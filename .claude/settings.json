@@ -20,7 +20,7 @@
       "Read(.env.*.local)"
     ],
     "allow": [
-      "Bash(bash init.sh)",
+      "Bash(bash init.sh*)",
       "Bash(uv run pytest*)",
       "Bash(uv run ruff*)",
       "Bash(git status)",
@@ -31,7 +31,10 @@
       "Bash(git push*)",
       "Bash(git checkout*)",
       "Bash(git branch*)",
-      "Bash(gh pr create*)"
+      "Bash(gh pr create*)",
+      "Edit(feature_list.json)",
+      "Edit(progress/*)",
+      "Write(progress/*)"
     ]
   }
 }
