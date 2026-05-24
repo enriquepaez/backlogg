@@ -1,0 +1,171 @@
+{
+  "project": "backlogg",
+  "description": "API de catálogo unificado para películas, series, libros y videojuegos. Items sincronizados desde APIs públicas y expuestos vía REST con fallback on-demand.",
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_tests_to_close": true,
+    "valid_status": ["pending", "in_progress", "done", "blocked"]
+  },
+  "features": [
+    {
+      "id": 1,
+      "name": "shared_models",
+      "title": "Shared models — Person, Credit + migraciones",
+      "description": "Modelos SQLAlchemy transversales: Person y Credit con external_ids polimórficos. Migración Alembic inicial.",
+      "issue": 10,
+      "depends_on": [],
+      "acceptance": [
+        "Modelos SQLAlchemy Person y Credit definidos en backlogg/shared/models.py",
+        "Utilidad polimórfica external_ids definida en backlogg/shared/external_ids.py",
+        "Alembic migration crea las tablas external_ids, people y credits",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "name": "movies",
+      "title": "Movies — schema, TMDB adapter, seed, endpoint, on-demand fallback",
+      "description": "Modelo Movie, cliente TMDB, seed inicial, GET /movies/{slug} con fallback on-demand.",
+      "issue": 2,
+      "depends_on": [1],
+      "acceptance": [
+        "Modelo SQLAlchemy Movie definido en backlogg/movies/models.py",
+        "Alembic migration crea las tablas movies, movie_genres, movie_genres_join",
+        "GET /movies/{slug} devuelve 200 para película existente",
+        "GET /movies/{slug} para slug no en DB consulta TMDB, persiste y devuelve 200",
+        "GET /movies/slug-inexistente-en-tmdb devuelve 404",
+        "Tests de repositorio pasan contra DB de test real",
+        "Tests de servicio pasan con cliente TMDB mockeado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "name": "series",
+      "title": "Series — schema, TMDB adapter, seed, endpoint, on-demand fallback",
+      "description": "Modelo Series, cliente TMDB, seed inicial, GET /series/{slug} con fallback on-demand.",
+      "issue": 3,
+      "depends_on": [1],
+      "acceptance": [
+        "Modelo SQLAlchemy Series definido en backlogg/series/models.py",
+        "Alembic migration crea las tablas series, series_genres, series_genres_join",
+        "GET /series/{slug} devuelve 200 con campos específicos de series",
+        "GET /series/{slug} para slug no en DB consulta TMDB, persiste y devuelve 200",
+        "GET /series/slug-inexistente-en-tmdb devuelve 404",
+        "Tests de repositorio, servicio y endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "name": "books",
+      "title": "Books — schema, Open Library adapter, seed, endpoint, on-demand fallback",
+      "description": "Modelo Book, cliente Open Library, seed inicial, GET /books/{slug} con fallback on-demand.",
+      "issue": 4,
+      "depends_on": [1],
+      "acceptance": [
+        "Modelo SQLAlchemy Book definido en backlogg/books/models.py",
+        "Alembic migration crea las tablas books, book_genres, book_genres_join",
+        "GET /books/{slug} devuelve 200 con campos específicos de books",
+        "GET /books/{slug} para slug no en DB consulta Open Library, persiste y devuelve 200",
+        "GET /books/slug-inexistente devuelve 404",
+        "Tests de repositorio, servicio y endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "name": "games",
+      "title": "Games — schema, IGDB adapter, seed, endpoint, on-demand fallback",
+      "description": "Modelo Game, cliente IGDB (con token Twitch), seed inicial, GET /games/{slug} con fallback on-demand.",
+      "issue": 5,
+      "depends_on": [1],
+      "acceptance": [
+        "Modelo SQLAlchemy Game definido en backlogg/games/models.py",
+        "Alembic migration crea las tablas games, game_genres, game_genres_join, game_platforms, game_platforms_join, company_credits, companies",
+        "El cliente IGDB obtiene token Twitch y lo renueva cuando expira",
+        "GET /games/{slug} devuelve 200 con campos específicos incluyendo plataformas",
+        "GET /games/{slug} para slug no en DB consulta IGDB, persiste y devuelve 200",
+        "GET /games/slug-inexistente devuelve 404",
+        "Tests de repositorio, servicio y endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "name": "people",
+      "title": "People — sync TMDB/IGDB, GET /people/{slug}",
+      "description": "Sincronización de personas desde TMDB e IGDB durante el seed. Endpoint GET /people/{slug}.",
+      "issue": 6,
+      "depends_on": [1, 2, 3, 4, 5],
+      "acceptance": [
+        "El sync de películas/series desde TMDB persiste personas asociadas en people y credits",
+        "GET /people/{slug} devuelve 200 con nombre, foto y lista de créditos",
+        "GET /people/slug-inexistente devuelve 404",
+        "external_ids registra los IDs de TMDB/IGDB para cada persona",
+        "Tests de repositorio, servicio y endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 7,
+      "name": "catalog_search",
+      "title": "Cross-type search — vista materializada catalog_search, GET /search",
+      "description": "Vista materializada PostgreSQL para búsqueda cross-type. Endpoint GET /search con filtros y paginación.",
+      "issue": 7,
+      "depends_on": [2, 3, 4, 5],
+      "acceptance": [
+        "Alembic migration crea la vista materializada catalog_search",
+        "GET /search?q= devuelve resultados mezclados ordenados por relevancia",
+        "GET /search?q=&type=movie devuelve solo el tipo filtrado",
+        "GET /search?q=&page=2&limit=10 pagina correctamente",
+        "GET /search?q= (sin query) devuelve 422",
+        "Cada resultado incluye item_type, title, poster_url, release_date, rating_external",
+        "Tests de endpoint con datos semilla en DB de test",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 8,
+      "name": "scheduler_sync",
+      "title": "APScheduler sync — nightly cron jobs para los 4 tipos de contenido",
+      "description": "Scheduler embebido en FastAPI que ejecuta sync nocturnos. Endpoint POST /admin/sync/{type} para testing manual.",
+      "issue": 8,
+      "depends_on": [2, 3, 4, 5, 7],
+      "acceptance": [
+        "El scheduler arranca automáticamente con la app FastAPI (en el lifespan)",
+        "Los 4 jobs de sync se ejecutan en el horario configurado",
+        "Cada job hace upsert idempotente (re-ejecutar no crea duplicados)",
+        "Tras cada job, la vista catalog_search se refresca",
+        "POST /admin/sync/{type} dispara sync manual para testing",
+        "Los errores de API externa en un job no abortan los demás",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 9,
+      "name": "deployment",
+      "title": "Fly.io deployment — Dockerfile, fly.toml, Neon, GitHub Actions CI",
+      "description": "Empaquetado Docker, configuración Fly.io con Neon PostgreSQL y pipeline CI con GitHub Actions.",
+      "issue": 9,
+      "depends_on": [2, 3, 4, 5, 6, 7, 8],
+      "acceptance": [
+        "docker build produce una imagen funcional",
+        "fly deploy despliega la app sin errores",
+        "La app en producción responde GET /health con 200",
+        "Las migraciones Alembic se ejecutan automáticamente en el deploy",
+        "GitHub Actions ejecuta bash init.sh en cada PR",
+        "Las variables sensibles se gestionan via Fly.io secrets"
+      ],
+      "status": "pending"
+    }
+  ]
+}
