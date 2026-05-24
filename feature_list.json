@@ -156,7 +156,7 @@
         "GitHub Actions ejecuta bash init.sh en cada PR",
         "Las variables sensibles se gestionan via Fly.io secrets"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
