@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from backlogg.books.routes import router as books_router
+from backlogg.games.routes import router as games_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.series.routes import router as series_router
 
@@ -15,3 +16,4 @@ async def health():
 app.include_router(movies_router)
 app.include_router(series_router)
 app.include_router(books_router)
+app.include_router(games_router)
