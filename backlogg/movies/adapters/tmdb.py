@@ -47,6 +47,18 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_movie_credits(self, tmdb_id: int) -> dict | None:
+        """Return cast and crew dicts for a movie, or None on 404."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/movie/{tmdb_id}/credits",
+                headers=self._headers,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     def movie_to_dict(self, raw: dict) -> dict:
         title = raw.get("title", "")
         release_date_str = raw.get("release_date", "")

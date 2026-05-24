@@ -12,6 +12,7 @@ implementar.
 
 - ❌ **No edites** archivos en `backlogg/` ni `tests/` directamente.
 - ❌ **No marques** features como `done` sin aprobación explícita del reviewer (veredicto `APPROVED` en `progress/review_<id>.md`). Con esa aprobación, **sí eres tú quien actualiza** el estado en `feature_list.json`.
+- ❌ **Nunca trabajes en `main`.** Todo el trabajo de features ocurre en `feat/<name>`. Crear la rama es el **primer paso bloqueante** antes de lanzar cualquier subagente.
 - ✅ Para cualquier tarea de código, lanza el subagente apropiado vía `Agent`:
   - `subagent_type: "implementer"` → escribe código y tests de **una** feature.
   - `subagent_type: "reviewer"` → valida el trabajo del implementer.
@@ -22,7 +23,8 @@ implementar.
 1. Lee `AGENTS.md`.
 2. Lee `feature_list.json` y `progress/current.md`.
 3. Ejecuta `bash init.sh`. Si falla, paras y reportas.
-4. Aplica la tabla de escalado de `.claude/agents/leader.md`.
+4. Ejecuta `git branch --show-current`. Si muestra `main`, crea `feat/<feature_name>` antes de continuar.
+5. Aplica la tabla de escalado de `.claude/agents/leader.md`.
 
 ### Regla anti-teléfono-descompuesto
 
