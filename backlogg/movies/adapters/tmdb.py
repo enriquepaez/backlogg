@@ -59,6 +59,35 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_top_movies(self, limit: int = 100) -> list[dict]:
+        """Fetch top-rated movies from TMDB for nightly sync.
+
+        Uses the /movie/popular endpoint and paginates to collect up to
+        ``limit`` results (max 500, TMDB returns 20 per page).
+        """
+        results: list[dict] = []
+        page = 1
+        while len(results) < limit:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{_TMDB_BASE}/movie/popular",
+                    headers=self._headers,
+                    params={"page": page},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            batch = data.get("results", [])
+            if not batch:
+                break
+            results.extend(batch)
+            total_pages = data.get("total_pages", 1)
+            if page >= total_pages:
+                break
+            page += 1
+
+        return results[:limit]
+
     def movie_to_dict(self, raw: dict) -> dict:
         title = raw.get("title", "")
         release_date_str = raw.get("release_date", "")

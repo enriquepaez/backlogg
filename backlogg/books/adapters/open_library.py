@@ -32,6 +32,36 @@ class OpenLibraryClient:
             docs = data.get("docs", [])
             return docs[0] if docs else None
 
+    async def get_trending_books(self, limit: int = 100) -> list[dict]:
+        """Fetch trending books from Open Library for nightly sync.
+
+        Uses the /trending/weekly.json endpoint which returns top works
+        for the current week.  Falls back to an empty list on error.
+        """
+        results: list[dict] = []
+        offset = 0
+        per_page = min(limit, 50)  # OL trending endpoint max is typically 50
+
+        while len(results) < limit:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{_OL_BASE}/trending/weekly.json",
+                    params={"limit": per_page, "offset": offset},
+                )
+                if response.status_code != 200:
+                    break
+                data = response.json()
+
+            works = data.get("works", [])
+            if not works:
+                break
+            results.extend(works)
+            if len(works) < per_page:
+                break
+            offset += per_page
+
+        return results[:limit]
+
     async def get_work_detail(self, work_id: str) -> dict | None:
         """Fetch full work detail from Open Library.
 
