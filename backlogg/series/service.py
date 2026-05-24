@@ -1,14 +1,18 @@
 import re
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
-from backlogg.series.adapters.tmdb import TMDBSeriesClient
+from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import upsert_external_id
 
 _tmdb = TMDBSeriesClient()
+
+_TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 
 def _title_from_slug(slug: str) -> str:
@@ -20,6 +24,98 @@ def _title_from_slug(slug: str) -> str:
     # Remove trailing 4-digit year suffix
     title = re.sub(r"-\d{4}$", "", slug)
     return title.replace("-", " ")
+
+
+async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int) -> None:
+    """Fetch credits from TMDB and persist people + credits for a series."""
+    credits_data = await _tmdb.get_series_credits(tmdb_id)
+    if not credits_data:
+        return
+
+    now = datetime.now(UTC)
+
+    # Cast — top 10 actors by billing order
+    for member in credits_data.get("cast", [])[:10]:
+        person_tmdb_id = member.get("id")
+        if not person_tmdb_id:
+            continue
+
+        name = member.get("name", "")
+        if not name:
+            continue
+
+        slug = _slugify(name)
+        profile_path = member.get("profile_path")
+        profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
+
+        person = await people_repo.upsert_person(
+            db,
+            {
+                "name": name,
+                "slug": slug,
+                "profile_url": profile_url,
+                "last_synced_at": now,
+            },
+        )
+        await upsert_external_id(db, "PERSON", person.id, "TMDB", str(person_tmdb_id))
+        await people_repo.upsert_credit(
+            db,
+            {
+                "item_type": "SERIES",
+                "item_id": series.id,
+                "person_id": person.id,
+                "role": "ACTOR",
+                "character_name": member.get("character") or None,
+                "billing_order": member.get("order"),
+            },
+        )
+
+    # Crew — creators from series detail (created_by field in series detail response)
+    # Note: series detail includes created_by, but credits endpoint may not.
+    # We handle created_by from the series detail separately via the series_detail dict.
+    # Here we handle crew from the credits endpoint (directors are rare in TV, so we skip).
+    # created_by is handled in get_series by passing detail to this function via a different path.
+    # For simplicity, creators are handled via created_by field when available.
+
+
+async def _persist_series_creators(db: AsyncSession, series: Series, created_by: list) -> None:
+    """Persist creators (CREATOR role) from the series created_by field."""
+    now = datetime.now(UTC)
+
+    for member in created_by:
+        person_tmdb_id = member.get("id")
+        if not person_tmdb_id:
+            continue
+
+        name = member.get("name", "")
+        if not name:
+            continue
+
+        slug = _slugify(name)
+        profile_path = member.get("profile_path")
+        profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
+
+        person = await people_repo.upsert_person(
+            db,
+            {
+                "name": name,
+                "slug": slug,
+                "profile_url": profile_url,
+                "last_synced_at": now,
+            },
+        )
+        await upsert_external_id(db, "PERSON", person.id, "TMDB", str(person_tmdb_id))
+        await people_repo.upsert_credit(
+            db,
+            {
+                "item_type": "SERIES",
+                "item_id": series.id,
+                "person_id": person.id,
+                "role": "CREATOR",
+                "character_name": None,
+                "billing_order": None,
+            },
+        )
 
 
 async def get_series(db: AsyncSession, slug: str) -> Series:
@@ -46,6 +142,13 @@ async def get_series(db: AsyncSession, slug: str) -> Series:
 
     # 5. Persist the TMDB external ID
     await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
+
+    # 6. Persist people (cast + creators) and their credits
+    await _persist_series_people(db, series, tmdb_id)
+    created_by = detail.get("created_by", [])
+    if created_by:
+        await _persist_series_creators(db, series, created_by)
+
     await db.commit()
 
     return series

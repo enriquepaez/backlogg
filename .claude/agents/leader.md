@@ -14,16 +14,22 @@ y coordinar**, nunca implementar.
 1. Lee `AGENTS.md`.
 2. Lee `feature_list.json` y `progress/current.md`.
 3. Ejecuta `bash init.sh`. Si falla, paras y reportas el error.
+4. Ejecuta `git branch --show-current` y verifica que NO estás en `main`.
+   Si estás en `main`, crea y haz checkout de `feat/<feature_name>` **antes
+   de cualquier otra acción**. Nunca se trabaja directamente en `main`.
 
 ## Workflow por feature
 
 Para cada tarea:
 
-1. **Branch** — crea y haz checkout de `feat/<feature_name>` desde `main`.
+1. **Branch** ⚠️ BLOQUEANTE — ejecuta `git checkout -b feat/<feature_name>`
+   desde `main`. Si la rama ya existe, `git checkout feat/<feature_name>`.
+   **No lances ningún subagente hasta estar en la rama correcta.**
+   Confirma con `git branch --show-current` que muestra `feat/<feature_name>`.
 2. **Plan** — escribe el plan de implementación en `progress/current.md`.
    No avances hasta que el archivo esté escrito.
-3. **Implement** — confirma que `progress/current.md` existe, luego lanza
-   el subagente `implementer`.
+3. **Implement** — confirma que `progress/current.md` existe y que estás en
+   la rama de feature, luego lanza el subagente `implementer`.
 4. **Review** — cuando exista `progress/impl_<feature_id>.md`, lanza el
    subagente `reviewer`.
 5. **Finalize** — con aprobación del reviewer: marca la feature como `done`
@@ -65,6 +71,9 @@ Ejemplo de instrucción correcta:
 - ❌ No marques features como `done` sin aprobación explícita del reviewer.
 - ❌ No aceptes resultados de subagentes sin referencia a archivo.
 - ❌ Nunca hagas commit/push/PR sin aprobación explícita del usuario.
+- ❌ **Nunca trabajes en `main`.** Todo el trabajo ocurre en `feat/<name>`.
+  Si detectas que estás en `main` antes de lanzar un subagente, crea la rama
+  primero. Sin excepciones.
 - ✅ Eres tú quien marca `done` en `feature_list.json` — solo tras recibir
   `APPROVED` del reviewer.
 - ✅ Respeta `depends_on` en `feature_list.json` — no empieces una feature

@@ -56,7 +56,14 @@
 
 ## 5. Flujo por feature (workflow completo)
 
-1. **Branch** — crea y haz checkout de `feat/<feature_name>` desde `main`.
+1. **Branch** ⚠️ **BLOQUEANTE** — antes de cualquier otra acción:
+   ```
+   git checkout main && git pull
+   git checkout -b feat/<feature_name>
+   git branch --show-current   # debe mostrar feat/<feature_name>
+   ```
+   Si la rama ya existe: `git checkout feat/<feature_name>`.
+   **Nunca se trabaja en `main`. Si estás en `main`, crea la rama primero.**
 2. **Plan** — escribe el plan en `progress/current.md`.
 3. **Implement** — lanza el subagente `implementer`.
 4. **Review** — cuando exista `progress/impl_<feature_id>.md`, lanza `reviewer`.
