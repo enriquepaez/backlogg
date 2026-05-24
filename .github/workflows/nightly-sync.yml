@@ -1,0 +1,22 @@
+name: Nightly content sync
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2:00 UTC cada noche
+  workflow_dispatch:      # permite dispararlo manualmente desde GitHub
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync movies
+        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie"
+
+      - name: Sync series
+        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series"
+
+      - name: Sync books
+        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book"
+
+      - name: Sync games
+        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"

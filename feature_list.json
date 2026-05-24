@@ -157,6 +157,21 @@
         "Las variables sensibles se gestionan via Fly.io secrets"
       ],
       "status": "done"
+    },
+    {
+      "id": 10,
+      "name": "nightly_sync_trigger",
+      "title": "Nightly sync via GitHub Actions — POST /admin/sync/{type}",
+      "description": "Workflow de GitHub Actions con cron nocturno que llama a los 4 endpoints POST /admin/sync/{type} para mantener el contenido actualizado en Render free tier.",
+      "depends_on": [8, 9],
+      "acceptance": [
+        "Workflow .github/workflows/nightly-sync.yml existe",
+        "Se dispara con cron '0 2 * * *'",
+        "Llama a los 4 endpoints de sync en orden",
+        "La URL base se lee de un secret RENDER_API_URL",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
     }
   ]
 }
