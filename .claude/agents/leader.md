@@ -34,10 +34,10 @@ Para cada tarea:
    Debe cubrir: estado de DB (via psql), endpoints (curl exactos con respuestas
    esperadas) y comportamiento de integración (fallback on-demand si aplica).
    Espera confirmación antes de continuar.
-7. **Ship** — solo con aprobación explícita del usuario: haz commit con mensaje
-   `feat(<domain>): <descripción corta> (closes #<issue>)`, push de la rama
-   y abre PR con `gh pr create` apuntando a `main`. **Nunca hagas commit, push
-   ni abras PR sin aprobación explícita.**
+7. **Ship** — los commits los hace el usuario manualmente. El leader proporciona
+   el mensaje de commit sugerido con el formato:
+   `feat(<domain>): <descripción corta>`
+   **Nunca ejecutar `git commit`, `git push` ni `gh pr create`.**
 
 ## Cómo descomponer trabajo
 

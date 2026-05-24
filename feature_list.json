@@ -12,7 +12,6 @@
       "name": "shared_models",
       "title": "Shared models — Person, Credit + migraciones",
       "description": "Modelos SQLAlchemy transversales: Person y Credit con external_ids polimórficos. Migración Alembic inicial.",
-      "issue": 10,
       "depends_on": [],
       "acceptance": [
         "Modelos SQLAlchemy Person y Credit definidos en backlogg/shared/models.py",
@@ -20,14 +19,13 @@
         "Alembic migration crea las tablas external_ids, people y credits",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 2,
       "name": "movies",
       "title": "Movies — schema, TMDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Movie, cliente TMDB, seed inicial, GET /movies/{slug} con fallback on-demand.",
-      "issue": 2,
       "depends_on": [1],
       "acceptance": [
         "Modelo SQLAlchemy Movie definido en backlogg/movies/models.py",
@@ -46,7 +44,6 @@
       "name": "series",
       "title": "Series — schema, TMDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Series, cliente TMDB, seed inicial, GET /series/{slug} con fallback on-demand.",
-      "issue": 3,
       "depends_on": [1],
       "acceptance": [
         "Modelo SQLAlchemy Series definido en backlogg/series/models.py",
@@ -64,7 +61,6 @@
       "name": "books",
       "title": "Books — schema, Open Library adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Book, cliente Open Library, seed inicial, GET /books/{slug} con fallback on-demand.",
-      "issue": 4,
       "depends_on": [1],
       "acceptance": [
         "Modelo SQLAlchemy Book definido en backlogg/books/models.py",
@@ -82,7 +78,6 @@
       "name": "games",
       "title": "Games — schema, IGDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Game, cliente IGDB (con token Twitch), seed inicial, GET /games/{slug} con fallback on-demand.",
-      "issue": 5,
       "depends_on": [1],
       "acceptance": [
         "Modelo SQLAlchemy Game definido en backlogg/games/models.py",
@@ -101,7 +96,6 @@
       "name": "people",
       "title": "People — sync TMDB/IGDB, GET /people/{slug}",
       "description": "Sincronización de personas desde TMDB e IGDB durante el seed. Endpoint GET /people/{slug}.",
-      "issue": 6,
       "depends_on": [1, 2, 3, 4, 5],
       "acceptance": [
         "El sync de películas/series desde TMDB persiste personas asociadas en people y credits",
@@ -118,7 +112,6 @@
       "name": "catalog_search",
       "title": "Cross-type search — vista materializada catalog_search, GET /search",
       "description": "Vista materializada PostgreSQL para búsqueda cross-type. Endpoint GET /search con filtros y paginación.",
-      "issue": 7,
       "depends_on": [2, 3, 4, 5],
       "acceptance": [
         "Alembic migration crea la vista materializada catalog_search",
@@ -137,7 +130,6 @@
       "name": "scheduler_sync",
       "title": "APScheduler sync — nightly cron jobs para los 4 tipos de contenido",
       "description": "Scheduler embebido en FastAPI que ejecuta sync nocturnos. Endpoint POST /admin/sync/{type} para testing manual.",
-      "issue": 8,
       "depends_on": [2, 3, 4, 5, 7],
       "acceptance": [
         "El scheduler arranca automáticamente con la app FastAPI (en el lifespan)",
@@ -155,7 +147,6 @@
       "name": "deployment",
       "title": "Fly.io deployment — Dockerfile, fly.toml, Neon, GitHub Actions CI",
       "description": "Empaquetado Docker, configuración Fly.io con Neon PostgreSQL y pipeline CI con GitHub Actions.",
-      "issue": 9,
       "depends_on": [2, 3, 4, 5, 6, 7, 8],
       "acceptance": [
         "docker build produce una imagen funcional",

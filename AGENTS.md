@@ -64,7 +64,10 @@
    `progress/history.md`, limpia archivos temporales de `progress/`.
 6. **Manual QA** — presenta al usuario una checklist de tests manuales.
    Espera confirmación antes de seguir.
-7. **Ship** — solo con aprobación explícita del usuario: commit, push y PR.
+7. **Ship** — los commits los hace el usuario manualmente. El leader solo proporciona
+   el mensaje de commit sugerido con el formato:
+   `feat(<domain>): <descripción corta>`
+   No ejecutar `git commit`, `git push` ni `gh pr create` en ningún caso.
 
 ## 6. Cierre de sesión
 
