@@ -7,9 +7,12 @@ for internal/testing use only.
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backlogg.admin.schemas import SyncResponse
+from backlogg.admin import service as admin_service
+from backlogg.admin.schemas import StatsResponse, SyncResponse
+from backlogg.core.database import get_db
 from backlogg.scheduler.jobs import sync_books, sync_games, sync_movies, sync_series
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -39,3 +42,13 @@ async def trigger_sync(type: SyncType) -> SyncResponse:
     asyncio.create_task(handler())
 
     return SyncResponse(status="ok", type=type)
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
+    """Return item counts and last sync timestamp for each content type.
+
+    ``count`` is a live COUNT(*) from each table.
+    ``last_synced_at`` is MAX(last_synced_at); null if the table is empty.
+    """
+    return await admin_service.get_stats(db)
