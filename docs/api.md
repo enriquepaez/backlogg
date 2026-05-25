@@ -107,12 +107,29 @@ Response fields: `id`, `name`, `slug`, `profile_url`, `credits[]`
 (each credit: `item_type`, `item_id`, `item_slug`, `item_title`, `role`,
 `character_name`, `billing_order`)
 
-### Admin (sync trigger for testing)
+### Admin (sync trigger)
 
 ```
-POST /admin/sync/{type}   type ∈ {movies, series, books, games}
-→ 202  Sync job triggered
+POST /admin/sync/{type}   type ∈ {movie, series, book, game}
+→ 200  Sync completed
 ```
+
+El endpoint **bloquea hasta que el sync termina** y devuelve el resultado real.
+Usar `--max-time 600` en curl para evitar timeout de cliente.
+
+Response:
+```json
+{
+  "type": "movie",
+  "synced": 94,
+  "errors": 6,
+  "duration_s": 87
+}
+```
+
+- `synced` — número de items insertados/actualizados correctamente.
+- `errors` — número de items que fallaron (logged en servidor).
+- `duration_s` — segundos que tardó el sync.
 
 Not authenticated in MVP — for internal/testing use only.
 

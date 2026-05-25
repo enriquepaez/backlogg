@@ -4,7 +4,6 @@ No authentication is required in the MVP.  These endpoints are intended
 for internal/testing use only.
 """
 
-import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,21 +26,21 @@ _SYNC_HANDLERS = {
 SyncType = Literal["movie", "series", "book", "game"]
 
 
-@router.post("/sync/{type}", status_code=202, response_model=SyncResponse)
+@router.post("/sync/{type}", status_code=200, response_model=SyncResponse)
 async def trigger_sync(type: SyncType) -> SyncResponse:
-    """Trigger a manual sync for the given content type.
+    """Trigger a synchronous sync for the given content type.
 
     ``type`` must be one of: ``movie``, ``series``, ``book``, ``game``.
 
-    The sync runs in the background and returns immediately with 202.
+    The sync runs to completion and returns the result with 200.
     """
     handler = _SYNC_HANDLERS.get(type)
     if handler is None:
         raise HTTPException(status_code=422, detail=f"Unknown sync type: {type}")
 
-    asyncio.create_task(handler())
+    result = await handler()
 
-    return SyncResponse(status="ok", type=type)
+    return SyncResponse(type=type, **result)
 
 
 @router.get("/stats", response_model=StatsResponse)

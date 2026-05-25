@@ -2,30 +2,21 @@ name: Nightly content sync
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2:00 UTC cada noche
-  workflow_dispatch:      # permite dispararlo manualmente desde GitHub
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Sync movies
-        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie"
 
       - name: Sync series
-        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series"
 
       - name: Sync books
-        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book"
 
       - name: Sync games
-        run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"
-
-      - name: Wait for background syncs to complete
-        run: |
-          echo "Syncs triggered — waiting 5 min for background jobs to finish..."
-          sleep 300
-
-      - name: Check stats
-        run: |
-          curl -sf "${{ secrets.RENDER_API_URL }}/admin/stats" | python3 -m json.tool
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"
