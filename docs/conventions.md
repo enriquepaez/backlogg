@@ -72,6 +72,23 @@
 - Todo el código pasa `uv run ruff format --check .` sin errores.
 - El formatter se aplica antes de declarar la feature como hecha.
 
+## Nombrado de ramas
+
+Las ramas siguen el patrón `<tipo>/<descripcion-en-kebab-case>`.
+
+| Prefijo   | Cuándo usarlo                                              | Ejemplo                          |
+|-----------|------------------------------------------------------------|----------------------------------|
+| `feat/`   | Nueva funcionalidad o endpoint                             | `feat/search-books`              |
+| `fix/`    | Corrección de bug (código de producción o tests)           | `fix/credits-mock-missing`       |
+| `chore/`  | Tareas de mantenimiento: deps, CI, config, docs            | `chore/update-ruff`              |
+| `refactor/` | Reestructuración sin cambio de comportamiento observable | `refactor/service-layer-cleanup` |
+| `docs/`   | Cambios exclusivos en documentación                        | `docs/add-branch-conventions`    |
+
+Reglas:
+- ❌ **Nunca** usar `feat/` para bugfixes, aunque el fix sea pequeño.
+- ❌ **Nunca** trabajar directamente en `main`.
+- El prefijo debe coincidir con el del commit message (`feat:`, `fix:`, etc.).
+
 ## Nombrado de archivos de progreso
 
 | Archivo                        | Quién lo escribe  | Contenido                          |
