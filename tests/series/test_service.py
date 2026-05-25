@@ -78,6 +78,12 @@ async def test_get_series_fallback_to_tmdb(db):
         patch.object(
             service._tmdb, "get_series_detail", new_callable=AsyncMock, return_value=detail
         ),
+        patch.object(
+            service._tmdb,
+            "get_series_credits",
+            new_callable=AsyncMock,
+            return_value={"cast": [], "crew": []},
+        ),
     ):
         result = await service.get_series(db, "breaking-bad-2008")
 
