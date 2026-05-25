@@ -5,9 +5,13 @@ propagated so that a failure in one job does not abort the others.
 
 After a successful upsert batch every job refreshes the catalog_search
 materialized view so search results stay current.
+
+Each job returns a dict with ``synced``, ``errors`` and ``duration_s`` so the
+admin endpoint can expose the result synchronously.
 """
 
 import logging
+import time
 
 from sqlalchemy import text
 
@@ -36,16 +40,22 @@ async def _refresh_catalog_search(session) -> None:
     await session.commit()
 
 
-async def sync_movies() -> None:
-    """Fetch top popular movies from TMDB and upsert them into the local DB."""
+async def sync_movies() -> dict:
+    """Fetch top popular movies from TMDB and upsert them into the local DB.
+
+    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    """
     logger.info("sync_movies: starting")
+    start = time.monotonic()
+    synced = 0
+    errors = 0
+
     try:
         raw_list = await _tmdb_movies.get_top_movies(limit=100)
     except Exception:
         logger.exception("sync_movies: failed to fetch from TMDB")
-        return
+        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
-    synced = 0
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
@@ -64,25 +74,33 @@ async def sync_movies() -> None:
                 synced += 1
             except Exception:
                 logger.exception("sync_movies: error upserting tmdb_id=%s", raw.get("id"))
+                errors += 1
 
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_movies: failed to refresh catalog_search")
 
-    logger.info("sync_movies: done — %d items upserted", synced)
+    logger.info("sync_movies: done — %d items upserted, %d errors", synced, errors)
+    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
 
 
-async def sync_series() -> None:
-    """Fetch popular TV series from TMDB and upsert them into the local DB."""
+async def sync_series() -> dict:
+    """Fetch popular TV series from TMDB and upsert them into the local DB.
+
+    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    """
     logger.info("sync_series: starting")
+    start = time.monotonic()
+    synced = 0
+    errors = 0
+
     try:
         raw_list = await _tmdb_series.get_top_series(limit=100)
     except Exception:
         logger.exception("sync_series: failed to fetch from TMDB")
-        return
+        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
-    synced = 0
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
@@ -101,25 +119,33 @@ async def sync_series() -> None:
                 synced += 1
             except Exception:
                 logger.exception("sync_series: error upserting tmdb_id=%s", raw.get("id"))
+                errors += 1
 
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_series: failed to refresh catalog_search")
 
-    logger.info("sync_series: done — %d items upserted", synced)
+    logger.info("sync_series: done — %d items upserted, %d errors", synced, errors)
+    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
 
 
-async def sync_books() -> None:
-    """Fetch trending books from Open Library and upsert them into the local DB."""
+async def sync_books() -> dict:
+    """Fetch trending books from Open Library and upsert them into the local DB.
+
+    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    """
     logger.info("sync_books: starting")
+    start = time.monotonic()
+    synced = 0
+    errors = 0
+
     try:
         raw_list = await _ol_client.get_trending_books(limit=100)
     except Exception:
         logger.exception("sync_books: failed to fetch from Open Library")
-        return
+        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
-    synced = 0
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
@@ -153,25 +179,33 @@ async def sync_books() -> None:
                 synced += 1
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
+                errors += 1
 
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_books: failed to refresh catalog_search")
 
-    logger.info("sync_books: done — %d items upserted", synced)
+    logger.info("sync_books: done — %d items upserted, %d errors", synced, errors)
+    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
 
 
-async def sync_games() -> None:
-    """Fetch top-rated games from IGDB and upsert them into the local DB."""
+async def sync_games() -> dict:
+    """Fetch top-rated games from IGDB and upsert them into the local DB.
+
+    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    """
     logger.info("sync_games: starting")
+    start = time.monotonic()
+    synced = 0
+    errors = 0
+
     try:
         raw_list = await _igdb_client.get_top_games(limit=100)
     except Exception:
         logger.exception("sync_games: failed to fetch from IGDB")
-        return
+        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
-    synced = 0
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
@@ -186,10 +220,12 @@ async def sync_games() -> None:
                 synced += 1
             except Exception:
                 logger.exception("sync_games: error upserting igdb_id=%s", raw.get("id"))
+                errors += 1
 
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_games: failed to refresh catalog_search")
 
-    logger.info("sync_games: done — %d items upserted", synced)
+    logger.info("sync_games: done — %d items upserted, %d errors", synced, errors)
+    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}

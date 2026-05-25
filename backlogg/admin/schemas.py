@@ -6,8 +6,10 @@ from pydantic import BaseModel
 
 
 class SyncResponse(BaseModel):
-    status: str
     type: str
+    synced: int
+    errors: int
+    duration_s: float
 
 
 class ContentStats(BaseModel):

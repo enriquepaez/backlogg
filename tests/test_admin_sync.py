@@ -13,11 +13,7 @@ from backlogg.main import app
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 
-
-def _noop_create_task(coro):
-    """Discard the coroutine cleanly to avoid 'coroutine never awaited' warnings."""
-    coro.close()
-    return MagicMock()
+_SYNC_RESULT = {"synced": 5, "errors": 0, "duration_s": 1.2}
 
 
 @pytest_asyncio.fixture
@@ -30,49 +26,60 @@ async def client():
 # ── Happy paths ───────────────────────────────────────────────────────────────
 
 
-_CREATE_TASK = "backlogg.admin.router.asyncio.create_task"
-
-
-async def test_sync_movie_returns_202(client):
-    """POST /admin/sync/movie triggers sync and returns 202."""
-    with patch(_CREATE_TASK, side_effect=_noop_create_task) as mock_task:
+async def test_sync_movie_returns_200(client):
+    """POST /admin/sync/movie runs sync synchronously and returns 200 with result."""
+    mock_handler = AsyncMock(return_value=_SYNC_RESULT)
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"movie": mock_handler}):
         response = await client.post("/admin/sync/movie")
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ok"
     assert body["type"] == "movie"
-    mock_task.assert_called_once()
+    assert body["synced"] == 5
+    assert body["errors"] == 0
+    assert body["duration_s"] == 1.2
 
 
-async def test_sync_series_returns_202(client):
-    """POST /admin/sync/series triggers sync and returns 202."""
-    with patch(_CREATE_TASK, side_effect=_noop_create_task) as mock_task:
+async def test_sync_series_returns_200(client):
+    """POST /admin/sync/series runs sync synchronously and returns 200 with result."""
+    mock_handler = AsyncMock(return_value=_SYNC_RESULT)
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"series": mock_handler}):
         response = await client.post("/admin/sync/series")
 
-    assert response.status_code == 202
-    assert response.json()["type"] == "series"
-    mock_task.assert_called_once()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "series"
+    assert body["synced"] == 5
+    assert body["errors"] == 0
+    assert body["duration_s"] == 1.2
 
 
-async def test_sync_book_returns_202(client):
-    """POST /admin/sync/book triggers sync and returns 202."""
-    with patch(_CREATE_TASK, side_effect=_noop_create_task) as mock_task:
+async def test_sync_book_returns_200(client):
+    """POST /admin/sync/book runs sync synchronously and returns 200 with result."""
+    mock_handler = AsyncMock(return_value=_SYNC_RESULT)
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"book": mock_handler}):
         response = await client.post("/admin/sync/book")
 
-    assert response.status_code == 202
-    assert response.json()["type"] == "book"
-    mock_task.assert_called_once()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "book"
+    assert body["synced"] == 5
+    assert body["errors"] == 0
+    assert body["duration_s"] == 1.2
 
 
-async def test_sync_game_returns_202(client):
-    """POST /admin/sync/game triggers sync and returns 202."""
-    with patch(_CREATE_TASK, side_effect=_noop_create_task) as mock_task:
+async def test_sync_game_returns_200(client):
+    """POST /admin/sync/game runs sync synchronously and returns 200 with result."""
+    mock_handler = AsyncMock(return_value=_SYNC_RESULT)
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"game": mock_handler}):
         response = await client.post("/admin/sync/game")
 
-    assert response.status_code == 202
-    assert response.json()["type"] == "game"
-    mock_task.assert_called_once()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "game"
+    assert body["synced"] == 5
+    assert body["errors"] == 0
+    assert body["duration_s"] == 1.2
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -115,12 +122,18 @@ async def test_sync_movies_error_does_not_affect_sync_series():
         ),
     ):
         # Neither call must raise — each job swallows its own exceptions
-        await sync_jobs.sync_movies()
-        await sync_jobs.sync_series()
+        result_movies = await sync_jobs.sync_movies()
+        result_series = await sync_jobs.sync_series()
+
+    # When the initial fetch fails the job returns errors=1
+    assert result_movies["synced"] == 0
+    assert result_movies["errors"] == 1
+    assert result_series["synced"] == 0
+    assert result_series["errors"] == 1
 
 
 async def test_sync_movies_job_catches_external_error():
-    """sync_movies logs and returns when the external API raises."""
+    """sync_movies logs and returns a result dict when the external API raises."""
     with (
         patch.object(
             sync_jobs._tmdb_movies,
@@ -129,41 +142,56 @@ async def test_sync_movies_job_catches_external_error():
             side_effect=RuntimeError("network error"),
         ),
     ):
-        # Must not raise — job catches all exceptions internally
-        await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_movies()
+
+    assert result["synced"] == 0
+    assert result["errors"] == 1
+    assert "duration_s" in result
 
 
 async def test_sync_games_job_catches_external_error():
-    """sync_games logs and returns when IGDB raises."""
+    """sync_games logs and returns a result dict when IGDB raises."""
     with patch.object(
         sync_jobs._igdb_client,
         "get_top_games",
         new_callable=AsyncMock,
         side_effect=RuntimeError("igdb down"),
     ):
-        await sync_jobs.sync_games()
+        result = await sync_jobs.sync_games()
+
+    assert result["synced"] == 0
+    assert result["errors"] == 1
+    assert "duration_s" in result
 
 
 async def test_sync_books_job_catches_external_error():
-    """sync_books logs and returns when Open Library raises."""
+    """sync_books logs and returns a result dict when Open Library raises."""
     with patch.object(
         sync_jobs._ol_client,
         "get_trending_books",
         new_callable=AsyncMock,
         side_effect=RuntimeError("ol down"),
     ):
-        await sync_jobs.sync_books()
+        result = await sync_jobs.sync_books()
+
+    assert result["synced"] == 0
+    assert result["errors"] == 1
+    assert "duration_s" in result
 
 
 async def test_sync_series_job_catches_external_error():
-    """sync_series logs and returns when TMDB raises."""
+    """sync_series logs and returns a result dict when TMDB raises."""
     with patch.object(
         sync_jobs._tmdb_series,
         "get_top_series",
         new_callable=AsyncMock,
         side_effect=RuntimeError("tmdb down"),
     ):
-        await sync_jobs.sync_series()
+        result = await sync_jobs.sync_series()
+
+    assert result["synced"] == 0
+    assert result["errors"] == 1
+    assert "duration_s" in result
 
 
 # ── Idempotency (upsert) ──────────────────────────────────────────────────────
@@ -220,9 +248,13 @@ async def test_sync_movies_is_idempotent(db):
         mock_cm.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_cm
 
-        await sync_jobs.sync_movies()
-        await sync_jobs.sync_movies()
+        result1 = await sync_jobs.sync_movies()
+        result2 = await sync_jobs.sync_movies()
 
     result = await db.execute(select(func.count()).where(Movie.title == "Idempotent Test Movie"))
     count = result.scalar_one()
     assert count == 1, f"Expected 1 row, got {count} — upsert is not idempotent"
+
+    # Both runs must report synced=1 (the upsert counts as success each time)
+    assert result1["synced"] == 1
+    assert result2["synced"] == 1
