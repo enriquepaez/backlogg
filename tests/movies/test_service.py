@@ -78,6 +78,12 @@ async def test_get_movie_fallback_to_tmdb(db):
         patch.object(
             service._tmdb, "get_movie_detail", new_callable=AsyncMock, return_value=detail
         ),
+        patch.object(
+            service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value={"cast": [], "crew": []},
+        ),
     ):
         result = await service.get_movie(db, "inception-2010")
 
