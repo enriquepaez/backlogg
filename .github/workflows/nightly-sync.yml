@@ -20,3 +20,12 @@ jobs:
 
       - name: Sync games
         run: curl -sf -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"
+
+      - name: Wait for background syncs to complete
+        run: |
+          echo "Syncs triggered — waiting 5 min for background jobs to finish..."
+          sleep 300
+
+      - name: Check stats
+        run: |
+          curl -sf "${{ secrets.RENDER_API_URL }}/admin/stats" | python3 -m json.tool
