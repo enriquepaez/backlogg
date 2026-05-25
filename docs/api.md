@@ -116,6 +116,28 @@ POST /admin/sync/{type}   type ∈ {movies, series, books, games}
 
 Not authenticated in MVP — for internal/testing use only.
 
+### Admin stats
+
+```
+GET /admin/stats
+→ 200
+```
+
+Response:
+```json
+{
+  "movies":  { "count": 847, "last_synced_at": "2026-05-25T02:03:12Z" },
+  "series":  { "count": 312, "last_synced_at": "2026-05-25T02:04:01Z" },
+  "books":   { "count": 520, "last_synced_at": "2026-05-25T02:05:44Z" },
+  "games":   { "count": 198, "last_synced_at": "2026-05-25T02:06:33Z" }
+}
+```
+
+- `count` — número de filas en la tabla correspondiente.
+- `last_synced_at` — `MAX(last_synced_at)` de la tabla; `null` si no hay datos.
+
+Not authenticated in MVP — for internal/testing use only.
+
 ## On-demand fallback
 
 When `GET /{type}/{slug}` finds no local result, the service layer:

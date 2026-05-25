@@ -159,6 +159,22 @@
       "status": "done"
     },
     {
+      "id": 11,
+      "name": "admin_stats",
+      "title": "Admin stats — GET /admin/stats con conteo y último sync por tipo",
+      "description": "Endpoint GET /admin/stats que devuelve el número de items en DB y la fecha de última sincronización para cada tipo de contenido (movies, series, books, games).",
+      "depends_on": [8],
+      "acceptance": [
+        "GET /admin/stats devuelve 200 con counts y last_synced_at para los 4 tipos",
+        "Los counts reflejan el estado real de la DB (COUNT queries, no caché)",
+        "last_synced_at es el MAX(last_synced_at) de cada tabla",
+        "El endpoint aparece documentado en docs/api.md",
+        "Tests de endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
       "id": 10,
       "name": "nightly_sync_trigger",
       "title": "Nightly sync via GitHub Actions — POST /admin/sync/{type}",
