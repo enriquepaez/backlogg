@@ -67,6 +67,7 @@
 2. **Plan** — escribe el plan en `progress/current.md`.
 3. **Implement** — lanza el subagente `implementer`.
 4. **Review** — cuando exista `progress/impl_<feature_id>.md`, lanza `reviewer`.
+   El reviewer guarda su veredicto en `progress/review_<feature_id>.md` **solo si la tarea forma parte del `feature_list.json`**. Para bugfixes o cambios puntuales fuera del backlog, devuelve el veredicto únicamente como texto — sin crear ningún archivo en `progress/`.
 5. **Finalize** — con aprobación del reviewer: marca `done`, mueve resumen a
    `progress/history.md`, limpia archivos temporales de `progress/`.
 6. **Manual QA** — presenta al usuario una checklist de tests manuales.
