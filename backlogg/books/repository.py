@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,13 +14,20 @@ async def get_book_by_slug(db: AsyncSession, slug: str) -> Book | None:
 
 
 async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> BookGenre:
-    result = await db.execute(select(BookGenre).where(BookGenre.slug == slug))
-    genre = result.scalar_one_or_none()
-    if genre is None:
-        genre = BookGenre(name=name, slug=slug)
-        db.add(genre)
-        await db.flush()
-    return genre
+    stmt = (
+        pg_insert(BookGenre)
+        .values(name=name, slug=slug)
+        .on_conflict_do_update(
+            constraint="uq_book_genre_name",
+            set_={"slug": slug},
+        )
+        .returning(BookGenre.id)
+    )
+    result = await db.execute(stmt)
+    genre_id = result.scalar_one()
+    await db.flush()
+    genre_result = await db.execute(select(BookGenre).where(BookGenre.id == genre_id))
+    return genre_result.scalar_one()
 
 
 async def upsert_book(db: AsyncSession, data: dict) -> Book:
@@ -28,8 +36,6 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
     The ``data`` dict must contain all book fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
     """
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     genres_data: list[dict] = data.pop("genres", [])
 
     # Build INSERT ... ON CONFLICT (slug) DO UPDATE
