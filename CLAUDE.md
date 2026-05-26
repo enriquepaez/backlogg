@@ -38,7 +38,7 @@ solo la referencia. Nunca aceptes bloques de código en el chat.
 
 ## Contexto del proyecto
 
-**Stack:** Python 3.12+ · uv · FastAPI · SQLAlchemy 2.0 · Alembic · Pydantic v2 · APScheduler · PostgreSQL (Neon) · ruff · pytest · Fly.io
+**Stack:** Python 3.12+ · uv · FastAPI · SQLAlchemy 2.0 · Alembic · Pydantic v2 · APScheduler · PostgreSQL (Neon) · ruff · pytest · Render
 
 **MVP scope:** catalog modeling, external API integration, search y sync.
 Auth, listas de usuario, ratings propios, reviews y features sociales están **fuera de scope**.

@@ -22,7 +22,7 @@ el ítem y lo devuelve en la misma petición.
 - **PostgreSQL** (Neon en producción)
 - **ruff** — linting y formato
 - **pytest** — suite de tests
-- **Fly.io** — despliegue
+- **Render** — despliegue
 
 ## Estructura del proyecto
 

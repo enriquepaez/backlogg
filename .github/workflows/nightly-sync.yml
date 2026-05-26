@@ -6,17 +6,33 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync:
+  sync-movies:
     runs-on: ubuntu-latest
     steps:
       - name: Sync movies
         run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie"
 
+  sync-series:
+    runs-on: ubuntu-latest
+    steps:
       - name: Sync series
         run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series"
 
+  sync-books:
+    runs-on: ubuntu-latest
+    steps:
       - name: Sync books
         run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book"
 
+  sync-games:
+    runs-on: ubuntu-latest
+    steps:
       - name: Sync games
         run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"
+
+  verify:
+    needs: [sync-movies, sync-series, sync-books, sync-games]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify stats
+        run: curl -sf --max-time 30 "${{ secrets.RENDER_API_URL }}/admin/stats"
