@@ -203,6 +203,20 @@
         "Las referencias a Fly.io en feature_list.json (id:9) se actualizan a Render",
         "bash init.sh termina en verde"
       ],
+      "status": "done"
+    },
+    {
+      "id": 13,
+      "name": "catalog_search_unique_index",
+      "title": "Fix — índice único en catalog_search para REFRESH CONCURRENTLY",
+      "description": "REFRESH MATERIALIZED VIEW CONCURRENTLY falla en producción porque catalog_search no tiene índice único. Añadir migración Alembic 0007 que crea CREATE UNIQUE INDEX uq_catalog_search_type_id ON catalog_search (item_type, id).",
+      "depends_on": [7],
+      "acceptance": [
+        "Migración alembic/versions/0007_catalog_search_unique_index.py existe",
+        "La migración crea el índice único (item_type, id) en catalog_search",
+        "La migración tiene downgrade que elimina el índice",
+        "bash init.sh termina en verde"
+      ],
       "status": "in_progress"
     }
   ]
