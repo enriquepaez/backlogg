@@ -145,16 +145,16 @@
     {
       "id": 9,
       "name": "deployment",
-      "title": "Fly.io deployment — Dockerfile, fly.toml, Neon, GitHub Actions CI",
-      "description": "Empaquetado Docker, configuración Fly.io con Neon PostgreSQL y pipeline CI con GitHub Actions.",
+      "title": "Render deployment — Dockerfile, render.yaml, Neon, GitHub Actions CI",
+      "description": "Empaquetado Docker, configuración Render con Neon PostgreSQL y pipeline CI con GitHub Actions.",
       "depends_on": [2, 3, 4, 5, 6, 7, 8],
       "acceptance": [
         "docker build produce una imagen funcional",
-        "fly deploy despliega la app sin errores",
+        "El servicio en Render despliega la app sin errores",
         "La app en producción responde GET /health con 200",
         "Las migraciones Alembic se ejecutan automáticamente en el deploy",
         "GitHub Actions ejecuta bash init.sh en cada PR",
-        "Las variables sensibles se gestionan via Fly.io secrets"
+        "Las variables sensibles se gestionan via Render environment secrets"
       ],
       "status": "done"
     },
@@ -188,6 +188,22 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 12,
+      "name": "nightly_sync_parallel",
+      "title": "Nightly sync paralelo — jobs concurrentes + verificación post-sync",
+      "description": "Refactorizar nightly-sync.yml para ejecutar los 4 syncs como jobs independientes en paralelo (reduciendo el tiempo total al máximo de los 4 en lugar de la suma). Añadir job 'verify' que depende de los 4 y llama a GET /admin/stats para confirmar que el contenido creció. Actualizar referencias a Fly.io → Render en feature_list.json.",
+      "depends_on": [10, 11],
+      "acceptance": [
+        "Los 4 syncs (movie, series, book, game) se ejecutan como jobs paralelos independientes",
+        "El job 'verify' declara needs: [sync-movies, sync-series, sync-books, sync-games] y solo corre si todos pasan",
+        "El job 'verify' llama a GET /admin/stats y falla si el endpoint no devuelve 200",
+        "La URL base sigue leyéndose de secrets.RENDER_API_URL",
+        "Las referencias a Fly.io en feature_list.json (id:9) se actualizan a Render",
+        "bash init.sh termina en verde"
+      ],
+      "status": "in_progress"
     }
   ]
 }
