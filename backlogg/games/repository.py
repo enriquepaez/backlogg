@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,23 +26,37 @@ async def get_game_by_slug(db: AsyncSession, slug: str) -> Game | None:
 
 
 async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> GameGenre:
-    result = await db.execute(select(GameGenre).where(GameGenre.slug == slug))
-    genre = result.scalar_one_or_none()
-    if genre is None:
-        genre = GameGenre(name=name, slug=slug)
-        db.add(genre)
-        await db.flush()
-    return genre
+    stmt = (
+        pg_insert(GameGenre)
+        .values(name=name, slug=slug)
+        .on_conflict_do_update(
+            constraint="uq_game_genre_name",
+            set_={"slug": slug},
+        )
+        .returning(GameGenre.id)
+    )
+    result = await db.execute(stmt)
+    genre_id = result.scalar_one()
+    await db.flush()
+    genre_result = await db.execute(select(GameGenre).where(GameGenre.id == genre_id))
+    return genre_result.scalar_one()
 
 
 async def _get_or_create_platform(db: AsyncSession, name: str, slug: str) -> GamePlatform:
-    result = await db.execute(select(GamePlatform).where(GamePlatform.slug == slug))
-    platform = result.scalar_one_or_none()
-    if platform is None:
-        platform = GamePlatform(name=name, slug=slug)
-        db.add(platform)
-        await db.flush()
-    return platform
+    stmt = (
+        pg_insert(GamePlatform)
+        .values(name=name, slug=slug)
+        .on_conflict_do_update(
+            constraint="uq_game_platform_name",
+            set_={"slug": slug},
+        )
+        .returning(GamePlatform.id)
+    )
+    result = await db.execute(stmt)
+    platform_id = result.scalar_one()
+    await db.flush()
+    platform_result = await db.execute(select(GamePlatform).where(GamePlatform.id == platform_id))
+    return platform_result.scalar_one()
 
 
 async def _get_or_create_company(db: AsyncSession, name: str, slug: str) -> Company:
@@ -62,8 +77,6 @@ async def upsert_game(db: AsyncSession, data: dict) -> Game:
     - ``platforms``: list of dicts with ``name`` and ``slug``
     - ``companies``: list of dicts with ``name``, ``slug``, and ``role``
     """
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     genres_data: list[dict] = data.pop("genres", [])
     platforms_data: list[dict] = data.pop("platforms", [])
     companies_data: list[dict] = data.pop("companies", [])

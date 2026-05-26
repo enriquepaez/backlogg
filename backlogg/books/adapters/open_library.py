@@ -55,7 +55,7 @@ class OpenLibraryClient:
                     params={"limit": per_page, "offset": offset},
                 )
                 if response.status_code != 200:
-                    logger.warning(
+                    logger.error(
                         "get_trending_books: non-200 status %d at offset %d",
                         response.status_code,
                         offset,
@@ -65,12 +65,19 @@ class OpenLibraryClient:
 
             works = data.get("works", [])
             if not works:
+                logger.error(
+                    "get_trending_books: OL returned 200 but empty works at offset %d"
+                    " — response keys: %s",
+                    offset,
+                    list(data.keys()),
+                )
                 break
             results.extend(works)
             if len(works) < per_page:
                 break
             offset += per_page
 
+        logger.error("get_trending_books: returning %d works total", len(results))
         return results[:limit]
 
     async def get_work_detail(self, work_id: str) -> dict | None:
