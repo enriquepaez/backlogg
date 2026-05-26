@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from datetime import UTC, date, datetime
@@ -6,6 +7,11 @@ import httpx
 
 _OL_BASE = "https://openlibrary.org"
 _OL_COVER_BASE = "https://covers.openlibrary.org/b/id"
+_OL_HEADERS = {
+    "User-Agent": "backlogg/1.0 (https://github.com/enriquepaez/backlogg; contact@backlogg.app)",
+}
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(text: str) -> str:
@@ -18,7 +24,7 @@ def _slugify(text: str) -> str:
 class OpenLibraryClient:
     async def search_book(self, title: str) -> dict | None:
         """Search Open Library by title and return the first result."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
             response = await client.get(
                 f"{_OL_BASE}/search.json",
                 params={
@@ -43,12 +49,17 @@ class OpenLibraryClient:
         per_page = min(limit, 50)  # OL trending endpoint max is typically 50
 
         while len(results) < limit:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
                 response = await client.get(
                     f"{_OL_BASE}/trending/weekly.json",
                     params={"limit": per_page, "offset": offset},
                 )
                 if response.status_code != 200:
+                    logger.warning(
+                        "get_trending_books: non-200 status %d at offset %d",
+                        response.status_code,
+                        offset,
+                    )
                     break
                 data = response.json()
 
@@ -67,7 +78,7 @@ class OpenLibraryClient:
 
         ``work_id`` is the bare OLID like ``OL123W`` (without the /works/ prefix).
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
             response = await client.get(f"{_OL_BASE}/works/{work_id}.json")
             if response.status_code == 404:
                 return None
