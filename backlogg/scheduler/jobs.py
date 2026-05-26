@@ -146,6 +146,8 @@ async def sync_books() -> dict:
         logger.exception("sync_books: failed to fetch from Open Library")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
+    logger.error("sync_books: get_trending_books returned %d works", len(raw_list))
+
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
@@ -180,6 +182,13 @@ async def sync_books() -> dict:
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
                 errors += 1
+
+        logger.error(
+            "sync_books: loop done — synced=%d errors=%d out_of=%d",
+            synced,
+            errors,
+            len(raw_list),
+        )
 
         try:
             await _refresh_catalog_search(session)
