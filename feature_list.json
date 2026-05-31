@@ -218,6 +218,175 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 14,
+      "name": "list_endpoints",
+      "title": "List endpoints — GET /movies, /series, /books, /games con filtros y paginación",
+      "description": "Endpoints de listado para cada tipo de contenido con paginación offset/limit, filtro por género (?genre=slug) y ordenación (?sort=rating_desc|rating_asc|date_desc|date_asc|title_asc). Sin on-demand fallback — solo muestra items ya en DB.",
+      "depends_on": [2, 3, 4, 5],
+      "acceptance": [
+        "GET /movies devuelve 200 con lista paginada de películas",
+        "GET /movies?genre=action filtra por género correctamente",
+        "GET /movies?sort=rating_desc ordena por rating_external descendente",
+        "GET /movies?sort=date_desc ordena por release_date descendente",
+        "GET /movies?page=2&limit=10 pagina correctamente",
+        "La respuesta incluye fields: id, title, slug, poster_url, release_date, rating_external, genres[]",
+        "La respuesta incluye metadatos: total, page, limit",
+        "Los mismos parámetros funcionan para GET /series, GET /books, GET /games",
+        "GET /series usa first_air_date para sort=date_desc",
+        "GET /books usa first_publish_date para sort=date_desc",
+        "Tests de endpoint con datos semilla en DB de test para los 4 tipos",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 15,
+      "name": "genres_endpoint",
+      "title": "Genre discovery — GET /genres con conteo de items por tipo",
+      "description": "Endpoint GET /genres?type=movie que devuelve todos los géneros con conteo de items asociados. Sin parámetro type devuelve géneros de todos los tipos. Base para la UI de filtros del frontend.",
+      "depends_on": [14],
+      "acceptance": [
+        "GET /genres devuelve 200 con lista de géneros de todos los tipos",
+        "GET /genres?type=movie devuelve solo géneros de películas",
+        "GET /genres?type=series|book|game funciona para cada tipo",
+        "Cada género incluye: name, slug, item_type, count",
+        "GET /genres?type=invalid devuelve 422",
+        "Los counts reflejan el número real de items asociados (no hardcodeado)",
+        "Tests de endpoint pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 16,
+      "name": "similar_items",
+      "title": "Similar items — GET /movies/{slug}/similar y GET /series/{slug}/similar vía TMDB",
+      "description": "Endpoints que devuelven items similares/recomendados usando TMDB recommendations API. Los items nuevos encontrados se persisten en la DB local. Hasta 10 resultados.",
+      "depends_on": [2, 3],
+      "acceptance": [
+        "GET /movies/{slug}/similar devuelve hasta 10 películas similares",
+        "GET /series/{slug}/similar devuelve hasta 10 series similares",
+        "GET /movies/slug-inexistente/similar devuelve 404",
+        "Los items similares no presentes en DB local se persisten automáticamente",
+        "Cada resultado incluye: title, slug, poster_url, release_date, rating_external",
+        "La respuesta incluye el campo results[] (array)",
+        "Tests de servicio con cliente TMDB mockeado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 17,
+      "name": "search_external_fallback",
+      "title": "Search external fallback — fan-out a APIs externas cuando resultados locales = 0",
+      "description": "Extender GET /search para que, cuando la consulta devuelve 0 resultados locales, haga fan-out en paralelo a TMDB (movies+series), Open Library (books) e IGDB (games), ingeste los top hits y re-consulte la vista local antes de responder. Si se filtra por type, solo consulta la API correspondiente.",
+      "depends_on": [7],
+      "acceptance": [
+        "GET /search?q=<titulo-no-en-db> devuelve resultados tras ingestar desde APIs externas",
+        "El fan-out se ejecuta en paralelo (asyncio.gather) para los tipos no filtrados",
+        "Si ?type=movie, solo consulta TMDB movies",
+        "Si hay resultados locales, NO se hace fan-out (no penalizar queries normales)",
+        "Los items ingestados aparecen en futuros GET /{type}/{slug} sin nuevo fan-out",
+        "Un fallo en una API externa no aborta las demás ni devuelve error al cliente",
+        "Tests con mocks de las 3 APIs externas",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 18,
+      "name": "admin_api_key",
+      "title": "Admin API key — protección de /admin/* con X-API-Key header",
+      "description": "Todos los endpoints bajo /admin/* requieren el header X-API-Key con el valor de la variable de entorno ADMIN_API_KEY. Devuelve 401 si el header falta o es incorrecto. Si ADMIN_API_KEY no está configurada, los endpoints admin devuelven 503.",
+      "depends_on": [8],
+      "acceptance": [
+        "POST /admin/sync/{type} sin X-API-Key devuelve 401",
+        "POST /admin/sync/{type} con X-API-Key incorrecto devuelve 401",
+        "POST /admin/sync/{type} con X-API-Key correcto devuelve 200",
+        "GET /admin/stats está protegido con la misma lógica",
+        "Si ADMIN_API_KEY no está en env, los endpoints devuelven 503",
+        "La clave no aparece en logs ni en respuestas de error",
+        "Tests de autenticación para ambos endpoints admin",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 19,
+      "name": "book_authors_people",
+      "title": "Book authors as People — autores Open Library → tabla people con credits",
+      "description": "Durante el sync de libros, extraer autores de Open Library (/authors/{id}.json), persistirlos en la tabla people y crear credits que los vinculan a cada libro. Paridad con movies/series (TMDB) y games (IGDB).",
+      "depends_on": [4, 6],
+      "acceptance": [
+        "El sync de libros persiste autores en la tabla people",
+        "Cada autor tiene un credit con role='author' vinculado al libro",
+        "external_ids registra el ID de Open Library para cada autor (source='openlibrary')",
+        "GET /people/{slug} devuelve autores con sus créditos de libros",
+        "El sync es idempotente — re-ejecutar no crea autores duplicados",
+        "Si la API de autores falla para un libro, el libro se persiste igualmente (degradación elegante)",
+        "Tests de repositorio y servicio pasan",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 20,
+      "name": "trending_popular",
+      "title": "Trending/Popular — GET /trending vía TMDB trending endpoint",
+      "description": "Endpoint GET /trending?type=movie|series&period=day|week que devuelve hasta 20 items trending usando TMDB Trending API. Los items se persisten en DB local si son nuevos. Sin type devuelve mix de movies y series.",
+      "depends_on": [2, 3],
+      "acceptance": [
+        "GET /trending devuelve 200 con hasta 20 items (mix movies + series)",
+        "GET /trending?type=movie devuelve solo películas trending",
+        "GET /trending?type=series devuelve solo series trending",
+        "GET /trending?period=day y ?period=week funcionan (default: week)",
+        "GET /trending?type=invalid devuelve 422",
+        "Los items nuevos se persisten en DB local",
+        "Cada resultado incluye: item_type, title, slug, poster_url, release_date, rating_external",
+        "Tests de servicio con TMDB mockeado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 21,
+      "name": "credits_in_detail",
+      "title": "Credits in detail — reparto/crew en GET /movies/{slug}, /series/{slug}, /games/{slug}",
+      "description": "Añadir el campo credits[] a las respuestas de detalle de películas, series y juegos. Cada credit incluye nombre de la persona, slug, foto, rol y character_name si aplica. Usa los datos ya almacenados en la tabla credits.",
+      "depends_on": [2, 3, 5, 6],
+      "acceptance": [
+        "GET /movies/{slug} incluye credits[] en la respuesta",
+        "GET /series/{slug} incluye credits[] en la respuesta",
+        "GET /games/{slug} incluye credits[] en la respuesta",
+        "Cada credit incluye: person_name, person_slug, profile_url, role, character_name, billing_order",
+        "Los credits están ordenados por billing_order ascendente",
+        "Si no hay credits, el campo es un array vacío []",
+        "Los schemas Pydantic actuales se extienden (no se rompe compatibilidad hacia atrás en campos existentes)",
+        "Tests de endpoint verifican que credits[] está presente y bien formado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 22,
+      "name": "cors_and_security",
+      "title": "CORS + security headers — configuración para acceso desde frontend",
+      "description": "Configurar CORSMiddleware en FastAPI con orígenes permitidos via CORS_ORIGINS env var (comma-separated). Añadir headers de seguridad básicos: X-Content-Type-Options, X-Frame-Options, Referrer-Policy. Sin configuración de CORS_ORIGINS, permite localhost en desarrollo.",
+      "depends_on": [9],
+      "acceptance": [
+        "CORSMiddleware añadido a la app FastAPI",
+        "CORS_ORIGINS env var (comma-separated) define los orígenes permitidos",
+        "Sin CORS_ORIGINS configurada, permite http://localhost:3000 y http://localhost:5173",
+        "OPTIONS preflight requests devuelven 200 con los headers CORS correctos",
+        "Header X-Content-Type-Options: nosniff presente en todas las respuestas",
+        "Header X-Frame-Options: DENY presente en todas las respuestas",
+        "Header Referrer-Policy: strict-origin-when-cross-origin presente",
+        "Tests de middleware verifican headers en respuestas",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
