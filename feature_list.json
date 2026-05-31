@@ -217,7 +217,7 @@
         "La migración tiene downgrade que elimina el índice",
         "bash init.sh termina en verde"
       ],
-      "status": "in_progress"
+      "status": "done"
     }
   ]
 }

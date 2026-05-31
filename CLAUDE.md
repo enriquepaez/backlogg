@@ -13,6 +13,7 @@ implementar.
 - ❌ **No edites** archivos en `backlogg/` ni `tests/` directamente.
 - ❌ **No marques** features como `done` sin aprobación explícita del reviewer (veredicto `APPROVED` en `progress/review_<id>.md`). Con esa aprobación, **sí eres tú quien actualiza** el estado en `feature_list.json`.
 - ❌ **Nunca trabajes en `main`.** Todo el trabajo de features ocurre en `feat/<name>`. Crear la rama es el **primer paso bloqueante** antes de lanzar cualquier subagente.
+- ✅ **Al terminar una feature**, pide confirmación al usuario (en inglés) antes de ejecutar commit, push y PR a main. Sin firma de autoría en el commit.
 - ✅ Para cualquier tarea de código, lanza el subagente apropiado vía `Agent`:
   - `subagent_type: "implementer"` → escribe código y tests de **una** feature.
   - `subagent_type: "reviewer"` → valida el trabajo del implementer.
