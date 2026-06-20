@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
 from backlogg.games.routes import router as games_router
+from backlogg.genres.routes import router as genres_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.people.routes import router as people_router
 from backlogg.scheduler.setup import create_scheduler
@@ -37,3 +38,4 @@ app.include_router(games_router)
 app.include_router(people_router)
 app.include_router(search_router)
 app.include_router(admin_router)
+app.include_router(genres_router)
