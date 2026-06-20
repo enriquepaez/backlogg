@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +8,14 @@ from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
 from backlogg.series.models import Series
-from backlogg.series.schemas import SeriesListItemOut, SeriesListOut, SeriesSortEnum
-from backlogg.shared.external_ids import upsert_external_id
+from backlogg.series.schemas import (
+    SeriesListItemOut,
+    SeriesListOut,
+    SeriesSortEnum,
+    SimilarSeriesListOut,
+    SimilarSeriesOut,
+)
+from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
 _tmdb = TMDBSeriesClient()
 
@@ -176,3 +182,71 @@ async def get_series(db: AsyncSession, slug: str) -> Series:
     await db.commit()
 
     return series
+
+
+async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOut:
+    # 1. Look up the source series — 404 if it doesn't exist
+    series = await repo.get_series_by_slug(db, slug)
+    if series is None:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    # 2. Get the TMDB ID for the source series
+    ext_id = await get_external_id(db, "SERIES", series.id, "TMDB")
+    if ext_id is None:
+        # Series exists locally but has no TMDB ID — return empty results
+        return SimilarSeriesListOut(results=[])
+
+    tmdb_id = int(ext_id.external_id)
+
+    # 3. Fetch recommendations from TMDB (page 1 only)
+    raw_results = await _tmdb.get_series_recommendations(tmdb_id)
+
+    # 4. Persist any new series and collect up to 10 results
+    results: list[SimilarSeriesOut] = []
+    for raw in raw_results[:10]:
+        rec_tmdb_id = raw.get("id")
+        if not rec_tmdb_id:
+            continue
+
+        # Build slug from recommendation data (list endpoint format, not detail)
+        title = raw.get("name", "")
+        first_air_date_str = raw.get("first_air_date", "")
+        release_date = None
+        year = ""
+        if first_air_date_str:
+            try:
+                release_date = date.fromisoformat(first_air_date_str)
+                year = str(release_date.year)
+            except ValueError:
+                pass
+
+        slug_base = _slugify(title)
+        rec_slug = f"{slug_base}-{year}" if year else slug_base
+
+        # Try local DB first
+        rec_series = await repo.get_series_by_slug(db, rec_slug)
+        if rec_series is None:
+            # Fetch full detail and persist
+            detail = await _tmdb.get_series_detail(rec_tmdb_id)
+            if detail is None:
+                continue
+            series_data = _tmdb.series_to_dict(detail)
+            rec_series = await repo.upsert_series(db, series_data)
+            await upsert_external_id(db, "SERIES", rec_series.id, "TMDB", str(rec_tmdb_id))
+            await db.commit()
+
+        results.append(
+            SimilarSeriesOut(
+                title=rec_series.title,
+                slug=rec_series.slug,
+                poster_url=rec_series.poster_url,
+                release_date=rec_series.first_air_date,
+                rating_external=(
+                    float(rec_series.rating_external)
+                    if rec_series.rating_external is not None
+                    else None
+                ),
+            )
+        )
+
+    return SimilarSeriesListOut(results=results)

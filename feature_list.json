@@ -275,7 +275,7 @@
         "Tests de servicio con cliente TMDB mockeado",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 17,

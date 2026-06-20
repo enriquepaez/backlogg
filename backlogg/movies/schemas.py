@@ -12,6 +12,20 @@ class GenreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SimilarMovieOut(BaseModel):
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarMoviesOut(BaseModel):
+    results: list[SimilarMovieOut]
+
+
 class MovieOut(BaseModel):
     id: int
     title: str

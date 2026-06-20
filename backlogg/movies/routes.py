@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
 from backlogg.movies import service
-from backlogg.movies.schemas import MovieListOut, MovieOut, MovieSortEnum
+from backlogg.movies.schemas import MovieListOut, MovieOut, MovieSortEnum, SimilarMoviesOut
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 
@@ -17,6 +17,11 @@ async def list_movies(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_movies(db, genre=genre, sort=sort, page=page, limit=limit)
+
+
+@router.get("/{slug}/similar", response_model=SimilarMoviesOut)
+async def get_similar_movies(slug: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_similar_movies(db, slug)
 
 
 @router.get("/{slug}", response_model=MovieOut)
