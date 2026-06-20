@@ -1,0 +1,18 @@
+meta {
+  name: List movies — sort by title
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/movies
+  body: none
+  auth: none
+}
+
+params:query {
+  ~genre: action
+  sort: title_asc
+  ~page: 1
+  ~limit: 20
+}
