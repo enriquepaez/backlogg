@@ -1,0 +1,18 @@
+meta {
+  name: Search — all types
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/search
+  body: none
+  auth: none
+}
+
+params:query {
+  q: batman
+  ~type: movie
+  ~page: 1
+  ~limit: 20
+}

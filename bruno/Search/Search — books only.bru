@@ -1,0 +1,16 @@
+meta {
+  name: Search — books only
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/search
+  body: none
+  auth: none
+}
+
+params:query {
+  q: batman
+  type: book
+}
