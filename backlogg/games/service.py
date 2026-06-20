@@ -4,9 +4,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.games import repository as repo
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.games.models import Game
+from backlogg.games.schemas import GameListItemOut, GameListOut, GameSortEnum
 from backlogg.shared.external_ids import upsert_external_id
 
 _igdb_client = IGDBClient()
+
+
+async def list_games(
+    db: AsyncSession,
+    genre: str | None,
+    sort: GameSortEnum,
+    page: int,
+    limit: int,
+) -> GameListOut:
+    items, total = await repo.list_games(db, genre=genre, sort=sort, page=page, limit=limit)
+    list_items = [
+        GameListItemOut(
+            id=g.id,
+            title=g.title,
+            slug=g.slug,
+            poster_url=g.poster_url,
+            release_date=g.release_date,
+            rating_external=float(g.rating_external) if g.rating_external is not None else None,
+            genres=[genre.slug for genre in g.genres],
+        )
+        for g in items
+    ]
+    return GameListOut(items=list_items, total=total, page=page, limit=limit)
 
 
 async def get_game(db: AsyncSession, slug: str) -> Game:

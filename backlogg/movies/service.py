@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.movies import repository as repo
 from backlogg.movies.adapters.tmdb import TMDBClient, _slugify
 from backlogg.movies.models import Movie
+from backlogg.movies.schemas import MovieListItemOut, MovieListOut, MovieSortEnum
 from backlogg.people import repository as people_repo
 from backlogg.shared.external_ids import upsert_external_id
 
@@ -108,6 +109,29 @@ async def _persist_movie_people(db: AsyncSession, movie: Movie, tmdb_id: int) ->
                 "billing_order": None,
             },
         )
+
+
+async def list_movies(
+    db: AsyncSession,
+    genre: str | None,
+    sort: MovieSortEnum,
+    page: int,
+    limit: int,
+) -> MovieListOut:
+    items, total = await repo.list_movies(db, genre=genre, sort=sort, page=page, limit=limit)
+    list_items = [
+        MovieListItemOut(
+            id=m.id,
+            title=m.title,
+            slug=m.slug,
+            poster_url=m.poster_url,
+            release_date=m.release_date,
+            rating_external=float(m.rating_external) if m.rating_external is not None else None,
+            genres=[g.slug for g in m.genres],
+        )
+        for m in items
+    ]
+    return MovieListOut(items=list_items, total=total, page=page, limit=limit)
 
 
 async def get_movie(db: AsyncSession, slug: str) -> Movie:

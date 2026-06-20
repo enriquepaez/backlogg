@@ -1,9 +1,51 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backlogg.books.models import Book, BookGenre, book_genres_join
+from backlogg.books.schemas import BookSortEnum
+
+
+async def list_books(
+    db: AsyncSession,
+    genre: str | None,
+    sort: BookSortEnum,
+    page: int,
+    limit: int,
+) -> tuple[list[Book], int]:
+    """Return a paginated list of books with optional genre filter and sorting.
+
+    Sort by first_publish_date for date_desc / date_asc (not release_date).
+    Returns a tuple of (items, total_count).
+    """
+    base_query = select(Book).options(selectinload(Book.genres))
+
+    if genre is not None:
+        base_query = base_query.join(Book.genres).where(BookGenre.slug == genre)
+
+    # Count query (without pagination)
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Sorting
+    if sort == BookSortEnum.rating_desc:
+        order_col = Book.rating_external.desc().nulls_last()
+    elif sort == BookSortEnum.rating_asc:
+        order_col = Book.rating_external.asc().nulls_last()
+    elif sort == BookSortEnum.date_desc:
+        order_col = Book.first_publish_date.desc().nulls_last()
+    elif sort == BookSortEnum.date_asc:
+        order_col = Book.first_publish_date.asc().nulls_last()
+    else:  # title_asc
+        order_col = Book.title.asc()
+
+    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    result = await db.execute(base_query)
+    items = list(result.scalars().unique().all())
+
+    return items, total
 
 
 async def get_book_by_slug(db: AsyncSession, slug: str) -> Book | None:

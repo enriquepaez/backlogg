@@ -1,8 +1,49 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
+from backlogg.movies.schemas import MovieSortEnum
+
+
+async def list_movies(
+    db: AsyncSession,
+    genre: str | None,
+    sort: MovieSortEnum,
+    page: int,
+    limit: int,
+) -> tuple[list[Movie], int]:
+    """Return a paginated list of movies with optional genre filter and sorting.
+
+    Returns a tuple of (items, total_count).
+    """
+    base_query = select(Movie).options(selectinload(Movie.genres))
+
+    if genre is not None:
+        base_query = base_query.join(Movie.genres).where(MovieGenre.slug == genre)
+
+    # Count query (without pagination)
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Sorting
+    if sort == MovieSortEnum.rating_desc:
+        order_col = Movie.rating_external.desc().nulls_last()
+    elif sort == MovieSortEnum.rating_asc:
+        order_col = Movie.rating_external.asc().nulls_last()
+    elif sort == MovieSortEnum.date_desc:
+        order_col = Movie.release_date.desc().nulls_last()
+    elif sort == MovieSortEnum.date_asc:
+        order_col = Movie.release_date.asc().nulls_last()
+    else:  # title_asc
+        order_col = Movie.title.asc()
+
+    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    result = await db.execute(base_query)
+    items = list(result.scalars().unique().all())
+
+    return items, total
 
 
 async def get_movie_by_slug(db: AsyncSession, slug: str) -> Movie | None:
