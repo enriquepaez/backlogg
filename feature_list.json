@@ -311,7 +311,7 @@
         "Tests de autenticación para ambos endpoints admin",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 19,

@@ -14,13 +14,16 @@ from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 
 _SYNC_RESULT = {"synced": 5, "errors": 0, "duration_s": 1.2}
+_VALID_KEY = "test-admin-secret"
 
 
 @pytest_asyncio.fixture
 async def client():
-    """AsyncClient wired to the FastAPI app."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+    """AsyncClient wired to the FastAPI app with a valid API key configured."""
+    with patch("backlogg.admin.auth.settings") as mock_settings:
+        mock_settings.ADMIN_API_KEY = _VALID_KEY
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
 
 
 # ── Happy paths ───────────────────────────────────────────────────────────────
@@ -30,7 +33,7 @@ async def test_sync_movie_returns_200(client):
     """POST /admin/sync/movie runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"movie": mock_handler}):
-        response = await client.post("/admin/sync/movie")
+        response = await client.post("/admin/sync/movie", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -44,7 +47,7 @@ async def test_sync_series_returns_200(client):
     """POST /admin/sync/series runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"series": mock_handler}):
-        response = await client.post("/admin/sync/series")
+        response = await client.post("/admin/sync/series", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -58,7 +61,7 @@ async def test_sync_book_returns_200(client):
     """POST /admin/sync/book runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"book": mock_handler}):
-        response = await client.post("/admin/sync/book")
+        response = await client.post("/admin/sync/book", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -72,7 +75,7 @@ async def test_sync_game_returns_200(client):
     """POST /admin/sync/game runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"game": mock_handler}):
-        response = await client.post("/admin/sync/game")
+        response = await client.post("/admin/sync/game", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -87,13 +90,13 @@ async def test_sync_game_returns_200(client):
 
 async def test_sync_unknown_type_returns_422(client):
     """POST /admin/sync/unknown returns 422 (unprocessable entity)."""
-    response = await client.post("/admin/sync/unknown")
+    response = await client.post("/admin/sync/unknown", headers={"X-API-Key": _VALID_KEY})
     assert response.status_code == 422
 
 
 async def test_sync_empty_type_returns_422(client):
     """POST /admin/sync/ (no type) returns 404 (route not matched)."""
-    response = await client.post("/admin/sync/")
+    response = await client.post("/admin/sync/", headers={"X-API-Key": _VALID_KEY})
     # FastAPI returns 404 for missing path segment, not 422
     assert response.status_code in (404, 422)
 
