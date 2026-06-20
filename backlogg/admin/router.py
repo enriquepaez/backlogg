@@ -1,7 +1,6 @@
 """Admin router — internal endpoints for manual sync triggering.
 
-No authentication is required in the MVP.  These endpoints are intended
-for internal/testing use only.
+All endpoints require the X-API-Key header validated by verify_api_key.
 """
 
 from typing import Literal
@@ -10,11 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.admin import service as admin_service
+from backlogg.admin.auth import verify_api_key
 from backlogg.admin.schemas import StatsResponse, SyncResponse
 from backlogg.core.database import get_db
 from backlogg.scheduler.jobs import sync_books, sync_games, sync_movies, sync_series
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(verify_api_key)])
 
 _SYNC_HANDLERS = {
     "movie": sync_movies,

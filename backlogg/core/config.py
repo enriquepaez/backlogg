@@ -18,5 +18,7 @@ class Settings(BaseSettings):
 
     SYNC_CRON: str = "0 3 * * *"
 
+    ADMIN_API_KEY: str = ""
+
 
 settings = Settings()
