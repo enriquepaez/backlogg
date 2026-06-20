@@ -1,8 +1,50 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backlogg.series.models import Series, SeriesGenre, series_genres_join
+from backlogg.series.schemas import SeriesSortEnum
+
+
+async def list_series(
+    db: AsyncSession,
+    genre: str | None,
+    sort: SeriesSortEnum,
+    page: int,
+    limit: int,
+) -> tuple[list[Series], int]:
+    """Return a paginated list of series with optional genre filter and sorting.
+
+    Sort by first_air_date for date_desc / date_asc (not release_date).
+    Returns a tuple of (items, total_count).
+    """
+    base_query = select(Series).options(selectinload(Series.genres))
+
+    if genre is not None:
+        base_query = base_query.join(Series.genres).where(SeriesGenre.slug == genre)
+
+    # Count query (without pagination)
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Sorting
+    if sort == SeriesSortEnum.rating_desc:
+        order_col = Series.rating_external.desc().nulls_last()
+    elif sort == SeriesSortEnum.rating_asc:
+        order_col = Series.rating_external.asc().nulls_last()
+    elif sort == SeriesSortEnum.date_desc:
+        order_col = Series.first_air_date.desc().nulls_last()
+    elif sort == SeriesSortEnum.date_asc:
+        order_col = Series.first_air_date.asc().nulls_last()
+    else:  # title_asc
+        order_col = Series.title.asc()
+
+    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    result = await db.execute(base_query)
+    items = list(result.scalars().unique().all())
+
+    return items, total
 
 
 async def get_series_by_slug(db: AsyncSession, slug: str) -> Series | None:

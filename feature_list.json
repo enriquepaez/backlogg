@@ -239,7 +239,7 @@
         "Tests de endpoint con datos semilla en DB de test para los 4 tipos",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 15,

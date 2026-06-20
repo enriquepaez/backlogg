@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.books import repository as repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.books.models import Book
+from backlogg.books.schemas import BookListItemOut, BookListOut, BookSortEnum
 from backlogg.shared.external_ids import upsert_external_id
 
 _ol_client = OpenLibraryClient()
@@ -19,6 +20,29 @@ def _title_from_slug(slug: str) -> str:
     """
     title = re.sub(r"-\d{4}$", "", slug)
     return title.replace("-", " ")
+
+
+async def list_books(
+    db: AsyncSession,
+    genre: str | None,
+    sort: BookSortEnum,
+    page: int,
+    limit: int,
+) -> BookListOut:
+    items, total = await repo.list_books(db, genre=genre, sort=sort, page=page, limit=limit)
+    list_items = [
+        BookListItemOut(
+            id=b.id,
+            title=b.title,
+            slug=b.slug,
+            poster_url=b.poster_url,
+            release_date=b.first_publish_date,
+            rating_external=float(b.rating_external) if b.rating_external is not None else None,
+            genres=[g.slug for g in b.genres],
+        )
+        for b in items
+    ]
+    return BookListOut(items=list_items, total=total, page=page, limit=limit)
 
 
 async def get_book(db: AsyncSession, slug: str) -> Book:

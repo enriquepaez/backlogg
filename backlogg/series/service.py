@@ -8,6 +8,7 @@ from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
 from backlogg.series.models import Series
+from backlogg.series.schemas import SeriesListItemOut, SeriesListOut, SeriesSortEnum
 from backlogg.shared.external_ids import upsert_external_id
 
 _tmdb = TMDBSeriesClient()
@@ -116,6 +117,29 @@ async def _persist_series_creators(db: AsyncSession, series: Series, created_by:
                 "billing_order": None,
             },
         )
+
+
+async def list_series(
+    db: AsyncSession,
+    genre: str | None,
+    sort: SeriesSortEnum,
+    page: int,
+    limit: int,
+) -> SeriesListOut:
+    items, total = await repo.list_series(db, genre=genre, sort=sort, page=page, limit=limit)
+    list_items = [
+        SeriesListItemOut(
+            id=s.id,
+            title=s.title,
+            slug=s.slug,
+            poster_url=s.poster_url,
+            release_date=s.first_air_date,
+            rating_external=float(s.rating_external) if s.rating_external is not None else None,
+            genres=[g.slug for g in s.genres],
+        )
+        for s in items
+    ]
+    return SeriesListOut(items=list_items, total=total, page=page, limit=limit)
 
 
 async def get_series(db: AsyncSession, slug: str) -> Series:

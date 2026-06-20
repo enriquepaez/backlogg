@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +14,47 @@ from backlogg.games.models import (
     game_genres_join,
     game_platforms_join,
 )
+from backlogg.games.schemas import GameSortEnum
+
+
+async def list_games(
+    db: AsyncSession,
+    genre: str | None,
+    sort: GameSortEnum,
+    page: int,
+    limit: int,
+) -> tuple[list[Game], int]:
+    """Return a paginated list of games with optional genre filter and sorting.
+
+    Returns a tuple of (items, total_count).
+    """
+    base_query = select(Game).options(selectinload(Game.genres), selectinload(Game.platforms))
+
+    if genre is not None:
+        base_query = base_query.join(Game.genres).where(GameGenre.slug == genre)
+
+    # Count query (without pagination)
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Sorting
+    if sort == GameSortEnum.rating_desc:
+        order_col = Game.rating_external.desc().nulls_last()
+    elif sort == GameSortEnum.rating_asc:
+        order_col = Game.rating_external.asc().nulls_last()
+    elif sort == GameSortEnum.date_desc:
+        order_col = Game.release_date.desc().nulls_last()
+    elif sort == GameSortEnum.date_asc:
+        order_col = Game.release_date.asc().nulls_last()
+    else:  # title_asc
+        order_col = Game.title.asc()
+
+    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    result = await db.execute(base_query)
+    items = list(result.scalars().unique().all())
+
+    return items, total
 
 
 async def get_game_by_slug(db: AsyncSession, slug: str) -> Game | None:

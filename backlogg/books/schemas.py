@@ -1,4 +1,5 @@
 from datetime import date
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,3 +26,30 @@ class BookOut(BaseModel):
     genres: list[BookGenreOut]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BookSortEnum(StrEnum):
+    rating_desc = "rating_desc"
+    rating_asc = "rating_asc"
+    date_desc = "date_desc"
+    date_asc = "date_asc"
+    title_asc = "title_asc"
+
+
+class BookListItemOut(BaseModel):
+    id: int
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+    genres: list[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BookListOut(BaseModel):
+    items: list[BookListItemOut]
+    total: int
+    page: int
+    limit: int
