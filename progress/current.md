@@ -1,12 +1,11 @@
 # Sesión actual
 
-Sprint 2 en progreso. Feature 14 (list_endpoints) completada y aprobada.
+Sprint 2 en progreso. Feature 15 (genres_endpoint) completada y aprobada.
 
 ## Features pendientes Sprint 2
 
 | ID | Nombre                   | Depende de     | Estado  |
 |----|--------------------------|----------------|---------|
-| 15 | genres_endpoint          | [14] ✅        | pending |
 | 16 | similar_items            | [2,3]          | pending |
 | 17 | search_external_fallback | [7]            | pending |
 | 18 | admin_api_key            | [8]            | pending |

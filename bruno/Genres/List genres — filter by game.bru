@@ -1,0 +1,16 @@
+meta {
+  name: List genres — filter by game
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/genres?type=game
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.genres: isDefined
+}
