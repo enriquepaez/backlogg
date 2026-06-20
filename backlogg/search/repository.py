@@ -1,12 +1,26 @@
+import logging
+
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.search.models import CatalogSearchEntry
 
+logger = logging.getLogger(__name__)
+
 
 class SearchRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def refresh_catalog_search(self) -> None:
+        """Refresh the catalog_search materialized view after ingestion."""
+        try:
+            await self._session.execute(
+                text("REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search")
+            )
+            await self._session.commit()
+        except Exception:
+            logger.exception("search fallback: failed to refresh catalog_search")
 
     async def search(
         self,

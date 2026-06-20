@@ -1,12 +1,11 @@
 # Sesión actual
 
-Sprint 2 en progreso. Feature 16 (similar_items) completada y aprobada.
+Sprint 2 en progreso. Feature 17 (search_external_fallback) completada y aprobada.
 
 ## Features pendientes Sprint 2
 
 | ID | Nombre                   | Depende de     | Estado  |
 |----|--------------------------|----------------|---------|
-| 17 | search_external_fallback | [7]            | pending |
 | 18 | admin_api_key            | [8]            | pending |
 | 19 | book_authors_people      | [4,6]          | pending |
 | 20 | trending_popular         | [2,3]          | pending |

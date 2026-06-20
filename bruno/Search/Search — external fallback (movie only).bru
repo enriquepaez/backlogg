@@ -1,0 +1,18 @@
+meta {
+  name: Search — external fallback (movie only)
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/search
+  body: none
+  auth: none
+}
+
+params:query {
+  q: Oppenheimer
+  type: movie
+  ~page: 1
+  ~limit: 10
+}

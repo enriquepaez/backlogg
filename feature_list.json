@@ -293,7 +293,7 @@
         "Tests con mocks de las 3 APIs externas",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 18,

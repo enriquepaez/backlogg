@@ -1,6 +1,7 @@
 """Tests for the catalog search endpoint (GET /search)."""
 
 from datetime import UTC, date, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -184,8 +185,27 @@ async def test_search_empty_q_returns_422(client, seeded_db):
 
 
 async def test_search_no_results(client, seeded_db):
-    """GET /search?q=<nonexistent> returns 200 with empty results."""
-    response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+    """GET /search?q=<nonexistent> returns 200 with empty results when APIs find nothing."""
+    with (
+        patch(
+            "backlogg.search.service._ingest_movies",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.search.service._ingest_series",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.search.service._ingest_books",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.search.service._ingest_games",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
     assert response.status_code == 200
     body = response.json()
     assert body["results"] == []
@@ -210,3 +230,281 @@ async def test_search_result_fields(client, seeded_db):
     )
     for field in expected_fields:
         assert field in item
+
+
+# ---------------------------------------------------------------------------
+# External fallback tests
+# ---------------------------------------------------------------------------
+
+_REFRESH_PATCH = "backlogg.search.repository.SearchRepository.refresh_catalog_search"
+
+
+async def test_search_fallback_fires_when_no_local_results(client, seeded_db):
+    """When local search returns 0 results, all 4 ingest functions are called."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+
+    assert response.status_code == 200
+    # All four ingest helpers must have been called exactly once
+    ingest_movie_mock.assert_called_once()
+    ingest_series_mock.assert_called_once()
+    ingest_books_mock.assert_called_once()
+    ingest_games_mock.assert_called_once()
+    # Materialized view refresh must have been called
+    refresh_mock.assert_called_once()
+
+
+async def test_search_fallback_not_fired_when_local_results_exist(client, seeded_db):
+    """When local results exist the fan-out must NOT be triggered."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=inception")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] > 0
+    # Fast path — no external calls
+    ingest_movie_mock.assert_not_called()
+    ingest_series_mock.assert_not_called()
+    ingest_books_mock.assert_not_called()
+    ingest_games_mock.assert_not_called()
+    refresh_mock.assert_not_called()
+
+
+async def test_search_fallback_type_movie_only_calls_tmdb_movies(client, seeded_db):
+    """?type=movie fan-out must only call the movie ingest, not others."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=movie")
+
+    assert response.status_code == 200
+    ingest_movie_mock.assert_called_once()
+    ingest_series_mock.assert_not_called()
+    ingest_books_mock.assert_not_called()
+    ingest_games_mock.assert_not_called()
+
+
+async def test_search_fallback_type_series_only_calls_tmdb_series(client, seeded_db):
+    """?type=series fan-out must only call the series ingest."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=series")
+
+    assert response.status_code == 200
+    ingest_movie_mock.assert_not_called()
+    ingest_series_mock.assert_called_once()
+    ingest_books_mock.assert_not_called()
+    ingest_games_mock.assert_not_called()
+
+
+async def test_search_fallback_type_book_only_calls_open_library(client, seeded_db):
+    """?type=book fan-out must only call the book ingest."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=book")
+
+    assert response.status_code == 200
+    ingest_movie_mock.assert_not_called()
+    ingest_series_mock.assert_not_called()
+    ingest_books_mock.assert_called_once()
+    ingest_games_mock.assert_not_called()
+
+
+async def test_search_fallback_type_game_only_calls_igdb(client, seeded_db):
+    """?type=game fan-out must only call the game ingest."""
+    ingest_movie_mock = AsyncMock(return_value=None)
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=game")
+
+    assert response.status_code == 200
+    ingest_movie_mock.assert_not_called()
+    ingest_series_mock.assert_not_called()
+    ingest_books_mock.assert_not_called()
+    ingest_games_mock.assert_called_once()
+
+
+async def test_search_fallback_api_failure_does_not_abort_others(client, seeded_db):
+    """A failure in one external API must not abort the others or return 500."""
+
+    async def failing_ingest(*args, **kwargs):
+        raise RuntimeError("simulated API failure")
+
+    ingest_series_mock = AsyncMock(return_value=None)
+    ingest_books_mock = AsyncMock(return_value=None)
+    ingest_games_mock = AsyncMock(return_value=None)
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=failing_ingest),
+        patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
+        patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
+        patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+
+    # Must still return 200 even though the movies ingest failed
+    assert response.status_code == 200
+    # The other ingests must have been called despite the movies failure
+    ingest_series_mock.assert_called_once()
+    ingest_books_mock.assert_called_once()
+    ingest_games_mock.assert_called_once()
+
+
+async def test_search_fallback_one_ingest_failure_does_not_abort_others(client, seeded_db):
+    """If one _ingest_* raises an unhandled exception, the remaining ingests and
+    refresh_catalog_search must still execute (each ingest owns its own session).
+    """
+    call_log: list[str] = []
+
+    async def failing_movies_ingest(q):
+        raise RuntimeError("simulated movies session error")
+
+    async def ok_series_ingest(q):
+        call_log.append("series")
+
+    async def ok_books_ingest(q):
+        call_log.append("books")
+
+    async def ok_games_ingest(q):
+        call_log.append("games")
+
+    refresh_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("backlogg.search.service._ingest_movies", new=failing_movies_ingest),
+        patch("backlogg.search.service._ingest_series", new=ok_series_ingest),
+        patch("backlogg.search.service._ingest_books", new=ok_books_ingest),
+        patch("backlogg.search.service._ingest_games", new=ok_games_ingest),
+        patch(_REFRESH_PATCH, new=refresh_mock),
+    ):
+        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+
+    # Must not 500 — each ingest has its own isolated session
+    assert response.status_code == 200
+    # The other ingests and refresh must have executed despite the movies failure
+    assert "series" in call_log
+    assert "books" in call_log
+    assert "games" in call_log
+    refresh_mock.assert_called_once()
+
+
+async def test_search_fallback_returns_ingested_items(client, db):
+    """After ingestion, items appear in search results (end-to-end with real ingest)."""
+    # Pre-seed a movie that will be "found" by the external fallback
+    movie_data = {
+        "title": "Galactic Traveler",
+        "original_title": "Galactic Traveler",
+        "slug": "galactic-traveler-2020",
+        "overview": "A unique cosmic adventure.",
+        "release_date": date(2020, 6, 15),
+        "runtime": 120,
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "budget": None,
+        "revenue": None,
+        "status": "Released",
+        "rating_external": 7.5,
+        "rating_count_external": 1000,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+
+    async def fake_ingest_movies(q):
+        await movies_repo.upsert_movie(db, dict(movie_data))
+        await db.flush()
+
+    async def fake_refresh(self):
+        await self._session.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
+
+    from backlogg.core.database import get_db
+
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        with (
+            patch("backlogg.search.service._ingest_movies", new=fake_ingest_movies),
+            patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
+            patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
+            patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
+            patch(_REFRESH_PATCH, new=fake_refresh),
+        ):
+            response = await ac.get("/search?q=galactic+traveler")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "galactic-traveler-2020" in slugs

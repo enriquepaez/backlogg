@@ -1,0 +1,17 @@
+meta {
+  name: Search — external fallback (all types)
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/search
+  body: none
+  auth: none
+}
+
+params:query {
+  q: Oppenheimer
+  ~page: 1
+  ~limit: 10
+}
