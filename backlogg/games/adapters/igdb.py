@@ -97,6 +97,19 @@ class IGDBClient:
         results = await self._post("games", query)
         return results[0] if results else None
 
+    async def search_games(self, query: str, limit: int = 5) -> list[dict]:
+        """Search IGDB games by name and return up to ``limit`` results."""
+        escaped = query.replace('"', '\\"')
+        igdb_query = (
+            "fields name,slug,summary,cover.*,first_release_date,rating,rating_count,"
+            "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
+            "involved_companies.company.name,involved_companies.company.slug,"
+            "involved_companies.developer,involved_companies.publisher;"
+            f' search "{escaped}";'
+            f" limit {limit};"
+        )
+        return await self._post("games", igdb_query)
+
     async def get_top_games(self, limit: int = 100) -> list[dict]:
         """Fetch top-rated main games from IGDB for seeding."""
         # IGDB limits to 500 per request; fetch in batches if needed
