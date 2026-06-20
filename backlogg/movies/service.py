@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,9 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.movies import repository as repo
 from backlogg.movies.adapters.tmdb import TMDBClient, _slugify
 from backlogg.movies.models import Movie
-from backlogg.movies.schemas import MovieListItemOut, MovieListOut, MovieSortEnum
+from backlogg.movies.schemas import (
+    MovieListItemOut,
+    MovieListOut,
+    MovieSortEnum,
+    SimilarMovieOut,
+    SimilarMoviesOut,
+)
 from backlogg.people import repository as people_repo
-from backlogg.shared.external_ids import upsert_external_id
+from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
 _tmdb = TMDBClient()
 
@@ -165,3 +171,71 @@ async def get_movie(db: AsyncSession, slug: str) -> Movie:
     await db.commit()
 
     return movie
+
+
+async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
+    # 1. Look up the source movie — 404 if it doesn't exist
+    movie = await repo.get_movie_by_slug(db, slug)
+    if movie is None:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    # 2. Get the TMDB ID for the source movie
+    ext_id = await get_external_id(db, "MOVIE", movie.id, "TMDB")
+    if ext_id is None:
+        # Movie exists locally but has no TMDB ID — return empty results
+        return SimilarMoviesOut(results=[])
+
+    tmdb_id = int(ext_id.external_id)
+
+    # 3. Fetch recommendations from TMDB (page 1 only)
+    raw_results = await _tmdb.get_movie_recommendations(tmdb_id)
+
+    # 4. Persist any new movies and collect up to 10 results
+    results: list[SimilarMovieOut] = []
+    for raw in raw_results[:10]:
+        rec_tmdb_id = raw.get("id")
+        if not rec_tmdb_id:
+            continue
+
+        # Build slug from recommendation data (list endpoint format, not detail)
+        title = raw.get("title", "")
+        release_date_str = raw.get("release_date", "")
+        release_date = None
+        year = ""
+        if release_date_str:
+            try:
+                release_date = date.fromisoformat(release_date_str)
+                year = str(release_date.year)
+            except ValueError:
+                pass
+
+        slug_base = _slugify(title)
+        rec_slug = f"{slug_base}-{year}" if year else slug_base
+
+        # Try local DB first
+        rec_movie = await repo.get_movie_by_slug(db, rec_slug)
+        if rec_movie is None:
+            # Fetch full detail and persist
+            detail = await _tmdb.get_movie_detail(rec_tmdb_id)
+            if detail is None:
+                continue
+            movie_data = _tmdb.movie_to_dict(detail)
+            rec_movie = await repo.upsert_movie(db, movie_data)
+            await upsert_external_id(db, "MOVIE", rec_movie.id, "TMDB", str(rec_tmdb_id))
+            await db.commit()
+
+        results.append(
+            SimilarMovieOut(
+                title=rec_movie.title,
+                slug=rec_movie.slug,
+                poster_url=rec_movie.poster_url,
+                release_date=rec_movie.release_date,
+                rating_external=(
+                    float(rec_movie.rating_external)
+                    if rec_movie.rating_external is not None
+                    else None
+                ),
+            )
+        )
+
+    return SimilarMoviesOut(results=results)

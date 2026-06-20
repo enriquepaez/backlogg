@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
 from backlogg.series import service
-from backlogg.series.schemas import SeriesListOut, SeriesOut, SeriesSortEnum
+from backlogg.series.schemas import SeriesListOut, SeriesOut, SeriesSortEnum, SimilarSeriesListOut
 
 router = APIRouter(prefix="/series", tags=["series"])
 
@@ -17,6 +17,11 @@ async def list_series(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_series(db, genre=genre, sort=sort, page=page, limit=limit)
+
+
+@router.get("/{slug}/similar", response_model=SimilarSeriesListOut)
+async def get_similar_series(slug: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_similar_series(db, slug)
 
 
 @router.get("/{slug}", response_model=SeriesOut)

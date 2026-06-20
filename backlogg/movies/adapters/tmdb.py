@@ -59,6 +59,20 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_movie_recommendations(self, tmdb_id: int) -> list[dict]:
+        """Return page 1 of movie recommendations from TMDB, or empty list on 404."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/movie/{tmdb_id}/recommendations",
+                headers=self._headers,
+                params={"page": 1},
+            )
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data = response.json()
+            return data.get("results", [])
+
     async def get_top_movies(self, limit: int = 100) -> list[dict]:
         """Fetch top-rated movies from TMDB for nightly sync.
 

@@ -12,6 +12,20 @@ class SeriesGenreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SimilarSeriesOut(BaseModel):
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarSeriesListOut(BaseModel):
+    results: list[SimilarSeriesOut]
+
+
 class SeriesOut(BaseModel):
     id: int
     title: str
