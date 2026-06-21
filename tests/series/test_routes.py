@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from backlogg.main import app
+from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
 from backlogg.series import service
 
@@ -73,3 +74,77 @@ async def test_get_series_returns_404(client, db):
         response = await client.get("/series/nonexistent-slug-404-test")
 
     assert response.status_code == 404
+
+
+async def test_get_series_credits_empty(client, db):
+    """GET /series/{slug} returns credits as [] when no credits exist."""
+    await repo.upsert_series(db, _make_series_dict("credits-empty-series-2002"))
+
+    response = await client.get("/series/credits-empty-series-2002")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert "credits" in body
+    assert body["credits"] == []
+
+
+async def test_get_series_credits_present_and_ordered(client, db):
+    """GET /series/{slug} returns credits ordered by billing_order ascending."""
+    series = await repo.upsert_series(db, _make_series_dict("credits-ordered-series-2002"))
+    now = datetime.now(UTC)
+
+    person_a = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Series Actor A",
+            "slug": "series-actor-a-credits-test",
+            "profile_url": "https://example.com/sa.jpg",
+            "last_synced_at": now,
+        },
+    )
+    person_b = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Series Actor B",
+            "slug": "series-actor-b-credits-test",
+            "profile_url": None,
+            "last_synced_at": now,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "SERIES",
+            "item_id": series.id,
+            "person_id": person_b.id,
+            "role": "ACTOR",
+            "character_name": "Bob",
+            "billing_order": 2,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "SERIES",
+            "item_id": series.id,
+            "person_id": person_a.id,
+            "role": "ACTOR",
+            "character_name": "Alice",
+            "billing_order": 1,
+        },
+    )
+
+    response = await client.get("/series/credits-ordered-series-2002")
+    assert response.status_code == 200
+
+    body = response.json()
+    credits = body["credits"]
+    assert len(credits) == 2
+    assert credits[0]["person_name"] == "Series Actor A"
+    assert credits[0]["person_slug"] == "series-actor-a-credits-test"
+    assert credits[0]["profile_url"] == "https://example.com/sa.jpg"
+    assert credits[0]["role"] == "ACTOR"
+    assert credits[0]["character_name"] == "Alice"
+    assert credits[0]["billing_order"] == 1
+    assert credits[1]["person_name"] == "Series Actor B"
+    assert credits[1]["billing_order"] == 2

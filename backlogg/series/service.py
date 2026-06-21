@@ -9,12 +9,15 @@ from backlogg.series import repository as repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
 from backlogg.series.models import Series
 from backlogg.series.schemas import (
+    SeriesGenreOut,
     SeriesListItemOut,
     SeriesListOut,
+    SeriesOut,
     SeriesSortEnum,
     SimilarSeriesListOut,
     SimilarSeriesOut,
 )
+from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
 _tmdb = TMDBSeriesClient()
@@ -148,40 +151,59 @@ async def list_series(
     return SeriesListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_series(db: AsyncSession, slug: str) -> Series:
+async def get_series(db: AsyncSession, slug: str) -> SeriesOut:
     # 1. Look up in local DB
     series = await repo.get_series_by_slug(db, slug)
-    if series:
-        return series
+    if series is None:
+        # 2. Derive a search title from the slug and query TMDB
+        query = _title_from_slug(slug)
+        search_result = await _tmdb.search_series(query)
+        if search_result is None:
+            raise HTTPException(status_code=404, detail="Series not found")
 
-    # 2. Derive a search title from the slug and query TMDB
-    query = _title_from_slug(slug)
-    search_result = await _tmdb.search_series(query)
-    if search_result is None:
-        raise HTTPException(status_code=404, detail="Series not found")
+        # 3. Fetch full detail from TMDB (includes genres, seasons, etc.)
+        tmdb_id = search_result["id"]
+        detail = await _tmdb.get_series_detail(tmdb_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Series not found")
 
-    # 3. Fetch full detail from TMDB (includes genres, seasons, etc.)
-    tmdb_id = search_result["id"]
-    detail = await _tmdb.get_series_detail(tmdb_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="Series not found")
+        # 4. Persist to local DB via repository
+        series_data = _tmdb.series_to_dict(detail)
+        series = await repo.upsert_series(db, series_data)
 
-    # 4. Persist to local DB via repository
-    series_data = _tmdb.series_to_dict(detail)
-    series = await repo.upsert_series(db, series_data)
+        # 5. Persist the TMDB external ID
+        await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
 
-    # 5. Persist the TMDB external ID
-    await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
+        # 6. Persist people (cast + creators) and their credits
+        await _persist_series_people(db, series, tmdb_id)
+        created_by = detail.get("created_by", [])
+        if created_by:
+            await _persist_series_creators(db, series, created_by)
 
-    # 6. Persist people (cast + creators) and their credits
-    await _persist_series_people(db, series, tmdb_id)
-    created_by = detail.get("created_by", [])
-    if created_by:
-        await _persist_series_creators(db, series, created_by)
+        await db.commit()
 
-    await db.commit()
-
-    return series
+    credits = await get_credits_for_item(db, "SERIES", series.id)
+    return SeriesOut(
+        id=series.id,
+        title=series.title,
+        original_title=series.original_title,
+        slug=series.slug,
+        overview=series.overview,
+        first_air_date=series.first_air_date,
+        last_air_date=series.last_air_date,
+        number_of_seasons=series.number_of_seasons,
+        number_of_episodes=series.number_of_episodes,
+        status=series.status,
+        original_language=series.original_language,
+        poster_url=series.poster_url,
+        backdrop_url=series.backdrop_url,
+        rating_external=(
+            float(series.rating_external) if series.rating_external is not None else None
+        ),
+        rating_count_external=series.rating_count_external,
+        genres=[SeriesGenreOut(id=g.id, name=g.name, slug=g.slug) for g in series.genres],
+        credits=credits,
+    )
 
 
 async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOut:

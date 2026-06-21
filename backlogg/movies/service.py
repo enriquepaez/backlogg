@@ -8,13 +8,16 @@ from backlogg.movies import repository as repo
 from backlogg.movies.adapters.tmdb import TMDBClient, _slugify
 from backlogg.movies.models import Movie
 from backlogg.movies.schemas import (
+    GenreOut,
     MovieListItemOut,
     MovieListOut,
+    MovieOut,
     MovieSortEnum,
     SimilarMovieOut,
     SimilarMoviesOut,
 )
 from backlogg.people import repository as people_repo
+from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
 _tmdb = TMDBClient()
@@ -140,37 +143,54 @@ async def list_movies(
     return MovieListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_movie(db: AsyncSession, slug: str) -> Movie:
+async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
     # 1. Look up in local DB
     movie = await repo.get_movie_by_slug(db, slug)
-    if movie:
-        return movie
+    if movie is None:
+        # 2. Derive a search title from the slug and query TMDB
+        query = _title_from_slug(slug)
+        search_result = await _tmdb.search_movie(query)
+        if search_result is None:
+            raise HTTPException(status_code=404, detail="Movie not found")
 
-    # 2. Derive a search title from the slug and query TMDB
-    query = _title_from_slug(slug)
-    search_result = await _tmdb.search_movie(query)
-    if search_result is None:
-        raise HTTPException(status_code=404, detail="Movie not found")
+        # 3. Fetch full detail from TMDB (includes genres, runtime, etc.)
+        tmdb_id = search_result["id"]
+        detail = await _tmdb.get_movie_detail(tmdb_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Movie not found")
 
-    # 3. Fetch full detail from TMDB (includes genres, runtime, etc.)
-    tmdb_id = search_result["id"]
-    detail = await _tmdb.get_movie_detail(tmdb_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="Movie not found")
+        # 4. Persist to local DB via repository
+        movie_data = _tmdb.movie_to_dict(detail)
+        movie = await repo.upsert_movie(db, movie_data)
 
-    # 4. Persist to local DB via repository
-    movie_data = _tmdb.movie_to_dict(detail)
-    movie = await repo.upsert_movie(db, movie_data)
+        # 5. Persist the TMDB external ID
+        await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
 
-    # 5. Persist the TMDB external ID
-    await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
+        # 6. Persist people (cast + directors) and their credits
+        await _persist_movie_people(db, movie, tmdb_id)
 
-    # 6. Persist people (cast + directors) and their credits
-    await _persist_movie_people(db, movie, tmdb_id)
+        await db.commit()
 
-    await db.commit()
-
-    return movie
+    credits = await get_credits_for_item(db, "MOVIE", movie.id)
+    return MovieOut(
+        id=movie.id,
+        title=movie.title,
+        original_title=movie.original_title,
+        slug=movie.slug,
+        overview=movie.overview,
+        release_date=movie.release_date,
+        runtime=movie.runtime,
+        original_language=movie.original_language,
+        poster_url=movie.poster_url,
+        backdrop_url=movie.backdrop_url,
+        budget=movie.budget,
+        revenue=movie.revenue,
+        status=movie.status,
+        rating_external=float(movie.rating_external) if movie.rating_external is not None else None,
+        rating_count_external=movie.rating_count_external,
+        genres=[GenreOut(id=g.id, name=g.name, slug=g.slug) for g in movie.genres],
+        credits=credits,
+    )
 
 
 async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:

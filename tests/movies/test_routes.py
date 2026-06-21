@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from backlogg.main import app
 from backlogg.movies import repository as repo
 from backlogg.movies import service
+from backlogg.people import repository as people_repo
 
 
 def _make_movie_dict(slug: str = "the-matrix-1999") -> dict:
@@ -71,3 +72,77 @@ async def test_get_movie_returns_404(client, db):
         response = await client.get("/movies/nonexistent-slug-404-test")
 
     assert response.status_code == 404
+
+
+async def test_get_movie_credits_empty(client, db):
+    """GET /movies/{slug} returns credits as [] when no credits exist."""
+    await repo.upsert_movie(db, _make_movie_dict("credits-empty-movie-1999"))
+
+    response = await client.get("/movies/credits-empty-movie-1999")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert "credits" in body
+    assert body["credits"] == []
+
+
+async def test_get_movie_credits_present_and_ordered(client, db):
+    """GET /movies/{slug} returns credits ordered by billing_order ascending."""
+    movie = await repo.upsert_movie(db, _make_movie_dict("credits-ordered-movie-1999"))
+    now = datetime.now(UTC)
+
+    person_a = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Actor A",
+            "slug": "actor-a-credits-movie-test",
+            "profile_url": "https://example.com/a.jpg",
+            "last_synced_at": now,
+        },
+    )
+    person_b = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Actor B",
+            "slug": "actor-b-credits-movie-test",
+            "profile_url": None,
+            "last_synced_at": now,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "MOVIE",
+            "item_id": movie.id,
+            "person_id": person_b.id,
+            "role": "ACTOR",
+            "character_name": "Bob",
+            "billing_order": 2,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "MOVIE",
+            "item_id": movie.id,
+            "person_id": person_a.id,
+            "role": "ACTOR",
+            "character_name": "Alice",
+            "billing_order": 1,
+        },
+    )
+
+    response = await client.get("/movies/credits-ordered-movie-1999")
+    assert response.status_code == 200
+
+    body = response.json()
+    credits = body["credits"]
+    assert len(credits) == 2
+    assert credits[0]["person_name"] == "Actor A"
+    assert credits[0]["person_slug"] == "actor-a-credits-movie-test"
+    assert credits[0]["profile_url"] == "https://example.com/a.jpg"
+    assert credits[0]["role"] == "ACTOR"
+    assert credits[0]["character_name"] == "Alice"
+    assert credits[0]["billing_order"] == 1
+    assert credits[1]["person_name"] == "Actor B"
+    assert credits[1]["billing_order"] == 2

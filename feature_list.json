@@ -367,7 +367,7 @@
         "Tests de endpoint verifican que credits[] está presente y bien formado",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 22,
