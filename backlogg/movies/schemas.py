@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
+from backlogg.shared.schemas import CreditOut
+
 
 class GenreOut(BaseModel):
     id: int
@@ -43,6 +45,7 @@ class MovieOut(BaseModel):
     rating_external: float | None
     rating_count_external: int | None
     genres: list[GenreOut]
+    credits: list[CreditOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 

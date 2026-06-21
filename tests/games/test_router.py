@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from backlogg.games import repository as repo
 from backlogg.games import service
 from backlogg.main import app
+from backlogg.people import repository as people_repo
 
 
 def _make_game_dict(slug: str = "doom-1993") -> dict:
@@ -97,3 +98,77 @@ async def test_get_game_fallback_endpoint(client, db):
     body = response.json()
     assert body["title"] == "DOOM"
     assert body["slug"] == "quake-1996-endpoint"
+
+
+async def test_get_game_credits_empty(client, db):
+    """GET /games/{slug} returns credits as [] when no credits exist."""
+    await repo.upsert_game(db, _make_game_dict("credits-empty-game-1993"))
+
+    response = await client.get("/games/credits-empty-game-1993")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert "credits" in body
+    assert body["credits"] == []
+
+
+async def test_get_game_credits_present_and_ordered(client, db):
+    """GET /games/{slug} returns credits ordered by billing_order ascending."""
+    game = await repo.upsert_game(db, _make_game_dict("credits-ordered-game-1993"))
+    now = datetime.now(UTC)
+
+    person_a = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Game Dev A",
+            "slug": "game-dev-a-credits-test",
+            "profile_url": "https://example.com/ga.jpg",
+            "last_synced_at": now,
+        },
+    )
+    person_b = await people_repo.upsert_person(
+        db,
+        {
+            "name": "Game Dev B",
+            "slug": "game-dev-b-credits-test",
+            "profile_url": None,
+            "last_synced_at": now,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "GAME",
+            "item_id": game.id,
+            "person_id": person_b.id,
+            "role": "DEVELOPER",
+            "character_name": None,
+            "billing_order": 2,
+        },
+    )
+    await people_repo.upsert_credit(
+        db,
+        {
+            "item_type": "GAME",
+            "item_id": game.id,
+            "person_id": person_a.id,
+            "role": "DEVELOPER",
+            "character_name": None,
+            "billing_order": 1,
+        },
+    )
+
+    response = await client.get("/games/credits-ordered-game-1993")
+    assert response.status_code == 200
+
+    body = response.json()
+    credits = body["credits"]
+    assert len(credits) == 2
+    assert credits[0]["person_name"] == "Game Dev A"
+    assert credits[0]["person_slug"] == "game-dev-a-credits-test"
+    assert credits[0]["profile_url"] == "https://example.com/ga.jpg"
+    assert credits[0]["role"] == "DEVELOPER"
+    assert credits[0]["character_name"] is None
+    assert credits[0]["billing_order"] == 1
+    assert credits[1]["person_name"] == "Game Dev B"
+    assert credits[1]["billing_order"] == 2

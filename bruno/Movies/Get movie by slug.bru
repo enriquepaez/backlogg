@@ -5,7 +5,27 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/movies/inception-2010
+  url: {{baseUrl}}/movies/oppenheimer-2023
   body: none
   auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("credits field is an array", function() {
+    expect(res.body.credits).to.be.an("array");
+  });
+
+  test("credits items have required fields", function() {
+    if (res.body.credits.length > 0) {
+      const c = res.body.credits[0];
+      expect(c).to.have.property("person_name");
+      expect(c).to.have.property("person_slug");
+      expect(c).to.have.property("role");
+      expect(c).to.have.property("billing_order");
+    }
+  });
 }

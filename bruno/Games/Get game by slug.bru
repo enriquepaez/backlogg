@@ -9,3 +9,13 @@ get {
   body: none
   auth: none
 }
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("credits field is an array", function() {
+    expect(res.body.credits).to.be.an("array");
+  });
+}
