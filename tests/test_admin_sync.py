@@ -261,3 +261,60 @@ async def test_sync_movies_is_idempotent(db):
     # Both runs must report synced=1 (the upsert counts as success each time)
     assert result1["synced"] == 1
     assert result2["synced"] == 1
+
+
+async def test_sync_books_does_not_call_get_work_detail():
+    """sync_books must not call get_work_detail — enrichment is on-demand only."""
+    trending_raw = [
+        {
+            "key": "/works/OL123W",
+            "title": "Test Book",
+            "first_publish_year": 2020,
+            "cover_i": 12345,
+            "subject": ["Fiction"],
+            "author_name": ["Test Author"],
+        }
+    ]
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_trending_books",
+            new_callable=AsyncMock,
+            return_value=trending_raw,
+        ),
+        patch.object(
+            sync_jobs._ol_client,
+            "get_work_detail",
+            new_callable=AsyncMock,
+        ) as mock_work_detail,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+        ) as mock_factory,
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.books.repository.upsert_book",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_book = MagicMock()
+            mock_book.id = 1
+            mock_upsert.return_value = mock_book
+            await sync_jobs.sync_books()
+
+    mock_work_detail.assert_not_called()

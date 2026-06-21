@@ -146,21 +146,12 @@ async def sync_books() -> dict:
         logger.exception("sync_books: failed to fetch from Open Library")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
 
-    logger.error("sync_books: get_trending_books returned %d works", len(raw_list))
-
     async with async_session_factory() as session:
         for raw in raw_list:
             try:
                 work_key = raw.get("key", "")
                 work_id = work_key.removeprefix("/works/") if work_key else None
 
-                # Normalize — trending endpoint returns a compact format; use
-                # it as both the search doc and fetch full detail when possible.
-                work_detail: dict | None = None
-                if work_id:
-                    work_detail = await _ol_client.get_work_detail(work_id)
-
-                # Build a pseudo search_doc from the trending entry
                 search_doc: dict = {
                     "title": raw.get("title", ""),
                     "key": work_key,
@@ -170,7 +161,7 @@ async def sync_books() -> dict:
                     "author_name": raw.get("author_name", []),
                 }
 
-                book_data = _ol_client.book_to_dict(search_doc, work_detail)
+                book_data = _ol_client.book_to_dict(search_doc, None)
                 if not book_data.get("title"):
                     continue
 
@@ -178,23 +169,10 @@ async def sync_books() -> dict:
                 if work_id:
                     await upsert_external_id(session, "BOOK", book.id, "OPEN_LIBRARY", work_id)
                 await session.flush()
-
-                if work_detail and work_detail.get("authors"):
-                    from backlogg.books.service import _persist_book_authors
-
-                    await _persist_book_authors(session, book, work_detail)
-
                 synced += 1
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
                 errors += 1
-
-        logger.error(
-            "sync_books: loop done — synced=%d errors=%d out_of=%d",
-            synced,
-            errors,
-            len(raw_list),
-        )
 
         try:
             await _refresh_catalog_search(session)

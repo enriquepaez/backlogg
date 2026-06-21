@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Sync books
         run: |
-          curl -sf --max-time 1800 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" \
+          curl -sf --max-time 300 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
   sync-games:
