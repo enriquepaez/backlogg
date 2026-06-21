@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import unicodedata
@@ -10,6 +11,7 @@ _OL_COVER_BASE = "https://covers.openlibrary.org/b/id"
 _OL_HEADERS = {
     "User-Agent": "backlogg/1.0 (https://github.com/enriquepaez/backlogg; contact@backlogg.app)",
 }
+_OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ def _slugify(text: str) -> str:
 class OpenLibraryClient:
     async def search_book(self, title: str) -> dict | None:
         """Search Open Library by title and return the first result."""
-        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
+        async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
             response = await client.get(
                 f"{_OL_BASE}/search.json",
                 params={
@@ -49,7 +51,7 @@ class OpenLibraryClient:
         per_page = min(limit, 50)  # OL trending endpoint max is typically 50
 
         while len(results) < limit:
-            async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
+            async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
                 response = await client.get(
                     f"{_OL_BASE}/trending/weekly.json",
                     params={"limit": per_page, "offset": offset},
@@ -85,7 +87,7 @@ class OpenLibraryClient:
 
         ``work_id`` is the bare OLID like ``OL123W`` (without the /works/ prefix).
         """
-        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
+        async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
             response = await client.get(f"{_OL_BASE}/works/{work_id}.json")
             if response.status_code == 404:
                 return None
@@ -96,13 +98,23 @@ class OpenLibraryClient:
         """Fetch author detail from Open Library.
 
         ``author_id`` is the bare OLID like ``OL123A`` (without the /authors/ prefix).
+        Retries up to 3 times on timeout before returning None.
         """
-        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
-            response = await client.get(f"{_OL_BASE}/authors/{author_id}.json")
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
-            return response.json()
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
+                    response = await client.get(f"{_OL_BASE}/authors/{author_id}.json")
+                    if response.status_code == 404:
+                        return None
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.TimeoutException:
+                if attempt < 2:
+                    await asyncio.sleep(1)
+                else:
+                    logger.warning("get_author: timeout after 3 attempts for %s", author_id)
+                    return None
+        return None  # unreachable, satisfies type checker
 
     def book_to_dict(self, search_doc: dict, work_detail: dict | None = None) -> dict:
         """Convert Open Library search doc (+ optional work detail) to a DB-ready dict."""

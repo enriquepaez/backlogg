@@ -4,10 +4,14 @@ Covers:
 - User-Agent header is sent in get_trending_books requests
 - get_trending_books returns [] when the API responds with 403
 - get_trending_books correctly parses a response containing a non-empty "works" list
+- get_author retries on TimeoutException and returns None after 3 failures
+- get_author succeeds on a retry after an initial timeout
+- get_author returns None on 404
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from backlogg.books.adapters.open_library import (
@@ -123,3 +127,99 @@ async def test_get_trending_books_parses_works_list():
     assert len(result) == 2
     assert result[0]["key"] == "/works/OL1W"
     assert result[1]["title"] == "Book Two"
+
+
+# ---------------------------------------------------------------------------
+# get_author retry tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_author_returns_none_after_three_timeouts():
+    """get_author must return None (not raise) after 3 consecutive TimeoutExceptions."""
+    call_count = 0
+
+    class TimeoutClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ConnectTimeout("timed out")
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", TimeoutClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+            ol = OpenLibraryClient()
+            result = await ol.get_author("OL123A")
+
+    assert result is None
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_get_author_succeeds_on_retry_after_timeout():
+    """get_author must return data when a retry succeeds after an initial timeout."""
+    attempts = 0
+    author_data = {"key": "/authors/OL123A", "name": "Test Author"}
+
+    class FlakyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ConnectTimeout("first attempt fails")
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json = MagicMock(return_value=author_data)
+            resp.raise_for_status = MagicMock()
+            return resp
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakyClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+            ol = OpenLibraryClient()
+            result = await ol.get_author("OL123A")
+
+    assert result == author_data
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_get_author_returns_none_on_404():
+    """get_author must return None when the API returns 404."""
+
+    class NotFoundClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", NotFoundClient):
+        ol = OpenLibraryClient()
+        result = await ol.get_author("OL999A")
+
+    assert result is None
