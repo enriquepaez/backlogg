@@ -92,6 +92,18 @@ class OpenLibraryClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_author(self, author_id: str) -> dict | None:
+        """Fetch author detail from Open Library.
+
+        ``author_id`` is the bare OLID like ``OL123A`` (without the /authors/ prefix).
+        """
+        async with httpx.AsyncClient(headers=_OL_HEADERS) as client:
+            response = await client.get(f"{_OL_BASE}/authors/{author_id}.json")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     def book_to_dict(self, search_doc: dict, work_detail: dict | None = None) -> dict:
         """Convert Open Library search doc (+ optional work detail) to a DB-ready dict."""
         title = search_doc.get("title", "")

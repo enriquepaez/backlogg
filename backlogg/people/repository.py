@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backlogg.books.models import Book
 from backlogg.movies.models import Movie
 from backlogg.people.schemas import CreditOut, PersonOut
 from backlogg.series.models import Series
@@ -36,11 +37,14 @@ async def _resolve_credits(db: AsyncSession, credits: list[Credit]) -> list[Cred
     # Gather item IDs by type
     movie_ids: list[int] = []
     series_ids: list[int] = []
+    book_ids: list[int] = []
     for credit in credits:
         if credit.item_type == "MOVIE":
             movie_ids.append(credit.item_id)
         elif credit.item_type == "SERIES":
             series_ids.append(credit.item_id)
+        elif credit.item_type == "BOOK":
+            book_ids.append(credit.item_id)
 
     # Fetch movies in bulk
     movies_by_id: dict[int, Movie] = {}
@@ -55,6 +59,13 @@ async def _resolve_credits(db: AsyncSession, credits: list[Credit]) -> list[Cred
         series_result = await db.execute(select(Series).where(Series.id.in_(series_ids)))
         for series in series_result.scalars().all():
             series_by_id[series.id] = series
+
+    # Fetch books in bulk
+    books_by_id: dict[int, Book] = {}
+    if book_ids:
+        book_result = await db.execute(select(Book).where(Book.id.in_(book_ids)))
+        for book in book_result.scalars().all():
+            books_by_id[book.id] = book
 
     credits_out: list[CreditOut] = []
     for credit in credits:
@@ -71,6 +82,11 @@ async def _resolve_credits(db: AsyncSession, credits: list[Credit]) -> list[Cred
             if series:
                 item_slug = series.slug
                 item_title = series.title
+        elif credit.item_type == "BOOK":
+            book = books_by_id.get(credit.item_id)
+            if book:
+                item_slug = book.slug
+                item_title = book.title
 
         credits_out.append(
             CreditOut(
