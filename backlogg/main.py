@@ -1,6 +1,10 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
@@ -25,6 +29,32 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Backlogg API", lifespan=lifespan)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+_cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if _cors_origins_env:
+    _origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _origins = ["http://localhost:3000", "http://localhost:5173"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")

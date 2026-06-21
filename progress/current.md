@@ -1,9 +1,7 @@
 # Sesión actual
 
-Feature 21 (credits_in_detail) completada y aprobada.
+Feature 22 (cors_and_security) completada y aprobada.
 
-## Próximas features pendientes
+## Estado
 
-| ID | Nombre            | Depende de | Estado  |
-|----|-------------------|------------|---------|
-| 22 | cors_and_security | [9]        | pending |
+Todas las features del backlog están en `done`. No hay features `pending`.
