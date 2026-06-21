@@ -2,6 +2,7 @@
 
 <!-- Append-only. Añadir una línea al cerrar cada feature. -->
 <!-- Formato: YYYY-MM-DD | feat_<id> <name> | resumen de una línea -->
+2026-06-21 | feat_22 cors_and_security | CORSMiddleware (CORS_ORIGINS env var, default localhost:3000+5173) + SecurityHeadersMiddleware (X-Content-Type-Options, X-Frame-Options, Referrer-Policy) en main.py + 8 tests. 185 tests en verde.
 2026-06-21 | feat_21 credits_in_detail | shared/schemas.py (CreditOut) + shared/credits.py (get_credits_for_item JOIN credits+people ORDER BY billing_order ASC NULLS LAST) + MovieOut/SeriesOut/GameOut extendidos con credits[] + servicios actualizados para construir Pydantic explícito con credits inyectados + 6 tests nuevos (2 por dominio: empty y ordered). 164 tests en verde.
 2026-06-21 | feat_19 book_authors_people | get_author() en OL adapter + _persist_book_authors() en service + sync_books() actualizado + _resolve_credits() extendido a BOOK + 8 tests nuevos. 158 tests en verde.
 2026-05-24 | feat_1 shared_models | pyproject.toml + core (config, database) + shared/models.py (Person, Credit) + shared/external_ids.py (ExternalId, helpers upsert/get/set) + migración Alembic 0001 (external_ids, people, credits con triggers) + 5 tests en verde.

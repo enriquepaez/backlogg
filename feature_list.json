@@ -386,7 +386,7 @@
         "Tests de middleware verifican headers en respuestas",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
