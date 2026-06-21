@@ -178,6 +178,12 @@ async def sync_books() -> dict:
                 if work_id:
                     await upsert_external_id(session, "BOOK", book.id, "OPEN_LIBRARY", work_id)
                 await session.flush()
+
+                if work_detail and work_detail.get("authors"):
+                    from backlogg.books.service import _persist_book_authors
+
+                    await _persist_book_authors(session, book, work_detail)
+
                 synced += 1
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))

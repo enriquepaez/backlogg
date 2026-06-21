@@ -329,7 +329,7 @@
         "Tests de repositorio y servicio pasan",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 20,

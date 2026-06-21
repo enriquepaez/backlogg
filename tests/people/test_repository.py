@@ -157,3 +157,50 @@ async def test_upsert_credit_idempotent(db):
     c1 = await upsert_credit(db, credit_data)
     c2 = await upsert_credit(db, credit_data)
     assert c1.id == c2.id
+
+
+async def test_get_person_by_slug_with_book_credits(db):
+    """_resolve_credits handles BOOK item_type correctly."""
+    from backlogg.books.repository import upsert_book
+
+    book = await upsert_book(
+        db,
+        {
+            "title": "Author Test Book",
+            "original_title": None,
+            "slug": "author-test-book-repo-2023",
+            "overview": None,
+            "first_publish_date": None,
+            "original_language": None,
+            "poster_url": None,
+            "rating_external": None,
+            "rating_count_external": None,
+            "rating_internal": None,
+            "rating_count_internal": 0,
+            "last_synced_at": datetime.now(UTC),
+            "genres": [],
+        },
+    )
+
+    person = await upsert_person(db, _person_data("test-book-author-001", "Book Author"))
+    await upsert_credit(
+        db,
+        {
+            "item_type": "BOOK",
+            "item_id": book.id,
+            "person_id": person.id,
+            "role": "AUTHOR",
+            "character_name": None,
+            "billing_order": None,
+        },
+    )
+
+    result = await get_person_by_slug(db, "test-book-author-001")
+    assert result is not None
+    assert len(result.credits) == 1
+    credit = result.credits[0]
+    assert credit.item_type == "BOOK"
+    assert credit.item_id == book.id
+    assert credit.item_slug == "author-test-book-repo-2023"
+    assert credit.item_title == "Author Test Book"
+    assert credit.role == "AUTHOR"

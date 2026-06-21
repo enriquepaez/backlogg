@@ -1,15 +1,20 @@
+import logging
 import re
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books import repository as repo
-from backlogg.books.adapters.open_library import OpenLibraryClient
+from backlogg.books.adapters.open_library import OpenLibraryClient, _slugify
 from backlogg.books.models import Book
 from backlogg.books.schemas import BookListItemOut, BookListOut, BookSortEnum
+from backlogg.people import repository as people_repo
 from backlogg.shared.external_ids import upsert_external_id
 
 _ol_client = OpenLibraryClient()
+
+logger = logging.getLogger(__name__)
 
 
 def _title_from_slug(slug: str) -> str:
@@ -20,6 +25,54 @@ def _title_from_slug(slug: str) -> str:
     """
     title = re.sub(r"-\d{4}$", "", slug)
     return title.replace("-", " ")
+
+
+async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict) -> None:
+    """Fetch authors from Open Library and persist them as people + credits."""
+    authors = work_detail.get("authors", [])
+    now = datetime.now(UTC)
+
+    for entry in authors:
+        try:
+            author_key = entry.get("author", {}).get("key", "")
+            if not author_key:
+                continue
+            author_id = author_key.removeprefix("/authors/")
+
+            author_data = await _ol_client.get_author(author_id)
+            if not author_data:
+                continue
+
+            name = author_data.get("name") or author_data.get("personal_name")
+            if not name:
+                continue
+
+            slug = _slugify(name)
+
+            person = await people_repo.upsert_person(
+                db,
+                {
+                    "name": name,
+                    "slug": slug,
+                    "profile_url": None,
+                    "last_synced_at": now,
+                },
+            )
+            await upsert_external_id(db, "PERSON", person.id, "OPEN_LIBRARY", author_id)
+            await people_repo.upsert_credit(
+                db,
+                {
+                    "item_type": "BOOK",
+                    "item_id": book.id,
+                    "person_id": person.id,
+                    "role": "AUTHOR",
+                    "character_name": None,
+                    "billing_order": None,
+                },
+            )
+        except Exception:
+            logger.exception("_persist_book_authors: error for entry=%s", entry)
+            # Graceful degradation: continue with next author
 
 
 async def list_books(
@@ -72,6 +125,11 @@ async def get_book(db: AsyncSession, slug: str) -> Book:
     # 5. Persist the Open Library external ID
     if work_id:
         await upsert_external_id(db, "BOOK", book.id, "OPEN_LIBRARY", work_id)
+
+    # 6. Persist authors as people + credits
+    if work_detail:
+        await _persist_book_authors(db, book, work_detail)
+
     await db.commit()
 
     return book
