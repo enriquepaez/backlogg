@@ -1,0 +1,16 @@
+meta {
+  name: Trending — mix default
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/trending
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.results: isArray
+}

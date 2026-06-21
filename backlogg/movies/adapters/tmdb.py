@@ -73,6 +73,20 @@ class TMDBClient:
             data = response.json()
             return data.get("results", [])
 
+    async def get_trending_movies(self, period: str = "week") -> list[dict]:
+        """Fetch trending movies from TMDB for the given time window (day or week).
+
+        Returns the first page of results (up to 20 items).
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/trending/movie/{period}",
+                headers=self._headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+        return data.get("results", [])
+
     async def get_top_movies(self, limit: int = 100) -> list[dict]:
         """Fetch top-rated movies from TMDB for nightly sync.
 

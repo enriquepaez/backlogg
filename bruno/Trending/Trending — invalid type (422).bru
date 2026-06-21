@@ -1,0 +1,15 @@
+meta {
+  name: Trending — invalid type (422)
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/trending?type=invalid
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 422
+}

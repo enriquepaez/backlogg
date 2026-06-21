@@ -1,0 +1,20 @@
+meta {
+  name: Trending — period week
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/trending
+  body: none
+  auth: none
+}
+
+params:query {
+  period: week
+}
+
+assert {
+  res.status: eq 200
+  res.body.results: isArray
+}
