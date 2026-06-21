@@ -1,0 +1,20 @@
+meta {
+  name: Trending — type movie
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/trending
+  body: none
+  auth: none
+}
+
+params:query {
+  type: movie
+}
+
+assert {
+  res.status: eq 200
+  res.body.results: isArray
+}

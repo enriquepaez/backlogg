@@ -1,0 +1,196 @@
+import asyncio
+from datetime import date
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backlogg.movies import repository as movies_repo
+from backlogg.movies.adapters.tmdb import TMDBClient
+from backlogg.movies.adapters.tmdb import _slugify as _movie_slugify
+from backlogg.series import repository as series_repo
+from backlogg.series.adapters.tmdb import TMDBSeriesClient
+from backlogg.series.adapters.tmdb import _slugify as _series_slugify
+from backlogg.shared.external_ids import upsert_external_id
+from backlogg.trending.schemas import TrendingItemOut, TrendingOut
+
+_movies_tmdb = TMDBClient()
+_series_tmdb = TMDBSeriesClient()
+
+
+async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut | None:
+    """Persist a trending movie (list-format TMDB item) and return a TrendingItemOut.
+
+    The trending endpoint returns list-format items (no genres), so we fetch
+    full detail to get genres and persist correctly.
+    """
+    tmdb_id = raw.get("id")
+    if not tmdb_id:
+        return None
+
+    title = raw.get("title", "")
+    release_date_str = raw.get("release_date", "")
+    release_date: date | None = None
+    year = ""
+    if release_date_str:
+        try:
+            release_date = date.fromisoformat(release_date_str)
+            year = str(release_date.year)
+        except ValueError:
+            pass
+
+    slug_base = _movie_slugify(title)
+    slug = f"{slug_base}-{year}" if year else slug_base
+
+    # Try local DB first to avoid unnecessary TMDB calls
+    movie = await movies_repo.get_movie_by_slug(db, slug)
+    if movie is None:
+        detail = await _movies_tmdb.get_movie_detail(tmdb_id)
+        if detail is None:
+            return None
+        movie_data = _movies_tmdb.movie_to_dict(detail)
+        movie = await movies_repo.upsert_movie(db, movie_data)
+        await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
+        await db.commit()
+
+    poster_path = raw.get("poster_path")
+    poster_url = (
+        f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else movie.poster_url
+    )
+
+    vote_average = raw.get("vote_average")
+    rating_external = (
+        round(float(vote_average), 1)
+        if vote_average
+        else (float(movie.rating_external) if movie.rating_external is not None else None)
+    )
+
+    return TrendingItemOut(
+        item_type="MOVIE",
+        title=movie.title,
+        slug=movie.slug,
+        poster_url=poster_url,
+        release_date=movie.release_date,
+        rating_external=rating_external,
+    )
+
+
+async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOut | None:
+    """Persist a trending series (list-format TMDB item) and return a TrendingItemOut."""
+    tmdb_id = raw.get("id")
+    if not tmdb_id:
+        return None
+
+    title = raw.get("name", "")
+    first_air_date_str = raw.get("first_air_date", "")
+    year = ""
+    if first_air_date_str:
+        try:
+            first_air_date = date.fromisoformat(first_air_date_str)
+            year = str(first_air_date.year)
+        except ValueError:
+            pass
+
+    slug_base = _series_slugify(title)
+    slug = f"{slug_base}-{year}" if year else slug_base
+
+    series = await series_repo.get_series_by_slug(db, slug)
+    if series is None:
+        detail = await _series_tmdb.get_series_detail(tmdb_id)
+        if detail is None:
+            return None
+        series_data = _series_tmdb.series_to_dict(detail)
+        series = await series_repo.upsert_series(db, series_data)
+        await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
+        await db.commit()
+
+    poster_path = raw.get("poster_path")
+    poster_url = (
+        f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else series.poster_url
+    )
+
+    vote_average = raw.get("vote_average")
+    rating_external = (
+        round(float(vote_average), 1)
+        if vote_average
+        else (float(series.rating_external) if series.rating_external is not None else None)
+    )
+
+    return TrendingItemOut(
+        item_type="SERIES",
+        title=series.title,
+        slug=series.slug,
+        poster_url=poster_url,
+        release_date=series.first_air_date,
+        rating_external=rating_external,
+    )
+
+
+async def _collect_movies(db: AsyncSession, raw_list: list[dict]) -> list[TrendingItemOut]:
+    """Process trending movies sequentially (same DB session — no concurrency)."""
+    results: list[TrendingItemOut] = []
+    for raw in raw_list:
+        try:
+            item = await _ingest_trending_movie(db, raw)
+            if item is not None:
+                results.append(item)
+        except Exception:
+            pass  # skip items that fail to ingest
+    return results
+
+
+async def _collect_series(db: AsyncSession, raw_list: list[dict]) -> list[TrendingItemOut]:
+    """Process trending series sequentially (same DB session — no concurrency)."""
+    results: list[TrendingItemOut] = []
+    for raw in raw_list:
+        try:
+            item = await _ingest_trending_series(db, raw)
+            if item is not None:
+                results.append(item)
+        except Exception:
+            pass  # skip items that fail to ingest
+    return results
+
+
+async def get_trending(
+    db: AsyncSession,
+    item_type: str | None,
+    period: str,
+) -> TrendingOut:
+    """Return up to 20 trending items from TMDB.
+
+    - item_type=None  → mix of movies and series (up to 10 each, interleaved)
+    - item_type=movie → movies only
+    - item_type=series → series only
+    - period=day|week (TMDB time window)
+    """
+    if item_type == "movie":
+        raw_movies = await _movies_tmdb.get_trending_movies(period)
+        results = await _collect_movies(db, raw_movies[:20])
+        return TrendingOut(results=results[:20])
+
+    if item_type == "series":
+        raw_series = await _series_tmdb.get_trending_series(period)
+        results = await _collect_series(db, raw_series[:20])
+        return TrendingOut(results=results[:20])
+
+    # No type filter — fetch raw data from both APIs concurrently (no DB involved),
+    # then process each list sequentially to avoid concurrent writes on the same session.
+    raw_movies, raw_series = await asyncio.gather(
+        _movies_tmdb.get_trending_movies(period),
+        _series_tmdb.get_trending_series(period),
+    )
+
+    movies_out = await _collect_movies(db, raw_movies[:10])
+    series_out = await _collect_series(db, raw_series[:10])
+
+    # Interleave: movie, series, movie, series, ...
+    min_len = min(len(movies_out), len(series_out))
+    interleaved: list[TrendingItemOut] = []
+    for i in range(min_len):
+        interleaved.append(movies_out[i])
+        interleaved.append(series_out[i])
+
+    # Append remaining items from whichever list is longer
+    interleaved.extend(movies_out[min_len:])
+    interleaved.extend(series_out[min_len:])
+
+    return TrendingOut(results=interleaved[:20])

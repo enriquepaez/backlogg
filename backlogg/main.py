@@ -11,6 +11,7 @@ from backlogg.people.routes import router as people_router
 from backlogg.scheduler.setup import create_scheduler
 from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
+from backlogg.trending.router import router as trending_router
 
 
 @asynccontextmanager
@@ -39,3 +40,4 @@ app.include_router(people_router)
 app.include_router(search_router)
 app.include_router(admin_router)
 app.include_router(genres_router)
+app.include_router(trending_router)
