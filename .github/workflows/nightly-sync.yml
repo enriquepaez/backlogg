@@ -10,29 +10,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Sync movies
-        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie" -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
   sync-series:
     runs-on: ubuntu-latest
     steps:
       - name: Sync series
-        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series" -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
   sync-books:
     runs-on: ubuntu-latest
     steps:
       - name: Sync books
-        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
   sync-games:
     runs-on: ubuntu-latest
     steps:
       - name: Sync games
-        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game"
+        run: curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game" -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
   verify:
     needs: [sync-movies, sync-series, sync-books, sync-games]
     runs-on: ubuntu-latest
     steps:
       - name: Verify stats
-        run: curl -sf --max-time 30 "${{ secrets.RENDER_API_URL }}/admin/stats"
+        run: curl -sf --max-time 30 "${{ secrets.RENDER_API_URL }}/admin/stats" -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
