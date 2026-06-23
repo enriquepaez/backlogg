@@ -103,6 +103,26 @@ async def _resolve_credits(db: AsyncSession, credits: list[Credit]) -> list[Cred
     return credits_out
 
 
+async def get_person_id_by_external(db: AsyncSession, source: str, external_id: str) -> int | None:
+    """Return the person.id linked to a given external ID, or None."""
+    from backlogg.shared.external_ids import ExternalId  # avoid circular import
+
+    result = await db.execute(
+        select(ExternalId.item_id).where(
+            ExternalId.item_type == "PERSON",
+            ExternalId.source == source,
+            ExternalId.external_id == external_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_person_by_id(db: AsyncSession, person_id: int) -> Person | None:
+    """Return a Person by primary key, or None."""
+    result = await db.execute(select(Person).where(Person.id == person_id))
+    return result.scalar_one_or_none()
+
+
 async def upsert_person(db: AsyncSession, data: dict) -> Person:
     """Upsert a person by slug (idempotent).
 

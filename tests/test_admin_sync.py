@@ -242,6 +242,10 @@ async def test_sync_movies_is_idempotent(db):
             "_refresh_catalog_search",
             new_callable=AsyncMock,
         ),
+        patch(
+            "backlogg.scheduler.jobs._persist_movie_people",
+            new_callable=AsyncMock,
+        ),
         # Use the test DB session factory so writes land in the test DB
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
@@ -263,8 +267,8 @@ async def test_sync_movies_is_idempotent(db):
     assert result2["synced"] == 1
 
 
-async def test_sync_books_does_not_call_get_work_detail():
-    """sync_books must not call get_work_detail — enrichment is on-demand only."""
+async def test_sync_books_calls_get_work_detail_for_authors():
+    """sync_books must call get_work_detail to fetch authors for each book with a work_id."""
     trending_raw = [
         {
             "key": "/works/OL123W",
@@ -275,6 +279,10 @@ async def test_sync_books_does_not_call_get_work_detail():
             "author_name": ["Test Author"],
         }
     ]
+    work_detail_data = {
+        "title": "Test Book",
+        "authors": [],
+    }
     with (
         patch.object(
             sync_jobs._ol_client,
@@ -286,6 +294,7 @@ async def test_sync_books_does_not_call_get_work_detail():
             sync_jobs._ol_client,
             "get_work_detail",
             new_callable=AsyncMock,
+            return_value=work_detail_data,
         ) as mock_work_detail,
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
@@ -294,6 +303,10 @@ async def test_sync_books_does_not_call_get_work_detail():
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
         ),
+        patch(
+            "backlogg.scheduler.jobs._persist_book_authors",
+            new_callable=AsyncMock,
+        ) as mock_persist_authors,
     ):
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
@@ -315,6 +328,229 @@ async def test_sync_books_does_not_call_get_work_detail():
             mock_book = MagicMock()
             mock_book.id = 1
             mock_upsert.return_value = mock_book
-            await sync_jobs.sync_books()
+            result = await sync_jobs.sync_books()
 
-    mock_work_detail.assert_not_called()
+    mock_work_detail.assert_called_once_with("OL123W")
+    mock_persist_authors.assert_called_once()
+    assert result["synced"] == 1
+    assert result["errors"] == 0
+
+
+async def test_sync_movies_calls_persist_movie_people():
+    """sync_movies must call _persist_movie_people once per successfully upserted movie."""
+    movie_raw = {
+        "id": 88801,
+        "title": "Credits Test Movie",
+        "original_title": "Credits Test Movie",
+        "overview": "A movie for testing people persistence.",
+        "release_date": "2021-05-01",
+        "runtime": 110,
+        "original_language": "en",
+        "poster_path": None,
+        "backdrop_path": None,
+        "budget": 0,
+        "revenue": 0,
+        "status": "Released",
+        "vote_average": 8.0,
+        "vote_count": 200,
+        "genres": [],
+    }
+
+    with (
+        patch.object(
+            sync_jobs._tmdb_movies,
+            "get_top_movies",
+            new_callable=AsyncMock,
+            return_value=[{"id": 88801}],
+        ),
+        patch.object(
+            sync_jobs._tmdb_movies,
+            "get_movie_detail",
+            new_callable=AsyncMock,
+            return_value=movie_raw,
+        ),
+        patch(
+            "backlogg.scheduler.jobs._persist_movie_people",
+            new_callable=AsyncMock,
+        ) as mock_persist_people,
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.movies.repository.upsert_movie",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_movie = MagicMock()
+            mock_movie.id = 10
+            mock_upsert.return_value = mock_movie
+            result = await sync_jobs.sync_movies()
+
+    mock_persist_people.assert_called_once()
+    call_args = mock_persist_people.call_args
+    assert call_args.args[2] == 88801  # tmdb_id passed correctly
+    assert result["synced"] == 1
+    assert result["errors"] == 0
+
+
+async def test_sync_movies_persist_people_failure_does_not_increment_errors():
+    """If _persist_movie_people raises, errors counter stays 0 and sync continues."""
+    movie_raw = {
+        "id": 88802,
+        "title": "Credits Failure Movie",
+        "original_title": "Credits Failure Movie",
+        "overview": "Testing graceful degradation.",
+        "release_date": "2022-03-15",
+        "runtime": 95,
+        "original_language": "en",
+        "poster_path": None,
+        "backdrop_path": None,
+        "budget": 0,
+        "revenue": 0,
+        "status": "Released",
+        "vote_average": 7.5,
+        "vote_count": 50,
+        "genres": [],
+    }
+
+    with (
+        patch.object(
+            sync_jobs._tmdb_movies,
+            "get_top_movies",
+            new_callable=AsyncMock,
+            return_value=[{"id": 88802}],
+        ),
+        patch.object(
+            sync_jobs._tmdb_movies,
+            "get_movie_detail",
+            new_callable=AsyncMock,
+            return_value=movie_raw,
+        ),
+        patch(
+            "backlogg.scheduler.jobs._persist_movie_people",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("credits API down"),
+        ),
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.movies.repository.upsert_movie",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_movie = MagicMock()
+            mock_movie.id = 11
+            mock_upsert.return_value = mock_movie
+            result = await sync_jobs.sync_movies()
+
+    # The upsert succeeded, so synced=1 even though people persistence failed
+    assert result["synced"] == 1
+    # errors must NOT be incremented by people persistence failure
+    assert result["errors"] == 0
+
+
+async def test_sync_series_calls_persist_series_people_and_creators():
+    """sync_series must call _persist_series_people and _persist_series_creators per item."""
+    series_raw = {
+        "id": 77701,
+        "name": "Credits Test Series",
+        "original_name": "Credits Test Series",
+        "overview": "A series for testing people persistence.",
+        "first_air_date": "2019-09-01",
+        "last_air_date": "2023-06-01",
+        "number_of_seasons": 3,
+        "number_of_episodes": 30,
+        "status": "Ended",
+        "original_language": "en",
+        "poster_path": None,
+        "backdrop_path": None,
+        "vote_average": 8.5,
+        "vote_count": 500,
+        "genres": [],
+        "created_by": [{"id": 999, "name": "A Creator", "profile_path": None}],
+    }
+
+    with (
+        patch.object(
+            sync_jobs._tmdb_series,
+            "get_top_series",
+            new_callable=AsyncMock,
+            return_value=[{"id": 77701}],
+        ),
+        patch.object(
+            sync_jobs._tmdb_series,
+            "get_series_detail",
+            new_callable=AsyncMock,
+            return_value=series_raw,
+        ),
+        patch(
+            "backlogg.scheduler.jobs._persist_series_people",
+            new_callable=AsyncMock,
+        ) as mock_persist_people,
+        patch(
+            "backlogg.scheduler.jobs._persist_series_creators",
+            new_callable=AsyncMock,
+        ) as mock_persist_creators,
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.series.repository.upsert_series",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_series = MagicMock()
+            mock_series.id = 20
+            mock_upsert.return_value = mock_series
+            result = await sync_jobs.sync_series()
+
+    mock_persist_people.assert_called_once()
+    mock_persist_creators.assert_called_once()
+    assert result["synced"] == 1
+    assert result["errors"] == 0

@@ -19,6 +19,7 @@ from backlogg.series.schemas import (
 )
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
+from backlogg.shared.models import Person
 
 _tmdb = TMDBSeriesClient()
 
@@ -34,6 +35,37 @@ def _title_from_slug(slug: str) -> str:
     # Remove trailing 4-digit year suffix
     title = re.sub(r"-\d{4}$", "", slug)
     return title.replace("-", " ")
+
+
+async def _get_or_create_person_tmdb(
+    db: AsyncSession,
+    tmdb_person_id: int,
+    name: str,
+    slug: str,
+    profile_url: str | None,
+    now: datetime,
+) -> Person | None:
+    """Look up a person by TMDB ID; create one if not found.
+
+    Returns the Person instance, or None if the lookup/creation fails.
+    Avoids IntegrityError on uq_external_id when the same TMDB person
+    appears across multiple items with slightly different name variants.
+    """
+    existing_id = await people_repo.get_person_id_by_external(db, "TMDB", str(tmdb_person_id))
+    if existing_id is not None:
+        return await people_repo.get_person_by_id(db, existing_id)
+
+    person = await people_repo.upsert_person(
+        db,
+        {
+            "name": name,
+            "slug": slug,
+            "profile_url": profile_url,
+            "last_synced_at": now,
+        },
+    )
+    await upsert_external_id(db, "PERSON", person.id, "TMDB", str(tmdb_person_id))
+    return person
 
 
 async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int) -> None:
@@ -58,16 +90,10 @@ async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int)
         profile_path = member.get("profile_path")
         profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
 
-        person = await people_repo.upsert_person(
-            db,
-            {
-                "name": name,
-                "slug": slug,
-                "profile_url": profile_url,
-                "last_synced_at": now,
-            },
-        )
-        await upsert_external_id(db, "PERSON", person.id, "TMDB", str(person_tmdb_id))
+        person = await _get_or_create_person_tmdb(db, person_tmdb_id, name, slug, profile_url, now)
+        if person is None:
+            continue
+
         await people_repo.upsert_credit(
             db,
             {
@@ -105,16 +131,10 @@ async def _persist_series_creators(db: AsyncSession, series: Series, created_by:
         profile_path = member.get("profile_path")
         profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
 
-        person = await people_repo.upsert_person(
-            db,
-            {
-                "name": name,
-                "slug": slug,
-                "profile_url": profile_url,
-                "last_synced_at": now,
-            },
-        )
-        await upsert_external_id(db, "PERSON", person.id, "TMDB", str(person_tmdb_id))
+        person = await _get_or_create_person_tmdb(db, person_tmdb_id, name, slug, profile_url, now)
+        if person is None:
+            continue
+
         await people_repo.upsert_credit(
             db,
             {
