@@ -20,7 +20,7 @@ async def test_create_person(db):
     """Create a Person and verify all fields are persisted."""
     person = Person(
         name="Christopher Nolan",
-        slug="christopher-nolan",
+        slug="test-model-christopher-nolan",
         profile_url="https://image.tmdb.org/t/p/w500/nolan.jpg",
         last_synced_at=_now(),
     )
@@ -29,7 +29,7 @@ async def test_create_person(db):
 
     assert person.id is not None
     assert person.name == "Christopher Nolan"
-    assert person.slug == "christopher-nolan"
+    assert person.slug == "test-model-christopher-nolan"
     assert person.profile_url == "https://image.tmdb.org/t/p/w500/nolan.jpg"
     assert person.created_at is not None
     assert person.updated_at is not None
@@ -39,7 +39,7 @@ async def test_create_credit(db):
     """Create a Credit associated with a Person and verify fields."""
     person = Person(
         name="Cillian Murphy",
-        slug="cillian-murphy",
+        slug="test-model-cillian-murphy",
         last_synced_at=_now(),
     )
     db.add(person)

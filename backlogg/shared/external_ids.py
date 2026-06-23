@@ -59,6 +59,23 @@ async def set_external_id(
 async def upsert_external_id(
     db: AsyncSession, item_type: str, item_id: int, source: str, external_id: str
 ) -> ExternalId:
+    # Check first if this (source, external_id) pair already exists.
+    # Prevents uq_external_id IntegrityError when the same external ID
+    # appears more than once (e.g. same TMDB person in cast and crew).
+    existing_check = await db.execute(
+        select(ExternalId).where(
+            ExternalId.source == source,
+            ExternalId.external_id == external_id,
+        )
+    )
+    existing_row = existing_check.scalar_one_or_none()
+    if existing_row is not None:
+        # Already linked. If it points to the same item, return as-is.
+        # If it points to a different item (item_id mismatch), keep the
+        # first claim to preserve data integrity.
+        return existing_row
+
+    # Not yet linked — safe to insert.
     stmt = (
         insert(ExternalId)
         .values(
@@ -76,6 +93,5 @@ async def upsert_external_id(
     result = await db.execute(stmt)
     await db.flush()
     row = result.scalar_one()
-    # Expire the cached instance so the updated value is reflected
     await db.refresh(row)
     return row

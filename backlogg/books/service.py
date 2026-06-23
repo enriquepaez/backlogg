@@ -11,6 +11,7 @@ from backlogg.books.models import Book
 from backlogg.books.schemas import BookListItemOut, BookListOut, BookSortEnum
 from backlogg.people import repository as people_repo
 from backlogg.shared.external_ids import upsert_external_id
+from backlogg.shared.models import Person
 
 _ol_client = OpenLibraryClient()
 
@@ -25,6 +26,36 @@ def _title_from_slug(slug: str) -> str:
     """
     title = re.sub(r"-\d{4}$", "", slug)
     return title.replace("-", " ")
+
+
+async def _get_or_create_person_ol(
+    db: AsyncSession,
+    ol_id: str,
+    name: str,
+    slug: str,
+    now: datetime,
+) -> Person | None:
+    """Look up a person by Open Library ID; create one if not found.
+
+    Returns the Person instance, or None if the lookup/creation fails.
+    Avoids IntegrityError on uq_external_id when the same OL author
+    appears in multiple books with slightly different name variants.
+    """
+    existing_id = await people_repo.get_person_id_by_external(db, "OPEN_LIBRARY", ol_id)
+    if existing_id is not None:
+        return await people_repo.get_person_by_id(db, existing_id)
+
+    person = await people_repo.upsert_person(
+        db,
+        {
+            "name": name,
+            "slug": slug,
+            "profile_url": None,
+            "last_synced_at": now,
+        },
+    )
+    await upsert_external_id(db, "PERSON", person.id, "OPEN_LIBRARY", ol_id)
+    return person
 
 
 async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict) -> None:
@@ -49,16 +80,10 @@ async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict)
 
             slug = _slugify(name)
 
-            person = await people_repo.upsert_person(
-                db,
-                {
-                    "name": name,
-                    "slug": slug,
-                    "profile_url": None,
-                    "last_synced_at": now,
-                },
-            )
-            await upsert_external_id(db, "PERSON", person.id, "OPEN_LIBRARY", author_id)
+            person = await _get_or_create_person_ol(db, author_id, name, slug, now)
+            if person is None:
+                continue
+
             await people_repo.upsert_credit(
                 db,
                 {

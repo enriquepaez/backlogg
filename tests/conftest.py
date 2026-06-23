@@ -10,34 +10,15 @@ from alembic import command
 from backlogg.core.config import settings
 
 
-def _resolve_db_url() -> tuple[str, dict]:
-    """Return (clean_url, connect_args) for the test database.
-
-    Uses TEST_DATABASE_URL when explicitly configured.
-    Falls back to DATABASE_URL (Neon) when TEST_DATABASE_URL is the default
-    localhost placeholder.
-    asyncpg does not understand the 'sslmode' query parameter — strip it
-    and pass ssl=True via connect_args.
-    """
-    url = settings.TEST_DATABASE_URL
-    if url == "postgresql+asyncpg://localhost/backlogg_test":
-        url = settings.DATABASE_URL
-
-    connect_args: dict = {}
-    if "sslmode" in url:
-        url = re.sub(r"[?&]sslmode=\w+", "", url)
-        connect_args["ssl"] = True
-    return url, connect_args
-
-
 @pytest.fixture(scope="session")
 def apply_migrations():
     """Apply all Alembic migrations to the test database (session scope)."""
-    url, _ = _resolve_db_url()
     alembic_cfg = Config("alembic.ini")
 
+    # Pass DATABASE_URL as-is so Alembic's env.py can handle sslmode stripping.
+    raw_url = settings.DATABASE_URL
     original = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = url
+    os.environ["DATABASE_URL"] = raw_url
 
     command.upgrade(alembic_cfg, "head")
 
@@ -52,7 +33,12 @@ def apply_migrations():
 @pytest_asyncio.fixture(scope="session")
 async def db_engine(apply_migrations):
     """Async engine for the test database, session-scoped."""
-    url, connect_args = _resolve_db_url()
+    url = settings.DATABASE_URL
+    connect_args: dict = {}
+    if "sslmode" in url:
+        url = re.sub(r"[?&]sslmode=\w+", "", url)
+        connect_args["ssl"] = True
+
     engine = create_async_engine(url, echo=False, connect_args=connect_args)
     yield engine
     await engine.dispose()

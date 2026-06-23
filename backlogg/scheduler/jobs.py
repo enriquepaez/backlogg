@@ -17,13 +17,16 @@ from sqlalchemy import text
 
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
+from backlogg.books.service import _persist_book_authors
 from backlogg.core.database import async_session_factory
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
+from backlogg.movies.service import _persist_movie_people
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
+from backlogg.series.service import _persist_series_creators, _persist_series_people
 from backlogg.shared.external_ids import upsert_external_id
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,13 @@ async def sync_movies() -> dict:
                 await upsert_external_id(session, "MOVIE", movie.id, "TMDB", str(tmdb_id))
                 await session.flush()
                 synced += 1
+
+                try:
+                    await _persist_movie_people(session, movie, tmdb_id)
+                except Exception:
+                    logger.exception(
+                        "sync_movies: failed to persist people for tmdb_id=%s", tmdb_id
+                    )
             except Exception:
                 logger.exception("sync_movies: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
@@ -117,6 +127,16 @@ async def sync_series() -> dict:
                 await upsert_external_id(session, "SERIES", series.id, "TMDB", str(tmdb_id))
                 await session.flush()
                 synced += 1
+
+                try:
+                    await _persist_series_people(session, series, tmdb_id)
+                    created_by = detail.get("created_by", [])
+                    if created_by:
+                        await _persist_series_creators(session, series, created_by)
+                except Exception:
+                    logger.exception(
+                        "sync_series: failed to persist people for tmdb_id=%s", tmdb_id
+                    )
             except Exception:
                 logger.exception("sync_series: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
@@ -170,6 +190,16 @@ async def sync_books() -> dict:
                     await upsert_external_id(session, "BOOK", book.id, "OPEN_LIBRARY", work_id)
                 await session.flush()
                 synced += 1
+
+                if work_id:
+                    try:
+                        work_detail = await _ol_client.get_work_detail(work_id)
+                        if work_detail:
+                            await _persist_book_authors(session, book, work_detail)
+                    except Exception:
+                        logger.exception(
+                            "sync_books: failed to persist authors for work_id=%s", work_id
+                        )
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
                 errors += 1
