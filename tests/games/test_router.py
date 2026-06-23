@@ -66,8 +66,11 @@ async def test_get_game_returns_200(client, db):
 
 async def test_get_game_returns_404(client, db):
     """GET /games/{slug} returns 404 when not in DB and IGDB has nothing."""
-    with patch.object(
-        service._igdb_client, "get_game_by_slug", new_callable=AsyncMock, return_value=None
+    with (
+        patch.object(
+            service._igdb_client, "get_game_by_slug", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(service._igdb_client, "search_games", new_callable=AsyncMock, return_value=[]),
     ):
         response = await client.get("/games/nonexistent-game-slug-404-test")
 

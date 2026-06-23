@@ -96,11 +96,44 @@ async def test_get_game_fallback_to_igdb(db):
 
 
 async def test_get_game_not_found_anywhere(db):
-    """When IGDB returns None, service raises HTTP 404."""
-    with patch.object(
-        service._igdb_client, "get_game_by_slug", new_callable=AsyncMock, return_value=None
+    """When IGDB returns None for both slug and search, service raises HTTP 404."""
+    with (
+        patch.object(
+            service._igdb_client, "get_game_by_slug", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(service._igdb_client, "search_games", new_callable=AsyncMock, return_value=[]),
     ):
         with pytest.raises(HTTPException) as exc_info:
             await service.get_game(db, "this-game-does-not-exist-9999")
 
     assert exc_info.value.status_code == 404
+
+
+async def test_get_game_title_search_fallback(db):
+    """When get_game_by_slug returns None, search_games fallback is used."""
+    raw = _make_raw_igdb()
+    game_dict = _make_game_dict()
+
+    with (
+        patch.object(
+            service._igdb_client, "get_game_by_slug", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(
+            service._igdb_client,
+            "search_games",
+            new_callable=AsyncMock,
+            return_value=[raw],
+        ),
+        patch.object(
+            service._igdb_client,
+            "game_to_dict",
+            return_value=game_dict,
+        ),
+    ):
+        result = await service.get_game(db, "the-witcher-3-wild-hunt-2015")
+
+    assert result.title == "The Witcher 3: Wild Hunt"
+
+    # Verify the game was persisted using the IGDB slug from game_to_dict
+    persisted = await repo.get_game_by_slug(db, "the-witcher-3-wild-hunt")
+    assert persisted is not None

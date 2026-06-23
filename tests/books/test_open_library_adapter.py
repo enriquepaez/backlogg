@@ -17,6 +17,7 @@ import pytest
 from backlogg.books.adapters.open_library import (
     _OL_HEADERS,
     OpenLibraryClient,
+    _is_clean_genre,
 )
 
 # ---------------------------------------------------------------------------
@@ -223,3 +224,83 @@ async def test_get_author_returns_none_on_404():
         result = await ol.get_author("OL999A")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Genre filtering tests (_is_clean_genre + book_to_dict)
+# ---------------------------------------------------------------------------
+
+
+def test_is_clean_genre_rejects_parenthesised_subject():
+    """Subjects containing parentheses must be filtered out."""
+    assert _is_clean_genre("American fiction (fictional works by one author)") is False
+
+
+def test_is_clean_genre_rejects_subject_with_comma():
+    """Subjects containing commas must be filtered out."""
+    assert _is_clean_genre("Long island (n.y.), fiction") is False
+
+
+def test_is_clean_genre_rejects_long_subject():
+    """Subjects longer than 30 characters with no punctuation still fail if > 30 chars."""
+    long_subject = "A" * 31  # 31 chars, no parens/comma
+    assert _is_clean_genre(long_subject) is False
+
+
+def test_is_clean_genre_accepts_allowlist_entry():
+    """A subject that matches the allowlist (case-insensitive) must pass."""
+    assert _is_clean_genre("Fiction") is True
+    assert _is_clean_genre("FANTASY") is True
+    assert _is_clean_genre("science fiction") is True
+
+
+def test_is_clean_genre_accepts_short_clean_subject():
+    """A short subject with no parentheses or commas must pass."""
+    assert _is_clean_genre("Magic") is True
+    assert _is_clean_genre("War") is True
+
+
+def test_book_to_dict_filters_raw_subjects():
+    """book_to_dict must exclude cataloguing subjects and keep only clean genres."""
+    ol = OpenLibraryClient()
+    search_doc = {
+        "title": "Test Book",
+        "first_publish_year": 2000,
+        "subject": [
+            "American fiction (fictional works by one author)",  # has parens -> out
+            "Lectures et morceaux choisis",  # >30 chars -> out
+            "Fiction",  # allowlist -> in
+            "Fantasy",  # allowlist -> in
+            "Long island (n.y.), fiction",  # parens + comma -> out
+        ],
+    }
+    result = ol.book_to_dict(search_doc)
+    genre_names = [g["name"] for g in result["genres"]]
+
+    assert "American fiction (fictional works by one author)" not in genre_names
+    assert "Lectures et morceaux choisis" not in genre_names
+    assert "Long island (n.y.), fiction" not in genre_names
+    assert "Fiction" in genre_names
+    assert "Fantasy" in genre_names
+
+
+def test_book_to_dict_caps_genres_at_five():
+    """book_to_dict must return at most 5 genres even when more clean subjects exist."""
+    ol = OpenLibraryClient()
+    # Provide 8 subjects that all pass the filter (all in allowlist or short+clean)
+    search_doc = {
+        "title": "Genre Rich Book",
+        "first_publish_year": 2010,
+        "subject": [
+            "Fiction",
+            "Fantasy",
+            "Mystery",
+            "Thriller",
+            "Horror",
+            "Romance",
+            "Science",
+            "History",
+        ],
+    }
+    result = ol.book_to_dict(search_doc)
+    assert len(result["genres"]) == 5
