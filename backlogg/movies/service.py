@@ -37,6 +37,12 @@ def _title_from_slug(slug: str) -> str:
     return title.replace("-", " ")
 
 
+def _year_from_slug(slug: str) -> int | None:
+    """Extract the 4-digit year suffix from a slug, or None if absent."""
+    m = re.search(r"-(\d{4})$", slug)
+    return int(m.group(1)) if m else None
+
+
 async def _get_or_create_person_tmdb(
     db: AsyncSession,
     tmdb_person_id: int,
@@ -167,9 +173,10 @@ async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
     # 1. Look up in local DB
     movie = await repo.get_movie_by_slug(db, slug)
     if movie is None:
-        # 2. Derive a search title from the slug and query TMDB
+        # 2. Derive a search title and optional year from the slug and query TMDB
         query = _title_from_slug(slug)
-        search_result = await _tmdb.search_movie(query)
+        year = _year_from_slug(slug)
+        search_result = await _tmdb.search_movie(query, year=year)
         if search_result is None:
             raise HTTPException(status_code=404, detail="Movie not found")
 

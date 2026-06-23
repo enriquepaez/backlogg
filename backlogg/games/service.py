@@ -1,3 +1,5 @@
+import re
+
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,15 @@ from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 
 _igdb_client = IGDBClient()
+
+
+def _title_from_slug(slug: str) -> str:
+    """Convert an internal slug to a search title.
+
+    Strips a trailing 4-digit year (e.g. "doom-1993" -> "doom") and replaces
+    hyphens with spaces so the result can be used as a free-text search query.
+    """
+    return re.sub(r"-\d{4}$", "", slug).replace("-", " ")
 
 
 async def list_games(
@@ -46,6 +57,12 @@ async def get_game(db: AsyncSession, slug: str) -> GameOut:
     if game is None:
         # 2. Fetch from IGDB by slug
         raw = await _igdb_client.get_game_by_slug(slug)
+        if raw is None:
+            # 2b. Slug mismatch fallback: search by derived title
+            title = _title_from_slug(slug)
+            results = await _igdb_client.search_games(title, limit=5)
+            if results:
+                raw = max(results, key=lambda r: r.get("rating_count") or 0)
         if raw is None:
             raise HTTPException(status_code=404, detail="Game not found")
 

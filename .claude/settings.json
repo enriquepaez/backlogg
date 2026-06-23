@@ -34,7 +34,11 @@
       "Bash(gh pr create*)",
       "Edit(feature_list.json)",
       "Edit(progress/*)",
-      "Write(progress/*)"
+      "Write(progress/*)",
+      "Edit(backlogg/*)",
+      "Write(backlogg/*)",
+      "Edit(tests/*)",
+      "Write(tests/*)"
     ]
   }
 }

@@ -104,3 +104,27 @@ async def test_get_movie_not_found_anywhere(db):
             await service.get_movie(db, "this-slug-does-not-exist-9999")
 
     assert exc_info.value.status_code == 404
+
+
+async def test_get_movie_fallback_passes_year_from_slug(db):
+    """When slug contains a year suffix, search_movie is called with that year."""
+    search_result = {"id": 78}
+    detail = _make_tmdb_detail(tmdb_id=78)
+
+    with (
+        patch.object(
+            service._tmdb, "search_movie", new_callable=AsyncMock, return_value=search_result
+        ) as mock_search,
+        patch.object(
+            service._tmdb, "get_movie_detail", new_callable=AsyncMock, return_value=detail
+        ),
+        patch.object(
+            service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value={"cast": [], "crew": []},
+        ),
+    ):
+        await service.get_movie(db, "blade-runner-1982")
+
+    mock_search.assert_called_once_with("blade runner", year=1982)

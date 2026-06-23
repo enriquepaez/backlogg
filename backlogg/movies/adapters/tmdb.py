@@ -24,12 +24,15 @@ class TMDBClient:
             "Accept": "application/json",
         }
 
-    async def search_movie(self, query: str) -> dict | None:
+    async def search_movie(self, query: str, year: int | None = None) -> dict | None:
+        params: dict = {"query": query}
+        if year is not None:
+            params["primary_release_year"] = year
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{_TMDB_BASE}/search/movie",
                 headers=self._headers,
-                params={"query": query},
+                params=params,
             )
             response.raise_for_status()
             data = response.json()

@@ -15,6 +15,77 @@ _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 logger = logging.getLogger(__name__)
 
+_GENRE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "fiction",
+        "nonfiction",
+        "non-fiction",
+        "science fiction",
+        "fantasy",
+        "mystery",
+        "thriller",
+        "horror",
+        "romance",
+        "historical fiction",
+        "biography",
+        "autobiography",
+        "history",
+        "science",
+        "philosophy",
+        "poetry",
+        "drama",
+        "adventure",
+        "crime",
+        "children's",
+        "young adult",
+        "graphic novel",
+        "short stories",
+        "essays",
+        "self-help",
+        "business",
+        "technology",
+        "travel",
+        "cooking",
+        "art",
+        "music",
+        "sports",
+        "religion",
+        "classics",
+        "literary fiction",
+        "dystopian",
+        "paranormal",
+        "suspense",
+        "satire",
+        "memoir",
+        "comics",
+    }
+)
+
+
+_CLEAN_SUBJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9'\-]*(?:\s[A-Za-z][A-Za-z0-9'\-]*)?$")
+
+
+def _is_clean_genre(subject: str) -> bool:
+    """Return True if *subject* is suitable as a user-facing genre label.
+
+    A subject is accepted when it is either:
+    - present in ``_GENRE_ALLOWLIST`` (case-insensitive), or
+    - at most two ASCII words (no parentheses, no comma, ≤ 30 chars).
+
+    Multi-word bibliographic tags like "Lectures et morceaux choisis" or
+    long phrases with parentheses/commas are rejected.
+    """
+    lower = subject.lower().strip()
+    if lower in _GENRE_ALLOWLIST:
+        return True
+    return (
+        len(subject) <= 30
+        and "(" not in subject
+        and ")" not in subject
+        and "," not in subject
+        and bool(_CLEAN_SUBJECT_RE.match(subject))
+    )
+
 
 def _slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
@@ -159,15 +230,19 @@ class OpenLibraryClient:
             elif isinstance(desc, dict):
                 overview = desc.get("value") or None
 
-        # Subjects/genres from search doc
+        # Subjects/genres from search doc — filter to clean, user-facing labels
         subjects = search_doc.get("subject", [])
         genres = []
         seen: set[str] = set()
-        for subject in subjects[:10]:  # cap at 10 genres
+        for subject in subjects:
+            if not _is_clean_genre(subject):
+                continue
             genre_slug = _slugify(subject)
             if genre_slug and genre_slug not in seen:
                 genres.append({"name": subject, "slug": genre_slug})
                 seen.add(genre_slug)
+            if len(genres) >= 5:  # cap at 5 genres per book
+                break
 
         # Open Library has no aggregate rating — leave as None
         return {
