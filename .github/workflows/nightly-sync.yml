@@ -5,44 +5,49 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+# The API runs on a single free Render instance that sleeps when idle and
+# cannot handle concurrent syncs, so the service is woken first and the four
+# syncs run sequentially in one job.
 jobs:
-  sync-movies:
+  sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
+      - name: Wake service
+        run: |
+          curl -sf --retry 8 --retry-delay 15 --retry-all-errors --max-time 120 \
+            "${{ secrets.RENDER_API_URL }}/health"
+
       - name: Sync movies
+        if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie" \
+          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
-  sync-series:
-    runs-on: ubuntu-latest
-    steps:
       - name: Sync series
+        if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series" \
+          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
-  sync-books:
-    runs-on: ubuntu-latest
-    steps:
       - name: Sync books
+        if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 300 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" \
+          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
-  sync-games:
-    runs-on: ubuntu-latest
-    steps:
       - name: Sync games
+        if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 600 -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game" \
+          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
-  verify:
-    needs: [sync-movies, sync-series, sync-books, sync-games]
-    runs-on: ubuntu-latest
-    steps:
       - name: Verify stats
+        if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 30 "${{ secrets.RENDER_API_URL }}/admin/stats" \
+          curl -sf --max-time 60 "${{ secrets.RENDER_API_URL }}/admin/stats" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
