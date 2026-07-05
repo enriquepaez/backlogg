@@ -25,7 +25,17 @@ wake-up + timeouts). Run manual post-fix: success en 28m14s.
    - Resultado en `progress/impl_remove_scheduler.md`.
 3. **[reviewer]** Veredicto como texto (tarea fuera del backlog — sin archivo).
 4. **[leader]** Actualizar menciones a APScheduler en docs/CLAUDE.md.
-5. Ship con confirmación del usuario (commit + push + PR).
+5. **[hecho]** Ship: commit `9a32e26`, PR #40 abierto (pendiente de merge).
+   Reviewer: APPROVED. Pasos 2-4 completados.
+
+## Incidencia destapada (pendiente, tarea separada)
+
+`init.sh` falla en main por 2 tests que asumen datos ausentes en la DB
+compartida, ahora poblada por el sync nocturno funcional:
+`test_credit_unique_constraint` (slug tom-hardy) y
+`test_get_movie_fallback_passes_year_from_slug` (blade-runner-1982 ya en
+catálogo). Relacionado con issue 5 de progress/issues.md (aislamiento de DB
+de tests).
 
 ## Otras acciones de la sesión
 
