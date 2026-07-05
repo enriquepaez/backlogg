@@ -1,9 +1,11 @@
 """Tests for the OpenLibraryClient adapter.
 
 Covers:
-- User-Agent header is sent in get_trending_books requests
-- get_trending_books returns [] when the API responds with 403
-- get_trending_books correctly parses a response containing a non-empty "works" list
+- User-Agent header is sent in get_popular_books requests
+- get_popular_books queries /search.json with q=*:*, sort=readinglog and
+  native offset/limit, requesting the field set book_to_dict consumes
+- get_popular_books returns [] when the API responds with 403
+- get_popular_books correctly parses a response containing a non-empty "docs" list
 - get_author retries on TimeoutException and returns None after 3 failures
 - get_author succeeds on a retry after an initial timeout
 - get_author returns None on 404
@@ -34,8 +36,8 @@ def _mock_response(status_code: int, json_data: dict | None = None) -> MagicMock
     return response
 
 
-def _trending_payload(works: list[dict]) -> dict:
-    return {"works": works}
+def _search_payload(docs: list[dict]) -> dict:
+    return {"numFound": len(docs), "docs": docs}
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +46,11 @@ def _trending_payload(works: list[dict]) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_get_trending_books_sends_user_agent_header():
-    """get_trending_books must include the User-Agent header in its HTTP request."""
+async def test_get_popular_books_sends_user_agent_header():
+    """get_popular_books must include the User-Agent header in its HTTP request."""
 
     async def fake_get(url, params=None):  # noqa: ARG001
-        return _mock_response(200, _trending_payload([]))
+        return _mock_response(200, _search_payload([]))
 
     mock_client = AsyncMock()
     mock_client.get = fake_get
@@ -69,15 +71,51 @@ async def test_get_trending_books_sends_user_agent_header():
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", CapturingClient):
         client = OpenLibraryClient()
-        await client.get_trending_books(limit=1)
+        await client.get_popular_books(limit=1)
 
     assert "User-Agent" in original_headers
     assert original_headers["User-Agent"] == _OL_HEADERS["User-Agent"]
 
 
 @pytest.mark.asyncio
-async def test_get_trending_books_returns_empty_list_on_403():
-    """get_trending_books must return [] (and not raise) when the API returns 403."""
+async def test_get_popular_books_queries_search_json_with_readinglog_sort():
+    """get_popular_books must hit /search.json with q=*:*, sort=readinglog,
+    native offset/limit and the field set consumed by book_to_dict."""
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            captured["url"] = url
+            captured["params"] = params
+            return _mock_response(200, _search_payload([]))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
+        client = OpenLibraryClient()
+        await client.get_popular_books(limit=5, offset=120)
+
+    assert captured["url"].endswith("/search.json")
+    assert captured["params"]["q"] == "*:*"
+    assert captured["params"]["sort"] == "readinglog"
+    assert captured["params"]["offset"] == 120
+    assert captured["params"]["limit"] == 5
+    assert (
+        captured["params"]["fields"]
+        == "key,title,author_name,first_publish_year,cover_i,subject,isbn"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_returns_empty_list_on_403():
+    """get_popular_books must return [] (and not raise) when the API returns 403."""
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -94,17 +132,31 @@ async def test_get_trending_books_returns_empty_list_on_403():
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
         client = OpenLibraryClient()
-        result = await client.get_trending_books(limit=10)
+        result = await client.get_popular_books(limit=10)
 
     assert result == []
 
 
 @pytest.mark.asyncio
-async def test_get_trending_books_parses_works_list():
-    """get_trending_books must return the list of works from a successful response."""
-    fake_works = [
-        {"key": "/works/OL1W", "title": "Book One"},
-        {"key": "/works/OL2W", "title": "Book Two"},
+async def test_get_popular_books_parses_docs_list():
+    """get_popular_books must return the list of search docs from a successful response."""
+    fake_docs = [
+        {
+            "key": "/works/OL1W",
+            "title": "Book One",
+            "author_name": ["Author One"],
+            "first_publish_year": 1999,
+            "cover_i": 111,
+            "subject": ["Fiction"],
+        },
+        {
+            "key": "/works/OL2W",
+            "title": "Book Two",
+            "author_name": ["Author Two"],
+            "first_publish_year": 2005,
+            "cover_i": 222,
+            "subject": ["Fantasy"],
+        },
     ]
 
     class FakeClient:
@@ -119,15 +171,20 @@ async def test_get_trending_books_parses_works_list():
 
         async def get(self, url, params=None):
             # Return fewer items than per_page so the loop terminates after one page
-            return _mock_response(200, _trending_payload(fake_works))
+            return _mock_response(200, _search_payload(fake_docs))
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
         client = OpenLibraryClient()
-        result = await client.get_trending_books(limit=10)
+        result = await client.get_popular_books(limit=10)
 
     assert len(result) == 2
     assert result[0]["key"] == "/works/OL1W"
     assert result[1]["title"] == "Book Two"
+    # Each doc carries the fields book_to_dict consumes
+    for doc in result:
+        assert {"key", "title", "author_name", "first_publish_year", "cover_i", "subject"} <= set(
+            doc
+        )
 
 
 # ---------------------------------------------------------------------------

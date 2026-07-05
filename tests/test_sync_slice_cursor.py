@@ -104,20 +104,24 @@ async def test_tmdb_series_offset_translates_to_pages():
 
 
 async def test_open_library_passes_native_offset():
-    """Open Library trending receives the offset as a native query param."""
+    """Open Library popular search receives the offset as a native query param."""
     client = OpenLibraryClient()
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"works": [{"key": f"/works/OL{i}W"} for i in range(5)]}
+    response.json.return_value = {"docs": [{"key": f"/works/OL{i}W"} for i in range(5)]}
     with patch(
         "httpx.AsyncClient.get",
         new_callable=AsyncMock,
         return_value=response,
     ) as mock_get:
-        results = await client.get_trending_books(limit=5, offset=120)
+        results = await client.get_popular_books(limit=5, offset=120)
 
     mock_get.assert_awaited_once()
-    assert mock_get.call_args.kwargs["params"] == {"limit": 5, "offset": 120}
+    params = mock_get.call_args.kwargs["params"]
+    assert params["limit"] == 5
+    assert params["offset"] == 120
+    assert params["q"] == "*:*"
+    assert params["sort"] == "readinglog"
     assert len(results) == 5
 
 
@@ -297,7 +301,7 @@ async def test_sync_books_slice_uses_cursor(monkeypatch):
     with (
         patch.object(
             sync_jobs._ol_client,
-            "get_trending_books",
+            "get_popular_books",
             new_callable=AsyncMock,
             return_value=[{"key": "", "title": ""}] * 2,  # skipped: no title
         ) as mock_fetch,

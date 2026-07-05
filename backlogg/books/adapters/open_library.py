@@ -111,46 +111,54 @@ class OpenLibraryClient:
             docs = data.get("docs", [])
             return docs[0] if docs else None
 
-    async def get_trending_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """Fetch trending books from Open Library for nightly sync.
+    async def get_popular_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Fetch popular books from Open Library for nightly sync.
 
-        Uses the /trending/weekly.json endpoint which returns top works
-        for the current week, starting at the given native ``offset``.
-        Falls back to an empty list on error.
+        Uses ``GET /search.json`` with a Solr match-all query (``q=*:*``)
+        sorted by ``readinglog`` — how many users shelved the work as
+        want-to-read/reading/read — which surfaces genuinely popular works
+        and supports deep native offset/limit pagination (43M+ works
+        indexed), unlike the old ``/trending/weekly.json`` listing that was
+        capped at a few hundred entries.
+
+        Returns search docs with the same field set as ``search_book``
+        (``key,title,author_name,first_publish_year,cover_i,subject,isbn``),
+        which is the shape ``book_to_dict`` consumes.  Falls back to the
+        results accumulated so far (possibly ``[]``) on error.
         """
         results: list[dict] = []
-        per_page = min(limit, 50)  # OL trending endpoint max is typically 50
+        per_page = min(limit, 100)  # OL search.json default page size
 
         while len(results) < limit:
             async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
                 response = await client.get(
-                    f"{_OL_BASE}/trending/weekly.json",
-                    params={"limit": per_page, "offset": offset},
+                    f"{_OL_BASE}/search.json",
+                    params={
+                        "q": "*:*",
+                        "sort": "readinglog",
+                        "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
+                        "limit": per_page,
+                        "offset": offset,
+                    },
                 )
                 if response.status_code != 200:
                     logger.error(
-                        "get_trending_books: non-200 status %d at offset %d",
+                        "get_popular_books: non-200 status %d at offset %d",
                         response.status_code,
                         offset,
                     )
                     break
                 data = response.json()
 
-            works = data.get("works", [])
-            if not works:
-                logger.error(
-                    "get_trending_books: OL returned 200 but empty works at offset %d"
-                    " — response keys: %s",
-                    offset,
-                    list(data.keys()),
-                )
+            docs = data.get("docs", [])
+            if not docs:
+                logger.info("get_popular_books: no more results at offset %d", offset)
                 break
-            results.extend(works)
-            if len(works) < per_page:
+            results.extend(docs)
+            if len(docs) < per_page:
                 break
             offset += per_page
 
-        logger.error("get_trending_books: returning %d works total", len(results))
         return results[:limit]
 
     async def get_work_detail(self, work_id: str) -> dict | None:
