@@ -387,6 +387,39 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 23,
+      "name": "seed_config_wiring",
+      "title": "Sync config — usar SEED_TOP_N_* en los jobs nocturnos",
+      "description": "Los jobs de scheduler/jobs.py hardcodean limit=100 e ignoran los settings SEED_TOP_N_* documentados en docs/external-apis.md. Conectar cada sync job a su setting correspondiente para que el tamaño del seed sea configurable por entorno.",
+      "depends_on": [8],
+      "acceptance": [
+        "sync_movies usa settings.SEED_TOP_N_MOVIES como limit (y equivalente para series, books, games)",
+        "Ningún limit hardcodeado a 100 queda en backlogg/scheduler/jobs.py",
+        "Tests verifican que el limit pasado al adapter proviene de settings (monkeypatch de settings)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 24,
+      "name": "sync_slice_cursor",
+      "title": "Slice sync — cursor persistido y sync incremental por tramos",
+      "description": "Cada run nocturno sincroniza un tramo de SYNC_SLICE_SIZE items (default 200) del listado popular de cada tipo, empezando en un offset persistido en la nueva tabla sync_cursors. Al alcanzar SEED_TOP_N_* o agotar resultados de la API, el cursor vuelve a 0. Permite crecer el catálogo hasta ~10k items por tipo (tope de TMDB popular) manteniendo constante la duración del nightly y dentro del free tier de Neon.",
+      "depends_on": [23],
+      "acceptance": [
+        "Modelo SQLAlchemy SyncCursor y migración Alembic crean la tabla sync_cursors (item_type PK, offset, updated_at)",
+        "Los adapters aceptan offset: TMDB traduce offset a páginas (20/página), Open Library e IGDB usan offset nativo",
+        "Cada sync job lee su cursor, procesa SYNC_SLICE_SIZE items desde ese offset y avanza el cursor al terminar",
+        "Wraparound: el cursor vuelve a 0 al alcanzar SEED_TOP_N_* del tipo o cuando la API devuelve menos items de los pedidos",
+        "La respuesta de POST /admin/sync/{type} incluye el offset del tramo procesado",
+        "Re-ejecutar el mismo tramo es idempotente (upserts, sin duplicados)",
+        "docs/schema.md documenta sync_cursors y docs/external-apis.md documenta SYNC_SLICE_SIZE",
+        "Tests de repositorio del cursor y de los jobs con adapters mockeados (incluyendo wraparound)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
