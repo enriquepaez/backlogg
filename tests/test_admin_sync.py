@@ -203,7 +203,7 @@ async def test_sync_books_job_catches_external_error():
     with (
         patch.object(
             sync_jobs._ol_client,
-            "get_trending_books",
+            "get_popular_books",
             new_callable=AsyncMock,
             side_effect=RuntimeError("ol down"),
         ),
@@ -309,7 +309,7 @@ async def test_sync_movies_is_idempotent(db):
 
 async def test_sync_books_calls_get_work_detail_for_authors():
     """sync_books must call get_work_detail to fetch authors for each book with a work_id."""
-    trending_raw = [
+    popular_raw = [
         {
             "key": "/works/OL123W",
             "title": "Test Book",
@@ -329,9 +329,9 @@ async def test_sync_books_calls_get_work_detail_for_authors():
         set_cursor,
         patch.object(
             sync_jobs._ol_client,
-            "get_trending_books",
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=trending_raw,
+            return_value=popular_raw,
         ),
         patch.object(
             sync_jobs._ol_client,

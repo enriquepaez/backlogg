@@ -250,7 +250,7 @@ async def sync_series() -> dict:
 
 
 async def sync_books() -> dict:
-    """Fetch a slice of trending books from Open Library and upsert them locally.
+    """Fetch a slice of popular books from Open Library and upsert them locally.
 
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
@@ -272,7 +272,7 @@ async def sync_books() -> dict:
         }
 
     try:
-        raw_list = await _ol_client.get_trending_books(limit=slice_size, offset=offset)
+        raw_list = await _ol_client.get_popular_books(limit=slice_size, offset=offset)
     except Exception:
         logger.exception("sync_books: failed to fetch from Open Library")
         return {

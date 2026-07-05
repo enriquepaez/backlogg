@@ -420,6 +420,42 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 25,
+      "name": "books_popular_source",
+      "title": "Books popular source — reemplazar /trending/weekly.json por search.json paginable",
+      "description": "sync_books usa GET /trending/weekly.json (Open Library), una lista acotada de 'tendencias de la semana' que nunca supera unos pocos cientos de entradas — por eso SEED_TOP_N_BOOKS no puede crecer de verdad (confirmado: el conteo de books se quedó igual tras un sync exitoso). Sustituir por GET /search.json?q=*:*&sort=readinglog, confirmado empíricamente en vivo: 43M+ works indexados, offset probado hasta 9900 sin error (HTTP 200), resultados ordenados por popularidad real de uso (readinglog_count: cuántos usuarios lo tienen en want-to-read/reading/read) — no por rating crudo (sort=rating surfacea libros oscuros con pocas valoraciones; sort=edition_count no existe y devuelve 500). Reusar el mismo field set que ya usa search_book: key,title,author_name,first_publish_year,cover_i,subject,isbn.",
+      "depends_on": [4],
+      "acceptance": [
+        "El adapter Open Library expone un método (renombrado si aplica desde get_trending_books) que usa GET /search.json con query amplia (q=*:*) y sort=readinglog, soportando offset/limit reales",
+        "sync_books en scheduler/jobs.py usa el nuevo método en lugar de /trending/weekly.json",
+        "Los resultados incluyen key, title, first_publish_year, cover_i/cover_id, subject, author_name (mismos campos que hoy consume book_to_dict)",
+        "El offset avanza correctamente entre tramos y permite superar los cientos de items que soportaba /trending/weekly.json",
+        "Tests existentes de get_trending_books (tests/books/test_open_library_adapter.py: User-Agent header, 403 → [], parseo de works) se actualizan/renombran conservando la cobertura",
+        "docs/external-apis.md actualizado con el nuevo endpoint/estrategia para books",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 26,
+      "name": "direct_backfill_sync",
+      "title": "Direct backfill sync — script que escribe directo a Neon sin pasar por el timeout HTTP de Render",
+      "description": "El nightly vía POST /admin/sync/{type} está acotado por un timeout de infraestructura de ~15 minutos por request (confirmado: con SYNC_SLICE_SIZE=200 movies y series fallaron con curl exit 22 tras ~48-49 min incluyendo reintentos; con slice=100 vuelve a ser seguro). A ese ritmo (100/noche), alcanzar SEED_TOP_N_*=10000 tarda ~3 meses. Crear un script que invoque la misma lógica de sync_movies/sync_series/sync_books/sync_games (feature 24) directamente contra la DB de producción (Neon) y las APIs externas, sin pasar por Render/HTTP, ejecutado vía un nuevo workflow de GitHub Actions con workflow_dispatch. Cada tipo procesa tramos grandes en bucle hasta agotar el objetivo (offset vuelve a 0) o un presupuesto de tiempo de seguridad (bajo el límite de 6h de GitHub Actions), dejando el progreso en sync_cursors (compartido con el nightly) para poder repetir la ejecución manualmente hasta completar cada tipo.",
+      "depends_on": [24, 25],
+      "acceptance": [
+        "Nuevo script (p.ej. scripts/backfill_sync.py) invocable con uv run, que acepta el tipo de contenido (movie/series/book/game) y usa las funciones existentes sync_movies/sync_series/sync_books/sync_games de backlogg/scheduler/jobs.py sin duplicar lógica de upsert",
+        "El script permite un tamaño de tramo mayor que el SYNC_SLICE_SIZE de producción sin modificar ese setting (p.ej. parámetro opcional slice_size en las funciones sync_*, o env var propia del proceso del script)",
+        "El script se detiene de forma segura tras un presupuesto de tiempo configurable (por defecto bajo el límite de 6h de GitHub Actions) y registra progreso (items sincronizados, offset actual) de forma legible en el log",
+        "backlogg/games/adapters/igdb.py pagina correctamente más allá de 500 items por invocación (hoy per_request=min(limit,500) sin loop) para que un tramo grande de games no provoque wraparound prematuro",
+        "Nuevo workflow .github/workflows/backfill-sync.yml con workflow_dispatch (input: content type) que ejecuta el script contra Neon de producción usando nuevos secrets: DATABASE_URL, TMDB_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET — el usuario los añade manualmente (gh secret set), no se crean automáticamente ni se piden por chat",
+        "IGDB respeta su límite de 4 req/s durante el backfill (throttling entre requests de paginación)",
+        "Tests: script probado con adapters mockeados (bucle, presupuesto de tiempo, wraparound); sin tests de integración contra APIs reales",
+        "docs/architecture.md o docs/verification.md documentan cómo ejecutar un backfill manualmente",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

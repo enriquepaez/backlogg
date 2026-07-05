@@ -113,7 +113,7 @@ async def test_sync_books_limit_comes_from_settings(monkeypatch):
     with (
         patch.object(
             sync_jobs._ol_client,
-            "get_trending_books",
+            "get_popular_books",
             new_callable=AsyncMock,
             return_value=[],
         ) as mock_fetch,

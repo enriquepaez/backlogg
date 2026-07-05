@@ -24,9 +24,20 @@
 - **Base URL**: `https://openlibrary.org`
 - **Rate limits**: none enforced — suitable for batch sync
 - **Key endpoints used**:
-  - `GET /search.json?q=&limit=` — seed and on-demand fallback
+  - `GET /search.json?q=*:*&sort=readinglog&offset=&limit=` — seed/nightly sync popular books
+  - `GET /search.json?title=&limit=` — on-demand fallback search
   - `GET /works/{olid}.json` — work detail (modeled at work level, not edition)
 
+- **Popular-books strategy**: the sync uses `search.json` with a Solr match-all query
+  (`q=*:*`, 43M+ works indexed) sorted by `readinglog` — the count of users who shelved
+  the work as want-to-read/reading/read — with native `offset`/`limit` pagination
+  (verified up to offset 9900). Do **not** use:
+  - `/trending/weekly.json` — capped at a few hundred entries, catalog cannot grow
+  - `sort=rating` — surfaces obscure books with very few ratings
+  - `sort=edition_count` — does not exist (returns HTTP 500)
+
+  Request the field set `key,title,author_name,first_publish_year,cover_i,subject,isbn`
+  (the shape `book_to_dict` consumes).
 - **Slug strategy**: Open Library uses `/works/OL123W` format. Strip prefix, use `OL123W`
   as slug or derive from title.
 - **Coverage note**: strong on classics and public domain; modern titles may have
