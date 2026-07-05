@@ -319,6 +319,24 @@ CREATE TRIGGER set_updated_at_movies BEFORE UPDATE ON movies
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 ```
 
+## Sync cursors
+
+Persisted per-type offset for slice-based nightly sync. Each sync run
+processes up to `SYNC_SLICE_SIZE` items starting at `next_offset` and then
+advances the cursor, wrapping back to 0 when `SEED_TOP_N_*` is reached or
+the external API returns fewer items than requested.
+
+```sql
+CREATE TABLE sync_cursors (
+    item_type   TEXT PRIMARY KEY,           -- MOVIE | SERIES | BOOK | GAME
+    next_offset INTEGER NOT NULL DEFAULT 0, -- where the next run starts fetching
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+`updated_at` is refreshed by the application on every cursor upsert
+(no trigger — the row is only written by the sync jobs).
+
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits` use polymorphic references

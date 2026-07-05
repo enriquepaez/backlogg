@@ -7,14 +7,16 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backlogg.core.database import Base
 
-__all__ = ["Base", "Person", "Credit"]
+__all__ = ["Base", "Person", "Credit", "SyncCursor"]
 
 
 class Person(Base):
@@ -60,4 +62,21 @@ class Credit(Base):
         Index("idx_credits_person", "person_id"),
         Index("idx_credits_item", "item_type", "item_id"),
         Index("idx_credits_role", "role"),
+    )
+
+
+class SyncCursor(Base):
+    """Persisted per-type offset for slice-based nightly sync.
+
+    ``item_type`` matches the polymorphic values used across the app
+    (MOVIE, SERIES, BOOK, GAME).  ``next_offset`` is where the next sync
+    run should start fetching from the external API's popular listing.
+    """
+
+    __tablename__ = "sync_cursors"
+
+    item_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    next_offset: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

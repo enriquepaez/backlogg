@@ -87,15 +87,23 @@ class TMDBSeriesClient:
             data = response.json()
         return data.get("results", [])
 
-    async def get_top_series(self, limit: int = 100) -> list[dict]:
+    async def get_top_series(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular TV series from TMDB for nightly sync.
 
         Uses the /tv/popular endpoint and paginates to collect up to
-        ``limit`` results (max 500, TMDB returns 20 per page).
+        ``limit`` results starting at ``offset`` (TMDB returns 20 per page,
+        so the offset is translated to a page number and the leading
+        ``offset % 20`` items of the first page are discarded).
+
+        TMDB caps pagination at page 500 — requests beyond it return an
+        empty list.
         """
         results: list[dict] = []
-        page = 1
+        page = offset // 20 + 1
+        skip = offset % 20
         while len(results) < limit:
+            if page > 500:
+                break
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{_TMDB_BASE}/tv/popular",
@@ -108,6 +116,9 @@ class TMDBSeriesClient:
             batch = data.get("results", [])
             if not batch:
                 break
+            if skip:
+                batch = batch[skip:]
+                skip = 0
             results.extend(batch)
             total_pages = data.get("total_pages", 1)
             if page >= total_pages:

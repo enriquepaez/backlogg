@@ -110,8 +110,11 @@ class IGDBClient:
         )
         return await self._post("games", igdb_query)
 
-    async def get_top_games(self, limit: int = 100) -> list[dict]:
-        """Fetch top-rated main games from IGDB for seeding."""
+    async def get_top_games(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Fetch top-rated main games from IGDB for seeding.
+
+        ``offset`` maps to IGDB's native ``offset N;`` query clause.
+        """
         # IGDB limits to 500 per request; fetch in batches if needed
         per_request = min(limit, 500)
         query = (
@@ -122,6 +125,7 @@ class IGDBClient:
             " where game_type = (0) & rating > 0;"
             " sort rating_count desc;"
             f" limit {per_request};"
+            f" offset {offset};"
         )
         return await self._post("games", query)
 

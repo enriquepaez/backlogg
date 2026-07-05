@@ -9,6 +9,7 @@ class SyncResponse(BaseModel):
     type: str
     synced: int
     errors: int
+    offset: int
     duration_s: float
 
 

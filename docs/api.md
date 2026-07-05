@@ -117,18 +117,25 @@ POST /admin/sync/{type}   type ∈ {movie, series, book, game}
 El endpoint **bloquea hasta que el sync termina** y devuelve el resultado real.
 Usar `--max-time 600` en curl para evitar timeout de cliente.
 
+Cada ejecución procesa un **tramo** de hasta `SYNC_SLICE_SIZE` items del
+listado popular, empezando en el offset persistido en `sync_cursors` para el
+tipo. El cursor avanza al terminar y vuelve a 0 al alcanzar `SEED_TOP_N_*`
+o cuando la API externa devuelve menos items de los pedidos.
+
 Response:
 ```json
 {
   "type": "movie",
   "synced": 94,
   "errors": 6,
+  "offset": 200,
   "duration_s": 87
 }
 ```
 
 - `synced` — número de items insertados/actualizados correctamente.
 - `errors` — número de items que fallaron (logged en servidor).
+- `offset` — offset (0-based) del tramo procesado en esta ejecución.
 - `duration_s` — segundos que tardó el sync.
 
 Not authenticated in MVP — for internal/testing use only.

@@ -19,7 +19,7 @@ from backlogg.main import app
 _VALID_KEY = "super-secret-admin-key"
 _WRONG_KEY = "wrong-key"
 
-_SYNC_RESULT = {"synced": 1, "errors": 0, "duration_s": 0.1}
+_SYNC_RESULT = {"synced": 1, "errors": 0, "offset": 0, "duration_s": 0.1}
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
