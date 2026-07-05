@@ -8,7 +8,7 @@ Estado base: 179 tests ✅, init.sh verde ✅, 4 tipos de contenido en DB.
 ## Issue 1 — Credits vacíos en todo el contenido del seed
 
 **Severidad:** Alta  
-**Estado:** Pendiente
+**Estado:** ✅ Resuelto (2026-07-04) — desbloqueado por Issue 6 (PR #37); el re-sync completo se ejecuta ahora cada noche vía workflow (PR #39) y puebla people/credits
 
 ### Síntoma
 Todos los items sincronizados en el seed inicial tienen `credits: []`.  
@@ -42,7 +42,7 @@ Tras el sync, `GET /movies/{slug}` de cualquier película seedeada debería devo
 ## Issue 2 — On-demand fallback de movies ignora el año del slug
 
 **Severidad:** Media  
-**Estado:** Pendiente
+**Estado:** ✅ Resuelto (PR #38)
 
 ### Síntoma
 `GET /movies/blade-runner-1982` devuelve **Blade Runner 2049 (2017)** en lugar de Blade Runner (1982).
@@ -70,7 +70,7 @@ TMDB acepta `primary_release_year` como parámetro en `/search/movie`.
 ## Issue 3 — On-demand fallback de games no funciona
 
 **Severidad:** Media  
-**Estado:** Pendiente
+**Estado:** ✅ Resuelto (PR #38)
 
 ### Síntoma
 `GET /games/doom-1993`, `GET /games/minecraft` devuelven 404.  
@@ -111,7 +111,7 @@ if raw is None:
 ## Issue 4 — Géneros de libros son tags crudos de Open Library
 
 **Severidad:** Baja  
-**Estado:** Pendiente
+**Estado:** ✅ Resuelto (PR #38)
 
 ### Síntoma
 Los géneros de libros incluyen strings como:
@@ -141,8 +141,8 @@ Opción recomendada: filtrar por allowlist + truncar subjects largos.
 
 ## Issue 5 — Test fixtures en la base de datos de producción
 
-**Severidad:** Baja  
-**Estado:** Pendiente
+**Severidad:** Baja (elevada a Media el 2026-07-04: el sync nocturno funcional puebla la DB compartida y rompe 2 tests → init.sh en rojo)  
+**Estado:** ✅ Resuelto (2026-07-05, rama fix/test-db-isolation) — DB backlogg_test en Neon, TEST_DATABASE_URL en .env y CI, conftest.py aislado con guardia de seguridad + TRUNCATE de sesión, 6 filas falsas borradas de prod (2 movies, 2 series, 1 book, 1 game). Reviewer: APPROVED
 
 ### Síntoma
 Aparecen items en la DB local con datos de tests:
@@ -186,7 +186,7 @@ El sync nocturno via GitHub Actions está configurado (`0 2 * * *`).
 ## Issue 6 — Personas duplicadas causan 500 en on-demand fallback
 
 **Severidad:** Alta (causa 500)  
-**Estado:** Pendiente  
+**Estado:** ✅ Resuelto (PR #37)  
 **Descubierto:** al verificar Issue 1 en vivo
 
 ### Síntoma
@@ -228,9 +228,9 @@ Alternativamente (fix más simple): en `upsert_external_id`, añadir un segundo 
 
 ## Orden de ataque sugerido
 
-1. ~~**Issue 1** (re-sync para poblar credits)~~ — código listo (fix/sync-missing-credits), pero bloqueado por Issue 6
-2. **Issue 6** (personas duplicadas → 500) — **bloqueante**, atacar primero
-3. **Issue 3** (games on-demand) — feature rota
-4. **Issue 2** (movie slug+año) — mejora de precisión del fallback
-5. **Issue 4** (géneros de libros) — calidad de datos
-6. **Issue 5** (test fixtures en DB) — limpieza puntual
+1. ~~**Issue 1** (re-sync para poblar credits)~~ ✅ PR #37 + #39
+2. ~~**Issue 6** (personas duplicadas → 500)~~ ✅ PR #37
+3. ~~**Issue 3** (games on-demand)~~ ✅ PR #38
+4. ~~**Issue 2** (movie slug+año)~~ ✅ PR #38
+5. ~~**Issue 4** (géneros de libros)~~ ✅ PR #38
+6. ~~**Issue 5** (test fixtures en DB)~~ ✅ fix/test-db-isolation
