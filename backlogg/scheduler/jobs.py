@@ -18,6 +18,7 @@ from sqlalchemy import text
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.books.service import _persist_book_authors
+from backlogg.core.config import settings
 from backlogg.core.database import async_session_factory
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
@@ -54,7 +55,7 @@ async def sync_movies() -> dict:
     errors = 0
 
     try:
-        raw_list = await _tmdb_movies.get_top_movies(limit=100)
+        raw_list = await _tmdb_movies.get_top_movies(limit=settings.SEED_TOP_N_MOVIES)
     except Exception:
         logger.exception("sync_movies: failed to fetch from TMDB")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
@@ -106,7 +107,7 @@ async def sync_series() -> dict:
     errors = 0
 
     try:
-        raw_list = await _tmdb_series.get_top_series(limit=100)
+        raw_list = await _tmdb_series.get_top_series(limit=settings.SEED_TOP_N_SERIES)
     except Exception:
         logger.exception("sync_series: failed to fetch from TMDB")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
@@ -161,7 +162,7 @@ async def sync_books() -> dict:
     errors = 0
 
     try:
-        raw_list = await _ol_client.get_trending_books(limit=100)
+        raw_list = await _ol_client.get_trending_books(limit=settings.SEED_TOP_N_BOOKS)
     except Exception:
         logger.exception("sync_books: failed to fetch from Open Library")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
@@ -224,7 +225,7 @@ async def sync_games() -> dict:
     errors = 0
 
     try:
-        raw_list = await _igdb_client.get_top_games(limit=100)
+        raw_list = await _igdb_client.get_top_games(limit=settings.SEED_TOP_N_GAMES)
     except Exception:
         logger.exception("sync_games: failed to fetch from IGDB")
         return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
