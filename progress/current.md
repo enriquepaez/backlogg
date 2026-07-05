@@ -1,17 +1,27 @@
 # Sesión actual
 
 Fecha: 2026-07-05
-Rama: feat/seed-config-wiring
+Rama: feat/sync-slice-cursor
 
-## Iniciativa: opción D — catálogo hasta ~10k populares por tipo
+## Iniciativa "opción D" — completa
 
-- **Feature 23 `seed_config_wiring`**: ✅ done (implementer + reviewer APPROVED,
-  222 tests en verde). Pendiente: QA manual del usuario y ship (commit + PR).
-- **Feature 24 `sync_slice_cursor`**: pending. Se arranca en rama nueva tras
-  mergear la 23.
+- Feature 23 `seed_config_wiring`: ✅ done, mergeada (PR #42).
+- Feature 24 `sync_slice_cursor`: ✅ done. Pendiente: QA manual + ship.
 
-## Nota de ops para el despliegue final (feature 24)
+Con esto el plan aprobado por el usuario para crecer el catálogo hasta ~10k
+items populares por tipo queda implementado en código. Con los defaults
+actuales (SEED_TOP_N=100, SYNC_SLICE_SIZE=200) el comportamiento nocturno no
+cambia.
 
-Al cerrar la 24, configurar en Render: `SEED_TOP_N_*=10000` (movies/series;
-valorar books/games) y `SYNC_SLICE_SIZE=200`. Con los defaults actuales no hay
-cambio de comportamiento.
+## Pendiente tras el merge (ops, no código)
+
+En Render, para activar el crecimiento real:
+- `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES` → subir hacia 10000 (tope real de
+  TMDB popular/discover).
+- `SEED_TOP_N_BOOKS` / `SEED_TOP_N_GAMES` → valorar objetivo (Open Library e
+  IGDB no tienen el mismo tope de 10k; decidir según necesidad real).
+- `SYNC_SLICE_SIZE` → 200 (o menos si se quiere ser más conservador con la
+  duración del job). Ojo: IGDB hace 1 sola request y su adapter no batchea
+  más allá de 500 — si se sube SYNC_SLICE_SIZE > 500, revisar
+  `backlogg/games/adapters/igdb.py` primero (provocaría wrap prematuro en
+  games). Anotado también en el review de la feature 24.

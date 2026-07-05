@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     SEED_TOP_N_BOOKS: int = 100
     SEED_TOP_N_GAMES: int = 100
 
+    SYNC_SLICE_SIZE: int = 200
+
     SYNC_CRON: str = "0 3 * * *"
 
     ADMIN_API_KEY: str = ""

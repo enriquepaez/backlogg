@@ -111,14 +111,14 @@ class OpenLibraryClient:
             docs = data.get("docs", [])
             return docs[0] if docs else None
 
-    async def get_trending_books(self, limit: int = 100) -> list[dict]:
+    async def get_trending_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch trending books from Open Library for nightly sync.
 
         Uses the /trending/weekly.json endpoint which returns top works
-        for the current week.  Falls back to an empty list on error.
+        for the current week, starting at the given native ``offset``.
+        Falls back to an empty list on error.
         """
         results: list[dict] = []
-        offset = 0
         per_page = min(limit, 50)  # OL trending endpoint max is typically 50
 
         while len(results) < limit:

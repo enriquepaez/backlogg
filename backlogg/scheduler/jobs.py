@@ -3,11 +3,19 @@
 Each job is an independent async coroutine.  Errors are logged but never
 propagated so that a failure in one job does not abort the others.
 
+Every run processes a slice of the external API's popular listing: it reads
+the persisted cursor for its type from ``sync_cursors`` (0 if absent),
+fetches up to ``settings.SYNC_SLICE_SIZE`` items starting at that offset
+(never beyond ``settings.SEED_TOP_N_<TYPE>``) and advances the cursor at the
+end.  The cursor wraps around to 0 when the target is reached or when the
+API returns fewer items than requested.
+
 After a successful upsert batch every job refreshes the catalog_search
 materialized view so search results stay current.
 
-Each job returns a dict with ``synced``, ``errors`` and ``duration_s`` so the
-admin endpoint can expose the result synchronously.
+Each job returns a dict with ``synced``, ``errors``, ``offset`` (the offset
+of the processed slice) and ``duration_s`` so the admin endpoint can expose
+the result synchronously.
 """
 
 import logging
@@ -25,6 +33,7 @@ from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.service import _persist_movie_people
+from backlogg.scheduler.repository import get_sync_offset, set_sync_offset
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
 from backlogg.series.service import _persist_series_creators, _persist_series_people
@@ -44,21 +53,68 @@ async def _refresh_catalog_search(session) -> None:
     await session.commit()
 
 
-async def sync_movies() -> dict:
-    """Fetch top popular movies from TMDB and upsert them into the local DB.
+async def _read_slice(item_type: str, target: int) -> tuple[int, int]:
+    """Return (offset, slice_size) for the next sync slice of ``item_type``.
 
-    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    Reads the persisted cursor (0 if absent).  A stale cursor at or beyond
+    ``target`` (e.g. after lowering SEED_TOP_N) is normalised back to 0.
+    """
+    async with async_session_factory() as session:
+        offset = await get_sync_offset(session, item_type)
+    if offset >= target:
+        offset = 0
+    return offset, min(settings.SYNC_SLICE_SIZE, target - offset)
+
+
+def _next_offset(offset: int, fetched: int, slice_size: int, target: int) -> int:
+    """Advance the cursor, wrapping to 0 at ``target`` or on a short fetch."""
+    advanced = offset + fetched
+    if fetched < slice_size or advanced >= target:
+        return 0
+    return advanced
+
+
+async def _persist_cursor(session, item_type: str, next_offset: int, job_name: str) -> None:
+    """Persist the cursor in the job's session; failures are logged, not raised."""
+    try:
+        await set_sync_offset(session, item_type, next_offset)
+        await session.commit()
+    except Exception:
+        logger.exception("%s: failed to persist sync cursor", job_name)
+
+
+async def sync_movies() -> dict:
+    """Fetch a slice of top popular movies from TMDB and upsert them locally.
+
+    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_movies: starting")
     start = time.monotonic()
     synced = 0
     errors = 0
+    target = settings.SEED_TOP_N_MOVIES
 
     try:
-        raw_list = await _tmdb_movies.get_top_movies(limit=settings.SEED_TOP_N_MOVIES)
+        offset, slice_size = await _read_slice("MOVIE", target)
+    except Exception:
+        logger.exception("sync_movies: failed to read sync cursor")
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": 0,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
+
+    try:
+        raw_list = await _tmdb_movies.get_top_movies(limit=slice_size, offset=offset)
     except Exception:
         logger.exception("sync_movies: failed to fetch from TMDB")
-        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": offset,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
 
     async with async_session_factory() as session:
         for raw in raw_list:
@@ -87,30 +143,58 @@ async def sync_movies() -> dict:
                 logger.exception("sync_movies: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
 
+        await _persist_cursor(
+            session, "MOVIE", _next_offset(offset, len(raw_list), slice_size, target), "sync_movies"
+        )
+
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_movies: failed to refresh catalog_search")
 
-    logger.info("sync_movies: done — %d items upserted, %d errors", synced, errors)
-    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
+    logger.info(
+        "sync_movies: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+    )
+    return {
+        "synced": synced,
+        "errors": errors,
+        "offset": offset,
+        "duration_s": round(time.monotonic() - start, 1),
+    }
 
 
 async def sync_series() -> dict:
-    """Fetch popular TV series from TMDB and upsert them into the local DB.
+    """Fetch a slice of popular TV series from TMDB and upsert them locally.
 
-    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_series: starting")
     start = time.monotonic()
     synced = 0
     errors = 0
+    target = settings.SEED_TOP_N_SERIES
 
     try:
-        raw_list = await _tmdb_series.get_top_series(limit=settings.SEED_TOP_N_SERIES)
+        offset, slice_size = await _read_slice("SERIES", target)
+    except Exception:
+        logger.exception("sync_series: failed to read sync cursor")
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": 0,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
+
+    try:
+        raw_list = await _tmdb_series.get_top_series(limit=slice_size, offset=offset)
     except Exception:
         logger.exception("sync_series: failed to fetch from TMDB")
-        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": offset,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
 
     async with async_session_factory() as session:
         for raw in raw_list:
@@ -142,30 +226,61 @@ async def sync_series() -> dict:
                 logger.exception("sync_series: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
 
+        await _persist_cursor(
+            session,
+            "SERIES",
+            _next_offset(offset, len(raw_list), slice_size, target),
+            "sync_series",
+        )
+
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_series: failed to refresh catalog_search")
 
-    logger.info("sync_series: done — %d items upserted, %d errors", synced, errors)
-    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
+    logger.info(
+        "sync_series: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+    )
+    return {
+        "synced": synced,
+        "errors": errors,
+        "offset": offset,
+        "duration_s": round(time.monotonic() - start, 1),
+    }
 
 
 async def sync_books() -> dict:
-    """Fetch trending books from Open Library and upsert them into the local DB.
+    """Fetch a slice of trending books from Open Library and upsert them locally.
 
-    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_books: starting")
     start = time.monotonic()
     synced = 0
     errors = 0
+    target = settings.SEED_TOP_N_BOOKS
 
     try:
-        raw_list = await _ol_client.get_trending_books(limit=settings.SEED_TOP_N_BOOKS)
+        offset, slice_size = await _read_slice("BOOK", target)
+    except Exception:
+        logger.exception("sync_books: failed to read sync cursor")
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": 0,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
+
+    try:
+        raw_list = await _ol_client.get_trending_books(limit=slice_size, offset=offset)
     except Exception:
         logger.exception("sync_books: failed to fetch from Open Library")
-        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": offset,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
 
     async with async_session_factory() as session:
         for raw in raw_list:
@@ -205,30 +320,58 @@ async def sync_books() -> dict:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
                 errors += 1
 
+        await _persist_cursor(
+            session, "BOOK", _next_offset(offset, len(raw_list), slice_size, target), "sync_books"
+        )
+
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_books: failed to refresh catalog_search")
 
-    logger.info("sync_books: done — %d items upserted, %d errors", synced, errors)
-    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
+    logger.info(
+        "sync_books: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+    )
+    return {
+        "synced": synced,
+        "errors": errors,
+        "offset": offset,
+        "duration_s": round(time.monotonic() - start, 1),
+    }
 
 
 async def sync_games() -> dict:
-    """Fetch top-rated games from IGDB and upsert them into the local DB.
+    """Fetch a slice of top-rated games from IGDB and upsert them locally.
 
-    Returns a dict with keys ``synced``, ``errors`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_games: starting")
     start = time.monotonic()
     synced = 0
     errors = 0
+    target = settings.SEED_TOP_N_GAMES
 
     try:
-        raw_list = await _igdb_client.get_top_games(limit=settings.SEED_TOP_N_GAMES)
+        offset, slice_size = await _read_slice("GAME", target)
+    except Exception:
+        logger.exception("sync_games: failed to read sync cursor")
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": 0,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
+
+    try:
+        raw_list = await _igdb_client.get_top_games(limit=slice_size, offset=offset)
     except Exception:
         logger.exception("sync_games: failed to fetch from IGDB")
-        return {"synced": 0, "errors": 1, "duration_s": round(time.monotonic() - start, 1)}
+        return {
+            "synced": 0,
+            "errors": 1,
+            "offset": offset,
+            "duration_s": round(time.monotonic() - start, 1),
+        }
 
     async with async_session_factory() as session:
         for raw in raw_list:
@@ -246,10 +389,21 @@ async def sync_games() -> dict:
                 logger.exception("sync_games: error upserting igdb_id=%s", raw.get("id"))
                 errors += 1
 
+        await _persist_cursor(
+            session, "GAME", _next_offset(offset, len(raw_list), slice_size, target), "sync_games"
+        )
+
         try:
             await _refresh_catalog_search(session)
         except Exception:
             logger.exception("sync_games: failed to refresh catalog_search")
 
-    logger.info("sync_games: done — %d items upserted, %d errors", synced, errors)
-    return {"synced": synced, "errors": errors, "duration_s": round(time.monotonic() - start, 1)}
+    logger.info(
+        "sync_games: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+    )
+    return {
+        "synced": synced,
+        "errors": errors,
+        "offset": offset,
+        "duration_s": round(time.monotonic() - start, 1),
+    }

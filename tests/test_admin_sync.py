@@ -13,8 +13,23 @@ from backlogg.main import app
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 
-_SYNC_RESULT = {"synced": 5, "errors": 0, "duration_s": 1.2}
+_SYNC_RESULT = {"synced": 5, "errors": 0, "offset": 0, "duration_s": 1.2}
 _VALID_KEY = "test-admin-secret"
+
+
+def _cursor_patches(offset: int = 0):
+    """Patches for the sync-cursor repository: cursor at ``offset``, writes mocked."""
+    return (
+        patch(
+            "backlogg.scheduler.jobs.get_sync_offset",
+            new_callable=AsyncMock,
+            return_value=offset,
+        ),
+        patch(
+            "backlogg.scheduler.jobs.set_sync_offset",
+            new_callable=AsyncMock,
+        ),
+    )
 
 
 @pytest_asyncio.fixture
@@ -40,6 +55,7 @@ async def test_sync_movie_returns_200(client):
     assert body["type"] == "movie"
     assert body["synced"] == 5
     assert body["errors"] == 0
+    assert body["offset"] == 0
     assert body["duration_s"] == 1.2
 
 
@@ -54,6 +70,7 @@ async def test_sync_series_returns_200(client):
     assert body["type"] == "series"
     assert body["synced"] == 5
     assert body["errors"] == 0
+    assert body["offset"] == 0
     assert body["duration_s"] == 1.2
 
 
@@ -68,6 +85,7 @@ async def test_sync_book_returns_200(client):
     assert body["type"] == "book"
     assert body["synced"] == 5
     assert body["errors"] == 0
+    assert body["offset"] == 0
     assert body["duration_s"] == 1.2
 
 
@@ -82,6 +100,7 @@ async def test_sync_game_returns_200(client):
     assert body["type"] == "game"
     assert body["synced"] == 5
     assert body["errors"] == 0
+    assert body["offset"] == 0
     assert body["duration_s"] == 1.2
 
 
@@ -110,6 +129,7 @@ async def test_sync_movies_error_does_not_affect_sync_series():
     This validates acceptance criterion C19: errors are swallowed per job.
     Both jobs must complete without raising even when the external API is down.
     """
+    get_cursor, set_cursor = _cursor_patches()
     with (
         patch.object(
             sync_jobs._tmdb_movies,
@@ -123,6 +143,8 @@ async def test_sync_movies_error_does_not_affect_sync_series():
             new_callable=AsyncMock,
             side_effect=RuntimeError("TMDB series is down"),
         ),
+        get_cursor,
+        set_cursor,
     ):
         # Neither call must raise — each job swallows its own exceptions
         result_movies = await sync_jobs.sync_movies()
@@ -137,6 +159,7 @@ async def test_sync_movies_error_does_not_affect_sync_series():
 
 async def test_sync_movies_job_catches_external_error():
     """sync_movies logs and returns a result dict when the external API raises."""
+    get_cursor, set_cursor = _cursor_patches()
     with (
         patch.object(
             sync_jobs._tmdb_movies,
@@ -144,6 +167,8 @@ async def test_sync_movies_job_catches_external_error():
             new_callable=AsyncMock,
             side_effect=RuntimeError("network error"),
         ),
+        get_cursor,
+        set_cursor,
     ):
         result = await sync_jobs.sync_movies()
 
@@ -154,11 +179,16 @@ async def test_sync_movies_job_catches_external_error():
 
 async def test_sync_games_job_catches_external_error():
     """sync_games logs and returns a result dict when IGDB raises."""
-    with patch.object(
-        sync_jobs._igdb_client,
-        "get_top_games",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("igdb down"),
+    get_cursor, set_cursor = _cursor_patches()
+    with (
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_top_games",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("igdb down"),
+        ),
+        get_cursor,
+        set_cursor,
     ):
         result = await sync_jobs.sync_games()
 
@@ -169,11 +199,16 @@ async def test_sync_games_job_catches_external_error():
 
 async def test_sync_books_job_catches_external_error():
     """sync_books logs and returns a result dict when Open Library raises."""
-    with patch.object(
-        sync_jobs._ol_client,
-        "get_trending_books",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("ol down"),
+    get_cursor, set_cursor = _cursor_patches()
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_trending_books",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("ol down"),
+        ),
+        get_cursor,
+        set_cursor,
     ):
         result = await sync_jobs.sync_books()
 
@@ -184,11 +219,16 @@ async def test_sync_books_job_catches_external_error():
 
 async def test_sync_series_job_catches_external_error():
     """sync_series logs and returns a result dict when TMDB raises."""
-    with patch.object(
-        sync_jobs._tmdb_series,
-        "get_top_series",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("tmdb down"),
+    get_cursor, set_cursor = _cursor_patches()
+    with (
+        patch.object(
+            sync_jobs._tmdb_series,
+            "get_top_series",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("tmdb down"),
+        ),
+        get_cursor,
+        set_cursor,
     ):
         result = await sync_jobs.sync_series()
 
@@ -283,7 +323,10 @@ async def test_sync_books_calls_get_work_detail_for_authors():
         "title": "Test Book",
         "authors": [],
     }
+    get_cursor, set_cursor = _cursor_patches()
     with (
+        get_cursor,
+        set_cursor,
         patch.object(
             sync_jobs._ol_client,
             "get_trending_books",
@@ -356,7 +399,10 @@ async def test_sync_movies_calls_persist_movie_people():
         "genres": [],
     }
 
+    get_cursor, set_cursor = _cursor_patches()
     with (
+        get_cursor,
+        set_cursor,
         patch.object(
             sync_jobs._tmdb_movies,
             "get_top_movies",
@@ -428,7 +474,10 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
         "genres": [],
     }
 
+    get_cursor, set_cursor = _cursor_patches()
     with (
+        get_cursor,
+        set_cursor,
         patch.object(
             sync_jobs._tmdb_movies,
             "get_top_movies",
@@ -501,7 +550,10 @@ async def test_sync_series_calls_persist_series_people_and_creators():
         "created_by": [{"id": 999, "name": "A Creator", "profile_path": None}],
     }
 
+    get_cursor, set_cursor = _cursor_patches()
     with (
+        get_cursor,
+        set_cursor,
         patch.object(
             sync_jobs._tmdb_series,
             "get_top_series",

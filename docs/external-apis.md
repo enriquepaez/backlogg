@@ -70,3 +70,4 @@
 | `SEED_TOP_N_SERIES`    | Sync job      | How many series to seed (default: 100)           |
 | `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
 | `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
+| `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |

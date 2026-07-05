@@ -419,7 +419,7 @@
         "Tests de repositorio del cursor y de los jobs con adapters mockeados (incluyendo wraparound)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
