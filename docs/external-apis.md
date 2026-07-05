@@ -70,4 +70,3 @@
 | `SEED_TOP_N_SERIES`    | Sync job      | How many series to seed (default: 100)           |
 | `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
 | `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
-| `SYNC_CRON`            | APScheduler   | Cron expression for nightly sync (default: `0 2 * * *`) |

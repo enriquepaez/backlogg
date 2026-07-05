@@ -1,5 +1,4 @@
 import os
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,23 +11,11 @@ from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.people.routes import router as people_router
-from backlogg.scheduler.setup import create_scheduler
 from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
 from backlogg.trending.router import router as trending_router
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    scheduler = create_scheduler()
-    scheduler.start()
-    try:
-        yield
-    finally:
-        scheduler.shutdown(wait=False)
-
-
-app = FastAPI(title="Backlogg API", lifespan=lifespan)
+app = FastAPI(title="Backlogg API")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
