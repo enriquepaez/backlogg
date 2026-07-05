@@ -18,7 +18,9 @@ el ítem y lo devuelve en la misma petición.
 - **FastAPI** — API REST async
 - **SQLAlchemy 2.0** (typed) + **Alembic** — ORM y migraciones
 - **Pydantic v2** — validación de request/response
-- **APScheduler** — sync jobs nocturnos, embebidos en el proceso FastAPI
+- **GitHub Actions** — sync nocturno (`.github/workflows/nightly-sync.yml`)
+  que llama a los endpoints `/admin/sync/{type}`; la instancia free de Render
+  duerme sin tráfico, por lo que no puede haber schedulers embebidos en el proceso
 - **PostgreSQL** (Neon en producción)
 - **ruff** — linting y formato
 - **pytest** — suite de tests

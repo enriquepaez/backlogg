@@ -46,8 +46,23 @@ jobs:
             -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
-      - name: Verify stats
+      # Fails if any content type has not synced in the last 2 hours, so a
+      # sync that returns 200 without actually updating anything still fails
+      # the night.
+      - name: Verify stats freshness
         if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 60 "${{ secrets.RENDER_API_URL }}/admin/stats" \
-            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
+          stats=$(curl -sf --max-time 60 "${{ secrets.RENDER_API_URL }}/admin/stats" \
+            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}")
+          echo "$stats" | jq .
+          cutoff=$(date -u -d '2 hours ago' +%s)
+          stale=$(echo "$stats" | jq -r --argjson cutoff "$cutoff" '
+            to_entries[]
+            | select((.value.last_synced_at // "1970-01-01T00:00:00Z"
+                | sub("\\.[0-9]+"; "") | fromdateiso8601) <= $cutoff)
+            | .key')
+          if [ -n "$stale" ]; then
+            echo "::error::Content types not synced in the last 2 hours: $stale"
+            exit 1
+          fi
+          echo "All content types synced within the last 2 hours."
