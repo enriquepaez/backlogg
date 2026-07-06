@@ -33,10 +33,15 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 
-from backlogg.core.database import async_session_factory, engine
-from backlogg.scheduler import jobs
-from backlogg.scheduler.repository import get_sync_offset
+# The project is not an installed package: make `backlogg` importable when the
+# script runs standalone (uv run python scripts/backfill_sync.py).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from backlogg.core.database import async_session_factory, engine  # noqa: E402
+from backlogg.scheduler import jobs  # noqa: E402
+from backlogg.scheduler.repository import get_sync_offset  # noqa: E402
 
 logger = logging.getLogger("backfill_sync")
 
