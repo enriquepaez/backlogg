@@ -3,7 +3,15 @@
 Fecha: 2026-07-05
 Rama: feat/direct-backfill-sync
 
-## Feature 26 `direct_backfill_sync` — done (APPROVED), pendiente de ship
+## Bugfix `fix/sync-genre-slug-collision` — APPROVED, pendiente de ship
+
+Descubierto al ejecutar el primer backfill real de books (run 28787545315):
+"success" con 0 libros persistidos. Colisión de slug de género → sesión
+envenenada → tramo en rollback y cursor clavado. Fix + 7 tests, APPROVED.
+Tras merge: relanzar backfill de books (cursor BOOK quedó en 0) y verificar
+crecimiento real en Neon (books estaba en 157).
+
+## Feature 26 `direct_backfill_sync` — done, shippeada (PR #45 + fix import PR #46)
 
 Feature 25 `books_popular_source`: ✅ done, mergeada (PR #44).
 

@@ -12,6 +12,11 @@ API returns fewer items than requested.  Each job accepts an optional
 ``slice_size`` argument that overrides ``settings.SYNC_SLICE_SIZE`` (used by
 ``scripts/backfill_sync.py`` to process bigger slices).
 
+Each item is committed individually and a per-item failure triggers a
+rollback: a bad item (e.g. an IntegrityError) can neither poison the shared
+session for the rest of the slice nor discard the items already persisted,
+and the cursor is always written on a healthy session.
+
 After a successful upsert batch every job refreshes the catalog_search
 materialized view so search results stay current.
 
@@ -92,6 +97,23 @@ async def _persist_cursor(session, item_type: str, next_offset: int, job_name: s
         logger.exception("%s: failed to persist sync cursor", job_name)
 
 
+async def _rollback_quietly(session, job_name: str) -> None:
+    """Roll back after a per-item failure so the session stays usable.
+
+    Without this, an aborted transaction (e.g. an IntegrityError from one
+    item) poisons the shared session: every later item in the slice fails
+    with InFailedSQLTransactionError and the cursor commit is lost too.
+    """
+    try:
+        await session.rollback()
+        # rollback() expires every object in the identity map; drop them so
+        # the next item's upsert does not touch an expired attribute (that
+        # would fire a sync lazy-load inside the async session and fail).
+        session.expunge_all()
+    except Exception:
+        logger.exception("%s: rollback after item failure failed", job_name)
+
+
 async def sync_movies(slice_size: int | None = None) -> dict:
     """Fetch a slice of top popular movies from TMDB and upsert them locally.
 
@@ -140,18 +162,23 @@ async def sync_movies(slice_size: int | None = None) -> dict:
                 movie_data = _tmdb_movies.movie_to_dict(detail)
                 movie = await movies_repo.upsert_movie(session, movie_data)
                 await upsert_external_id(session, "MOVIE", movie.id, "TMDB", str(tmdb_id))
-                await session.flush()
+                # Commit per item: a failure in a later item must not discard
+                # the movies already upserted in this slice.
+                await session.commit()
                 synced += 1
 
                 try:
                     await _persist_movie_people(session, movie, tmdb_id)
+                    await session.commit()
                 except Exception:
                     logger.exception(
                         "sync_movies: failed to persist people for tmdb_id=%s", tmdb_id
                     )
+                    await _rollback_quietly(session, "sync_movies")
             except Exception:
                 logger.exception("sync_movies: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
+                await _rollback_quietly(session, "sync_movies")
 
         await _persist_cursor(
             session, "MOVIE", _next_offset(offset, len(raw_list), slice_size, target), "sync_movies"
@@ -221,7 +248,9 @@ async def sync_series(slice_size: int | None = None) -> dict:
                 series_data = _tmdb_series.series_to_dict(detail)
                 series = await series_repo.upsert_series(session, series_data)
                 await upsert_external_id(session, "SERIES", series.id, "TMDB", str(tmdb_id))
-                await session.flush()
+                # Commit per item: a failure in a later item must not discard
+                # the series already upserted in this slice.
+                await session.commit()
                 synced += 1
 
                 try:
@@ -229,13 +258,16 @@ async def sync_series(slice_size: int | None = None) -> dict:
                     created_by = detail.get("created_by", [])
                     if created_by:
                         await _persist_series_creators(session, series, created_by)
+                    await session.commit()
                 except Exception:
                     logger.exception(
                         "sync_series: failed to persist people for tmdb_id=%s", tmdb_id
                     )
+                    await _rollback_quietly(session, "sync_series")
             except Exception:
                 logger.exception("sync_series: error upserting tmdb_id=%s", raw.get("id"))
                 errors += 1
+                await _rollback_quietly(session, "sync_series")
 
         await _persist_cursor(
             session,
@@ -316,7 +348,9 @@ async def sync_books(slice_size: int | None = None) -> dict:
                 book = await books_repo.upsert_book(session, book_data)
                 if work_id:
                     await upsert_external_id(session, "BOOK", book.id, "OPEN_LIBRARY", work_id)
-                await session.flush()
+                # Commit per item: a failure in a later item must not discard
+                # the books already upserted in this slice.
+                await session.commit()
                 synced += 1
 
                 if work_id:
@@ -324,13 +358,16 @@ async def sync_books(slice_size: int | None = None) -> dict:
                         work_detail = await _ol_client.get_work_detail(work_id)
                         if work_detail:
                             await _persist_book_authors(session, book, work_detail)
+                            await session.commit()
                     except Exception:
                         logger.exception(
                             "sync_books: failed to persist authors for work_id=%s", work_id
                         )
+                        await _rollback_quietly(session, "sync_books")
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
                 errors += 1
+                await _rollback_quietly(session, "sync_books")
 
         await _persist_cursor(
             session, "BOOK", _next_offset(offset, len(raw_list), slice_size, target), "sync_books"
@@ -396,11 +433,14 @@ async def sync_games(slice_size: int | None = None) -> dict:
                 game_data = _igdb_client.game_to_dict(raw)
                 game = await games_repo.upsert_game(session, game_data)
                 await upsert_external_id(session, "GAME", game.id, "IGDB", str(igdb_id))
-                await session.flush()
+                # Commit per item: a failure in a later item must not discard
+                # the games already upserted in this slice.
+                await session.commit()
                 synced += 1
             except Exception:
                 logger.exception("sync_games: error upserting igdb_id=%s", raw.get("id"))
                 errors += 1
+                await _rollback_quietly(session, "sync_games")
 
         await _persist_cursor(
             session, "GAME", _next_offset(offset, len(raw_list), slice_size, target), "sync_games"
