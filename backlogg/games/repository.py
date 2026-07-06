@@ -67,6 +67,17 @@ async def get_game_by_slug(db: AsyncSession, slug: str) -> Game | None:
 
 
 async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> GameGenre:
+    """Get or create a genre, treating the slug as its real identity.
+
+    Look the slug up first: two name spellings that slugify to the same value
+    must reuse the existing row instead of violating ``uq_game_genre_slug``.
+    The name-conflict upsert remains as a fallback.
+    """
+    result = await db.execute(select(GameGenre).where(GameGenre.slug == slug))
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+
     stmt = (
         pg_insert(GameGenre)
         .values(name=name, slug=slug)
@@ -84,6 +95,12 @@ async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> GameGe
 
 
 async def _get_or_create_platform(db: AsyncSession, name: str, slug: str) -> GamePlatform:
+    """Get or create a platform by slug — same collision-safe pattern as genres."""
+    result = await db.execute(select(GamePlatform).where(GamePlatform.slug == slug))
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+
     stmt = (
         pg_insert(GamePlatform)
         .values(name=name, slug=slug)

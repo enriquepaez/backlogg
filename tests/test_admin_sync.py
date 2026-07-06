@@ -503,6 +503,9 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
     ):
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
+        # expunge_all is a sync method on AsyncSession — the job calls it
+        # after the per-item rollback that follows the people failure.
+        mock_session.expunge_all = MagicMock()
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)

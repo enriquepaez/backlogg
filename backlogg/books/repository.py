@@ -56,6 +56,20 @@ async def get_book_by_slug(db: AsyncSession, slug: str) -> Book | None:
 
 
 async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> BookGenre:
+    """Get or create a genre, treating the slug as its real identity.
+
+    Open Library subjects are not canonical: two spellings of the same genre
+    (e.g. "Fiction" / "fiction") slugify to the same value.  Looking the slug
+    up first reuses the existing row instead of violating
+    ``uq_book_genre_slug`` — the slug is what the app exposes in
+    ``?genre=<slug>`` filters.  The name-conflict upsert remains as a
+    fallback for the same name arriving with a slug not yet in the table.
+    """
+    result = await db.execute(select(BookGenre).where(BookGenre.slug == slug))
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+
     stmt = (
         pg_insert(BookGenre)
         .values(name=name, slug=slug)
@@ -111,10 +125,16 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
     )
     book = book_result.scalar_one()
 
-    # Handle genres: get-or-create each genre and assign to book
+    # Handle genres: get-or-create each genre and assign to book.
+    # Deduplicate by slug first — two subjects of the same book that slugify
+    # to the same value must map to a single genre row and a single join row.
     if genres_data:
         genre_objects = []
+        seen_slugs: set[str] = set()
         for g in genres_data:
+            if g["slug"] in seen_slugs:
+                continue
+            seen_slugs.add(g["slug"])
             genre = await _get_or_create_genre(db, g["name"], g["slug"])
             genre_objects.append(genre)
 
