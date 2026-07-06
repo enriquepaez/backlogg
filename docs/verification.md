@@ -56,6 +56,43 @@ Para cada endpoint nuevo, el leader presenta al usuario una checklist que cubre:
    # 3. Verificar que el slug YA está en DB
    ```
 
+## Backfill manual del catálogo
+
+El sync nocturno vía `POST /admin/sync/{type}` está limitado por el timeout
+de ~15 min por request de Render, por lo que avanza ~100 items/noche/tipo.
+Para poblar el catálogo más rápido existe `scripts/backfill_sync.py`, que
+reutiliza los mismos jobs de `backlogg/scheduler/jobs.py` pero escribe
+directamente contra la DB (`DATABASE_URL`) y las APIs externas, sin pasar
+por Render. El progreso se persiste en `sync_cursors` (compartido con el
+nightly), así que re-ejecutarlo retoma donde quedó.
+
+**Desde GitHub Actions (recomendado):**
+
+1. Ir a *Actions → Backfill content sync → Run workflow*.
+2. Elegir el tipo de contenido (`movie`/`series`/`book`/`game`) y lanzar.
+   El input `seed_top_n` (default 10000) fija el objetivo de wraparound y
+   **debe coincidir** con `SEED_TOP_N_*` en Render — si difiere, el cursor
+   compartido `sync_cursors` haría wraparound antes de tiempo.
+3. Repetir el dispatch hasta que el log termine con `stop_reason: wraparound`
+   (objetivo alcanzado o API agotada). Una parada por `time_budget` (5 h por
+   defecto) simplemente significa que hay que volver a lanzarlo.
+
+Requiere los secrets `DATABASE_URL` (formato `postgresql+asyncpg://...`),
+`TMDB_API_KEY`, `TWITCH_CLIENT_ID` y `TWITCH_CLIENT_SECRET`.
+
+**En local:**
+
+```bash
+uv run python scripts/backfill_sync.py movie
+uv run python scripts/backfill_sync.py game --slice-size 500 --time-budget-minutes 60
+```
+
+Usa el `DATABASE_URL` del entorno/`.env` — apunta a producción solo a
+propósito. Defaults configurables también por env: `BACKFILL_SLICE_SIZE`
+(500) y `BACKFILL_TIME_BUDGET_MINUTES` (300). Sale con código 0 en parada
+normal (wraparound o presupuesto agotado) y != 0 si el tipo es inválido o
+una iteración no consigue sincronizar nada.
+
 ## Variables de entorno requeridas
 
 Copiar `.env.example` a `.env` y rellenar antes de correr tests de integración:

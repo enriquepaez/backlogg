@@ -455,7 +455,7 @@
         "docs/architecture.md o docs/verification.md documentan cómo ejecutar un backfill manualmente",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
