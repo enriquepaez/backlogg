@@ -1,33 +1,35 @@
 # Sesión actual
 
-Fecha: 2026-07-05
-Rama: feat/direct-backfill-sync
+Fecha: 2026-07-06
+Rama: fix/ol-error-masking
 
-## Bugfix `fix/sync-genre-slug-collision` — APPROVED, pendiente de ship
+## Bugfix `fix/ol-error-masking` — APPROVED, PR pendiente de merge por el usuario
 
-Descubierto al ejecutar el primer backfill real de books (run 28787545315):
-"success" con 0 libros persistidos. Colisión de slug de género → sesión
-envenenada → tramo en rollback y cursor clavado. Fix + 7 tests, APPROVED.
-Tras merge: relanzar backfill de books (cursor BOOK quedó en 0) y verificar
-crecimiento real en Neon (books estaba en 157).
+Causa raíz del run 28799265814 ("success" con 0 libros): 500 transitorio del
+Solr de OL enmascarado como `[]` por `get_popular_books` → fetch corto →
+cursor wrappeado a 0 → wraparound verde falso. Fix: retry de 5xx (3 intentos,
+backoff 1s/2s) y excepción en vez de lista acumulada (4xx sin retry); error a
+mitad de paginación descarta y lanza — el cursor nunca wrappea por error.
+TMDB/IGDB revisados: no enmascaran (raise_for_status). jobs.py y el script
+sin cambios (sus guards ya hacían lo correcto). 266 tests en verde.
+Reviewer: APPROVED (veredicto como texto, bugfix fuera de backlog).
 
-## Feature 26 `direct_backfill_sync` — done, shippeada (PR #45 + fix import PR #46)
+## Backfill del catálogo — siguiente paso tras el merge
 
-Feature 25 `books_popular_source`: ✅ done, mergeada (PR #44).
+Historial de intentos de books:
+1. Run 28787545315: 0 libros — colisión de slug de género (arreglado, PR #47).
+2. Run 28799265814: 0 libros, "success" falso en 26s — el 500 enmascarado
+   (arreglado en fix/ol-error-masking).
 
-- Implementer + reviewer completados. Reviewer: APPROVED (init.sh verde,
-  254 tests). Resumen movido a `progress/history.md`.
-- Entregado: `scripts/backfill_sync.py`, workflow `backfill-sync.yml`
-  (workflow_dispatch: content_type + seed_top_n), param `slice_size` en los
-  4 jobs, paginación IGDB >500 con throttle, docs/verification.md, 14 tests.
-- Pendiente: manual QA con el usuario → confirmación → commit + push + PR.
+Al mergear la PR: relanzar `gh workflow run backfill-sync.yml -f
+content_type=book -f seed_top_n=10000`; verificar en el log iteraciones con
+~500 synced y offset avanzando (0 → 500 → 1000…), y crecimiento en Neon
+(books partía de 157, cursor BOOK en 0). Si stop_reason=time_budget,
+relanzar dispatch (reanuda del cursor). Después: dispatch de movie/series/game
+(sus cursores: MOVIE=200, SERIES=200, GAME=400).
 
-**Nota operativa (sigue pendiente)**: los 4 secrets del workflow
-(`DATABASE_URL`, `TMDB_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`)
-NO aparecen en `gh secret list` (solo `ADMIN_API_KEY` y `RENDER_API_URL`),
-aunque el usuario dijo haberlos añadido. Sin ellos el workflow fallará.
-Verificar antes del primer dispatch.
+## Estado de producción
 
-**Estado de producción**: `SEED_TOP_N_*=10000`, `SYNC_SLICE_SIZE=100` en
-Render. Tras mergear esta feature: lanzar el backfill por tipo desde Actions
-(input seed_top_n=10000) y repetir hasta stop_reason=wraparound.
+`SEED_TOP_N_*=10000`, `SYNC_SLICE_SIZE=100` en Render. Los 4 secrets del
+workflow de backfill ya están en el repo (añadidos 2026-07-06). Nightly
+books afectado por los mismos bugs hasta que se merge la PR de ol-error-masking.
