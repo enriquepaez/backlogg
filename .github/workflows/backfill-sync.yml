@@ -1,0 +1,57 @@
+name: Backfill content sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      content_type:
+        description: 'Content type to backfill'
+        required: true
+        type: choice
+        options:
+          - movie
+          - series
+          - book
+          - game
+      seed_top_n:
+        description: 'Sync target per type — must match SEED_TOP_N_* on Render'
+        required: false
+        type: string
+        default: '10000'
+
+# Runs the sync jobs directly against the production database (Neon) and the
+# external APIs, bypassing Render's ~15 min per-request timeout. Progress is
+# persisted in sync_cursors, so re-dispatching the workflow resumes where the
+# previous run stopped. The script stops itself after BACKFILL_TIME_BUDGET
+# (default 300 min); timeout-minutes leaves headroom for setup plus the
+# iteration in flight when the budget expires.
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      # Wraparound target — must match production's SEED_TOP_N_* (Render),
+      # otherwise the shared sync_cursors cursor wraps too early.
+      SEED_TOP_N_MOVIES: ${{ github.event.inputs.seed_top_n }}
+      SEED_TOP_N_SERIES: ${{ github.event.inputs.seed_top_n }}
+      SEED_TOP_N_BOOKS: ${{ github.event.inputs.seed_top_n }}
+      SEED_TOP_N_GAMES: ${{ github.event.inputs.seed_top_n }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run backfill
+        run: uv run python scripts/backfill_sync.py "${{ github.event.inputs.content_type }}"

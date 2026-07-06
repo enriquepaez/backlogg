@@ -1,5 +1,6 @@
 """IGDB API client with automatic Twitch OAuth2 token management."""
 
+import asyncio
 import re
 import time
 import unicodedata
@@ -11,6 +12,9 @@ from backlogg.core.config import settings
 
 _TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 _IGDB_BASE = "https://api.igdb.com/v4"
+
+# Delay between paginated requests — IGDB allows at most 4 req/s
+_PAGE_THROTTLE_S = 0.3
 
 # Map IGDB game_type integer to descriptive string
 _GAME_TYPE_MAP: dict[int, str] = {
@@ -113,21 +117,34 @@ class IGDBClient:
     async def get_top_games(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch top-rated main games from IGDB for seeding.
 
-        ``offset`` maps to IGDB's native ``offset N;`` query clause.
+        ``offset`` maps to IGDB's native ``offset N;`` query clause.  IGDB
+        caps each request at 500 results, so bigger limits paginate with
+        successive requests, sleeping between pages to respect IGDB's
+        4 req/s rate limit.  A short page ends the pagination (listing
+        exhausted).
         """
-        # IGDB limits to 500 per request; fetch in batches if needed
-        per_request = min(limit, 500)
-        query = (
-            "fields name,slug,summary,cover.*,first_release_date,rating,rating_count,"
-            "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
-            "involved_companies.company.name,involved_companies.company.slug,"
-            "involved_companies.developer,involved_companies.publisher;"
-            " where game_type = (0) & rating > 0;"
-            " sort rating_count desc;"
-            f" limit {per_request};"
-            f" offset {offset};"
-        )
-        return await self._post("games", query)
+        results: list[dict] = []
+        current_offset = offset
+        while len(results) < limit:
+            per_request = min(limit - len(results), 500)
+            query = (
+                "fields name,slug,summary,cover.*,first_release_date,rating,rating_count,"
+                "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
+                "involved_companies.company.name,involved_companies.company.slug,"
+                "involved_companies.developer,involved_companies.publisher;"
+                " where game_type = (0) & rating > 0;"
+                " sort rating_count desc;"
+                f" limit {per_request};"
+                f" offset {current_offset};"
+            )
+            batch = await self._post("games", query)
+            results.extend(batch)
+            if len(batch) < per_request:
+                break
+            current_offset += len(batch)
+            if len(results) < limit:
+                await asyncio.sleep(_PAGE_THROTTLE_S)
+        return results[:limit]
 
     def game_to_dict(self, raw: dict) -> dict:
         """Convert an IGDB game object to a DB-ready dict."""

@@ -8,7 +8,9 @@ the persisted cursor for its type from ``sync_cursors`` (0 if absent),
 fetches up to ``settings.SYNC_SLICE_SIZE`` items starting at that offset
 (never beyond ``settings.SEED_TOP_N_<TYPE>``) and advances the cursor at the
 end.  The cursor wraps around to 0 when the target is reached or when the
-API returns fewer items than requested.
+API returns fewer items than requested.  Each job accepts an optional
+``slice_size`` argument that overrides ``settings.SYNC_SLICE_SIZE`` (used by
+``scripts/backfill_sync.py`` to process bigger slices).
 
 After a successful upsert batch every job refreshes the catalog_search
 materialized view so search results stay current.
@@ -53,17 +55,24 @@ async def _refresh_catalog_search(session) -> None:
     await session.commit()
 
 
-async def _read_slice(item_type: str, target: int) -> tuple[int, int]:
+async def _read_slice(
+    item_type: str, target: int, slice_size: int | None = None
+) -> tuple[int, int]:
     """Return (offset, slice_size) for the next sync slice of ``item_type``.
 
     Reads the persisted cursor (0 if absent).  A stale cursor at or beyond
     ``target`` (e.g. after lowering SEED_TOP_N) is normalised back to 0.
+
+    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided
+    (used by the direct backfill script to process bigger slices without
+    touching the production setting).
     """
+    size = slice_size if slice_size is not None else settings.SYNC_SLICE_SIZE
     async with async_session_factory() as session:
         offset = await get_sync_offset(session, item_type)
     if offset >= target:
         offset = 0
-    return offset, min(settings.SYNC_SLICE_SIZE, target - offset)
+    return offset, min(size, target - offset)
 
 
 def _next_offset(offset: int, fetched: int, slice_size: int, target: int) -> int:
@@ -83,9 +92,10 @@ async def _persist_cursor(session, item_type: str, next_offset: int, job_name: s
         logger.exception("%s: failed to persist sync cursor", job_name)
 
 
-async def sync_movies() -> dict:
+async def sync_movies(slice_size: int | None = None) -> dict:
     """Fetch a slice of top popular movies from TMDB and upsert them locally.
 
+    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_movies: starting")
@@ -95,7 +105,7 @@ async def sync_movies() -> dict:
     target = settings.SEED_TOP_N_MOVIES
 
     try:
-        offset, slice_size = await _read_slice("MOVIE", target)
+        offset, slice_size = await _read_slice("MOVIE", target, slice_size)
     except Exception:
         logger.exception("sync_movies: failed to read sync cursor")
         return {
@@ -163,9 +173,10 @@ async def sync_movies() -> dict:
     }
 
 
-async def sync_series() -> dict:
+async def sync_series(slice_size: int | None = None) -> dict:
     """Fetch a slice of popular TV series from TMDB and upsert them locally.
 
+    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_series: starting")
@@ -175,7 +186,7 @@ async def sync_series() -> dict:
     target = settings.SEED_TOP_N_SERIES
 
     try:
-        offset, slice_size = await _read_slice("SERIES", target)
+        offset, slice_size = await _read_slice("SERIES", target, slice_size)
     except Exception:
         logger.exception("sync_series: failed to read sync cursor")
         return {
@@ -249,9 +260,10 @@ async def sync_series() -> dict:
     }
 
 
-async def sync_books() -> dict:
+async def sync_books(slice_size: int | None = None) -> dict:
     """Fetch a slice of popular books from Open Library and upsert them locally.
 
+    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_books: starting")
@@ -261,7 +273,7 @@ async def sync_books() -> dict:
     target = settings.SEED_TOP_N_BOOKS
 
     try:
-        offset, slice_size = await _read_slice("BOOK", target)
+        offset, slice_size = await _read_slice("BOOK", target, slice_size)
     except Exception:
         logger.exception("sync_books: failed to read sync cursor")
         return {
@@ -340,9 +352,10 @@ async def sync_books() -> dict:
     }
 
 
-async def sync_games() -> dict:
+async def sync_games(slice_size: int | None = None) -> dict:
     """Fetch a slice of top-rated games from IGDB and upsert them locally.
 
+    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_games: starting")
@@ -352,7 +365,7 @@ async def sync_games() -> dict:
     target = settings.SEED_TOP_N_GAMES
 
     try:
-        offset, slice_size = await _read_slice("GAME", target)
+        offset, slice_size = await _read_slice("GAME", target, slice_size)
     except Exception:
         logger.exception("sync_games: failed to read sync cursor")
         return {
