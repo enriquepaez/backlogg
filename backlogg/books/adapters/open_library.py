@@ -13,6 +13,12 @@ _OL_HEADERS = {
 }
 _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
+# Retry policy for the popular-books search: OL's Solr backend answers the
+# readinglog-sorted match-all query with intermittent 500s, but an immediate
+# retry of the same request consistently succeeds.
+_SEARCH_RETRY_ATTEMPTS = 3
+_SEARCH_RETRY_BACKOFF_S = 1.0
+
 logger = logging.getLogger(__name__)
 
 _GENRE_ALLOWLIST: frozenset[str] = frozenset(
@@ -111,6 +117,40 @@ class OpenLibraryClient:
             docs = data.get("docs", [])
             return docs[0] if docs else None
 
+    async def _fetch_popular_page(self, per_page: int, offset: int) -> dict:
+        """Fetch one page of the popular-books search, retrying transient 5xx.
+
+        5xx responses are retried up to ``_SEARCH_RETRY_ATTEMPTS`` times with
+        a short linear backoff (OL's Solr is flaky on this query; an
+        immediate retry consistently succeeds).  A 5xx that survives the
+        retries — and any 4xx (e.g. a 403 rate-limit), which a retry would
+        not fix — raises ``httpx.HTTPStatusError``: callers must never
+        mistake a failed fetch for an exhausted listing.
+        """
+        params = {
+            "q": "*:*",
+            "sort": "readinglog",
+            "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
+            "limit": per_page,
+            "offset": offset,
+        }
+        for attempt in range(_SEARCH_RETRY_ATTEMPTS):
+            async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
+                response = await client.get(f"{_OL_BASE}/search.json", params=params)
+            if response.status_code >= 500 and attempt < _SEARCH_RETRY_ATTEMPTS - 1:
+                logger.warning(
+                    "get_popular_books: HTTP %d at offset %d (attempt %d/%d), retrying",
+                    response.status_code,
+                    offset,
+                    attempt + 1,
+                    _SEARCH_RETRY_ATTEMPTS,
+                )
+                await asyncio.sleep(_SEARCH_RETRY_BACKOFF_S * (attempt + 1))
+                continue
+            response.raise_for_status()
+            return response.json()
+        raise AssertionError("unreachable")  # last attempt always returns or raises
+
     async def get_popular_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular books from Open Library for nightly sync.
 
@@ -123,33 +163,22 @@ class OpenLibraryClient:
 
         Returns search docs with the same field set as ``search_book``
         (``key,title,author_name,first_publish_year,cover_i,subject,isbn``),
-        which is the shape ``book_to_dict`` consumes.  Falls back to the
-        results accumulated so far (possibly ``[]``) on error.
+        which is the shape ``book_to_dict`` consumes.
+
+        Raises ``httpx.HTTPStatusError`` when a page request keeps failing
+        after the 5xx retries (or fails with a 4xx), even mid-pagination:
+        the pages accumulated so far are discarded so a returned list always
+        means a fully successful fetch — a 200 response with fewer docs than
+        requested is the only legitimate end-of-results signal.  Discarding
+        is safe because nothing has been persisted yet, upserts are
+        idempotent and the sync cursor is not advanced on error, so the next
+        run refetches the same slice.
         """
         results: list[dict] = []
         per_page = min(limit, 100)  # OL search.json default page size
 
         while len(results) < limit:
-            async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
-                response = await client.get(
-                    f"{_OL_BASE}/search.json",
-                    params={
-                        "q": "*:*",
-                        "sort": "readinglog",
-                        "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
-                        "limit": per_page,
-                        "offset": offset,
-                    },
-                )
-                if response.status_code != 200:
-                    logger.error(
-                        "get_popular_books: non-200 status %d at offset %d",
-                        response.status_code,
-                        offset,
-                    )
-                    break
-                data = response.json()
-
+            data = await self._fetch_popular_page(per_page, offset)
             docs = data.get("docs", [])
             if not docs:
                 logger.info("get_popular_books: no more results at offset %d", offset)

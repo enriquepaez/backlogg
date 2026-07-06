@@ -6,7 +6,10 @@ Covers:
 - IGDB pagination beyond 500 items with throttling between pages;
 - the backfill loop in ``scripts/backfill_sync.py``: multiple iterations,
   stop on cursor wraparound, stop on time budget, abort on an iteration
-  with zero progress, and CLI exit codes.
+  with zero progress, and CLI exit codes;
+- error propagation from a failing adapter fetch: ``sync_books`` reports
+  ``errors=1`` without touching the cursor, and the backfill guard turns
+  that into a ``BackfillError`` (red run) instead of a false wraparound.
 
 Everything external (adapters, jobs, DB sessions) is mocked — no real
 network calls and no real database access.
@@ -17,6 +20,7 @@ import sys
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from backlogg.games.adapters.igdb import _PAGE_THROTTLE_S, IGDBClient
@@ -126,6 +130,69 @@ async def test_sync_slice_size_is_capped_by_target(monkeypatch):
         await sync_jobs.sync_games(slice_size=500)
 
     mock_fetch.assert_awaited_once_with(limit=6, offset=4)
+
+
+# ── Adapter fetch failure: errors reported, cursor untouched ─────────────────
+
+
+def _http_error(status_code: int) -> httpx.HTTPStatusError:
+    response = MagicMock()
+    response.status_code = status_code
+    return httpx.HTTPStatusError(f"HTTP {status_code}", request=MagicMock(), response=response)
+
+
+async def test_sync_books_fetch_error_reports_error_and_keeps_cursor(monkeypatch):
+    """An adapter exception yields errors=1 and never writes the cursor."""
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 100)
+    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=500)
+
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_popular_books",
+            new_callable=AsyncMock,
+            side_effect=_http_error(500),
+        ),
+        get_cursor,
+        set_cursor as mock_set,
+        refresh,
+        factory,
+    ):
+        result = await sync_jobs.sync_books()
+
+    assert result["synced"] == 0
+    assert result["errors"] == 1
+    assert result["offset"] == 500
+    mock_set.assert_not_awaited()  # the cursor must never wrap because of an error
+
+
+async def test_backfill_guard_aborts_on_fetch_error(monkeypatch):
+    """End to end: adapter raises → real sync_books errors → BackfillError (exit 1).
+
+    This is the regression for run 28799265814, where an OL 500 was masked
+    as an empty listing and produced a false-green wraparound stop.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
+    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=500)
+    script_cursor, script_factory = _backfill_patches(cursor_reads=[500])
+
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_popular_books",
+            new_callable=AsyncMock,
+            side_effect=_http_error(500),
+        ),
+        get_cursor,
+        set_cursor,
+        refresh,
+        factory,
+        script_cursor,
+        script_factory,
+        pytest.raises(backfill_sync.BackfillError),
+    ):
+        await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
 
 
 # ── IGDB pagination beyond 500 with throttling ───────────────────────────────

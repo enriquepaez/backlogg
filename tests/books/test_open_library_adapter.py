@@ -4,7 +4,10 @@ Covers:
 - User-Agent header is sent in get_popular_books requests
 - get_popular_books queries /search.json with q=*:*, sort=readinglog and
   native offset/limit, requesting the field set book_to_dict consumes
-- get_popular_books returns [] when the API responds with 403
+- get_popular_books raises immediately (no retry) when the API responds with 403
+- get_popular_books retries transient 5xx responses and succeeds on a later attempt
+- get_popular_books raises after exhausting the 5xx retries, including
+  mid-pagination (accumulated pages are discarded, never returned as success)
 - get_popular_books correctly parses a response containing a non-empty "docs" list
 - get_author retries on TimeoutException and returns None after 3 failures
 - get_author succeeds on a retry after an initial timeout
@@ -33,6 +36,14 @@ def _mock_response(status_code: int, json_data: dict | None = None) -> MagicMock
     response.status_code = status_code
     if json_data is not None:
         response.json = MagicMock(return_value=json_data)
+    if status_code >= 400:
+        response.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError(
+                f"HTTP {status_code}", request=MagicMock(), response=response
+            )
+        )
+    else:
+        response.raise_for_status = MagicMock()
     return response
 
 
@@ -114,8 +125,9 @@ async def test_get_popular_books_queries_search_json_with_readinglog_sort():
 
 
 @pytest.mark.asyncio
-async def test_get_popular_books_returns_empty_list_on_403():
-    """get_popular_books must return [] (and not raise) when the API returns 403."""
+async def test_get_popular_books_raises_on_403_without_retry():
+    """A 4xx (e.g. rate-limit 403) must raise immediately — no retry, no [] masking."""
+    call_count = 0
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -128,13 +140,115 @@ async def test_get_popular_books_returns_empty_list_on_403():
             pass
 
         async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
             return _mock_response(403)
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
         client = OpenLibraryClient()
-        result = await client.get_popular_books(limit=10)
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.get_popular_books(limit=10)
 
-    assert result == []
+    assert call_count == 1  # 4xx is not retried
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
+    """A transient 5xx must be retried; the second attempt's 200 is returned."""
+    fake_docs = [{"key": "/works/OL1W", "title": "Book One"}]
+    call_count = 0
+
+    class FlakyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_response(500)
+            return _mock_response(200, _search_payload(fake_docs))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakyClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()) as mock_sleep:
+            client = OpenLibraryClient()
+            result = await client.get_popular_books(limit=10)
+
+    assert result == fake_docs
+    assert call_count == 2
+    mock_sleep.assert_awaited_once()  # one backoff between the two attempts
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_raises_after_persistent_5xx():
+    """A 5xx that survives all retry attempts must raise, never return []."""
+    call_count = 0
+
+    class BrokenClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            return _mock_response(500)
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", BrokenClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+            client = OpenLibraryClient()
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.get_popular_books(limit=10)
+
+    assert call_count == 3  # initial attempt + 2 retries
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_mid_pagination_error_discards_and_raises():
+    """A persistent 5xx on a later page raises and discards earlier pages.
+
+    A returned list must always mean a fully successful fetch: returning the
+    accumulated pages would look like a legitimate short (end-of-results)
+    response upstream and wrap the sync cursor to 0.
+    """
+    page_one = [{"key": f"/works/OL{i}W", "title": f"Book {i}"} for i in range(100)]
+    call_count = 0
+
+    class FlakySecondPageClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            if params["offset"] == 0:
+                return _mock_response(200, _search_payload(page_one))
+            return _mock_response(500)
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakySecondPageClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+            client = OpenLibraryClient()
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.get_popular_books(limit=200, offset=0)
+
+    assert call_count == 4  # page 1 OK + 3 failed attempts on page 2
 
 
 @pytest.mark.asyncio
