@@ -8,9 +8,10 @@
 
 Backlogg es una API de catálogo unificado para películas, series, libros y
 videojuegos. Los ítems se sincronizan desde APIs públicas y se exponen vía REST.
-El catálogo vive en PostgreSQL local y crece bajo demanda — cuando una búsqueda
-no encuentra resultados locales, el servicio consulta la API externa, persiste
-el ítem y lo devuelve en la misma petición.
+El catálogo vive en PostgreSQL y crece por tres vías: sync nocturno por tramos,
+backfill masivo bajo demanda (ver "Flujo de datos") y fallback on-demand —
+cuando una búsqueda no encuentra resultados locales, el servicio consulta la
+API externa, persiste el ítem y lo devuelve en la misma petición.
 
 ## Stack
 
@@ -32,19 +33,28 @@ Vertical slices por dominio. Cada dominio contiene todo lo necesario:
 
 ```
 backlogg/
-├── <domain>/              # movies, series, books, games, people, search
+├── <domain>/              # movies, series, books, games, people, search,
+│   │                      # genres, trending
 │   ├── models.py          # SQLAlchemy ORM models
 │   ├── schemas.py         # Pydantic v2 request/response schemas
 │   ├── repository.py      # DB queries (solo este archivo toca SQLAlchemy)
 │   ├── service.py         # Lógica de negocio + on-demand fallback
 │   ├── routes.py          # FastAPI router (sin lógica, solo delega)
 │   └── adapters/          # Clientes de APIs externas
+├── admin/                 # POST /admin/sync/{type}, GET /admin/stats
+│   └── auth.py            # X-API-Key dependency para /admin/*
+├── scheduler/
+│   ├── jobs.py            # sync_movies/series/books/games (por tramos)
+│   └── repository.py      # Cursores de sync (tabla sync_cursors)
 ├── shared/
 │   ├── models.py          # Person, Credit (transversales a todos los dominios)
 │   └── external_ids.py    # Utilidades polimórficas de external_ids
 └── core/
     ├── database.py        # Engine, SessionLocal, get_db dependency
     └── config.py          # Settings via pydantic-settings
+
+scripts/
+└── backfill_sync.py       # Backfill directo contra la DB (ver docs/operations.md)
 ```
 
 ## Principios
@@ -93,6 +103,16 @@ repository.py ── SQLAlchemy 2.0 typed queries
     ▼
 PostgreSQL
 ```
+
+El catálogo se puebla por dos caminos además del fallback on-demand:
+
+- **Nightly** (GitHub Actions → `POST /admin/sync/{type}`): cada noche avanza
+  un tramo de `SYNC_SLICE_SIZE` items por tipo, con cursor persistido en
+  `sync_cursors`.
+- **Backfill** (GitHub Actions → `scripts/backfill_sync.py`): reutiliza los
+  mismos jobs de `scheduler/jobs.py` pero escribe directo contra la DB en
+  bucle, para poblar el catálogo completo en horas en lugar de meses.
+  Comandos y procedimiento en `docs/operations.md`.
 
 ## APIs externas
 
