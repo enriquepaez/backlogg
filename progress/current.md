@@ -1,7 +1,28 @@
 # Sesión actual
 
-Fecha: 2026-07-06
-Rama: fix/ol-error-masking
+Fecha: 2026-07-07
+Rama: docs/update-project-docs
+
+## Docs refresh — pendiente de ship
+
+Auditoría completa de la documentación contra el estado real:
+- `README.md` reescrito: quickstart, stack corregido (Render + GitHub
+  Actions; fuera APScheduler y Fly.io), tabla de endpoints, enlace al runbook.
+- `docs/operations.md` **nuevo**: runbook de producción (nightly, backfill
+  con comandos gh, admin endpoints, secrets, cursores, topología free tier).
+- `docs/api.md`: añadidos list endpoints, /genres, /trending, /similar,
+  credits[] en detail, auth X-API-Key en /admin/* (401/503), fallback externo
+  del search, CORS/security headers. Eliminado "GET /movies out of scope".
+- `docs/architecture.md`: árbol con admin/, scheduler/, genres/, trending/ y
+  scripts/; visión y flujo de datos con las 3 vías de crecimiento.
+- `docs/verification.md`: sección backfill reducida a puntero a operations.md.
+
+## Backfill — book COMPLETADO ✅ (run 28827435184)
+
+20 iteraciones, 9.999 synced, 1 error, stop_reason=wraparound, ~2h37m.
+Neon: books = 9.974 (desde 157). Los dos fixes (genre slug + OL retry)
+funcionaron. Pendiente: dispatch de movie/series/game (cursores 200/200/400,
+pueden ir en paralelo).
 
 ## Bugfix `fix/ol-error-masking` — APPROVED, PR pendiente de merge por el usuario
 

@@ -5,6 +5,12 @@
 - **URL identifiers**: slugs (not numeric IDs). Example: `/movies/the-godfather`
 - **Pagination**: offset/limit. Parameters: `page` (1-based) and `limit` (default 20, max 100)
 - **Content-Type**: `application/json`
+- **Admin auth**: los endpoints `/admin/*` requieren el header `X-API-Key`
+  (ver sección Admin). El resto de la API es pública.
+- **CORS y security headers**: orígenes permitidos vía `CORS_ORIGINS`
+  (comma-separated; sin configurar permite `localhost:3000` y `localhost:5173`).
+  Todas las respuestas llevan `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY` y `Referrer-Policy: strict-origin-when-cross-origin`.
 
 ## Endpoints
 
@@ -48,6 +54,49 @@ Response:
 }
 ```
 
+**External fallback**: si la consulta devuelve 0 resultados locales, el
+servicio hace fan-out en paralelo a las APIs externas (TMDB, Open Library,
+IGDB — solo la correspondiente si se filtra por `type`), ingesta los top hits
+y re-consulta la vista local antes de responder. Un fallo en una API externa
+no aborta las demás ni devuelve error al cliente.
+
+### List endpoints (los 4 tipos)
+
+```
+GET /movies | /series | /books | /games
+→ 200  Lista paginada (solo items ya en DB, sin fallback externo)
+```
+
+| Param   | Required | Description |
+|---------|----------|-------------|
+| `genre` | No       | Filtro por slug de género (p.ej. `action`) |
+| `sort`  | No       | `rating_desc` (default), `rating_asc`, `date_desc`, `date_asc`, `title_asc` |
+| `page`  | No       | Página, 1-based (default: 1) |
+| `limit` | No       | Items por página (default: 20, max: 100) |
+
+`date_*` ordena por `release_date` (movies/games), `first_air_date` (series)
+o `first_publish_date` (books).
+
+Response:
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "title": "Dune",
+      "slug": "dune-2021",
+      "poster_url": "https://...",
+      "release_date": "2021-10-22",
+      "rating_external": 7.8,
+      "genres": ["science-fiction", "adventure"]
+    }
+  ],
+  "total": 847,
+  "page": 1,
+  "limit": 20
+}
+```
+
 ### Movies
 
 ```
@@ -58,7 +107,16 @@ GET /movies/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `runtime`, `original_language`, `poster_url`, `backdrop_url`, `budget`, `revenue`,
-`status`, `rating_external`, `rating_count_external`, `genres[]`
+`status`, `rating_external`, `rating_count_external`, `genres[]`, `credits[]`
+
+```
+GET /movies/{slug}/similar
+→ 200  Hasta 10 películas similares (TMDB recommendations)
+→ 404  Slug no encontrado
+```
+
+Response: `{"results": [...]}` — cada item: `title`, `slug`, `poster_url`,
+`release_date`, `rating_external`. Los items nuevos se persisten en la DB local.
 
 ### Series
 
@@ -70,7 +128,13 @@ GET /series/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_air_date`,
 `last_air_date`, `number_of_seasons`, `number_of_episodes`, `status`, `original_language`,
-`poster_url`, `backdrop_url`, `rating_external`, `rating_count_external`, `genres[]`
+`poster_url`, `backdrop_url`, `rating_external`, `rating_count_external`, `genres[]`, `credits[]`
+
+```
+GET /series/{slug}/similar
+→ 200  Hasta 10 series similares (mismo contrato que /movies/{slug}/similar)
+→ 404  Slug no encontrado
+```
 
 ### Books
 
@@ -93,7 +157,11 @@ GET /games/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `game_type`, `original_language`, `poster_url`, `backdrop_url`, `rating_external`,
-`rating_count_external`, `genres[]`, `platforms[]`
+`rating_count_external`, `genres[]`, `platforms[]`, `credits[]`
+
+**`credits[]`** (en detail de movies, series y games): cada credit incluye
+`person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
+`billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
 
 ### People
 
@@ -106,6 +174,31 @@ GET /people/{slug}
 Response fields: `id`, `name`, `slug`, `profile_url`, `credits[]`
 (each credit: `item_type`, `item_id`, `item_slug`, `item_title`, `role`,
 `character_name`, `billing_order`)
+
+### Genres
+
+```
+GET /genres?type=movie|series|book|game
+→ 200  Géneros con conteo de items asociados
+→ 422  type inválido
+```
+
+Sin `type` devuelve los géneros de todos los tipos. Response:
+`{"genres": [...]}` — cada género: `name`, `slug`, `item_type`, `count`
+(número real de items asociados).
+
+### Trending
+
+```
+GET /trending?type=movie|series&period=day|week
+→ 200  Hasta 20 items trending (TMDB Trending API)
+→ 422  type o period inválidos
+```
+
+Sin `type` devuelve mix de movies y series. `period` default: `week`.
+Response: `{"results": [...]}` — cada item: `item_type`, `title`, `slug`,
+`poster_url`, `release_date`, `rating_external`. Los items nuevos se
+persisten en la DB local.
 
 ### Admin (sync trigger)
 
@@ -138,7 +231,9 @@ Response:
 - `offset` — offset (0-based) del tramo procesado en esta ejecución.
 - `duration_s` — segundos que tardó el sync.
 
-Not authenticated in MVP — for internal/testing use only.
+**Auth**: requiere el header `X-API-Key` con el valor de la env var
+`ADMIN_API_KEY`. Header ausente o incorrecto → `401`; `ADMIN_API_KEY` sin
+configurar → `503`.
 
 ### Admin stats
 
@@ -160,7 +255,7 @@ Response:
 - `count` — número de filas en la tabla correspondiente.
 - `last_synced_at` — `MAX(last_synced_at)` de la tabla; `null` si no hay datos.
 
-Not authenticated in MVP — for internal/testing use only.
+**Auth**: misma protección `X-API-Key` que el sync trigger (`401`/`503`).
 
 ## On-demand fallback
 
@@ -176,4 +271,3 @@ If the item is not found in the external API either, returns `404`.
 - Auth endpoints (`POST /auth/login`, `POST /auth/register`)
 - User list endpoints (`GET /users/{id}/lists`, `POST /lists`, etc.)
 - Rating endpoints
-- `GET /movies` (list all) — search covers this use case
