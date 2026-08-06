@@ -456,6 +456,87 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 27,
+      "name": "users_auth",
+      "title": "Users & auth — registro, login JWT, perfil público",
+      "description": "Nuevo dominio backlogg/users/: modelo User, registro, login con JWT, perfil propio y perfil público. Base para ratings/reviews y follows.",
+      "depends_on": [],
+      "acceptance": [
+        "Modelo SQLAlchemy User en backlogg/users/models.py (username unique, email unique, password_hash, display_name, bio, avatar_url, timestamps)",
+        "Migración Alembic 0009_users.py crea la tabla users",
+        "Password hashing con argon2-cffi (añadido a pyproject.toml) — nunca se persiste ni loguea el password en claro",
+        "POST /auth/register crea el usuario y devuelve 201; username/email duplicados devuelven 409",
+        "POST /auth/login valida credenciales y devuelve un JWT (backlogg/core/config.py: JWT_SECRET_KEY, JWT_ALGORITHM=HS256, JWT_EXPIRE_MINUTES); credenciales inválidas devuelven 401",
+        "backlogg/users/auth.py expone get_current_user (dependency FastAPI que decodifica Authorization: Bearer <token>, 401 si falta/es inválido/expiró)",
+        "GET /users/me devuelve el perfil del usuario autenticado (401 sin token)",
+        "PATCH /users/me permite actualizar display_name/bio/avatar_url del usuario autenticado",
+        "GET /users/{username} devuelve el perfil público (sin email) o 404",
+        "Slugs: username es el identificador en la URL, no hay id numérico expuesto",
+        "Tests de repositorio, servicio (hashing/JWT) y endpoint (incluye 401/404/409)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 28,
+      "name": "ratings_reviews",
+      "title": "Ratings & reviews — puntuación 1-5 + texto, likes en reviews",
+      "description": "Nuevo dominio backlogg/ratings/: una entrada por (usuario, item) con score 1-5 opcional y texto opcional, patrón polimórfico item_type/item_id como credits/external_ids. Recalcula rating_internal/rating_count_internal en el item afectado. Likes en reviews (ReviewLike) para alimentar el ranking del feed. GET /users/{username}/reviews cross-type.",
+      "depends_on": [27, 2, 3, 4, 5],
+      "acceptance": [
+        "Modelo UserRating (user_id, item_type, item_id, score 1-5 nullable, review_text nullable, timestamps) con UniqueConstraint(user_id, item_type, item_id)",
+        "Modelo ReviewLike (user_id, rating_id, created_at) con UniqueConstraint(user_id, rating_id)",
+        "Migración Alembic 0010_ratings_reviews.py crea user_ratings y review_likes",
+        "PUT /movies/{slug}/rating (y equivalente en series/books/games) — auth requerida, upsert de score+review_text del usuario autenticado, 422 si score fuera de 1-5",
+        "DELETE /movies/{slug}/rating (y equivalente en series/books/games) — auth requerida, elimina la rating propia; 404 si no existe",
+        "Tras cada create/update/delete de una rating, rating_internal (AVG) y rating_count_internal (COUNT) del item afectado se recalculan y persisten",
+        "GET /movies/{slug}/ratings (y equivalente en series/books/games) — público, paginado, incluye like_count por review",
+        "POST /ratings/{id}/like y DELETE /ratings/{id}/like — auth requerida, idempotente (no duplica likes)",
+        "GET /users/{username}/reviews — público, todas las entradas de rating/review del usuario a través de los 4 tipos (UNION ALL), incluyan o no texto",
+        "docs/schema.md documenta user_ratings y review_likes; docs/api.md documenta los endpoints nuevos",
+        "Tests de repositorio (recalculo de agregados), servicio y endpoint (incluye 401/422/404 y no-duplicación de likes)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 29,
+      "name": "follows",
+      "title": "Follows — seguir usuarios, listas de followers/following",
+      "description": "Nuevo dominio backlogg/follows/: relación unidireccional sin aprobación entre usuarios. Extiende el perfil público con follower_count/following_count.",
+      "depends_on": [27],
+      "acceptance": [
+        "Modelo Follow (follower_id, followed_id, created_at) con UniqueConstraint(follower_id, followed_id); un usuario no puede seguirse a sí mismo (422)",
+        "Migración Alembic 0011_follows.py crea la tabla follows",
+        "POST /users/{username}/follow — auth requerida, idempotente (seguir dos veces no duplica ni falla)",
+        "DELETE /users/{username}/follow — auth requerida, deja de seguir; no falla si no seguía",
+        "GET /users/{username}/followers — público, paginado",
+        "GET /users/{username}/following — público, paginado",
+        "GET /users/{username} (de la feature 27) se extiende con follower_count y following_count",
+        "Tests de repositorio, servicio y endpoint (incluye self-follow 422, doble follow idempotente, unfollow)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 30,
+      "name": "activity_feed",
+      "title": "Activity feed — GET /feed con pestañas following/popular",
+      "description": "Nuevo dominio backlogg/feed/: feed de reviews sin tablas nuevas. Pestaña 'following' con las reviews recientes de los usuarios seguidos por el caller; pestaña 'popular' con las reviews más gustadas (últimos 30 días). Auth requerida en ambas pestañas.",
+      "depends_on": [28, 29],
+      "acceptance": [
+        "GET /feed?tab=following|popular&page=&limit= — auth requerida (401 sin token); 422 si tab no es following/popular",
+        "tab=following devuelve reviews (UserRating) de usuarios que el caller sigue, orden reverse-chronological, paginado",
+        "tab=popular devuelve reviews de los últimos 30 días ordenadas por like_count desc, luego created_at desc, paginado",
+        "Cada entrada del feed incluye: autor (username, display_name, avatar_url), item (item_type, title, slug, poster_url), score, review_text, like_count, created_at",
+        "Query cross-type vía UNION ALL en backlogg/feed/repository.py, mismo estilo que catalog_search/genres — sin nueva vista materializada",
+        "tab=following con el caller sin follows devuelve lista vacía (no error)",
+        "Tests de repositorio (ambas pestañas, paginación, ventana de 30 días) y endpoint (401, 422, ambos tabs)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

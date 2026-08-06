@@ -82,8 +82,9 @@ scripts/
    El implementer debe leer TODOS los archivos de migración existentes antes de
    escribir uno nuevo.
 
-7. **MVP scope.** Auth, listas de usuario, ratings propios, reviews y features
-   sociales están **fuera de scope**. `rating_internal` es siempre 0/NULL.
+7. **Scope.** Catálogo, auth, ratings/reviews propios (`rating_internal`,
+   agregado desde `user_ratings`) y capa social (follows + feed). Mensajería
+   directa entre usuarios está **fuera de scope**.
 
 ## Flujo de datos
 

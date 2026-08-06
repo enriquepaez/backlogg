@@ -41,8 +41,9 @@ solo la referencia. Nunca aceptes bloques de código en el chat.
 
 **Stack:** Python 3.12+ · uv · FastAPI · SQLAlchemy 2.0 · Alembic · Pydantic v2 · PostgreSQL (Neon) · ruff · pytest · Render (el sync nocturno corre vía GitHub Actions, no in-process)
 
-**MVP scope:** catalog modeling, external API integration, search y sync.
-Auth, listas de usuario, ratings propios, reviews y features sociales están **fuera de scope**.
+**Scope:** catalog modeling, external API integration, search, sync, cuentas
+de usuario, ratings/reviews y una capa social (follows + feed). Mensajería
+directa entre usuarios está **fuera de scope**.
 
 ## Docs de referencia
 

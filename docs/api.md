@@ -266,8 +266,6 @@ When `GET /{type}/{slug}` finds no local result, the service layer:
 
 If the item is not found in the external API either, returns `404`.
 
-## Out of scope in MVP
+## Out of scope
 
-- Auth endpoints (`POST /auth/login`, `POST /auth/register`)
-- User list endpoints (`GET /users/{id}/lists`, `POST /lists`, etc.)
-- Rating endpoints
+- Direct messaging between users.
