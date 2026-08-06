@@ -22,5 +22,9 @@ class Settings(BaseSettings):
 
     ADMIN_API_KEY: str = ""
 
+    JWT_SECRET_KEY: str = ""
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 10080
+
 
 settings = Settings()

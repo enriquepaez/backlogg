@@ -14,6 +14,7 @@ from backlogg.people.routes import router as people_router
 from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
 from backlogg.trending.router import router as trending_router
+from backlogg.users.routes import auth_router, users_router
 
 app = FastAPI(title="Backlogg API")
 
@@ -58,3 +59,5 @@ app.include_router(search_router)
 app.include_router(admin_router)
 app.include_router(genres_router)
 app.include_router(trending_router)
+app.include_router(auth_router)
+app.include_router(users_router)
