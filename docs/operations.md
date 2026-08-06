@@ -21,6 +21,7 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
 | `SYNC_SLICE_SIZE` | 100 | Tramo por request de sync; >100 arriesga el timeout de ~15 min por request de Render |
 | `ADMIN_API_KEY` | (secret) | Protege `/admin/*` |
 | `CORS_ORIGINS` | (opcional) | Orígenes permitidos, comma-separated |
+| `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/auth/*`. Sin configurar, `POST /auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
 
 ## Secrets de GitHub Actions
 
