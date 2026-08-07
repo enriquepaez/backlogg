@@ -34,7 +34,8 @@ Vertical slices por dominio. Cada dominio contiene todo lo necesario:
 ```
 backlogg/
 ├── <domain>/              # movies, series, books, games, people, search,
-│   │                      # genres, trending
+│   │                      # genres, trending, users, ratings, follows, feed,
+│   │                      # library, lists, notifications, recommendations
 │   ├── models.py          # SQLAlchemy ORM models
 │   ├── schemas.py         # Pydantic v2 request/response schemas
 │   ├── repository.py      # DB queries (solo este archivo toca SQLAlchemy)
@@ -82,8 +83,11 @@ scripts/
    El implementer debe leer TODOS los archivos de migración existentes antes de
    escribir uno nuevo.
 
-7. **Scope.** Catálogo, auth, ratings/reviews propios (`rating_internal`,
-   agregado desde `user_ratings`) y capa social (follows + feed). Mensajería
+7. **Scope.** Catálogo, auth (con refresh tokens y recuperación de cuenta),
+   ratings/reviews propios (`rating_internal`, agregado desde `user_ratings`),
+   biblioteca/backlog por usuario, listas curadas, recomendaciones
+   personalizadas y capa social (follows + feed + notificaciones). Como capa
+   de plataforma: rate limiting, observabilidad, métricas y caché. Mensajería
    directa entre usuarios está **fuera de scope**.
 
 ## Flujo de datos
