@@ -537,6 +537,216 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 31,
+      "name": "user_library",
+      "title": "User library — backlog por usuario (want/in_progress/completed/dropped)",
+      "description": "Nuevo dominio backlogg/library/: una entrada por (usuario, item) con estado de backlog, patrón polimórfico item_type/item_id como user_ratings/credits. Es la feature que da nombre al proyecto: cada usuario mantiene su lista de pendientes/en curso/terminados/abandonados a través de los 4 tipos. Extiende el perfil público con conteos por estado y el detalle de item con el estado del caller.",
+      "depends_on": [27, 2, 3, 4, 5],
+      "acceptance": [
+        "Modelo LibraryEntry (user_id, item_type, item_id, status enum [want, in_progress, completed, dropped], created_at, updated_at) con UniqueConstraint(user_id, item_type, item_id)",
+        "Migración Alembic 0012_user_library.py (down_revision = la última migración existente) crea la tabla library_entries",
+        "PUT /movies/{slug}/library (y equivalente en series/books/games) — auth requerida, upsert del status del usuario autenticado; 422 si status inválido",
+        "DELETE /movies/{slug}/library (y equivalente) — auth requerida, elimina la entrada propia; 404 si no existe",
+        "GET /users/{username}/library — público, paginado, filtrable por ?status= y ?type=, cross-type vía UNION ALL (mismo estilo que feed/genres); cada entrada incluye item (item_type, title, slug, poster_url, release_date, rating_external) y status",
+        "GET /{type}/{slug} incluye viewer_status: el status del caller autenticado para ese item, o null si no autenticado o sin entrada (auth opcional, sin romper compatibilidad de campos existentes)",
+        "GET /users/{username} (feature 27) se extiende con library_counts {want, in_progress, completed, dropped}",
+        "docs/schema.md documenta library_entries; docs/api.md documenta los endpoints nuevos",
+        "Tests de repositorio, servicio y endpoint (upsert de status, filtros por status/type, 401/404/422, counts en perfil, viewer_status con y sin auth)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 32,
+      "name": "user_lists",
+      "title": "User lists — colecciones curadas públicas/privadas con items ordenados",
+      "description": "Nuevo dominio backlogg/lists/: listas nombradas creadas por usuarios (p.ej. 'Mejor sci-fi') con items cross-type ordenados y visibilidad público/privado. Un slug por (owner, lista).",
+      "depends_on": [27, 2, 3, 4, 5],
+      "acceptance": [
+        "Modelo UserList (id, user_id, slug, title, description nullable, is_public bool, created_at, updated_at) con UniqueConstraint(user_id, slug)",
+        "Modelo ListItem (list_id, item_type, item_id, position, added_at) con UniqueConstraint(list_id, item_type, item_id)",
+        "Migración Alembic 0013_user_lists.py crea las tablas user_lists y list_items",
+        "POST /lists — auth, crea la lista (slug derivado del título, único por usuario), 201",
+        "PATCH /lists/{slug} y DELETE /lists/{slug} — auth, solo el owner (403 si no lo es); 404 si no existe",
+        "POST /lists/{slug}/items y DELETE /lists/{slug}/items — auth owner, añade/quita item (item_type + slug); idempotente; al añadir, position va al final",
+        "PUT /lists/{slug}/items/order — auth owner, reordena los items de la lista",
+        "GET /lists/{slug} — accesible si is_public; si es privada, solo el owner la ve (404 para el resto); incluye los items resueltos cross-type en orden",
+        "GET /users/{username}/lists — devuelve las listas públicas de cualquiera; incluye las privadas solo si el caller es el owner",
+        "docs/schema.md y docs/api.md actualizados",
+        "Tests de repositorio, servicio y endpoint (ownership 403, visibilidad privada 404, idempotencia de items, reordenación)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 33,
+      "name": "notifications",
+      "title": "Notifications — nuevo follower y likes en tus reviews",
+      "description": "Nuevo dominio backlogg/notifications/: tabla notifications generada por eventos sociales (nuevo follower, like en una review propia). Sin mensajería directa (fuera de scope). Feed de notificaciones del usuario autenticado con marca de leído.",
+      "depends_on": [28, 29],
+      "acceptance": [
+        "Modelo Notification (id, recipient_id, actor_id, type enum [new_follower, review_like], target_type nullable, target_id nullable, is_read bool default false, created_at) con índice (recipient_id, created_at desc)",
+        "Migración Alembic 0014_notifications.py crea la tabla notifications",
+        "Al crear un follow (feature 29) se genera una notificación new_follower para el followed; no se notifica un self-follow ni se duplica en un re-follow idempotente",
+        "Al dar like a una review (feature 28) se genera review_like para el autor de la review; no se notifica si el autor se da like a sí mismo; el unlike no genera notificación",
+        "GET /notifications — auth, paginado, reverse-chronological; cada entrada incluye actor (username, display_name, avatar_url) e info del target",
+        "GET /notifications/unread_count — auth, devuelve el número de notificaciones no leídas",
+        "POST /notifications/read — auth, marca todas (o los ids indicados) como leídas; idempotente",
+        "La generación de notificaciones no rompe la operación origen si falla (degradación elegante)",
+        "docs/schema.md y docs/api.md actualizados",
+        "Tests de repositorio, servicio y endpoint (generación en follow/like, no-self, unread_count, marcado idempotente)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 34,
+      "name": "personalized_recommendations",
+      "title": "Personalized recommendations — GET /recommendations desde library + ratings",
+      "description": "Endpoint GET /recommendations que genera sugerencias personalizadas para el usuario autenticado a partir de sus items mejor valorados y de su library (want/completed), haciendo fan-out a las recomendaciones de TMDB (feature 16) y a solapamiento por género, excluyendo lo que ya ha visto o tiene.",
+      "depends_on": [31, 28, 16],
+      "acceptance": [
+        "GET /recommendations — auth requerida (401 sin token), ?type= opcional, con limit/paginación",
+        "Semillas: items del usuario con score >= 4 y/o status completed/want; si no hay semillas, hace fallback a trending/popular (lista no vacía cuando hay catálogo, sin error)",
+        "Reúne candidatos vía las recomendaciones existentes de movies/series (feature 16); para books/games (sin API de similares) usa solapamiento por género como heurística",
+        "Excluye de los resultados los items que el usuario ya ha puntuado o tiene en su library",
+        "Cada resultado incluye item_type, title, slug, poster_url, release_date, rating_external y un motivo legible (p.ej. 'porque valoraste X')",
+        "No se dispara fan-out externo cuando ya hay suficientes candidatos locales",
+        "Tests de servicio con adapters mockeados (semillas, exclusión de vistos, fallback sin semillas, filtro por type)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 35,
+      "name": "auth_refresh_tokens",
+      "title": "Refresh tokens — access corto + refresh rotatorio con revocación",
+      "description": "Sustituir el JWT de larga duración por un access token corto más un refresh token persistido y rotatorio. El login devuelve ambos; /auth/refresh emite un par nuevo e invalida el anterior; /auth/logout revoca el refresh. Detección de reuse.",
+      "depends_on": [27],
+      "acceptance": [
+        "Modelo RefreshToken (id, user_id, token_hash, expires_at, revoked_at nullable, created_at) — nunca se persiste el token en claro, solo su hash",
+        "Migración Alembic 0015_refresh_tokens.py crea la tabla refresh_tokens",
+        "Settings: JWT_EXPIRE_MINUTES pasa a ser corto (access) y se añade REFRESH_EXPIRE_DAYS",
+        "POST /auth/login devuelve access_token y refresh_token",
+        "POST /auth/refresh valida el refresh (existe, no expirado, no revocado), rota (revoca el usado y emite uno nuevo) y devuelve el nuevo par; 401 si es inválido/revocado/expirado",
+        "POST /auth/logout — auth, revoca el refresh presentado (idempotente)",
+        "Reusar un refresh ya rotado/revocado devuelve 401 (detección de reuse)",
+        "Compatibilidad: get_current_user (feature 27) sigue validando el access token igual que hoy",
+        "docs/schema.md y docs/api.md actualizados",
+        "Tests de servicio y endpoint (rotación, revocación, reuse, expiración)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 36,
+      "name": "account_recovery",
+      "title": "Account recovery — verificación de email y reset de password (token-based)",
+      "description": "Verificación de email y restablecimiento de contraseña mediante tokens de un solo uso con expiración. El correo se envía con Resend a través de una interfaz de EmailSender: implementación real (Resend) cuando RESEND_API_KEY está configurada, y fallback que loguea el enlace en dev cuando no lo está. El flujo, la seguridad del token y el envío desacoplado son el entregable.",
+      "depends_on": [27],
+      "acceptance": [
+        "Tabla de tokens de un solo uso (verificación de email y reset de password) con hash, propósito, expiración y timestamp de consumo; nunca en claro",
+        "Migración Alembic 0016_account_recovery.py (incluye users.email_verified bool default false)",
+        "Dependencia resend añadida a pyproject.toml; settings RESEND_API_KEY, RESEND_FROM_EMAIL y APP_BASE_URL (para construir los enlaces) en backlogg/core/config.py",
+        "Interfaz EmailSender aislada de la lógica de negocio: implementación Resend cuando RESEND_API_KEY está presente; fallback que loguea el enlace (sin enviar) cuando falta — la app arranca y funciona en ambos casos",
+        "POST /auth/verify/request (auth) genera token de verificación y envía el email de verificación; POST /auth/verify/confirm consume el token y marca email_verified=true; token inválido/expirado/usado → 400",
+        "POST /auth/password/forgot (por email, sin auth) genera token de reset, envía el email y responde 202 siempre, sin revelar si el email existe (no enumeración)",
+        "POST /auth/password/reset consume el token, cambia el password_hash y revoca los refresh tokens activos si la feature 35 está presente",
+        "Los tokens caducan y son de un solo uso; reusarlos → 400",
+        "Un fallo de Resend al enviar no filtra si el email existe ni rompe la respuesta del endpoint (se registra y se responde igual)",
+        "La RESEND_API_KEY nunca aparece en logs ni en respuestas de error",
+        "docs/schema.md, docs/api.md y docs/operations.md (secret RESEND_API_KEY + variables de entorno) actualizados",
+        "Tests de servicio y endpoint con EmailSender mockeado (verificación, reset, no enumeración de emails, expiración/single-use, fallback sin API key)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 37,
+      "name": "rate_limiting",
+      "title": "Rate limiting — límites por IP/usuario en auth y fallback externo",
+      "description": "Rate limiting para proteger endpoints sensibles (/auth/*, búsqueda con fallback externo, escrituras). Configurable por env; devuelve 429 con Retry-After. Almacenamiento in-process (suficiente para una instancia) tras una interfaz que permita mover a Redis después.",
+      "depends_on": [22],
+      "acceptance": [
+        "Límites configurables por env (p.ej. RATE_LIMIT_AUTH, RATE_LIMIT_DEFAULT)",
+        "POST /auth/login y POST /auth/register limitados por IP; superar el límite devuelve 429 con header Retry-After",
+        "El fallback externo de /search (feature 17) está limitado para no abusar de las APIs externas",
+        "Las respuestas 429 no filtran información sensible",
+        "El contador está tras una interfaz (in-process por defecto) reemplazable sin tocar los call sites",
+        "Los endpoints no limitados siguen respondiendo con normalidad",
+        "Tests que verifican 429 tras exceder el límite y el reset tras la ventana",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 38,
+      "name": "observability",
+      "title": "Observability — logging estructurado con request IDs + Sentry opcional",
+      "description": "Logging estructurado (JSON) con correlación por request ID e integración opcional de Sentry activada por env (SENTRY_DSN). Sin proveedor configurado, la app funciona igual y sin overhead.",
+      "depends_on": [9],
+      "acceptance": [
+        "Middleware que asigna/propaga un X-Request-ID por petición y lo incluye en todos los logs de esa petición y en la respuesta",
+        "Logs estructurados (JSON) con nivel configurable por env (LOG_LEVEL); cada request registra método, path, status y duración",
+        "Datos sensibles (passwords, API keys, tokens, X-API-Key) nunca aparecen en los logs",
+        "Integración Sentry activada solo si SENTRY_DSN está presente; sin ella no hay overhead ni fallos",
+        "Las excepciones no controladas se capturan correlacionadas con el request ID",
+        "Tests que verifican el request ID en la respuesta y el redactado de campos sensibles",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 39,
+      "name": "metrics_endpoint",
+      "title": "Metrics — endpoint /metrics estilo Prometheus",
+      "description": "Exponer métricas operativas en formato de exposición Prometheus: contadores de requests por endpoint/status, latencias y contadores de negocio (syncs, fan-outs externos). Sin datos sensibles ni PII.",
+      "depends_on": [38],
+      "acceptance": [
+        "GET /metrics devuelve 200 en formato de exposición Prometheus",
+        "Incluye al menos: total de requests por método+ruta+status y un histograma/summary de latencia",
+        "Incluye contadores de negocio: syncs ejecutados y fan-outs a APIs externas",
+        "El endpoint no expone datos sensibles ni PII",
+        "El overhead de instrumentación es acotado y no rompe endpoints existentes",
+        "Tests que verifican el formato y la presencia de las series clave",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 40,
+      "name": "response_caching",
+      "title": "Response caching — Cache-Control/ETag + caché in-process para lecturas calientes",
+      "description": "Cabeceras Cache-Control/ETag en lecturas idempotentes (detalle, listados, géneros, trending) y una caché in-process con TTL para las respuestas más costosas (trending, genres). Interfaz reemplazable para mover a Redis después.",
+      "depends_on": [14, 15, 20],
+      "acceptance": [
+        "GET de detalle y listados devuelven Cache-Control apropiado; el detalle soporta ETag + If-None-Match → 304",
+        "Caché in-process con TTL para /trending y /genres (respuestas costosas), tras una interfaz reemplazable (in-process por defecto)",
+        "Los endpoints con estado por usuario (feed, /users/me, viewer_status) no se cachean de forma compartida",
+        "La caché no sirve datos obsoletos más allá del TTL configurado",
+        "Tests que verifican el 304 con ETag y el hit/miss de la caché con TTL",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 41,
+      "name": "openapi_polish",
+      "title": "OpenAPI polish — tags, descripciones y ejemplos para consumo por frontend",
+      "description": "Enriquecer el esquema OpenAPI generado: tags por dominio, summaries/descripciones por operación, ejemplos de request/response y metadatos de la app. Facilita generar clientes y una UI a partir de /openapi.json.",
+      "depends_on": [30],
+      "acceptance": [
+        "Cada router declara tags coherentes por dominio y summary/description por operación",
+        "Los schemas de respuesta clave incluyen ejemplos (Pydantic model_config / json_schema_extra)",
+        "La instancia FastAPI declara title, version y description",
+        "GET /openapi.json valida como OpenAPI 3.x y refleja tags y ejemplos",
+        "Swagger UI (/docs) agrupa los endpoints por dominio",
+        "Tests que verifican la presencia de tags y ejemplos en el esquema generado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

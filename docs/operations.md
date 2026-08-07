@@ -23,6 +23,20 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
 | `CORS_ORIGINS` | (opcional) | Orígenes permitidos, comma-separated |
 | `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/auth/*`. Sin configurar, `POST /auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
 
+### Roadmap — env vars planificadas en Render (features 35-40)
+
+Se configuran cuando se despliegue cada feature. Detalle en `docs/external-apis.md`.
+
+| Env var | Feature | Notas |
+|---|---|---|
+| `RESEND_API_KEY` | 36 | (secret) API key de Resend. Sin ella, `EmailSender` loguea el enlace en vez de enviar |
+| `RESEND_FROM_EMAIL` | 36 | Remitente verificado en Resend (dominio verificado) |
+| `APP_BASE_URL` | 36 | Base pública para los enlaces de verificación/reset |
+| `REFRESH_EXPIRE_DAYS` | 35 | Vida del refresh token; `JWT_EXPIRE_MINUTES` pasa a valor corto |
+| `RATE_LIMIT_AUTH` / `RATE_LIMIT_DEFAULT` | 37 | Límites de rate limiting por ventana |
+| `SENTRY_DSN` | 38 | (secret) DSN de Sentry; ausente = integración off |
+| `LOG_LEVEL` | 38 | Nivel de logging estructurado |
+
 ## Secrets de GitHub Actions
 
 | Secret | Usado por |
