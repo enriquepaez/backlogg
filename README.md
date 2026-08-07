@@ -22,48 +22,48 @@ lo devuelve en la misma petición.
 
 ## Quickstart
 
+Requiere `uv` y Docker (no hace falta PostgreSQL nativo).
+
 ```bash
-# Dependencias (requiere uv; no requiere PostgreSQL nativo, ver Docker abajo)
+# 1. Dependencias
 uv sync
 
-# Configuración — copiar plantilla y rellenar credenciales de APIs externas
-# (ver docs/external-apis.md)
+# 2. Configuración — la plantilla ya trae la config de la DB local lista.
+#    Solo rellena las credenciales de APIs externas si vas a usar
+#    sync/on-demand en local (ver docs/external-apis.md).
 cp .env.example .env
 
-# Sin PostgreSQL nativo: levantar uno vía Docker (una sola vez; crea las
-# DBs backlogg y backlogg_test con auth trust, rol = usuario del SO)
-docker run -d --name backlogg-test-pg -p 5432:5432 \
-  -e POSTGRES_USER=$(whoami) -e POSTGRES_HOST_AUTH_METHOD=trust \
-  -e POSTGRES_DB=backlogg_test postgres:16-alpine
-psql -h localhost -U $(whoami) -d postgres -c 'CREATE DATABASE backlogg'
+# 3. Base de datos local: Postgres en Docker, con datos persistentes.
+#    Crea las DBs `backlogg` (dev) y `backlogg_test` (tests) en el primer
+#    arranque. Ver docker-compose.yml.
+docker compose up -d
 
-# En sesiones siguientes, si el contenedor existe pero está parado:
-docker start backlogg-test-pg
-
-# En .env: DATABASE_URL debe apuntar a `backlogg` (DB de dev) y
-# TEST_DATABASE_URL a `backlogg_test` (DB de test, que pytest trunca en
-# cada run) — NUNCA la misma DB en ambas, o pytest borra tus datos de dev.
-# Con auth trust no hace falta contraseña:
-#   DATABASE_URL=postgresql+asyncpg://<tu-usuario-unix>@localhost/backlogg
-#   TEST_DATABASE_URL=postgresql+asyncpg://<tu-usuario-unix>@localhost/backlogg_test
-
-# Aplicar migraciones a la DB de dev (backlogg_test se automigra al correr
-# los tests, vía la fixture apply_migrations de tests/conftest.py)
+# 4. Migraciones a la DB de dev (backlogg_test se automigra al correr los
+#    tests, vía la fixture de tests/conftest.py)
 uv run alembic upgrade head
 
-# Verificar el entorno completo: archivos, lint, formato y suite de tests
+# 5. Verificar el entorno completo: archivos, lint, formato y tests
 bash init.sh
 
 # Arrancar la API en local
 uv run uvicorn backlogg.main:app --reload
-
-# Conectarse a la DB de dev para inspección manual
-psql -h localhost -U $(whoami) -d backlogg
-
-# Solo tests / solo lint
-uv run pytest -q
-uv run ruff check .
 ```
+
+Uso diario:
+
+```bash
+docker compose up -d          # levantar la DB (persiste entre reinicios)
+docker compose down           # parar la DB conservando los datos
+docker compose down -v        # parar y BORRAR los datos (empezar limpio)
+
+uv run pytest -q              # solo tests
+uv run ruff check .           # solo lint
+docker compose exec db psql -U postgres -d backlogg   # inspección manual
+```
+
+> `DATABASE_URL` (DB de dev) y `TEST_DATABASE_URL` deben apuntar a DBs
+> distintas — pytest trunca la de test en cada run. La plantilla ya las
+> configura bien (`backlogg` vs `backlogg_test`).
 
 ## API
 
