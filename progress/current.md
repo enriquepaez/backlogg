@@ -2,7 +2,5 @@
 
 Sin feature en curso.
 
-Próximo paso: feature 29 — `follows` (ver `feature_list.json`).
-Épico en curso: capa social (auth ✅ / ratings+reviews ✅ / follows / feed).
-Plan completo del épico en
-`/home/enriquepaez/.claude/plans/luminous-finding-hickey.md`.
+Épico social: auth ✅ / ratings+reviews ✅ / follows ✅ / feed (pendiente, feature 30).
+Próximo paso: feature 30 — `activity_feed` (depende de 28 y 29, ya done).
