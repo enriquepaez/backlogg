@@ -90,6 +90,8 @@ async def get_game(db: AsyncSession, slug: str) -> GameOut:
         backdrop_url=game.backdrop_url,
         rating_external=float(game.rating_external) if game.rating_external is not None else None,
         rating_count_external=game.rating_count_external,
+        rating_internal=(float(game.rating_internal) if game.rating_internal is not None else None),
+        rating_count_internal=game.rating_count_internal,
         genres=[GameGenreOut(id=g.id, name=g.name, slug=g.slug) for g in game.genres],
         platforms=[GamePlatformOut(id=p.id, name=p.name, slug=p.slug) for p in game.platforms],
         credits=credits,

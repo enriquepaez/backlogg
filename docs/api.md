@@ -6,7 +6,11 @@
 - **Pagination**: offset/limit. Parameters: `page` (1-based) and `limit` (default 20, max 100)
 - **Content-Type**: `application/json`
 - **Admin auth**: los endpoints `/admin/*` requieren el header `X-API-Key`
-  (ver sección Admin). El resto de la API es pública.
+  (ver sección Admin).
+- **User auth**: `POST /auth/login` devuelve un JWT (`access_token`). Los
+  endpoints que lo requieren esperan `Authorization: Bearer <token>` y
+  devuelven `401` si falta, es inválido o expiró (ver sección Auth & Users).
+  El resto de la API es pública.
 - **CORS y security headers**: orígenes permitidos vía `CORS_ORIGINS`
   (comma-separated; sin configurar permite `localhost:3000` y `localhost:5173`).
   Todas las respuestas llevan `X-Content-Type-Options: nosniff`,
@@ -107,7 +111,8 @@ GET /movies/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `runtime`, `original_language`, `poster_url`, `backdrop_url`, `budget`, `revenue`,
-`status`, `rating_external`, `rating_count_external`, `genres[]`, `credits[]`
+`status`, `rating_external`, `rating_count_external`, `rating_internal`,
+`rating_count_internal`, `genres[]`, `credits[]`
 
 ```
 GET /movies/{slug}/similar
@@ -128,7 +133,8 @@ GET /series/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_air_date`,
 `last_air_date`, `number_of_seasons`, `number_of_episodes`, `status`, `original_language`,
-`poster_url`, `backdrop_url`, `rating_external`, `rating_count_external`, `genres[]`, `credits[]`
+`poster_url`, `backdrop_url`, `rating_external`, `rating_count_external`, `rating_internal`,
+`rating_count_internal`, `genres[]`, `credits[]`
 
 ```
 GET /series/{slug}/similar
@@ -145,7 +151,8 @@ GET /books/{slug}
 ```
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_publish_date`,
-`original_language`, `poster_url`, `rating_external`, `rating_count_external`, `genres[]`
+`original_language`, `poster_url`, `rating_external`, `rating_count_external`,
+`rating_internal`, `rating_count_internal`, `genres[]`
 
 ### Games
 
@@ -157,11 +164,120 @@ GET /games/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `game_type`, `original_language`, `poster_url`, `backdrop_url`, `rating_external`,
-`rating_count_external`, `genres[]`, `platforms[]`, `credits[]`
+`rating_count_external`, `rating_internal`, `rating_count_internal`, `genres[]`,
+`platforms[]`, `credits[]`
 
 **`credits[]`** (en detail de movies, series y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
 `billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
+
+### Auth & Users
+
+```
+POST /auth/register
+→ 201  Cuenta creada
+→ 409  username o email ya en uso
+→ 422  validación de payload (username/email/password fuera de formato o longitud)
+```
+
+Body: `{"username": string, "email": string, "password": string (min 8),
+"display_name": string | null}`. `username` solo admite `[a-zA-Z0-9_-]`,
+3-50 caracteres — es el identificador en las URLs (`/users/{username}`),
+no hay slug ni id numérico expuestos.
+
+Response (`UserMeOut`, incluye email — solo se devuelve así en register/login/me):
+`username`, `email`, `display_name`, `bio`, `avatar_url`.
+
+```
+POST /auth/login
+→ 200  Login correcto
+→ 401  Credenciales inválidas
+```
+
+Body: `{"username": string, "password": string}`.
+Response: `{"access_token": string, "token_type": "bearer"}`.
+
+```
+GET /users/me
+→ 200  Perfil propio (incluye email)
+→ 401  Sin token / token inválido o expirado
+```
+
+```
+PATCH /users/me
+→ 200  Perfil actualizado
+→ 401  Sin token
+```
+
+Body (reemplazo parcial, todos los campos opcionales):
+`{"display_name": string | null, "bio": string | null, "avatar_url": string | null}`.
+
+```
+GET /users/{username}
+→ 200  Perfil público (sin email)
+→ 404  Username no encontrado
+```
+
+Response (`UserOut`, público): `username`, `display_name`, `bio`, `avatar_url`.
+
+### Ratings & reviews
+
+Mismo contrato en los 4 tipos de contenido — sustituir `{type}` por
+`movies`, `series`, `books` o `games`.
+
+```
+PUT /{type}/{slug}/rating
+→ 200  Upsert de la puntuación/review del usuario autenticado
+→ 401  Sin token
+→ 404  Slug no encontrado
+→ 422  score fuera de 1-5
+```
+
+Body: `{"score": 1-5 | null, "review_text": string | null}` — reemplazo
+completo (PUT), no parcial: omitir un campo lo deja en `null`. Tras cada
+upsert se recalculan `rating_internal` (AVG) y `rating_count_internal`
+(COUNT) del item.
+
+Response: `id`, `user` (`username`, `display_name`, `avatar_url`), `score`,
+`review_text`, `like_count`, `created_at`, `updated_at`.
+
+```
+DELETE /{type}/{slug}/rating
+→ 204  Rating propia eliminada; agregados recalculados
+→ 401  Sin token
+→ 404  El usuario no tiene rating para ese item
+```
+
+```
+GET /{type}/{slug}/ratings?page=&limit=
+→ 200  Lista paginada, pública, más reciente primero
+→ 404  Slug no encontrado
+```
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada item
+tiene el mismo shape que la respuesta de `PUT .../rating`, incluyendo
+`like_count`.
+
+```
+POST /ratings/{id}/like
+DELETE /ratings/{id}/like
+→ 204  Auth requerida, idempotente (dar/quitar like dos veces no falla)
+→ 401  Sin token
+→ 404  Rating no encontrada
+```
+
+`{id}` es el id numérico de la rating (no tiene slug propio).
+
+```
+GET /users/{username}/reviews?page=&limit=
+→ 200  Público, paginado, cross-type (UNION ALL de movies/series/books/games)
+→ 404  Username no encontrado
+```
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada item:
+`id`, `item` (`item_type`, `title`, `slug`, `poster_url`), `score`,
+`review_text`, `created_at`, `updated_at`. Incluye entradas con y sin
+`review_text`.
 
 ### People
 

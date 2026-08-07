@@ -1,0 +1,143 @@
+"""Ratings service — business logic for ratings/reviews across all 4 content types.
+
+Each PUT/DELETE/GET .../rating(s) route in movies/series/books/games routes.py
+delegates here, passing the resolved ``item_type`` ("MOVIE"/"SERIES"/"BOOK"/
+"GAME") and the ``slug`` from the URL. This keeps the upsert + aggregate
+recalculation logic in one place instead of duplicating it across four
+domain slices.
+"""
+
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backlogg.ratings import repository as repo
+from backlogg.ratings.schemas import (
+    RatingAuthorOut,
+    RatingIn,
+    RatingListOut,
+    RatingOut,
+    UserReviewItemOut,
+    UserReviewListOut,
+    UserReviewOut,
+)
+from backlogg.users import repository as users_repo
+from backlogg.users.models import User
+
+_ITEM_NOT_FOUND_DETAIL = {
+    "MOVIE": "Movie not found",
+    "SERIES": "Series not found",
+    "BOOK": "Book not found",
+    "GAME": "Game not found",
+}
+
+
+def _rating_to_out(rating, user: User, like_count: int) -> RatingOut:
+    return RatingOut(
+        id=rating.id,
+        user=RatingAuthorOut.model_validate(user),
+        score=rating.score,
+        review_text=rating.review_text,
+        like_count=like_count,
+        created_at=rating.created_at,
+        updated_at=rating.updated_at,
+    )
+
+
+async def _get_item_or_404(db: AsyncSession, item_type: str, slug: str):
+    item = await repo.get_item_by_slug(db, item_type, slug)
+    if item is None:
+        raise HTTPException(status_code=404, detail=_ITEM_NOT_FOUND_DETAIL[item_type])
+    return item
+
+
+async def rate_item(
+    db: AsyncSession, item_type: str, slug: str, payload: RatingIn, user: User
+) -> RatingOut:
+    """Upsert the authenticated user's score/review_text for an item."""
+    item = await _get_item_or_404(db, item_type, slug)
+
+    rating = await repo.upsert_rating(
+        db,
+        user_id=user.id,
+        item_type=item_type,
+        item_id=item.id,
+        score=payload.score,
+        review_text=payload.review_text,
+    )
+    await repo.recalculate_item_aggregates(db, item_type, item.id)
+    await db.commit()
+
+    like_count = await repo.count_likes(db, rating.id)
+    return _rating_to_out(rating, user, like_count)
+
+
+async def delete_item_rating(db: AsyncSession, item_type: str, slug: str, user: User) -> None:
+    """Delete the authenticated user's own rating for an item. 404 if it doesn't exist."""
+    item = await _get_item_or_404(db, item_type, slug)
+
+    rating = await repo.get_rating(db, user_id=user.id, item_type=item_type, item_id=item.id)
+    if rating is None:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    await repo.delete_rating(db, rating)
+    await repo.recalculate_item_aggregates(db, item_type, item.id)
+    await db.commit()
+
+
+async def list_item_ratings(
+    db: AsyncSession, item_type: str, slug: str, page: int, limit: int
+) -> RatingListOut:
+    """Public, paginated list of ratings/reviews for an item, newest first."""
+    item = await _get_item_or_404(db, item_type, slug)
+
+    rows, total = await repo.list_ratings_for_item(db, item_type, item.id, page, limit)
+    items = [_rating_to_out(rating, user, like_count) for rating, user, like_count in rows]
+    return RatingListOut(items=items, total=total, page=page, limit=limit)
+
+
+async def like_review(db: AsyncSession, rating_id: int, user: User) -> None:
+    """Like a review. Idempotent — liking twice does not duplicate. 404 if rating missing."""
+    rating = await repo.get_rating_by_id(db, rating_id)
+    if rating is None:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    await repo.create_like_if_not_exists(db, user_id=user.id, rating_id=rating_id)
+    await db.commit()
+
+
+async def unlike_review(db: AsyncSession, rating_id: int, user: User) -> None:
+    """Unlike a review. Idempotent — unliking twice (or never liked) is a no-op."""
+    rating = await repo.get_rating_by_id(db, rating_id)
+    if rating is None:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    await repo.delete_like_if_exists(db, user_id=user.id, rating_id=rating_id)
+    await db.commit()
+
+
+async def get_user_reviews(
+    db: AsyncSession, username: str, page: int, limit: int
+) -> UserReviewListOut:
+    """Public, cross-type (UNION ALL) list of a user's ratings/reviews, newest first."""
+    target_user = await users_repo.get_user_by_username(db, username)
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows, total = await repo.list_user_reviews(db, target_user.id, page, limit)
+    items = [
+        UserReviewOut(
+            id=row.id,
+            item=UserReviewItemOut(
+                item_type=row.item_type,
+                title=row.title,
+                slug=row.slug,
+                poster_url=row.poster_url,
+            ),
+            score=row.score,
+            review_text=row.review_text,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+    return UserReviewListOut(items=items, total=total, page=page, limit=limit)

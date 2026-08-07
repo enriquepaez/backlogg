@@ -1,0 +1,21 @@
+meta {
+  name: Delete movie rating
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/movies/oppenheimer-2023/rating
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}

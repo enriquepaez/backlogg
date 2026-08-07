@@ -1,0 +1,33 @@
+meta {
+  name: Put movie rating
+  type: http
+  seq: 1
+}
+
+put {
+  url: {{baseUrl}}/movies/oppenheimer-2023/rating
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "score": 5,
+    "review_text": "A masterpiece."
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("upserted score and review_text", function() {
+    expect(res.body.score).to.equal(5);
+    expect(res.body.review_text).to.equal("A masterpiece.");
+  });
+}

@@ -1,0 +1,17 @@
+meta {
+  name: Get book ratings
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/books/harry-potter-and-the-philosophers-stone-1997/ratings
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

@@ -1,0 +1,26 @@
+meta {
+  name: Unlike rating
+  type: http
+  seq: 17
+}
+
+delete {
+  url: {{baseUrl}}/ratings/1/like
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  Replace `1` with a real rating id, same as "Like rating". Does not fail
+  if the like doesn't exist.
+}

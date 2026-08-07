@@ -1,0 +1,28 @@
+meta {
+  name: Put game rating
+  type: http
+  seq: 13
+}
+
+put {
+  url: {{baseUrl}}/games/baldurs-gate-iii/rating
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "score": 5,
+    "review_text": "GOTY."
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

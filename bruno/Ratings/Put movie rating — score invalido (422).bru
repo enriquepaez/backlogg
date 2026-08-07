@@ -1,0 +1,28 @@
+meta {
+  name: Put movie rating — score invalido (422)
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/movies/oppenheimer-2023/rating
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "score": 7,
+    "review_text": null
+  }
+}
+
+tests {
+  test("status 422", function() {
+    expect(res.status).to.equal(422);
+  });
+}

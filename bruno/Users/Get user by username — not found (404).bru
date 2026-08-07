@@ -1,0 +1,17 @@
+meta {
+  name: Get user by username — not found (404)
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/users/username-that-does-not-exist
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}

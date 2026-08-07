@@ -44,6 +44,8 @@ class SeriesOut(BaseModel):
     backdrop_url: str | None
     rating_external: float | None
     rating_count_external: int | None
+    rating_internal: float | None
+    rating_count_internal: int
     genres: list[SeriesGenreOut]
     credits: list[CreditOut] = []
 

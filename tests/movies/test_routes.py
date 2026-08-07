@@ -62,6 +62,8 @@ async def test_get_movie_returns_200(client, db):
     assert len(body["genres"]) == 2
     genre_names = {g["name"] for g in body["genres"]}
     assert genre_names == {"Action", "Sci-Fi"}
+    assert body["rating_internal"] is None
+    assert body["rating_count_internal"] == 0
 
 
 async def test_get_movie_returns_404(client, db):

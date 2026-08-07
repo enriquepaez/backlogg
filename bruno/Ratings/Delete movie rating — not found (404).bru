@@ -1,0 +1,21 @@
+meta {
+  name: Delete movie rating — not found (404)
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/movies/oppenheimer-2023/rating
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
