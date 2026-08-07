@@ -31,6 +31,7 @@ jobs:
       TMDB_API_KEY: ""
       TWITCH_CLIENT_ID: ""
       TWITCH_CLIENT_SECRET: ""
+      JWT_SECRET_KEY: "ci-test-secret-key-not-for-prod-32bytes"
 
     steps:
       - name: Checkout repository
