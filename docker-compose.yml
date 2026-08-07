@@ -1,0 +1,32 @@
+# Local development database.
+#
+#   docker compose up -d          # start Postgres (data persists in a volume)
+#   uv run alembic upgrade head   # apply migrations
+#   docker compose down           # stop (data is kept)
+#   docker compose down -v        # stop AND wipe the data volume
+#
+# .env's DATABASE_URL / TEST_DATABASE_URL already point at localhost:5432.
+# This is DEV ONLY — production runs on Neon (configured in Render).
+services:
+  db:
+    image: postgres:16
+    container_name: backlogg-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: backlogg
+    ports:
+      # Bind to localhost only — the dev DB (weak password) must not be
+      # reachable from other machines on your network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - backlogg-pgdata:/var/lib/postgresql/data
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d backlogg"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  backlogg-pgdata:
