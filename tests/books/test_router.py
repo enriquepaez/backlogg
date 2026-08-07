@@ -54,6 +54,8 @@ async def test_get_book_returns_200(client, db):
     assert body["first_publish_date"] == "1937-09-21"
     assert len(body["genres"]) == 1
     assert body["genres"][0]["name"] == "Fantasy"
+    assert body["rating_internal"] is None
+    assert body["rating_count_internal"] == 0
 
 
 async def test_get_book_returns_404(client, db):

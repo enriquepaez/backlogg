@@ -1,0 +1,21 @@
+meta {
+  name: Get user by username
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_tester
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("public profile has no email", function() {
+    expect(res.body).to.not.have.property("email");
+  });
+}

@@ -221,6 +221,10 @@ async def get_series(db: AsyncSession, slug: str) -> SeriesOut:
             float(series.rating_external) if series.rating_external is not None else None
         ),
         rating_count_external=series.rating_count_external,
+        rating_internal=(
+            float(series.rating_internal) if series.rating_internal is not None else None
+        ),
+        rating_count_internal=series.rating_count_internal,
         genres=[SeriesGenreOut(id=g.id, name=g.name, slug=g.slug) for g in series.genres],
         credits=credits,
     )

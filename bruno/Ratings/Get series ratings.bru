@@ -1,0 +1,17 @@
+meta {
+  name: Get series ratings
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/series/the-bear-2022/ratings
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

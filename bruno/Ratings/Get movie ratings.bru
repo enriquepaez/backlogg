@@ -1,0 +1,23 @@
+meta {
+  name: Get movie ratings
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/movies/oppenheimer-2023/ratings
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("items include like_count", function() {
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0]).to.have.property("like_count");
+    }
+  });
+}

@@ -1,0 +1,27 @@
+meta {
+  name: Like rating
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{baseUrl}}/ratings/1/like
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  Replace `1` with a real rating id — take it from the `id` field of an
+  item in "Get movie ratings" (or any of the other Get *ratings requests).
+  Idempotent: running this twice does not duplicate the like.
+}

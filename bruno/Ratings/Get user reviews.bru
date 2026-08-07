@@ -1,0 +1,23 @@
+meta {
+  name: Get user reviews
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_tester/reviews
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("each item has item_type", function() {
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0].item).to.have.property("item_type");
+    }
+  });
+}

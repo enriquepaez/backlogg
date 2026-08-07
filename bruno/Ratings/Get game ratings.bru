@@ -1,0 +1,17 @@
+meta {
+  name: Get game ratings
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/games/baldurs-gate-iii/ratings
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

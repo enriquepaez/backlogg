@@ -1,0 +1,28 @@
+meta {
+  name: Put book rating
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{baseUrl}}/books/harry-potter-and-the-philosophers-stone-1997/rating
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "score": 5,
+    "review_text": "Where it all began."
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

@@ -337,8 +337,83 @@ CREATE TABLE sync_cursors (
 `updated_at` is refreshed by the application on every cursor upsert
 (no trigger — the row is only written by the sync jobs).
 
+## Users
+
+```sql
+CREATE TABLE users (
+    id              BIGSERIAL PRIMARY KEY,
+    username        VARCHAR(50) NOT NULL UNIQUE,   -- URL identifier, no separate slug
+    email           VARCHAR(255) NOT NULL UNIQUE,
+    password_hash   VARCHAR(255) NOT NULL,         -- argon2, never plaintext
+    display_name    VARCHAR(255),
+    bio             TEXT,
+    avatar_url      VARCHAR(1000),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+`username` doubles as the URL identifier (`/users/{username}`) — no numeric
+id or separate slug is exposed. Auth is JWT-based (`POST /auth/login`);
+see `docs/api.md` for the endpoint contracts.
+
+## Ratings & reviews
+
+### `user_ratings`
+
+One row per (user, item): an optional 1-5 `score` and/or optional
+`review_text` — either can be null, but the row exists once a user has
+rated and/or reviewed an item (upsert on repeat calls). Polymorphic
+`item_type` + `item_id`, same pattern as `credits`/`external_ids`; no real
+FK to movies/series/books/games.
+
+```sql
+CREATE TABLE user_ratings (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_type       VARCHAR(20) NOT NULL,     -- MOVIE, SERIES, BOOK, GAME
+    item_id         BIGINT NOT NULL,
+    score           INTEGER,                  -- 1-5, nullable (text-only review)
+    review_text     TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_user_rating_item UNIQUE (user_id, item_type, item_id),
+    CONSTRAINT ck_user_ratings_score_range CHECK (score IS NULL OR (score >= 1 AND score <= 5))
+);
+
+CREATE INDEX idx_user_ratings_item ON user_ratings (item_type, item_id);
+CREATE INDEX idx_user_ratings_user ON user_ratings (user_id);
+```
+
+After every create/update/delete of a `user_ratings` row, the application
+recalculates and persists `rating_internal` (`AVG(score)` ignoring nulls)
+and `rating_count_internal` (`COUNT(score)` ignoring nulls) on the affected
+movies/series/books/games row (`backlogg/ratings/repository.py`,
+`recalculate_item_aggregates` — same cross-domain write precedent as
+`backlogg/admin/repository.py`).
+
+### `review_likes`
+
+One like per (user, rating).
+
+```sql
+CREATE TABLE review_likes (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating_id   BIGINT NOT NULL REFERENCES user_ratings(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_review_like UNIQUE (user_id, rating_id)
+);
+
+CREATE INDEX idx_review_likes_rating ON review_likes (rating_id);
+CREATE INDEX idx_review_likes_user ON review_likes (user_id);
+```
+
 ## Notes on polymorphic references
 
-`external_ids`, `credits`, `company_credits` use polymorphic references
-(`item_type` + `item_id`) with no real FK. Referential integrity is enforced
-at the application layer, typically in the use case that persists the item.
+`external_ids`, `credits`, `company_credits`, `user_ratings` use polymorphic
+references (`item_type` + `item_id`) with no real FK. Referential integrity
+is enforced at the application layer, typically in the use case that
+persists the item.

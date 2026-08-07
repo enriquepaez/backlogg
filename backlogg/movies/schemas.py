@@ -44,6 +44,8 @@ class MovieOut(BaseModel):
     status: str | None
     rating_external: float | None
     rating_count_external: int | None
+    rating_internal: float | None
+    rating_count_internal: int
     genres: list[GenreOut]
     credits: list[CreditOut] = []
 

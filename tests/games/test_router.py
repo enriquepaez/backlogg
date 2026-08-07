@@ -62,6 +62,8 @@ async def test_get_game_returns_200(client, db):
     assert body["genres"][0]["name"] == "Shooter"
     assert len(body["platforms"]) == 1
     assert body["platforms"][0]["slug"] == "win"
+    assert body["rating_internal"] is None
+    assert body["rating_count_internal"] == 0
 
 
 async def test_get_game_returns_404(client, db):

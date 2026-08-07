@@ -64,6 +64,8 @@ async def test_get_series_found(client, db):
     assert len(body["genres"]) == 2
     genre_names = {g["name"] for g in body["genres"]}
     assert genre_names == {"Drama", "Crime"}
+    assert body["rating_internal"] is None
+    assert body["rating_count_internal"] == 0
 
 
 async def test_get_series_returns_404(client, db):

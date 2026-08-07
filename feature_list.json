@@ -499,7 +499,7 @@
         "Tests de repositorio (recalculo de agregados), servicio y endpoint (incluye 401/422/404 y no-duplicación de likes)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 29,

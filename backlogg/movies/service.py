@@ -215,6 +215,10 @@ async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
         status=movie.status,
         rating_external=float(movie.rating_external) if movie.rating_external is not None else None,
         rating_count_external=movie.rating_count_external,
+        rating_internal=(
+            float(movie.rating_internal) if movie.rating_internal is not None else None
+        ),
+        rating_count_internal=movie.rating_count_internal,
         genres=[GenreOut(id=g.id, name=g.name, slug=g.slug) for g in movie.genres],
         credits=credits,
     )

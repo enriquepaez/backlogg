@@ -35,6 +35,8 @@ class GameOut(BaseModel):
     backdrop_url: str | None
     rating_external: float | None
     rating_count_external: int | None
+    rating_internal: float | None
+    rating_count_internal: int
     genres: list[GameGenreOut]
     platforms: list[GamePlatformOut]
     credits: list[CreditOut] = []

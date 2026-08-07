@@ -1,0 +1,25 @@
+meta {
+  name: Register — duplicate username (409)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/auth/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "bruno_tester",
+    "email": "someone-else@example.com",
+    "password": "testpass123"
+  }
+}
+
+tests {
+  test("status 409", function() {
+    expect(res.status).to.equal(409);
+  });
+}

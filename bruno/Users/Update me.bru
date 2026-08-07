@@ -1,0 +1,33 @@
+meta {
+  name: Update me
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{baseUrl}}/users/me
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "display_name": "Bruno Tester",
+    "bio": "Testing the API from Bruno.",
+    "avatar_url": null
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("display_name updated", function() {
+    expect(res.body.display_name).to.equal("Bruno Tester");
+  });
+}
