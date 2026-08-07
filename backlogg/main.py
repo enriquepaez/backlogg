@@ -7,6 +7,7 @@ from starlette.requests import Request
 
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
+from backlogg.feed.routes import feed_router
 from backlogg.follows.routes import follows_router
 from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
@@ -66,3 +67,4 @@ app.include_router(users_router)
 app.include_router(ratings_router)
 app.include_router(user_reviews_router)
 app.include_router(follows_router)
+app.include_router(feed_router)

@@ -536,7 +536,7 @@
         "Tests de repositorio (ambas pestañas, paginación, ventana de 30 días) y endpoint (401, 422, ambos tabs)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

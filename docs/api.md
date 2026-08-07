@@ -315,6 +315,27 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada item:
 `review_text`, `created_at`, `updated_at`. Incluye entradas con y sin
 `review_text`.
 
+### Feed (activity feed)
+
+```
+GET /feed?tab=following|popular&page=&limit=
+→ 200  Feed paginado, cross-type (UNION ALL de movies/series/books/games)
+→ 401  Sin token
+→ 422  tab distinto de following/popular
+```
+
+Auth requerida en ambas pestañas. `tab` por defecto `following`.
+
+- `tab=following`: reviews de los usuarios que el caller sigue, orden
+  reverse-chronological. Caller sin follows → lista vacía (no es error).
+- `tab=popular`: reviews de los últimos 30 días ordenadas por `like_count`
+  desc y, a igualdad, por `created_at` desc.
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
+`id`, `author` (`username`, `display_name`, `avatar_url`), `item` (`item_type`,
+`title`, `slug`, `poster_url`), `score`, `review_text`, `like_count`,
+`created_at`.
+
 ### People
 
 ```
