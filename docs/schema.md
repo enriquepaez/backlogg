@@ -411,6 +411,33 @@ CREATE INDEX idx_review_likes_rating ON review_likes (rating_id);
 CREATE INDEX idx_review_likes_user ON review_likes (user_id);
 ```
 
+## Follows
+
+### `follows`
+
+A unidirectional follow relationship between two users (no approval).
+`follower_id` follows `followed_id`. One row per ordered pair; a user cannot
+follow themselves (enforced in `backlogg/follows/service.py`, returns 422).
+Following and unfollowing are both idempotent.
+
+```sql
+CREATE TABLE follows (
+    id           BIGSERIAL PRIMARY KEY,
+    follower_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    followed_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_follow_pair UNIQUE (follower_id, followed_id)
+);
+
+CREATE INDEX idx_follows_follower ON follows (follower_id);
+CREATE INDEX idx_follows_followed ON follows (followed_id);
+```
+
+The public profile (`GET /users/{username}`) derives `follower_count`
+(`COUNT` where `followed_id = user`) and `following_count` (`COUNT` where
+`follower_id = user`) from this table via `backlogg/follows/repository.py`.
+
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits`, `user_ratings` use polymorphic

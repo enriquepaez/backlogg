@@ -3,6 +3,7 @@ from argon2.exceptions import VerifyMismatchError
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.follows import repository as follows_repo
 from backlogg.users import repository as repo
 from backlogg.users.auth import create_access_token
 from backlogg.users.models import User
@@ -67,11 +68,24 @@ def get_current_user_profile(user: User) -> UserMeOut:
 
 
 async def get_user_profile(db: AsyncSession, username: str) -> UserOut:
-    """Return the public profile for a username, or raise HTTP 404."""
+    """Return the public profile for a username, or raise HTTP 404.
+
+    Includes follower_count/following_count from the follows domain.
+    """
     user = await repo.get_user_by_username(db, username)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserOut.model_validate(user)
+
+    follower_count = await follows_repo.count_followers(db, user.id)
+    following_count = await follows_repo.count_following(db, user.id)
+    return UserOut(
+        username=user.username,
+        display_name=user.display_name,
+        bio=user.bio,
+        avatar_url=user.avatar_url,
+        follower_count=follower_count,
+        following_count=following_count,
+    )
 
 
 async def update_current_user(db: AsyncSession, user: User, payload: UserUpdate) -> UserMeOut:

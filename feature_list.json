@@ -518,7 +518,7 @@
         "Tests de repositorio, servicio y endpoint (incluye self-follow 422, doble follow idempotente, unfollow)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 30,

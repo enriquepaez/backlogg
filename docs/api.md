@@ -218,7 +218,43 @@ GET /users/{username}
 → 404  Username no encontrado
 ```
 
-Response (`UserOut`, público): `username`, `display_name`, `bio`, `avatar_url`.
+Response (`UserOut`, público): `username`, `display_name`, `bio`,
+`avatar_url`, `follower_count`, `following_count`.
+
+### Follows
+
+Relación unidireccional sin aprobación entre usuarios.
+
+```
+POST /users/{username}/follow
+→ 204  Ahora sigues a {username} (idempotente: seguir dos veces no falla)
+→ 401  Sin token
+→ 404  Username no encontrado
+→ 422  No puedes seguirte a ti mismo
+```
+
+```
+DELETE /users/{username}/follow
+→ 204  Dejas de seguir a {username} (idempotente: no falla si no seguías)
+→ 401  Sin token
+→ 404  Username no encontrado
+```
+
+```
+GET /users/{username}/followers?page=&limit=
+→ 200  Lista paginada, pública, de usuarios que siguen a {username}
+→ 404  Username no encontrado
+```
+
+```
+GET /users/{username}/following?page=&limit=
+→ 200  Lista paginada, pública, de usuarios a los que {username} sigue
+→ 404  Username no encontrado
+```
+
+Response (ambos listados): `{"items": [...], "total": , "page": , "limit": }`
+— cada item: `username`, `display_name`, `avatar_url`. Orden: más reciente
+primero.
 
 ### Ratings & reviews
 

@@ -26,6 +26,8 @@ class UserOut(BaseModel):
     display_name: str | None
     bio: str | None
     avatar_url: str | None
+    follower_count: int
+    following_count: int
 
     model_config = ConfigDict(from_attributes=True)
 
