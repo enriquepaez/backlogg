@@ -68,6 +68,20 @@
 - **Coverage note**: director data is sparse — only sync when available.
 - **external_ids source value**: `IGDB`
 
+## Resend (Email) — planificado (feature 36 `account_recovery`)
+
+- **Auth**: API key via header `Authorization: Bearer <RESEND_API_KEY>`
+- **Base URL**: `https://api.resend.com`
+- **Uso**: emails transaccionales de verificación de cuenta y reset de password.
+- **Endpoint principal**: `POST /emails` — `{from, to, subject, html}` (usar el SDK
+  `resend` en lugar de HTTP crudo).
+- **Aislamiento**: detrás de una interfaz `EmailSender`. Con `RESEND_API_KEY`
+  presente envía vía Resend; sin ella, un fallback loguea el enlace y no envía —
+  así dev y CI arrancan sin API key.
+- **Requisitos**: el dominio del `from` (`RESEND_FROM_EMAIL`) debe estar
+  verificado en Resend. Free tier suficiente para volumen transaccional bajo.
+- **Seguridad**: `RESEND_API_KEY` es secret — nunca en logs ni en respuestas de error.
+
 ## Environment variables
 
 | Variable               | Used by       | Description                                      |
@@ -82,3 +96,17 @@
 | `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
 | `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
+
+### Roadmap — variables planificadas (features 35-40)
+
+Aún no leídas por el código; se añaden cuando se implemente cada feature.
+
+| Variable                              | Feature | Description                                                        |
+|---------------------------------------|---------|-------------------------------------------------------------------|
+| `RESEND_API_KEY`                      | 36      | API key de Resend; sin ella, `EmailSender` cae a log (no envía)    |
+| `RESEND_FROM_EMAIL`                   | 36      | Dirección remitente verificada en Resend                          |
+| `APP_BASE_URL`                        | 36      | Base para construir los enlaces de verificación/reset             |
+| `REFRESH_EXPIRE_DAYS`                 | 35      | Vida del refresh token (el access `JWT_EXPIRE_MINUTES` pasa a corto)|
+| `RATE_LIMIT_AUTH` / `RATE_LIMIT_DEFAULT` | 37   | Límites de peticiones por ventana (auth y general)                |
+| `SENTRY_DSN`                          | 38      | DSN de Sentry; ausente = integración desactivada, sin overhead    |
+| `LOG_LEVEL`                           | 38      | Nivel del logging estructurado (default `INFO`)                   |
