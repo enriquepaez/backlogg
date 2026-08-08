@@ -235,6 +235,24 @@ async def m():
 asyncio.run(m())"'
 ```
 
+## Métricas (Prometheus)
+
+`GET /metrics` expone métricas operativas en formato de exposición Prometheus
+(v0.0.4), sin auth y sin PII. No hay dependencia externa: el registro es
+in-process y stdlib-only (mismo criterio que la capa de observabilidad).
+
+```bash
+curl "$RENDER_API_URL/metrics"
+```
+
+Series expuestas: `http_requests_total{method,path,status}`,
+`http_request_duration_seconds` (histograma con `_bucket`/`_sum`/`_count`),
+`backlogg_syncs_total{type}` y `backlogg_external_fanout_total{source}`. El label
+`path` usa siempre la **plantilla de ruta** (`/movies/{slug}`), nunca la URL con
+valores reales, para no filtrar identificadores ni disparar la cardinalidad.
+No requiere ningún setting nuevo; el endpoint está siempre activo y `/metrics`
+se excluye de su propia instrumentación. Ver `docs/api.md` para el detalle.
+
 ## CI
 
 `.github/workflows/ci.yml` ejecuta `bash init.sh` (lint + format + suite

@@ -713,7 +713,7 @@
         "Tests que verifican el formato y la presencia de las series clave",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 40,
