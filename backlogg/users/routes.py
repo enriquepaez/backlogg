@@ -6,7 +6,9 @@ from backlogg.users import service
 from backlogg.users.auth import get_current_user
 from backlogg.users.models import User
 from backlogg.users.schemas import (
-    TokenOut,
+    LogoutRequest,
+    RefreshRequest,
+    TokenPairOut,
     UserCreate,
     UserLogin,
     UserMeOut,
@@ -23,9 +25,23 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     return await service.register_user(db, payload)
 
 
-@auth_router.post("/login", response_model=TokenOut)
+@auth_router.post("/login", response_model=TokenPairOut)
 async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     return await service.login_user(db, payload)
+
+
+@auth_router.post("/refresh", response_model=TokenPairOut)
+async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    return await service.refresh_tokens(db, payload)
+
+
+@auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    payload: LogoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await service.logout_user(db, current_user, payload)
 
 
 # NOTE: "/me" must be registered before "/{username}" — otherwise the

@@ -354,8 +354,33 @@ CREATE TABLE users (
 ```
 
 `username` doubles as the URL identifier (`/users/{username}`) — no numeric
-id or separate slug is exposed. Auth is JWT-based (`POST /auth/login`);
+id or separate slug is exposed. Auth uses a short-lived access token (JWT)
+plus a persisted, rotating refresh token (`refresh_tokens`, below);
 see `docs/api.md` for the endpoint contracts.
+
+### `refresh_tokens`
+
+One row per issued refresh token. The token itself is an opaque random value
+(`secrets.token_urlsafe`, not a JWT); only its **sha256 hash** is stored — the
+plaintext is returned to the client once (in the HTTP response) and never
+persisted or logged. Rotation on `POST /auth/refresh` revokes the used token
+(`revoked_at`) and inserts a new row; presenting an already-revoked token is
+treated as **reuse** and revokes every still-active token for that user.
+
+```sql
+CREATE TABLE refresh_tokens (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(64) NOT NULL UNIQUE,   -- sha256 hex, never plaintext
+    expires_at  TIMESTAMPTZ NOT NULL,
+    revoked_at  TIMESTAMPTZ,                    -- NULL while active
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens (user_id);
+```
+
+Access token lifetime is `JWT_EXPIRE_MINUTES` (short, 15 by default); refresh
+token lifetime is `REFRESH_EXPIRE_DAYS` (30 by default).
 
 ## Ratings & reviews
 

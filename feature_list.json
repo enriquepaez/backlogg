@@ -638,7 +638,7 @@
         "Tests de servicio y endpoint (rotación, revocación, reuse, expiración)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 36,

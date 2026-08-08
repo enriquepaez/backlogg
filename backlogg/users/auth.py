@@ -11,6 +11,8 @@ Rules:
 - Token valid but the user no longer exists → 401
 """
 
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -35,6 +37,23 @@ def create_access_token(user_id: int) -> str:
         "exp": now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def generate_refresh_token() -> str:
+    """Generate a new opaque refresh token (not a JWT).
+
+    The plaintext value is returned to the client exactly once; only its
+    sha256 hash is ever persisted (see ``hash_refresh_token``).
+    """
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(token: str) -> str:
+    """Return the sha256 hex digest of an opaque refresh token.
+
+    Only this digest is stored — the plaintext is never persisted or logged.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 async def get_current_user(
