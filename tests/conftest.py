@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from alembic import command
 from backlogg.core.config import settings
@@ -106,15 +106,28 @@ async def db_engine(apply_migrations):
 
 @pytest_asyncio.fixture
 async def db(db_engine) -> AsyncSession:
-    """Provide an AsyncSession for each test.
+    """Provide an AsyncSession for each test with true per-test isolation.
 
-    Each test runs inside a transaction that is rolled back at the end,
-    keeping the database clean between tests.
+    Uses SQLAlchemy 2.0's "external transaction + SAVEPOINT" pattern: the test
+    runs inside an outer transaction (``trans``) opened on a dedicated
+    connection, and the session joins it in ``create_savepoint`` mode. When a
+    request handler calls ``session.commit()`` mid-test it only releases a
+    SAVEPOINT — the outer transaction stays open — so the teardown
+    ``trans.rollback()`` undoes *everything* written during the test, including
+    committed rows. This is what keeps endpoint tests (which commit through the
+    shared session injected by the ``client`` fixture) isolated from each other.
 
-    We rely on SQLAlchemy's autobegin — the first ORM operation starts the
-    transaction implicitly.  Calling rollback() at teardown undoes all writes.
+    ``expire_on_commit=False`` is kept intentionally: some services read ORM
+    attributes after commit (e.g. the notifications graceful-degradation path).
     """
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-    async with session_factory() as session:
-        yield session
-        await session.rollback()
+    connection = await db_engine.connect()
+    trans = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    yield session
+    await session.close()
+    await trans.rollback()
+    await connection.close()

@@ -10,6 +10,7 @@ domain slices.
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.notifications import service as notifications_service
 from backlogg.ratings import repository as repo
 from backlogg.ratings.schemas import (
     RatingAuthorOut,
@@ -101,8 +102,16 @@ async def like_review(db: AsyncSession, rating_id: int, user: User) -> None:
     if rating is None:
         raise HTTPException(status_code=404, detail="Rating not found")
 
-    await repo.create_like_if_not_exists(db, user_id=user.id, rating_id=rating_id)
+    created = await repo.create_like_if_not_exists(db, user_id=user.id, rating_id=rating_id)
     await db.commit()
+
+    # Notify the review's author — only on a genuinely new like, and never when
+    # a user likes their own review. Runs after the like is committed and cannot
+    # break it (graceful degradation).
+    if created and rating.user_id != user.id:
+        await notifications_service.notify_review_like(
+            db, recipient_id=rating.user_id, actor_id=user.id, rating_id=rating_id
+        )
 
 
 async def unlike_review(db: AsyncSession, rating_id: int, user: User) -> None:

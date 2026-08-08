@@ -202,15 +202,23 @@ async def get_like(db: AsyncSession, user_id: int, rating_id: int) -> ReviewLike
     return result.scalar_one_or_none()
 
 
-async def create_like_if_not_exists(db: AsyncSession, user_id: int, rating_id: int) -> None:
-    """Idempotent like — INSERT ... ON CONFLICT DO NOTHING."""
+async def create_like_if_not_exists(db: AsyncSession, user_id: int, rating_id: int) -> bool:
+    """Idempotent like — INSERT ... ON CONFLICT DO NOTHING.
+
+    Returns ``True`` when a new like row was inserted, ``False`` when the like
+    already existed (idempotent no-op). ``RETURNING id`` yields no rows on
+    conflict, so callers can tell whether to fire a ``review_like``
+    notification for the review's author.
+    """
     stmt = (
         pg_insert(ReviewLike)
         .values(user_id=user_id, rating_id=rating_id)
         .on_conflict_do_nothing(constraint="uq_review_like")
+        .returning(ReviewLike.id)
     )
-    await db.execute(stmt)
+    result = await db.execute(stmt)
     await db.flush()
+    return result.scalar_one_or_none() is not None
 
 
 async def delete_like_if_exists(db: AsyncSession, user_id: int, rating_id: int) -> None:

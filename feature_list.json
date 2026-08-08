@@ -599,7 +599,7 @@
         "Tests de repositorio, servicio y endpoint (generación en follow/like, no-self, unread_count, marcado idempotente)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 34,

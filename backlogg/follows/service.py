@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.follows import repository as repo
 from backlogg.follows.schemas import FollowListOut, FollowUserOut
+from backlogg.notifications import service as notifications_service
 from backlogg.users import repository as users_repo
 from backlogg.users.models import User
 
@@ -30,8 +31,16 @@ async def follow_user(db: AsyncSession, username: str, user: User) -> None:
     if target.id == user.id:
         raise HTTPException(status_code=422, detail="You cannot follow yourself")
 
-    await repo.create_follow_if_not_exists(db, follower_id=user.id, followed_id=target.id)
+    created = await repo.create_follow_if_not_exists(db, follower_id=user.id, followed_id=target.id)
     await db.commit()
+
+    # Notify the followed user — only on a genuinely new follow (not a re-follow
+    # no-op). Self-follow is already blocked with 422 above. Runs after the
+    # follow is committed and cannot break it (graceful degradation).
+    if created:
+        await notifications_service.notify_new_follower(
+            db, recipient_id=target.id, actor_id=user.id
+        )
 
 
 async def unfollow_user(db: AsyncSession, username: str, user: User) -> None:

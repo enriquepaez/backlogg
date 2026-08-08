@@ -264,6 +264,9 @@ Response (ambos listados): `{"items": [...], "total": , "page": , "limit": }`
 — cada item: `username`, `display_name`, `avatar_url`. Orden: más reciente
 primero.
 
+Un follow nuevo genera una notificación `new_follower` para el usuario seguido
+(ver Notifications). No se notifica en un re-follow idempotente.
+
 ### Ratings & reviews
 
 Mismo contrato en los 4 tipos de contenido — sustituir `{type}` por
@@ -310,7 +313,10 @@ DELETE /ratings/{id}/like
 → 404  Rating no encontrada
 ```
 
-`{id}` es el id numérico de la rating (no tiene slug propio).
+`{id}` es el id numérico de la rating (no tiene slug propio). Un like nuevo
+genera una notificación `review_like` para el autor de la review (ver
+Notifications); no se notifica un self-like ni un re-like idempotente, y el
+unlike nunca notifica.
 
 ```
 GET /users/{username}/reviews?page=&limit=
@@ -343,6 +349,41 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `id`, `author` (`username`, `display_name`, `avatar_url`), `item` (`item_type`,
 `title`, `slug`, `poster_url`), `score`, `review_text`, `like_count`,
 `created_at`.
+
+### Notifications
+
+Notificaciones sociales del usuario autenticado, generadas como efecto lateral
+de eventos sociales: `new_follower` (alguien te sigue) y `review_like` (alguien
+da like a una de tus reviews). Sin mensajería directa (fuera de scope). La
+generación es best-effort: si falla, no rompe el follow/like que la originó.
+
+```
+GET /notifications?page=&limit=
+→ 200  Notificaciones del caller, paginadas, reverse-chronological
+→ 401  Sin token
+```
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
+`id`, `type` (`new_follower` | `review_like`), `actor` (`username`,
+`display_name`, `avatar_url`), `target` (`target_type`, `target_id`; ambos
+`null` para `new_follower`, `review`/`user_ratings.id` para `review_like`),
+`is_read`, `created_at`.
+
+```
+GET /notifications/unread_count
+→ 200  {"unread_count": }  número de notificaciones no leídas del caller
+→ 401  Sin token
+```
+
+```
+POST /notifications/read
+→ 204  Marca notificaciones del caller como leídas (idempotente)
+→ 401  Sin token
+```
+
+Body opcional: `{"ids": [int, ...]}`. Sin body (o `ids` omitido/`null`) marca
+**todas** las no leídas del caller; con `ids` marca solo esas. Siempre limitado
+a las notificaciones del propio caller.
 
 ### Library (backlog por usuario)
 

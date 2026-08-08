@@ -14,6 +14,7 @@ from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
 from backlogg.lists.routes import lists_router, user_lists_router
 from backlogg.movies.routes import router as movies_router
+from backlogg.notifications.routes import notifications_router
 from backlogg.people.routes import router as people_router
 from backlogg.ratings.routes import ratings_router, user_reviews_router
 from backlogg.search.routes import router as search_router
@@ -73,3 +74,4 @@ app.include_router(feed_router)
 app.include_router(user_library_router)
 app.include_router(lists_router)
 app.include_router(user_lists_router)
+app.include_router(notifications_router)
