@@ -1,0 +1,32 @@
+meta {
+  name: Put game library
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/games/baldurs-gate-iii/library
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "status": "dropped"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("upserted status", function() {
+    expect(res.body.status).to.equal("dropped");
+    expect(res.body.item_type).to.equal("game");
+  });
+}

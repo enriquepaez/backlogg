@@ -1,0 +1,27 @@
+meta {
+  name: Get user library — filter by type
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_tester/library
+  body: none
+  auth: none
+}
+
+params:query {
+  type: movie
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("only movie entries", function() {
+    res.body.items.forEach(function(entry) {
+      expect(entry.item.item_type).to.equal("movie");
+    });
+  });
+}

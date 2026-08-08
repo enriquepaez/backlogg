@@ -1,0 +1,31 @@
+meta {
+  name: Get user library
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_tester/library
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated shape", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+    expect(res.body).to.have.property("page");
+    expect(res.body).to.have.property("limit");
+  });
+
+  test("each entry has item and status", function() {
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0]).to.have.property("status");
+      expect(res.body.items[0].item).to.have.property("item_type");
+    }
+  });
+}

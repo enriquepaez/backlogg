@@ -40,6 +40,7 @@ class GameOut(BaseModel):
     genres: list[GameGenreOut]
     platforms: list[GamePlatformOut]
     credits: list[CreditOut] = []
+    viewer_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

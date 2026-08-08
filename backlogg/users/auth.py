@@ -72,3 +72,39 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return user
+
+
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """FastAPI dependency for endpoints where authentication is optional.
+
+    Returns the authenticated ``User`` when a valid Bearer token is present,
+    or ``None`` when the Authorization header is missing, the token is
+    invalid/expired, or it no longer maps to an existing user. Never raises
+    401 — public endpoints stay reachable while still recognising the caller
+    when possible (e.g. to attach ``viewer_status``).
+    """
+    if credentials is None:
+        return None
+
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError:
+        return None
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+
+    try:
+        user = await repo.get_user_by_id(db, int(user_id))
+    except (TypeError, ValueError):
+        return None
+
+    return user

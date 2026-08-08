@@ -4,9 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.books import service
 from backlogg.books.schemas import BookListOut, BookOut, BookSortEnum
 from backlogg.core.database import get_db
+from backlogg.library import service as library_service
+from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
-from backlogg.users.auth import get_current_user
+from backlogg.users.auth import get_current_user, get_current_user_optional
 from backlogg.users.models import User
 
 router = APIRouter(prefix="/books", tags=["books"])
@@ -56,6 +58,32 @@ async def delete_book_rating(
     await ratings_service.delete_item_rating(db, item_type="BOOK", slug=slug, user=current_user)
 
 
+@router.put("/{slug}/library", response_model=LibraryStatusOut)
+async def set_book_library(
+    slug: str,
+    payload: LibraryEntryIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await library_service.set_library_status(
+        db, item_type="BOOK", slug=slug, status=payload.status, user=current_user
+    )
+
+
+@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_book_library(
+    slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await library_service.remove_library_entry(db, item_type="BOOK", slug=slug, user=current_user)
+
+
 @router.get("/{slug}", response_model=BookOut)
-async def get_book(slug: str, db: AsyncSession = Depends(get_db)):
-    return await service.get_book(db, slug)
+async def get_book(
+    slug: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    viewer_id = current_user.id if current_user else None
+    return await service.get_book(db, slug, viewer_id=viewer_id)

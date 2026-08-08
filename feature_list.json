@@ -556,7 +556,7 @@
         "Tests de repositorio, servicio y endpoint (upsert de status, filtros por status/type, 401/404/422, counts en perfil, viewer_status con y sin auth)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 32,

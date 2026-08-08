@@ -1,0 +1,27 @@
+meta {
+  name: Get user library — filter by status
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_tester/library
+  body: none
+  auth: none
+}
+
+params:query {
+  status: completed
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("only completed entries", function() {
+    res.body.items.forEach(function(entry) {
+      expect(entry.status).to.equal("completed");
+    });
+  });
+}

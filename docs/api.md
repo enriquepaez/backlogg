@@ -112,7 +112,12 @@ GET /movies/{slug}
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `runtime`, `original_language`, `poster_url`, `backdrop_url`, `budget`, `revenue`,
 `status`, `rating_external`, `rating_count_external`, `rating_internal`,
-`rating_count_internal`, `genres[]`, `credits[]`
+`rating_count_internal`, `genres[]`, `credits[]`, `viewer_status`
+
+`viewer_status` es el estado de biblioteca del caller autenticado para este
+item (`want`/`in_progress`/`completed`/`dropped`) o `null` si no está
+autenticado o no tiene entrada. Auth **opcional**: sin token la respuesta es
+idéntica salvo `viewer_status: null`.
 
 ```
 GET /movies/{slug}/similar
@@ -134,7 +139,7 @@ GET /series/{slug}
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_air_date`,
 `last_air_date`, `number_of_seasons`, `number_of_episodes`, `status`, `original_language`,
 `poster_url`, `backdrop_url`, `rating_external`, `rating_count_external`, `rating_internal`,
-`rating_count_internal`, `genres[]`, `credits[]`
+`rating_count_internal`, `genres[]`, `credits[]`, `viewer_status` (ver Movies)
 
 ```
 GET /series/{slug}/similar
@@ -152,7 +157,7 @@ GET /books/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_publish_date`,
 `original_language`, `poster_url`, `rating_external`, `rating_count_external`,
-`rating_internal`, `rating_count_internal`, `genres[]`
+`rating_internal`, `rating_count_internal`, `genres[]`, `viewer_status` (ver Movies)
 
 ### Games
 
@@ -165,7 +170,7 @@ GET /games/{slug}
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `game_type`, `original_language`, `poster_url`, `backdrop_url`, `rating_external`,
 `rating_count_external`, `rating_internal`, `rating_count_internal`, `genres[]`,
-`platforms[]`, `credits[]`
+`platforms[]`, `credits[]`, `viewer_status` (ver Movies)
 
 **`credits[]`** (en detail de movies, series y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
@@ -219,7 +224,10 @@ GET /users/{username}
 ```
 
 Response (`UserOut`, público): `username`, `display_name`, `bio`,
-`avatar_url`, `follower_count`, `following_count`.
+`avatar_url`, `follower_count`, `following_count`, `library_counts`.
+
+`library_counts` es un objeto `{want, in_progress, completed, dropped}` con el
+número de entradas de biblioteca del usuario por estado (zero-filled).
 
 ### Follows
 
@@ -335,6 +343,46 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `id`, `author` (`username`, `display_name`, `avatar_url`), `item` (`item_type`,
 `title`, `slug`, `poster_url`), `score`, `review_text`, `like_count`,
 `created_at`.
+
+### Library (backlog por usuario)
+
+Cada usuario mantiene una lista de pendientes/en curso/terminados/abandonados a
+través de los 4 tipos. Estados válidos: `want`, `in_progress`, `completed`,
+`dropped`.
+
+```
+PUT /{type}/{slug}/library      ({type} = movies | series | books | games)
+→ 200  Upsert del estado del caller para el item
+→ 401  Sin token
+→ 404  Slug no encontrado
+→ 422  status inválido (no está entre los cuatro permitidos)
+```
+
+Body: `{"status": "want"}`. Response (`LibraryStatusOut`): `item_type`, `slug`,
+`status`, `created_at`, `updated_at`. Llamar dos veces reemplaza el estado
+(upsert por `(user, item_type, item_id)`).
+
+```
+DELETE /{type}/{slug}/library
+→ 204  Entrada propia eliminada
+→ 401  Sin token
+→ 404  El caller no tiene entrada para ese item (o slug no encontrado)
+```
+
+```
+GET /users/{username}/library?status=&type=&page=&limit=
+→ 200  Biblioteca paginada, cross-type (UNION ALL de movies/series/books/games)
+→ 404  Username no encontrado
+```
+
+Público (sin auth). Filtros opcionales: `status` (uno de los cuatro estados) y
+`type` (`movie`/`series`/`book`/`game`); valores inválidos → 422. Orden
+reverse-chronological por `created_at`.
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
+`item` (`item_type`, `title`, `slug`, `poster_url`, `release_date`,
+`rating_external`) y `status`, `created_at`, `updated_at`. `release_date` usa
+`first_air_date` para series y `first_publish_date` para libros.
 
 ### People
 

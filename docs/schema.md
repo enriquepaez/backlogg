@@ -438,9 +438,44 @@ The public profile (`GET /users/{username}`) derives `follower_count`
 (`COUNT` where `followed_id = user`) and `following_count` (`COUNT` where
 `follower_id = user`) from this table via `backlogg/follows/repository.py`.
 
+## Library
+
+### `library_entries`
+
+One row per (user, item): the user's backlog status for a movie/series/book/
+game. Polymorphic `item_type` + `item_id` (same pattern as `user_ratings`),
+no real FK to the content tables. `status` is a plain string constrained by a
+CHECK to `want`/`in_progress`/`completed`/`dropped` — no PostgreSQL ENUM type,
+matching how the project models other enum-like columns. Setting the status is
+an upsert on `(user_id, item_type, item_id)`.
+
+```sql
+CREATE TABLE library_entries (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_type   VARCHAR(20) NOT NULL,   -- 'MOVIE' | 'SERIES' | 'BOOK' | 'GAME'
+    item_id     BIGINT NOT NULL,
+    status      VARCHAR(20) NOT NULL,   -- 'want' | 'in_progress' | 'completed' | 'dropped'
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_library_entry_item UNIQUE (user_id, item_type, item_id),
+    CONSTRAINT ck_library_entries_status
+        CHECK (status IN ('want', 'in_progress', 'completed', 'dropped'))
+);
+
+CREATE INDEX idx_library_entries_item ON library_entries (item_type, item_id);
+CREATE INDEX idx_library_entries_user ON library_entries (user_id);
+```
+
+`updated_at` is refreshed by the shared `trigger_set_updated_at()` trigger
+(defined in migration 0001). The public profile (`GET /users/{username}`)
+derives `library_counts` (`COUNT` grouped by `status`, zero-filled) from this
+table, and `GET /{type}/{slug}` derives the caller's `viewer_status` from it.
+
 ## Notes on polymorphic references
 
-`external_ids`, `credits`, `company_credits`, `user_ratings` use polymorphic
-references (`item_type` + `item_id`) with no real FK. Referential integrity
-is enforced at the application layer, typically in the use case that
-persists the item.
+`external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`
+use polymorphic references (`item_type` + `item_id`) with no real FK.
+Referential integrity is enforced at the application layer, typically in the
+use case that persists the item.
