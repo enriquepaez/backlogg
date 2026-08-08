@@ -1,0 +1,21 @@
+meta {
+  name: Delete list
+  type: http
+  seq: 11
+}
+
+delete {
+  url: {{baseUrl}}/lists/best-sci-fi
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}

@@ -1,0 +1,27 @@
+meta {
+  name: Get list
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/lists/best-sci-fi
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("detail shape with ordered items", function() {
+    expect(res.body).to.have.property("slug");
+    expect(res.body).to.have.property("item_count");
+    expect(res.body).to.have.property("items");
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0]).to.have.property("item_type");
+      expect(res.body.items[0]).to.have.property("position");
+    }
+  });
+}

@@ -1,0 +1,36 @@
+meta {
+  name: Create list
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/lists
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "title": "Best Sci-Fi",
+    "description": "my picks",
+    "is_public": true
+  }
+}
+
+tests {
+  test("status 201", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("slug derived from title", function() {
+    expect(res.body.slug).to.equal("best-sci-fi");
+    expect(res.body.title).to.equal("Best Sci-Fi");
+    expect(res.body.is_public).to.equal(true);
+    expect(res.body).to.have.property("items");
+  });
+}

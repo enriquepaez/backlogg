@@ -2,6 +2,6 @@
 
 Sin feature en curso.
 
-Feature 31 `user_library` completada y aprobada (ship pendiente de merge de PR).
+Feature 32 `user_lists` completada y aprobada (rama `feat/user_lists`, ship pendiente de QA manual + confirmación de PR).
 
-Siguiente feature elegible por dependencias: **32 user_lists** (depende de 27, 2, 3, 4, 5 — todas `done`).
+Siguiente feature elegible por dependencias: **33 notifications** (depende de 28, 29 — ambas `done`).

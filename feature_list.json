@@ -578,7 +578,7 @@
         "Tests de repositorio, servicio y endpoint (ownership 403, visibilidad privada 404, idempotencia de items, reordenación)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 33,
