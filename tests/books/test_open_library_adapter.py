@@ -6,6 +6,8 @@ Covers:
   native offset/limit, requesting the field set book_to_dict consumes
 - get_popular_books raises immediately (no retry) when the API responds with 403
 - get_popular_books retries transient 5xx responses and succeeds on a later attempt
+- get_popular_books tolerates a long 5xx burst and still succeeds within the
+  widened retry window (recovers on the 5th attempt)
 - get_popular_books raises after exhausting the 5xx retries, including
   mid-pagination (accumulated pages are discarded, never returned as success)
 - get_popular_books correctly parses a response containing a non-empty "docs" list
@@ -211,7 +213,45 @@ async def test_get_popular_books_raises_after_persistent_5xx():
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_popular_books(limit=10)
 
-    assert call_count == 3  # initial attempt + 2 retries
+    assert call_count == 5  # initial attempt + 4 retries
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_recovers_after_long_5xx_burst():
+    """A long 5xx burst that clears on the 5th attempt must still succeed.
+
+    The retry window was widened (5 attempts) precisely to absorb longer OL
+    Solr 5xx bursts: four consecutive 500s followed by a 200 must return the
+    docs, not raise.
+    """
+    fake_docs = [{"key": "/works/OL1W", "title": "Book One"}]
+    call_count = 0
+
+    class LongBurstClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 5:
+                return _mock_response(500)
+            return _mock_response(200, _search_payload(fake_docs))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", LongBurstClient):
+        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()) as mock_sleep:
+            client = OpenLibraryClient()
+            result = await client.get_popular_books(limit=10)
+
+    assert result == fake_docs
+    assert call_count == 5  # four 500s absorbed, 200 on the fifth attempt
+    assert mock_sleep.await_count == 4  # one backoff between each of the 5 attempts
 
 
 @pytest.mark.asyncio
@@ -248,7 +288,7 @@ async def test_get_popular_books_mid_pagination_error_discards_and_raises():
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_popular_books(limit=200, offset=0)
 
-    assert call_count == 4  # page 1 OK + 3 failed attempts on page 2
+    assert call_count == 6  # page 1 OK + 5 failed attempts on page 2
 
 
 @pytest.mark.asyncio
