@@ -520,9 +520,45 @@ CREATE INDEX idx_list_items_list ON list_items (list_id);
 trigger (defined in migration 0001). `GET /lists/{slug}` resolves `list_items`
 against the four content tables (UNION ALL, ordered by `position`).
 
+## Notifications
+
+### `notifications`
+
+Social notifications for a recipient user, generated as a side effect of social
+events by `backlogg/notifications/service.py`:
+
+- `new_follower` — someone followed the recipient (no target).
+- `review_like` — someone liked one of the recipient's reviews
+  (`target_type = 'review'`, `target_id` = the `user_ratings.id`).
+
+`actor_id` is who triggered the event, `recipient_id` is who receives it. Both
+FK to `users` with `ON DELETE CASCADE`. Generation is deliberately best-effort:
+the source operation (the follow / the like) is committed first and any failure
+creating the notification is swallowed, so it can never break the follow/like.
+
+```sql
+CREATE TABLE notifications (
+    id           BIGSERIAL PRIMARY KEY,
+    recipient_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type         VARCHAR(30) NOT NULL,   -- 'new_follower' | 'review_like'
+    target_type  VARCHAR(20),            -- e.g. 'review' (NULL for new_follower)
+    target_id    BIGINT,                 -- e.g. user_ratings.id (NULL for new_follower)
+    is_read      BOOLEAN NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_notifications_type CHECK (type IN ('new_follower', 'review_like'))
+);
+
+-- Recipient feed: newest first.
+CREATE INDEX idx_notifications_recipient_created
+    ON notifications (recipient_id, created_at DESC);
+```
+
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`,
-`list_items` use polymorphic references (`item_type` + `item_id`) with no real
-FK. Referential integrity is enforced at the application layer, typically in the
-use case that persists the item.
+`list_items`, `notifications` (target_type/target_id) use polymorphic references
+(`item_type`/`target_type` + `item_id`/`target_id`) with no real FK. Referential
+integrity is enforced at the application layer, typically in the use case that
+persists the item.

@@ -1,7 +1,15 @@
 # Sesión actual
 
-Sin feature en curso.
+Feature 33 `notifications` **completada y APROBADA** (rama `feat/notifications`).
+Incluye fix del harness de tests preexistente (aislamiento por SAVEPOINT en
+`tests/conftest.py`) que resolvió la flakiness de init.sh.
 
-Feature 32 `user_lists` completada y aprobada (rama `feat/user_lists`, ship pendiente de QA manual + confirmación de PR).
+`feature_list.json` → status 33 = `done`. Resumen en `progress/history.md`.
 
-Siguiente feature elegible por dependencias: **33 notifications** (depende de 28, 29 — ambas `done`).
+**Pendiente:** QA manual + confirmación del usuario para ship (commit/push/PR).
+
+Siguiente feature elegible por dependencias tras la 33:
+- 34 personalized_recommendations (depende de 31, 28, 16 — todas done) ✅ elegible
+- 35 auth_refresh_tokens (depende de 27 done) ✅ elegible
+- 36 account_recovery (depende de 27 done) ✅ elegible
+(La de menor id elegible es la 34.)

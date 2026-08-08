@@ -13,15 +13,23 @@ from backlogg.follows.models import Follow
 from backlogg.users.models import User
 
 
-async def create_follow_if_not_exists(db: AsyncSession, follower_id: int, followed_id: int) -> None:
-    """Idempotent follow — INSERT ... ON CONFLICT DO NOTHING."""
+async def create_follow_if_not_exists(db: AsyncSession, follower_id: int, followed_id: int) -> bool:
+    """Idempotent follow — INSERT ... ON CONFLICT DO NOTHING.
+
+    Returns ``True`` when a new row was actually inserted, ``False`` when the
+    follow already existed (idempotent no-op). ``RETURNING id`` yields no rows
+    on conflict, so callers can tell whether to fire a side effect such as a
+    ``new_follower`` notification.
+    """
     stmt = (
         pg_insert(Follow)
         .values(follower_id=follower_id, followed_id=followed_id)
         .on_conflict_do_nothing(constraint="uq_follow_pair")
+        .returning(Follow.id)
     )
-    await db.execute(stmt)
+    result = await db.execute(stmt)
     await db.flush()
+    return result.scalar_one_or_none() is not None
 
 
 async def delete_follow_if_exists(db: AsyncSession, follower_id: int, followed_id: int) -> None:
