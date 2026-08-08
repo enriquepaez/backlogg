@@ -56,5 +56,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: str = ""
 
+    # Response caching. Cache-Control max-age (seconds) emitted for public,
+    # shared-cacheable reads: detail reads and catalog listings. Plus the TTL of
+    # the in-process response cache backing the expensive /trending and /genres
+    # reads. The cache lives behind a swappable interface (core/cache.py) so it
+    # can move to Redis later without touching any call site.
+    CACHE_CONTROL_DETAIL_MAX_AGE: int = 300
+    CACHE_CONTROL_LISTING_MAX_AGE: int = 60
+    CACHE_TTL_TRENDING: int = 900
+    CACHE_TTL_GENRES: int = 300
+
 
 settings = Settings()

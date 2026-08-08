@@ -729,7 +729,7 @@
         "Tests que verifican el 304 con ETag y el hit/miss de la caché con TTL",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 41,

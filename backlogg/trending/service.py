@@ -3,6 +3,8 @@ from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.core.cache import get_cache
+from backlogg.core.config import settings
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.adapters.tmdb import _slugify as _movie_slugify
@@ -155,7 +157,30 @@ async def get_trending(
     item_type: str | None,
     period: str,
 ) -> TrendingOut:
-    """Return up to 20 trending items from TMDB.
+    """Return up to 20 trending items, served from the in-process TTL cache.
+
+    Trending is expensive — it fans out to TMDB and may ingest new items — so the
+    computed result is cached per ``(item_type, period)`` for a configurable TTL.
+    The cache lives behind ``get_cache()`` so it can move to Redis without
+    touching this call site. A cache miss recomputes via :func:`_compute_trending`.
+    """
+    cache = get_cache()
+    key = f"trending:{item_type}:{period}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = await _compute_trending(db, item_type=item_type, period=period)
+    cache.set(key, result, settings.CACHE_TTL_TRENDING)
+    return result
+
+
+async def _compute_trending(
+    db: AsyncSession,
+    item_type: str | None,
+    period: str,
+) -> TrendingOut:
+    """Compute the trending list from TMDB (uncached).
 
     - item_type=None  → mix of movies and series (up to 10 each, interleaved)
     - item_type=movie → movies only

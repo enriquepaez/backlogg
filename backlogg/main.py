@@ -10,6 +10,7 @@ from starlette.requests import Request
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
 from backlogg.core.config import settings
+from backlogg.core.http_cache import CacheHeadersMiddleware
 from backlogg.core.metrics import MetricsMiddleware
 from backlogg.core.observability import (
     RequestIDMiddleware,
@@ -52,6 +53,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
 
+
+# Added before SecurityHeadersMiddleware so it is the innermost app middleware:
+# it runs closest to the route (reads the final body to build the ETag / 304),
+# and the security headers still decorate whatever response it returns.
+app.add_middleware(CacheHeadersMiddleware)
 
 app.add_middleware(SecurityHeadersMiddleware)
 
