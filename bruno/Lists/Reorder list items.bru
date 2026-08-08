@@ -1,0 +1,33 @@
+meta {
+  name: Reorder list items
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{baseUrl}}/lists/best-sci-fi/items/order
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "items": [
+      { "item_type": "movie", "slug": "fight-club-1999" }
+    ]
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("returns updated detail", function() {
+    expect(res.body).to.have.property("items");
+  });
+}

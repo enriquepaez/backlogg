@@ -384,6 +384,83 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `rating_external`) y `status`, `created_at`, `updated_at`. `release_date` usa
 `first_air_date` para series y `first_publish_date` para libros.
 
+### Lists (colecciones curadas)
+
+Listas nombradas creadas por usuarios (p.ej. "Mejor sci-fi") con items
+cross-type ordenados y visibilidad público/privado. El `slug` se deriva del
+título al crear la lista y no cambia. Aunque la unicidad en DB es por
+`(user_id, slug)`, el `slug` se resuelve de forma **globalmente única**
+(sufijo `-2`, `-3`, … en caso de colisión) para que `/lists/{slug}` apunte a
+una sola lista — esto permite distinguir 404 (no existe) de 403 (existe pero no
+es tuya).
+
+```
+POST /lists
+→ 201  Lista creada (slug derivado del título)
+→ 401  Sin token
+```
+
+Body (`ListCreate`): `title` (obligatorio), `description` (opcional),
+`is_public` (opcional, default `true`). Response (`UserListOut`): `slug`,
+`title`, `description`, `is_public`, `item_count`, `created_at`, `updated_at`,
+`items[]`.
+
+```
+GET /lists/{slug}
+→ 200  Detalle con items resueltos cross-type en orden (por position)
+→ 404  No existe, o es privada y el caller no es el owner
+```
+
+Auth opcional. Las listas privadas solo las ve su owner; para el resto se
+oculta su existencia con 404. Cada item de `items[]`: `item_type`, `title`,
+`slug`, `poster_url`, `release_date`, `rating_external`, `position`.
+
+```
+PATCH /lists/{slug}      (auth, solo owner)
+→ 200  Actualiza title/description/is_public (el slug no cambia)
+→ 401  Sin token
+→ 403  No es el owner
+→ 404  No existe
+```
+
+```
+DELETE /lists/{slug}     (auth, solo owner)
+→ 204  Lista eliminada (cascada sobre sus list_items)
+→ 401 / 403 / 404
+```
+
+```
+POST   /lists/{slug}/items     (auth, solo owner)
+DELETE /lists/{slug}/items     (auth, solo owner)
+→ 200  Devuelve el detalle de la lista actualizado
+→ 401 / 403
+→ 404  El item (item_type + slug) no existe en el catálogo
+```
+
+Body (`ListItemRef`): `{"item_type": "movie|series|book|game", "slug": "..."}`.
+Añadir es idempotente y coloca el item al final (`position` = max+1); quitar es
+idempotente (no falla si el item no estaba) y re-empaqueta las posiciones.
+
+```
+PUT /lists/{slug}/items/order   (auth, solo owner)
+→ 200  Reordena los items; devuelve el detalle
+→ 401 / 403 / 404
+→ 422  El conjunto enviado no coincide exactamente con los items de la lista
+```
+
+Body (`ListReorder`): `{"items": [{"item_type": "...", "slug": "..."}, ...]}`
+con el orden deseado. Debe contener exactamente los items actuales de la lista.
+
+```
+GET /users/{username}/lists
+→ 200  Listas del usuario (públicas siempre; privadas solo si el caller es owner)
+→ 404  Username no encontrado
+```
+
+Auth opcional. Response (`UserListsOut`): `{"lists": [...], "total": }` — cada
+entrada (`UserListSummary`): `slug`, `title`, `description`, `is_public`,
+`item_count`, `created_at`, `updated_at`.
+
 ### People
 
 ```

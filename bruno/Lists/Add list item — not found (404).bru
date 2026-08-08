@@ -1,0 +1,28 @@
+meta {
+  name: Add list item — not found (404)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/lists/best-sci-fi/items
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "item_type": "movie",
+    "slug": "no-existe-xyz"
+  }
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
