@@ -1,12 +1,21 @@
+import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
+from backlogg.core.config import settings
+from backlogg.core.observability import (
+    RequestIDMiddleware,
+    configure_logging,
+    init_sentry,
+    request_id_ctx,
+)
 from backlogg.feed.routes import feed_router
 from backlogg.follows.routes import follows_router
 from backlogg.games.routes import router as games_router
@@ -22,6 +31,13 @@ from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
 from backlogg.trending.router import router as trending_router
 from backlogg.users.routes import auth_router, users_router
+
+# Structured JSON logging + optional Sentry, wired before the app handles any
+# request. init_sentry is a no-op (and never imports sentry_sdk) without a DSN.
+configure_logging(settings.LOG_LEVEL)
+init_sentry()
+
+_logger = logging.getLogger("backlogg.main")
 
 app = FastAPI(title="Backlogg API")
 
@@ -50,6 +66,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registered last so it is the outermost user middleware: the request id is set
+# before any other middleware or route runs and is available to every log line.
+app.add_middleware(RequestIDMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Log any uncaught exception correlated with the request id, return a 500.
+
+    The response body is deliberately generic — internal details never leak to
+    the client. The stack trace goes to the structured logs only.
+    """
+    _logger.exception(
+        "request.unhandled_exception",
+        extra={"method": request.method, "path": request.url.path},
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={"X-Request-ID": request_id_ctx.get() or ""},
+    )
 
 
 @app.get("/health")

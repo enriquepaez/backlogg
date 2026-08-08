@@ -35,6 +35,8 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
 | `RATE_LIMIT_AUTH` | 10/60 | Límite por IP de `POST /auth/login` y `/auth/register`. Formato `count/segundos` |
 | `RATE_LIMIT_SEARCH_FALLBACK` | 20/60 | Límite por IP del fan-out externo de `/search` (feature 17) |
 | `RATE_LIMIT_DEFAULT` | 120/60 | Bucket general reutilizable por la interfaz de rate limiting |
+| `LOG_LEVEL` | INFO | Nivel del logging estructurado JSON (DEBUG/INFO/WARNING/ERROR) |
+| `SENTRY_DSN` | (secret) | DSN de Sentry. **Vacío → integración off** (no se importa `sentry-sdk`, sin overhead) |
 
 El envío de email usa SMTP genérico de la stdlib (`smtplib`), sin dependencias
 externas. `SMTP_PASSWORD` es un secreto: configúralo en Render como
@@ -79,14 +81,47 @@ sites. El cliente detrás del proxy de Render se identifica por el primer hop de
   factory) está aislada en `backlogg/core/rate_limit.py`; el wiring está en
   `backlogg/users/routes.py` (auth) y `backlogg/search/service.py` (fallback).
 
-### Roadmap — env vars planificadas en Render (features 38-40)
+### Observability (feature 38)
 
-Se configuran cuando se despliegue cada feature. Detalle en `docs/external-apis.md`.
+Logging estructurado en JSON con correlación por request ID e integración
+opcional de Sentry. La lógica vive en `backlogg/core/observability.py`; el wiring
+(configuración del logging, middleware y exception handler global) está en
+`backlogg/main.py`. Los defaults de env viven en `backlogg/core/config.py`.
 
-| Env var | Feature | Notas |
-|---|---|---|
-| `SENTRY_DSN` | 38 | (secret) DSN de Sentry; ausente = integración off |
-| `LOG_LEVEL` | 38 | Nivel de logging estructurado |
+**Formato de log JSON.** Cada línea de log es un objeto JSON con un esquema
+estable:
+
+```json
+{"timestamp": "2026-08-08T12:00:00+0000", "level": "INFO",
+ "logger": "backlogg.request", "message": "request.completed",
+ "request_id": "3f1c…", "method": "GET", "path": "/health",
+ "status": 200, "duration_ms": 1.42}
+```
+
+- Campos base siempre presentes: `timestamp`, `level`, `logger`, `message`,
+  `request_id`. Cualquier campo pasado vía `extra=` se añade tras redactarse.
+- El nivel raíz se controla con `LOG_LEVEL`.
+- Cada petición registra una línea `request.completed` con `method`, `path`,
+  `status` y `duration_ms`.
+
+**Request ID.** `RequestIDMiddleware` lee el header `X-Request-ID` entrante (o
+genera un `uuid4`), lo propaga vía un `ContextVar` a **todos** los logs de esa
+petición y lo devuelve en el header `X-Request-ID` de la respuesta. Las
+excepciones no controladas las captura un `@app.exception_handler(Exception)`
+global que las loguea correlacionadas con el request ID y responde `500` con un
+body genérico (`{"detail": "Internal server error"}`) sin filtrar internals.
+
+**Política de redacción.** El formatter nunca emite el valor de campos sensibles
+(`password`, `api_key`, `token`, `authorization`, `x-api-key`, `refresh_token`,
+`smtp_password`, `secret` — match por substring case-insensitive). Se aplica
+tanto a los campos `extra` (recursivo en dicts/listas) como, best-effort, a los
+pares `clave=valor` embebidos en el texto del mensaje. El valor se sustituye por
+`***REDACTED***`.
+
+**Sentry.** `init_sentry()` importa `sentry_sdk` de forma **perezosa** y solo
+cuando `SENTRY_DSN` está presente; sin DSN no se importa nada (cero overhead). Si
+el DSN está configurado pero el paquete no está instalado, se loguea un warning y
+la app continúa sin error tracking.
 
 ## Secrets de GitHub Actions
 
