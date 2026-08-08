@@ -35,6 +35,7 @@ from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.books.service import _persist_book_authors
 from backlogg.core.config import settings
 from backlogg.core.database import async_session_factory
+from backlogg.core.metrics import get_metrics
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies import repository as movies_repo
@@ -121,6 +122,7 @@ async def sync_movies(slice_size: int | None = None) -> dict:
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_movies: starting")
+    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "movie"})
     start = time.monotonic()
     synced = 0
     errors = 0
@@ -207,6 +209,7 @@ async def sync_series(slice_size: int | None = None) -> dict:
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_series: starting")
+    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "series"})
     start = time.monotonic()
     synced = 0
     errors = 0
@@ -299,6 +302,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_books: starting")
+    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "book"})
     start = time.monotonic()
     synced = 0
     errors = 0
@@ -396,6 +400,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
     Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_games: starting")
+    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "game"})
     start = time.monotonic()
     synced = 0
     errors = 0

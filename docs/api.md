@@ -718,6 +718,48 @@ Response:
 
 **Auth**: misma protección `X-API-Key` que el sync trigger (`401`/`503`).
 
+## Metrics
+
+```
+GET /metrics
+→ 200  (Content-Type: text/plain; version=0.0.4; charset=utf-8)
+```
+
+Operational metrics in the Prometheus text exposition format (v0.0.4). No
+authentication: the endpoint exposes only aggregate operational data and never
+any PII or secret. Serialised in-process by hand (no `prometheus-client`
+dependency), consistent with the stdlib-only observability layer.
+
+Exposed metric families:
+
+- `http_requests_total{method,path,status}` — counter of HTTP requests. The
+  `path` label is always the **route template** (`/movies/{slug}`), never the
+  concrete URL, so slugs/usernames/ids/query strings never become labels and the
+  series count stays bounded. Unmatched URLs (404 with no route) fold into
+  `path="__unmatched__"`.
+- `http_request_duration_seconds{method,path}` — request-latency histogram with
+  cumulative `_bucket{le=...}` series plus `_sum` and `_count`.
+- `backlogg_syncs_total{type}` — content sync jobs executed, by content type
+  (`movie`/`series`/`book`/`game`).
+- `backlogg_external_fanout_total{source}` — external API fan-outs during the
+  `/search` fallback, by source (`movie`/`series`/`book`/`game`).
+
+`/metrics` is excluded from its own request instrumentation so scrape traffic
+does not dominate the counters.
+
+Example excerpt:
+```
+# HELP http_requests_total Total HTTP requests by method, route template and status.
+# TYPE http_requests_total counter
+http_requests_total{method="GET",path="/health",status="200"} 3
+# HELP http_request_duration_seconds HTTP request latency in seconds by method and route template.
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{method="GET",path="/health",le="0.005"} 3
+http_request_duration_seconds_bucket{method="GET",path="/health",le="+Inf"} 3
+http_request_duration_seconds_sum{method="GET",path="/health"} 0.004
+http_request_duration_seconds_count{method="GET",path="/health"} 3
+```
+
 ## On-demand fallback
 
 When `GET /{type}/{slug}` finds no local result, the service layer:

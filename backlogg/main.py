@@ -10,6 +10,7 @@ from starlette.requests import Request
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
 from backlogg.core.config import settings
+from backlogg.core.metrics import MetricsMiddleware
 from backlogg.core.observability import (
     RequestIDMiddleware,
     configure_logging,
@@ -22,6 +23,7 @@ from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
 from backlogg.lists.routes import lists_router, user_lists_router
+from backlogg.metrics.routes import router as metrics_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.notifications.routes import notifications_router
 from backlogg.people.routes import router as people_router
@@ -66,6 +68,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Records request count + latency per (method, route template, status). Added
+# just before RequestIDMiddleware so the latter stays the outermost middleware
+# (request id set first) while metrics still wrap CORS/security headers/routing.
+app.add_middleware(MetricsMiddleware)
 
 # Registered last so it is the outermost user middleware: the request id is set
 # before any other middleware or route runs and is available to every log line.
@@ -115,3 +122,4 @@ app.include_router(lists_router)
 app.include_router(user_lists_router)
 app.include_router(notifications_router)
 app.include_router(recommendations_router)
+app.include_router(metrics_router)

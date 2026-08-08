@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.core.database import async_session_factory
+from backlogg.core.metrics import get_metrics
 from backlogg.core.rate_limit import enforce_search_fallback
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
@@ -44,6 +45,7 @@ _FANOUT_LIMIT = 5
 
 async def _ingest_movies(q: str) -> None:
     """Search TMDB for movies matching *q* and persist the top hits."""
+    get_metrics().inc_counter("backlogg_external_fanout_total", labels={"source": "movie"})
     try:
         raw = await _tmdb_movies.search_movie(q)
         if raw is None:
@@ -65,6 +67,7 @@ async def _ingest_movies(q: str) -> None:
 
 async def _ingest_series(q: str) -> None:
     """Search TMDB for series matching *q* and persist the top hits."""
+    get_metrics().inc_counter("backlogg_external_fanout_total", labels={"source": "series"})
     try:
         raw = await _tmdb_series.search_series(q)
         if raw is None:
@@ -86,6 +89,7 @@ async def _ingest_series(q: str) -> None:
 
 async def _ingest_books(q: str) -> None:
     """Search Open Library for books matching *q* and persist the top hits."""
+    get_metrics().inc_counter("backlogg_external_fanout_total", labels={"source": "book"})
     try:
         raw = await _ol_client.search_book(q)
         if raw is None:
@@ -109,6 +113,7 @@ async def _ingest_books(q: str) -> None:
 
 async def _ingest_games(q: str) -> None:
     """Search IGDB for games matching *q* and persist the top hits."""
+    get_metrics().inc_counter("backlogg_external_fanout_total", labels={"source": "game"})
     try:
         results = await _igdb_client.search_games(q, limit=_FANOUT_LIMIT)
         async with async_session_factory() as db:
