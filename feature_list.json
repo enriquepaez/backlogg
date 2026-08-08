@@ -617,7 +617,7 @@
         "Tests de servicio con adapters mockeados (semillas, exclusión de vistos, fallback sin semillas, filtro por type)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 35,

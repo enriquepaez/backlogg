@@ -30,6 +30,21 @@ Si cualquier paso falla, el script termina con código de salida != 0 y
 
 ## Verificación manual de un endpoint nuevo
 
+> **Shell del entorno: fish, no bash.** Las checklists de QA se ejecutan en
+> `fish`, así que la sintaxis de bash falla. En particular:
+> - Asignar variable: `set TOKEN (cmd ...)` — **nunca** `TOKEN=$(cmd ...)`
+>   (`fish: Unsupported use of '='`).
+> - Sustitución de comando: `(cmd)`; env var puntual: `env VAR=val cmd`
+>   (no existe el `VAR=val cmd` de bash).
+> - Condicionales/loops: sintaxis fish (`for x in ...; ...; end`).
+>
+> Ejemplo de captura de token para los curl autenticados:
+> ```fish
+> set TOKEN (curl -s -X POST localhost:8000/auth/login \
+>   -H 'content-type: application/json' \
+>   -d '{"username":"<user>","password":"<pass>"}' | jq -r .access_token)
+> ```
+
 Para cada endpoint nuevo, el leader presenta al usuario una checklist que cubre:
 
 1. **Estado de DB** — tablas/filas vía psql:

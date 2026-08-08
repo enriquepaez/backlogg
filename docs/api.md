@@ -385,6 +385,41 @@ Body opcional: `{"ids": [int, ...]}`. Sin body (o `ids` omitido/`null`) marca
 **todas** las no leídas del caller; con `ids` marca solo esas. Siempre limitado
 a las notificaciones del propio caller.
 
+### Recommendations (personalizadas)
+
+Sugerencias personalizadas para el usuario autenticado, calculadas al vuelo
+(dominio de solo lectura — sin tabla ni entidad nueva) a partir de sus
+"semillas": items con rating `score >= 4` y/o en su library con status
+`completed`/`want`.
+
+```
+GET /recommendations?type=&page=&limit=
+→ 200  Recomendaciones paginadas, cross-type
+→ 401  Sin token
+→ 422  type inválido (no está entre movie/series/book/game)
+```
+
+Auth requerida. Filtro opcional `type` (`movie`/`series`/`book`/`game`); si se
+indica, solo se generan recomendaciones de ese tipo. `page` (≥1, default 1) y
+`limit` (1–100, default 20).
+
+Cómo se generan los candidatos:
+- **Movies/series:** primero candidatos locales por solapamiento de género con
+  las semillas; solo si no se alcanzan suficientes candidatos locales se hace
+  fan-out externo reutilizando las recomendaciones de TMDB (feature 16,
+  `get_similar_movies`/`get_similar_series`). No se dispara fan-out externo
+  cuando ya hay suficientes candidatos locales.
+- **Books/games:** solapamiento por género (sin API externa de similares).
+- **Sin semillas:** fallback a populares/trending locales (por `rating_external`
+  desc); lista no vacía cuando hay catálogo.
+
+Se excluyen los items que el usuario ya ha puntuado o tiene en su library.
+
+Response: `{"results": [...], "page": , "limit": }` — cada resultado:
+`item_type`, `title`, `slug`, `poster_url`, `release_date`, `rating_external` y
+`reason` (motivo legible, p.ej. `"Because you rated <title>"`,
+`"Because <title> is in your library"`, `"Popular right now"`).
+
 ### Library (backlog por usuario)
 
 Cada usuario mantiene una lista de pendientes/en curso/terminados/abandonados a
