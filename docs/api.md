@@ -2,17 +2,21 @@
 
 ## Conventions
 
-- **URL identifiers**: slugs (not numeric IDs). Example: `/movies/the-godfather`
+- **Versionado**: toda la superficie de negocio se sirve bajo el prefijo `/v1`
+  (p.ej. `/v1/movies`, `/v1/auth/login`, `/v1/admin/reports`). Es un corte
+  limpio: no se mantienen alias en la raíz. Los endpoints operativos `/health` y
+  `/metrics` quedan **sin versionar** (son de ops, no de la API de negocio).
+- **URL identifiers**: slugs (not numeric IDs). Example: `/v1/movies/the-godfather`
 - **Pagination**: offset/limit. Parameters: `page` (1-based) and `limit` (default 20, max 100)
 - **Content-Type**: `application/json`
-- **Admin auth**: los endpoints `/admin/*` requieren el header `X-API-Key`
+- **Admin auth**: los endpoints `/v1/admin/*` requieren el header `X-API-Key`
   (ver sección Admin).
-- **User auth**: `POST /auth/login` devuelve un par de tokens: un
+- **User auth**: `POST /v1/auth/login` devuelve un par de tokens: un
   `access_token` (JWT corto) y un `refresh_token` (opaco, rotatorio). Los
   endpoints protegidos esperan `Authorization: Bearer <access_token>` y
   devuelven `401` si falta, es inválido o expiró. El access token caduca pronto;
-  se renueva con `POST /auth/refresh` (rota el par) y se invalida con
-  `POST /auth/logout` (ver sección Auth & Users). El resto de la API es pública.
+  se renueva con `POST /v1/auth/refresh` (rota el par) y se invalida con
+  `POST /v1/auth/logout` (ver sección Auth & Users). El resto de la API es pública.
 - **CORS y security headers**: orígenes permitidos vía `CORS_ORIGINS`
   (comma-separated; sin configurar permite `localhost:3000` y `localhost:5173`).
   Todas las respuestas llevan `X-Content-Type-Options: nosniff`,
@@ -30,7 +34,7 @@ GET /health
 ### Search (cross-type)
 
 ```
-GET /search?q=&type=&page=&limit=
+GET /v1/search?q=&type=&page=&limit=
 ```
 
 | Param   | Required | Description |
@@ -73,7 +77,7 @@ APIs externas. Las consultas servidas desde el catálogo local no consumen cupo.
 ### List endpoints (los 4 tipos)
 
 ```
-GET /movies | /series | /books | /games
+GET /v1/movies | /v1/series | /v1/books | /v1/games
 → 200  Lista paginada (solo items ya en DB, sin fallback externo)
 ```
 
@@ -110,7 +114,7 @@ Response:
 ### Movies
 
 ```
-GET /movies/{slug}
+GET /v1/movies/{slug}
 → 200  Movie detail
 → 404  Not found in DB or external API
 ```
@@ -126,7 +130,7 @@ autenticado o no tiene entrada. Auth **opcional**: sin token la respuesta es
 idéntica salvo `viewer_status: null`.
 
 ```
-GET /movies/{slug}/similar
+GET /v1/movies/{slug}/similar
 → 200  Hasta 10 películas similares (TMDB recommendations)
 → 404  Slug no encontrado
 ```
@@ -137,7 +141,7 @@ Response: `{"results": [...]}` — cada item: `title`, `slug`, `poster_url`,
 ### Series
 
 ```
-GET /series/{slug}
+GET /v1/series/{slug}
 → 200  Series detail
 → 404  Not found
 ```
@@ -148,15 +152,15 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_air
 `rating_count_internal`, `genres[]`, `credits[]`, `viewer_status` (ver Movies)
 
 ```
-GET /series/{slug}/similar
-→ 200  Hasta 10 series similares (mismo contrato que /movies/{slug}/similar)
+GET /v1/series/{slug}/similar
+→ 200  Hasta 10 series similares (mismo contrato que /v1/movies/{slug}/similar)
 → 404  Slug no encontrado
 ```
 
 ### Books
 
 ```
-GET /books/{slug}
+GET /v1/books/{slug}
 → 200  Book detail
 → 404  Not found
 ```
@@ -168,7 +172,7 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_pub
 ### Games
 
 ```
-GET /games/{slug}
+GET /v1/games/{slug}
 → 200  Game detail
 → 404  Not found
 ```
@@ -185,7 +189,7 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_d
 ### Auth & Users
 
 ```
-POST /auth/register
+POST /v1/auth/register
 → 201  Cuenta creada
 → 409  username o email ya en uso
 → 422  validación de payload (username/email/password fuera de formato o longitud)
@@ -194,20 +198,20 @@ POST /auth/register
 
 Body: `{"username": string, "email": string, "password": string (min 8),
 "display_name": string | null}`. `username` solo admite `[a-zA-Z0-9_-]`,
-3-50 caracteres — es el identificador en las URLs (`/users/{username}`),
+3-50 caracteres — es el identificador en las URLs (`/v1/users/{username}`),
 no hay slug ni id numérico expuestos.
 
 Response (`UserMeOut`, incluye email — solo se devuelve así en register/login/me):
 `username`, `email`, `display_name`, `bio`, `avatar_url`, `email_verified`.
 
 ```
-POST /auth/login
+POST /v1/auth/login
 → 200  Login correcto
 → 401  Credenciales inválidas
 → 429  demasiadas peticiones desde la misma IP (header Retry-After)
 ```
 
-`POST /auth/login` y `POST /auth/register` están rate-limited por IP
+`POST /v1/auth/login` y `POST /v1/auth/register` están rate-limited por IP
 (`RATE_LIMIT_AUTH`). Al exceder el límite responden `429` con header
 `Retry-After` (segundos) y un body genérico que no filtra IP ni límites.
 
@@ -216,10 +220,10 @@ Response: `{"access_token": string, "refresh_token": string, "token_type": "bear
 El `access_token` es un JWT corto (`JWT_EXPIRE_MINUTES`, 15 por defecto); el
 `refresh_token` es un valor opaco rotatorio (`REFRESH_EXPIRE_DAYS`, 30 por
 defecto). El `refresh_token` solo se devuelve en esta respuesta y en la de
-`/auth/refresh` — guárdalo, no vuelve a mostrarse.
+`/v1/auth/refresh` — guárdalo, no vuelve a mostrarse.
 
 ```
-POST /auth/refresh
+POST /v1/auth/refresh
 → 200  Par de tokens rotado
 → 401  refresh inválido, expirado o revocado (incluye reuse)
 ```
@@ -231,7 +235,7 @@ Reusar un refresh ya rotado/revocado devuelve `401` y revoca todos los refresh
 activos del usuario como defensa ante robo de token.
 
 ```
-POST /auth/logout
+POST /v1/auth/logout
 → 204  Sesión cerrada (refresh revocado)
 → 401  Sin token / access token inválido o expirado
 ```
@@ -250,7 +254,7 @@ un solo uso** y **caducan**; reusar un token consumido/expirado/desconocido
 devuelve `400`.
 
 ```
-POST /auth/verify/request
+POST /v1/auth/verify/request
 → 202  Email de verificación enviado (o logueado en dev)
 → 401  Sin token / access token inválido o expirado
 ```
@@ -260,7 +264,7 @@ verificación para el usuario autenticado y le envía el enlace. Sin body.
 Response: `{"detail": string}`.
 
 ```
-POST /auth/verify/confirm
+POST /v1/auth/verify/confirm
 → 200  Email verificado (users.email_verified = true)
 → 400  Token inválido, expirado o ya usado
 ```
@@ -269,7 +273,7 @@ Body: `{"token": string}` (el token del enlace). No requiere `Authorization`.
 Response: `{"detail": string}`.
 
 ```
-POST /auth/password/forgot
+POST /v1/auth/password/forgot
 → 202  Siempre (exista o no el email — sin enumeración)
 ```
 
@@ -279,7 +283,7 @@ La respuesta es **idéntica** en ambos casos para no revelar qué emails existen
 Un fallo del proveedor de email no altera la respuesta. Response: `{"detail": string}`.
 
 ```
-POST /auth/password/reset
+POST /v1/auth/password/reset
 → 200  Password cambiada; se revocan los refresh activos del usuario
 → 400  Token inválido, expirado o ya usado
 ```
@@ -290,13 +294,13 @@ todos los refresh tokens activos del usuario (fuerza re-login). Response:
 `{"detail": string}`.
 
 ```
-GET /users/me
+GET /v1/users/me
 → 200  Perfil propio (incluye email)
 → 401  Sin token / token inválido o expirado
 ```
 
 ```
-PATCH /users/me
+PATCH /v1/users/me
 → 200  Perfil actualizado
 → 401  Sin token
 ```
@@ -305,7 +309,7 @@ Body (reemplazo parcial, todos los campos opcionales):
 `{"display_name": string | null, "bio": string | null, "avatar_url": string | null}`.
 
 ```
-DELETE /users/me
+DELETE /v1/users/me
 → 204  Cuenta borrada
 → 401  Sin token / token inválido o expirado
 ```
@@ -316,10 +320,10 @@ review_likes, follows (en ambos sentidos), biblioteca, listas, notificaciones
 (como recipient y como actor) y tokens (refresh + account). Tras el borrado se
 recomputan `rating_internal`/`rating_count_internal` de los items que el usuario
 había puntuado, y el `username`/`email` quedan libres para re-registro. Los
-refresh tokens quedan invalidados (un `/auth/refresh` posterior devuelve 401).
+refresh tokens quedan invalidados (un `/v1/auth/refresh` posterior devuelve 401).
 
 ```
-GET /users/{username}
+GET /v1/users/{username}
 → 200  Perfil público (sin email)
 → 404  Username no encontrado
 ```
@@ -335,7 +339,7 @@ número de entradas de biblioteca del usuario por estado (zero-filled).
 Relación unidireccional sin aprobación entre usuarios.
 
 ```
-POST /users/{username}/follow
+POST /v1/users/{username}/follow
 → 204  Ahora sigues a {username} (idempotente: seguir dos veces no falla)
 → 401  Sin token
 → 404  Username no encontrado
@@ -343,20 +347,20 @@ POST /users/{username}/follow
 ```
 
 ```
-DELETE /users/{username}/follow
+DELETE /v1/users/{username}/follow
 → 204  Dejas de seguir a {username} (idempotente: no falla si no seguías)
 → 401  Sin token
 → 404  Username no encontrado
 ```
 
 ```
-GET /users/{username}/followers?page=&limit=
+GET /v1/users/{username}/followers?page=&limit=
 → 200  Lista paginada, pública, de usuarios que siguen a {username}
 → 404  Username no encontrado
 ```
 
 ```
-GET /users/{username}/following?page=&limit=
+GET /v1/users/{username}/following?page=&limit=
 → 200  Lista paginada, pública, de usuarios a los que {username} sigue
 → 404  Username no encontrado
 ```
@@ -374,7 +378,7 @@ Mismo contrato en los 4 tipos de contenido — sustituir `{type}` por
 `movies`, `series`, `books` o `games`.
 
 ```
-PUT /{type}/{slug}/rating
+PUT /v1/{type}/{slug}/rating
 → 200  Upsert de la puntuación/review del usuario autenticado
 → 401  Sin token
 → 404  Slug no encontrado
@@ -390,14 +394,14 @@ Response: `id`, `user` (`username`, `display_name`, `avatar_url`), `score`,
 `review_text`, `like_count`, `created_at`, `updated_at`.
 
 ```
-DELETE /{type}/{slug}/rating
+DELETE /v1/{type}/{slug}/rating
 → 204  Rating propia eliminada; agregados recalculados
 → 401  Sin token
 → 404  El usuario no tiene rating para ese item
 ```
 
 ```
-GET /{type}/{slug}/ratings?page=&limit=
+GET /v1/{type}/{slug}/ratings?page=&limit=
 → 200  Lista paginada, pública, más reciente primero
 → 404  Slug no encontrado
 ```
@@ -407,8 +411,8 @@ tiene el mismo shape que la respuesta de `PUT .../rating`, incluyendo
 `like_count`.
 
 ```
-POST /ratings/{id}/like
-DELETE /ratings/{id}/like
+POST /v1/ratings/{id}/like
+DELETE /v1/ratings/{id}/like
 → 204  Auth requerida, idempotente (dar/quitar like dos veces no falla)
 → 401  Sin token
 → 404  Rating no encontrada
@@ -420,7 +424,7 @@ Notifications); no se notifica un self-like ni un re-like idempotente, y el
 unlike nunca notifica.
 
 ```
-GET /users/{username}/reviews?page=&limit=
+GET /v1/users/{username}/reviews?page=&limit=
 → 200  Público, paginado, cross-type (UNION ALL de movies/series/books/games)
 → 404  Username no encontrado
 ```
@@ -436,7 +440,7 @@ Un usuario marca una review (una fila de `user_ratings`) como problemática; los
 admin la triagean desde una cola. Rutas en raíz (se versionarán en la feature 45).
 
 ```
-POST /reviews/{id}/report
+POST /v1/reviews/{id}/report
 → 201  Reporte creado (primera vez)
 → 200  Ya existía un reporte del mismo usuario para esa review (idempotente)
 → 401  Sin token
@@ -451,17 +455,17 @@ existente **sin** sobrescribir el `reason` original. Response: `id`,
 `created_at`, `resolved_at`.
 
 ```
-GET /admin/reports?status=&page=&limit=
+GET /v1/admin/reports?status=&page=&limit=
 → 200  Cola paginada, más reciente primero (requiere X-API-Key)
 → 401  X-API-Key ausente o incorrecta
 ```
 
 Filtro opcional `status` ∈ {`open`, `resolved`}. Response:
 `{"items": [...], "total": , "page": , "limit": }` — cada item con el mismo
-shape que la respuesta de `POST /reviews/{id}/report`.
+shape que la respuesta de `POST /v1/reviews/{id}/report`.
 
 ```
-POST /admin/reports/{id}/resolve
+POST /v1/admin/reports/{id}/resolve
 → 200  Reporte marcado como resuelto (idempotente; requiere X-API-Key)
 → 401  X-API-Key ausente o incorrecta
 → 404  Reporte no encontrado
@@ -477,13 +481,13 @@ header `X-API-Key`. Rutas en raíz (se versionarán en la feature 45).
 
 **Condición de visibilidad (reutilizable).** Una review es visible sólo cuando
 `is_hidden = false` **y** su autor no está baneado (`users.is_banned = false`).
-Una review no visible se excluye de `GET /{tipo}/{slug}/ratings`, del feed y de
-`GET /users/{username}/reviews`, y **no cuenta** para
+Una review no visible se excluye de `GET /v1/{tipo}/{slug}/ratings`, del feed y de
+`GET /v1/users/{username}/reviews`, y **no cuenta** para
 `rating_internal`/`rating_count_internal`.
 
 ```
-POST /admin/reviews/{id}/hide
-POST /admin/reviews/{id}/unhide
+POST /v1/admin/reviews/{id}/hide
+POST /v1/admin/reviews/{id}/unhide
 → 200  Review oculta / restaurada (idempotente; requiere X-API-Key)
 → 401  X-API-Key ausente o incorrecta
 → 404  Review (rating) no encontrada
@@ -494,8 +498,8 @@ POST /admin/reviews/{id}/unhide
 no visibles. Response: `{"id": , "is_hidden": bool}`.
 
 ```
-POST /admin/users/{username}/ban
-POST /admin/users/{username}/unban
+POST /v1/admin/users/{username}/ban
+POST /v1/admin/users/{username}/unban
 → 200  Usuario baneado / desbaneado (idempotente; requiere X-API-Key)
 → 401  X-API-Key ausente o incorrecta
 → 404  Usuario no encontrado
@@ -511,7 +515,7 @@ de **todos** los items que el usuario había puntuado. Response:
 ### Feed (activity feed)
 
 ```
-GET /feed?tab=following|popular&page=&limit=
+GET /v1/feed?tab=following|popular&page=&limit=
 → 200  Feed paginado, cross-type (UNION ALL de movies/series/books/games)
 → 401  Sin token
 → 422  tab distinto de following/popular
@@ -537,7 +541,7 @@ da like a una de tus reviews). Sin mensajería directa (fuera de scope). La
 generación es best-effort: si falla, no rompe el follow/like que la originó.
 
 ```
-GET /notifications?page=&limit=
+GET /v1/notifications?page=&limit=
 → 200  Notificaciones del caller, paginadas, reverse-chronological
 → 401  Sin token
 ```
@@ -549,13 +553,13 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `is_read`, `created_at`.
 
 ```
-GET /notifications/unread_count
+GET /v1/notifications/unread_count
 → 200  {"unread_count": }  número de notificaciones no leídas del caller
 → 401  Sin token
 ```
 
 ```
-POST /notifications/read
+POST /v1/notifications/read
 → 204  Marca notificaciones del caller como leídas (idempotente)
 → 401  Sin token
 ```
@@ -572,7 +576,7 @@ Sugerencias personalizadas para el usuario autenticado, calculadas al vuelo
 `completed`/`want`.
 
 ```
-GET /recommendations?type=&page=&limit=
+GET /v1/recommendations?type=&page=&limit=
 → 200  Recomendaciones paginadas, cross-type
 → 401  Sin token
 → 422  type inválido (no está entre movie/series/book/game)
@@ -606,7 +610,7 @@ través de los 4 tipos. Estados válidos: `want`, `in_progress`, `completed`,
 `dropped`.
 
 ```
-PUT /{type}/{slug}/library      ({type} = movies | series | books | games)
+PUT /v1/{type}/{slug}/library      ({type} = movies | series | books | games)
 → 200  Upsert del estado del caller para el item
 → 401  Sin token
 → 404  Slug no encontrado
@@ -618,14 +622,14 @@ Body: `{"status": "want"}`. Response (`LibraryStatusOut`): `item_type`, `slug`,
 (upsert por `(user, item_type, item_id)`).
 
 ```
-DELETE /{type}/{slug}/library
+DELETE /v1/{type}/{slug}/library
 → 204  Entrada propia eliminada
 → 401  Sin token
 → 404  El caller no tiene entrada para ese item (o slug no encontrado)
 ```
 
 ```
-GET /users/{username}/library?status=&type=&page=&limit=
+GET /v1/users/{username}/library?status=&type=&page=&limit=
 → 200  Biblioteca paginada, cross-type (UNION ALL de movies/series/books/games)
 → 404  Username no encontrado
 ```
@@ -645,12 +649,12 @@ Listas nombradas creadas por usuarios (p.ej. "Mejor sci-fi") con items
 cross-type ordenados y visibilidad público/privado. El `slug` se deriva del
 título al crear la lista y no cambia. Aunque la unicidad en DB es por
 `(user_id, slug)`, el `slug` se resuelve de forma **globalmente única**
-(sufijo `-2`, `-3`, … en caso de colisión) para que `/lists/{slug}` apunte a
+(sufijo `-2`, `-3`, … en caso de colisión) para que `/v1/lists/{slug}` apunte a
 una sola lista — esto permite distinguir 404 (no existe) de 403 (existe pero no
 es tuya).
 
 ```
-POST /lists
+POST /v1/lists
 → 201  Lista creada (slug derivado del título)
 → 401  Sin token
 ```
@@ -661,7 +665,7 @@ Body (`ListCreate`): `title` (obligatorio), `description` (opcional),
 `items[]`.
 
 ```
-GET /lists/{slug}
+GET /v1/lists/{slug}
 → 200  Detalle con items resueltos cross-type en orden (por position)
 → 404  No existe, o es privada y el caller no es el owner
 ```
@@ -671,7 +675,7 @@ oculta su existencia con 404. Cada item de `items[]`: `item_type`, `title`,
 `slug`, `poster_url`, `release_date`, `rating_external`, `position`.
 
 ```
-PATCH /lists/{slug}      (auth, solo owner)
+PATCH /v1/lists/{slug}      (auth, solo owner)
 → 200  Actualiza title/description/is_public (el slug no cambia)
 → 401  Sin token
 → 403  No es el owner
@@ -679,14 +683,14 @@ PATCH /lists/{slug}      (auth, solo owner)
 ```
 
 ```
-DELETE /lists/{slug}     (auth, solo owner)
+DELETE /v1/lists/{slug}     (auth, solo owner)
 → 204  Lista eliminada (cascada sobre sus list_items)
 → 401 / 403 / 404
 ```
 
 ```
-POST   /lists/{slug}/items     (auth, solo owner)
-DELETE /lists/{slug}/items     (auth, solo owner)
+POST   /v1/lists/{slug}/items     (auth, solo owner)
+DELETE /v1/lists/{slug}/items     (auth, solo owner)
 → 200  Devuelve el detalle de la lista actualizado
 → 401 / 403
 → 404  El item (item_type + slug) no existe en el catálogo
@@ -697,7 +701,7 @@ Añadir es idempotente y coloca el item al final (`position` = max+1); quitar es
 idempotente (no falla si el item no estaba) y re-empaqueta las posiciones.
 
 ```
-PUT /lists/{slug}/items/order   (auth, solo owner)
+PUT /v1/lists/{slug}/items/order   (auth, solo owner)
 → 200  Reordena los items; devuelve el detalle
 → 401 / 403 / 404
 → 422  El conjunto enviado no coincide exactamente con los items de la lista
@@ -707,7 +711,7 @@ Body (`ListReorder`): `{"items": [{"item_type": "...", "slug": "..."}, ...]}`
 con el orden deseado. Debe contener exactamente los items actuales de la lista.
 
 ```
-GET /users/{username}/lists
+GET /v1/users/{username}/lists
 → 200  Listas del usuario (públicas siempre; privadas solo si el caller es owner)
 → 404  Username no encontrado
 ```
@@ -719,7 +723,7 @@ entrada (`UserListSummary`): `slug`, `title`, `description`, `is_public`,
 ### People
 
 ```
-GET /people/{slug}
+GET /v1/people/{slug}
 → 200  Person detail
 → 404  Not found
 ```
@@ -731,7 +735,7 @@ Response fields: `id`, `name`, `slug`, `profile_url`, `credits[]`
 ### Genres
 
 ```
-GET /genres?type=movie|series|book|game
+GET /v1/genres?type=movie|series|book|game
 → 200  Géneros con conteo de items asociados
 → 422  type inválido
 ```
@@ -743,7 +747,7 @@ Sin `type` devuelve los géneros de todos los tipos. Response:
 ### Trending
 
 ```
-GET /trending?type=movie|series&period=day|week
+GET /v1/trending?type=movie|series&period=day|week
 → 200  Hasta 20 items trending (TMDB Trending API)
 → 422  type o period inválidos
 ```
@@ -756,7 +760,7 @@ persisten en la DB local.
 ### Admin (sync trigger)
 
 ```
-POST /admin/sync/{type}   type ∈ {movie, series, book, game}
+POST /v1/admin/sync/{type}   type ∈ {movie, series, book, game}
 → 200  Sync completed
 ```
 
@@ -791,7 +795,7 @@ configurar → `503`.
 ### Admin stats
 
 ```
-GET /admin/stats
+GET /v1/admin/stats
 → 200
 ```
 
@@ -825,7 +829,7 @@ dependency), consistent with the stdlib-only observability layer.
 Exposed metric families:
 
 - `http_requests_total{method,path,status}` — counter of HTTP requests. The
-  `path` label is always the **route template** (`/movies/{slug}`), never the
+  `path` label is always the **route template** (`/v1/movies/{slug}`), never the
   concrete URL, so slugs/usernames/ids/query strings never become labels and the
   series count stays bounded. Unmatched URLs (404 with no route) fold into
   `path="__unmatched__"`.
@@ -834,7 +838,7 @@ Exposed metric families:
 - `backlogg_syncs_total{type}` — content sync jobs executed, by content type
   (`movie`/`series`/`book`/`game`).
 - `backlogg_external_fanout_total{source}` — external API fan-outs during the
-  `/search` fallback, by source (`movie`/`series`/`book`/`game`).
+  `/v1/search` fallback, by source (`movie`/`series`/`book`/`game`).
 
 `/metrics` is excluded from its own request instrumentation so scrape traffic
 does not dominate the counters.
@@ -854,7 +858,7 @@ http_request_duration_seconds_count{method="GET",path="/health"} 3
 
 ## On-demand fallback
 
-When `GET /{type}/{slug}` finds no local result, the service layer:
+When `GET /v1/{type}/{slug}` finds no local result, the service layer:
 1. Queries the external API by slug/title
 2. Persists the item to the local DB
 3. Returns the item as if it had been found locally

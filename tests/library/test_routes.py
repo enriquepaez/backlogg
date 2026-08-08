@@ -122,10 +122,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -138,7 +140,7 @@ def _auth_headers(token: str) -> dict:
 
 async def test_put_library_without_token_returns_401(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-library-movie-1"))
-    response = await client.put("/movies/route-library-movie-1/library", json={"status": "want"})
+    response = await client.put("/v1/movies/route-library-movie-1/library", json={"status": "want"})
     assert response.status_code == 401
 
 
@@ -147,7 +149,7 @@ async def test_put_library_upserts_and_returns_200(client, db):
     token = await _register_and_login(client, "route-library-user-1")
 
     response = await client.put(
-        "/movies/route-library-movie-2/library",
+        "/v1/movies/route-library-movie-2/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
@@ -159,7 +161,7 @@ async def test_put_library_upserts_and_returns_200(client, db):
 
     # Upsert to a new status.
     response2 = await client.put(
-        "/movies/route-library-movie-2/library",
+        "/v1/movies/route-library-movie-2/library",
         json={"status": "completed"},
         headers=_auth_headers(token),
     )
@@ -172,7 +174,7 @@ async def test_put_library_invalid_status_returns_422(client, db):
     token = await _register_and_login(client, "route-library-user-2")
 
     response = await client.put(
-        "/movies/route-library-movie-3/library",
+        "/v1/movies/route-library-movie-3/library",
         json={"status": "reading"},
         headers=_auth_headers(token),
     )
@@ -182,7 +184,7 @@ async def test_put_library_invalid_status_returns_422(client, db):
 async def test_put_library_slug_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-library-user-3")
     response = await client.put(
-        "/movies/no-such-movie-library/library",
+        "/v1/movies/no-such-movie-library/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
@@ -194,7 +196,7 @@ async def test_put_library_slug_not_found_returns_404(client, db):
 
 async def test_delete_library_without_token_returns_401(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-library-movie-4"))
-    response = await client.delete("/movies/route-library-movie-4/library")
+    response = await client.delete("/v1/movies/route-library-movie-4/library")
     assert response.status_code == 401
 
 
@@ -203,12 +205,12 @@ async def test_delete_library_removes_entry(client, db):
     token = await _register_and_login(client, "route-library-user-4")
 
     await client.put(
-        "/movies/route-library-movie-5/library",
+        "/v1/movies/route-library-movie-5/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
     response = await client.delete(
-        "/movies/route-library-movie-5/library", headers=_auth_headers(token)
+        "/v1/movies/route-library-movie-5/library", headers=_auth_headers(token)
     )
     assert response.status_code == 204
 
@@ -218,7 +220,7 @@ async def test_delete_library_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-library-user-5")
 
     response = await client.delete(
-        "/movies/route-library-movie-6/library", headers=_auth_headers(token)
+        "/v1/movies/route-library-movie-6/library", headers=_auth_headers(token)
     )
     assert response.status_code == 404
 
@@ -232,18 +234,18 @@ async def test_get_user_library_public_cross_type(client, db):
     token = await _register_and_login(client, "route-library-user-6")
 
     await client.put(
-        "/movies/route-library-movie-7/library",
+        "/v1/movies/route-library-movie-7/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
     await client.put(
-        "/series/route-library-series-1/library",
+        "/v1/series/route-library-series-1/library",
         json={"status": "completed"},
         headers=_auth_headers(token),
     )
 
     # No auth required for reading.
-    response = await client.get("/users/route-library-user-6/library")
+    response = await client.get("/v1/users/route-library-user-6/library")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
@@ -268,22 +270,22 @@ async def test_get_user_library_filter_by_status_and_type(client, db):
     token = await _register_and_login(client, "route-library-user-7")
 
     await client.put(
-        "/movies/route-library-movie-8/library",
+        "/v1/movies/route-library-movie-8/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
     await client.put(
-        "/series/route-library-series-2/library",
+        "/v1/series/route-library-series-2/library",
         json={"status": "completed"},
         headers=_auth_headers(token),
     )
 
-    by_status = await client.get("/users/route-library-user-7/library?status=want")
+    by_status = await client.get("/v1/users/route-library-user-7/library?status=want")
     assert by_status.status_code == 200
     assert by_status.json()["total"] == 1
     assert by_status.json()["items"][0]["item"]["item_type"] == "MOVIE"
 
-    by_type = await client.get("/users/route-library-user-7/library?type=series")
+    by_type = await client.get("/v1/users/route-library-user-7/library?type=series")
     assert by_type.status_code == 200
     assert by_type.json()["total"] == 1
     assert by_type.json()["items"][0]["item"]["item_type"] == "SERIES"
@@ -291,12 +293,12 @@ async def test_get_user_library_filter_by_status_and_type(client, db):
 
 async def test_get_user_library_invalid_status_filter_returns_422(client, db):
     await _register_and_login(client, "route-library-user-8")
-    response = await client.get("/users/route-library-user-8/library?status=bogus")
+    response = await client.get("/v1/users/route-library-user-8/library?status=bogus")
     assert response.status_code == 422
 
 
 async def test_get_user_library_unknown_user_returns_404(client, db):
-    response = await client.get("/users/nobody-library-ever/library")
+    response = await client.get("/v1/users/nobody-library-ever/library")
     assert response.status_code == 404
 
 
@@ -307,13 +309,13 @@ async def test_get_movie_viewer_status_null_without_auth(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-library-movie-9"))
     token = await _register_and_login(client, "route-library-user-9")
     await client.put(
-        "/movies/route-library-movie-9/library",
+        "/v1/movies/route-library-movie-9/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
 
     # Anonymous caller — viewer_status must be null even though someone else set it.
-    response = await client.get("/movies/route-library-movie-9")
+    response = await client.get("/v1/movies/route-library-movie-9")
     assert response.status_code == 200
     assert response.json()["viewer_status"] is None
 
@@ -322,12 +324,12 @@ async def test_get_movie_viewer_status_reflects_caller_entry(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-library-movie-10"))
     token = await _register_and_login(client, "route-library-user-10")
     await client.put(
-        "/movies/route-library-movie-10/library",
+        "/v1/movies/route-library-movie-10/library",
         json={"status": "in_progress"},
         headers=_auth_headers(token),
     )
 
-    response = await client.get("/movies/route-library-movie-10", headers=_auth_headers(token))
+    response = await client.get("/v1/movies/route-library-movie-10", headers=_auth_headers(token))
     assert response.status_code == 200
     assert response.json()["viewer_status"] == "in_progress"
 
@@ -336,7 +338,7 @@ async def test_get_movie_viewer_status_null_when_authed_without_entry(client, db
     await movies_repo.upsert_movie(db, _movie_data("route-library-movie-11"))
     token = await _register_and_login(client, "route-library-user-11")
 
-    response = await client.get("/movies/route-library-movie-11", headers=_auth_headers(token))
+    response = await client.get("/v1/movies/route-library-movie-11", headers=_auth_headers(token))
     assert response.status_code == 200
     assert response.json()["viewer_status"] is None
 
@@ -350,17 +352,17 @@ async def test_get_user_profile_includes_library_counts(client, db):
     token = await _register_and_login(client, "route-library-user-12")
 
     await client.put(
-        "/movies/route-library-movie-12/library",
+        "/v1/movies/route-library-movie-12/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
     await client.put(
-        "/series/route-library-series-3/library",
+        "/v1/series/route-library-series-3/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
 
-    response = await client.get("/users/route-library-user-12")
+    response = await client.get("/v1/users/route-library-user-12")
     assert response.status_code == 200
     counts = response.json()["library_counts"]
     assert counts == {"want": 2, "in_progress": 0, "completed": 0, "dropped": 0}
@@ -374,7 +376,7 @@ async def test_series_library_put_delete_symmetry(client, db):
     token = await _register_and_login(client, "route-library-user-13")
 
     put = await client.put(
-        "/series/route-library-series-4/library",
+        "/v1/series/route-library-series-4/library",
         json={"status": "want"},
         headers=_auth_headers(token),
     )
@@ -382,7 +384,7 @@ async def test_series_library_put_delete_symmetry(client, db):
     assert put.json()["status"] == "want"
 
     delete = await client.delete(
-        "/series/route-library-series-4/library", headers=_auth_headers(token)
+        "/v1/series/route-library-series-4/library", headers=_auth_headers(token)
     )
     assert delete.status_code == 204
 
@@ -392,7 +394,7 @@ async def test_book_library_put_delete_symmetry(client, db):
     token = await _register_and_login(client, "route-library-user-14")
 
     put = await client.put(
-        "/books/route-library-book-1/library",
+        "/v1/books/route-library-book-1/library",
         json={"status": "completed"},
         headers=_auth_headers(token),
     )
@@ -400,12 +402,12 @@ async def test_book_library_put_delete_symmetry(client, db):
     assert put.json()["status"] == "completed"
 
     # viewer_status exposed on the book detail for the caller.
-    detail = await client.get("/books/route-library-book-1", headers=_auth_headers(token))
+    detail = await client.get("/v1/books/route-library-book-1", headers=_auth_headers(token))
     assert detail.status_code == 200
     assert detail.json()["viewer_status"] == "completed"
 
     delete = await client.delete(
-        "/books/route-library-book-1/library", headers=_auth_headers(token)
+        "/v1/books/route-library-book-1/library", headers=_auth_headers(token)
     )
     assert delete.status_code == 204
 
@@ -415,18 +417,18 @@ async def test_game_library_put_delete_symmetry(client, db):
     token = await _register_and_login(client, "route-library-user-15")
 
     put = await client.put(
-        "/games/route-library-game-1/library",
+        "/v1/games/route-library-game-1/library",
         json={"status": "dropped"},
         headers=_auth_headers(token),
     )
     assert put.status_code == 200
     assert put.json()["status"] == "dropped"
 
-    detail = await client.get("/games/route-library-game-1", headers=_auth_headers(token))
+    detail = await client.get("/v1/games/route-library-game-1", headers=_auth_headers(token))
     assert detail.status_code == 200
     assert detail.json()["viewer_status"] == "dropped"
 
     delete = await client.delete(
-        "/games/route-library-game-1/library", headers=_auth_headers(token)
+        "/v1/games/route-library-game-1/library", headers=_auth_headers(token)
     )
     assert delete.status_code == 204

@@ -28,10 +28,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -43,17 +45,17 @@ def _auth_headers(token: str) -> dict:
 
 
 async def test_list_notifications_without_token_returns_401(client):
-    response = await client.get("/notifications")
+    response = await client.get("/v1/notifications")
     assert response.status_code == 401
 
 
 async def test_unread_count_without_token_returns_401(client):
-    response = await client.get("/notifications/unread_count")
+    response = await client.get("/v1/notifications/unread_count")
     assert response.status_code == 401
 
 
 async def test_mark_read_without_token_returns_401(client):
-    response = await client.post("/notifications/read")
+    response = await client.post("/v1/notifications/read")
     assert response.status_code == 401
 
 
@@ -64,9 +66,9 @@ async def test_list_notifications_after_follow(client):
     actor_token = await _register_and_login(client, "route-notif-actor-1")
     target_token = await _register_and_login(client, "route-notif-target-1")
 
-    await client.post("/users/route-notif-target-1/follow", headers=_auth_headers(actor_token))
+    await client.post("/v1/users/route-notif-target-1/follow", headers=_auth_headers(actor_token))
 
-    response = await client.get("/notifications", headers=_auth_headers(target_token))
+    response = await client.get("/v1/notifications", headers=_auth_headers(target_token))
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1
@@ -81,12 +83,12 @@ async def test_unread_count_reflects_notifications(client):
     actor_token = await _register_and_login(client, "route-notif-actor-2")
     target_token = await _register_and_login(client, "route-notif-target-2")
 
-    resp0 = await client.get("/notifications/unread_count", headers=_auth_headers(target_token))
+    resp0 = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp0.json()["unread_count"] == 0
 
-    await client.post("/users/route-notif-target-2/follow", headers=_auth_headers(actor_token))
+    await client.post("/v1/users/route-notif-target-2/follow", headers=_auth_headers(actor_token))
 
-    resp1 = await client.get("/notifications/unread_count", headers=_auth_headers(target_token))
+    resp1 = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp1.json()["unread_count"] == 1
 
 
@@ -96,18 +98,18 @@ async def test_unread_count_reflects_notifications(client):
 async def test_mark_all_read_and_idempotent(client):
     actor_token = await _register_and_login(client, "route-notif-actor-3")
     target_token = await _register_and_login(client, "route-notif-target-3")
-    await client.post("/users/route-notif-target-3/follow", headers=_auth_headers(actor_token))
+    await client.post("/v1/users/route-notif-target-3/follow", headers=_auth_headers(actor_token))
 
-    first = await client.post("/notifications/read", headers=_auth_headers(target_token))
+    first = await client.post("/v1/notifications/read", headers=_auth_headers(target_token))
     assert first.status_code == 204
 
-    resp = await client.get("/notifications/unread_count", headers=_auth_headers(target_token))
+    resp = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp.json()["unread_count"] == 0
 
     # Idempotent — marking again is still 204 and count stays 0.
-    second = await client.post("/notifications/read", headers=_auth_headers(target_token))
+    second = await client.post("/v1/notifications/read", headers=_auth_headers(target_token))
     assert second.status_code == 204
-    resp2 = await client.get("/notifications/unread_count", headers=_auth_headers(target_token))
+    resp2 = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp2.json()["unread_count"] == 0
 
 
@@ -116,18 +118,18 @@ async def test_mark_read_specific_ids(client):
     actor2_token = await _register_and_login(client, "route-notif-actor-4b")
     target_token = await _register_and_login(client, "route-notif-target-4")
 
-    await client.post("/users/route-notif-target-4/follow", headers=_auth_headers(actor1_token))
-    await client.post("/users/route-notif-target-4/follow", headers=_auth_headers(actor2_token))
+    await client.post("/v1/users/route-notif-target-4/follow", headers=_auth_headers(actor1_token))
+    await client.post("/v1/users/route-notif-target-4/follow", headers=_auth_headers(actor2_token))
 
-    listing = await client.get("/notifications", headers=_auth_headers(target_token))
+    listing = await client.get("/v1/notifications", headers=_auth_headers(target_token))
     first_id = listing.json()["items"][0]["id"]
 
     marked = await client.post(
-        "/notifications/read",
+        "/v1/notifications/read",
         json={"ids": [first_id]},
         headers=_auth_headers(target_token),
     )
     assert marked.status_code == 204
 
-    resp = await client.get("/notifications/unread_count", headers=_auth_headers(target_token))
+    resp = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp.json()["unread_count"] == 1

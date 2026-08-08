@@ -52,7 +52,7 @@ async def test_get_series_found(client, db):
     # Seed the series directly via repository
     await repo.upsert_series(db, _make_series_dict("the-wire-2002"))
 
-    response = await client.get("/series/the-wire-2002")
+    response = await client.get("/v1/series/the-wire-2002")
     assert response.status_code == 200
 
     body = response.json()
@@ -73,7 +73,7 @@ async def test_get_series_returns_404(client, db):
     with (
         patch.object(service._tmdb, "search_series", new_callable=AsyncMock, return_value=None),
     ):
-        response = await client.get("/series/nonexistent-slug-404-test")
+        response = await client.get("/v1/series/nonexistent-slug-404-test")
 
     assert response.status_code == 404
 
@@ -82,7 +82,7 @@ async def test_get_series_credits_empty(client, db):
     """GET /series/{slug} returns credits as [] when no credits exist."""
     await repo.upsert_series(db, _make_series_dict("credits-empty-series-2002"))
 
-    response = await client.get("/series/credits-empty-series-2002")
+    response = await client.get("/v1/series/credits-empty-series-2002")
     assert response.status_code == 200
 
     body = response.json()
@@ -136,7 +136,7 @@ async def test_get_series_credits_present_and_ordered(client, db):
         },
     )
 
-    response = await client.get("/series/credits-ordered-series-2002")
+    response = await client.get("/v1/series/credits-ordered-series-2002")
     assert response.status_code == 200
 
     body = response.json()

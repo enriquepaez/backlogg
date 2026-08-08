@@ -48,7 +48,7 @@ async def client(db):
 
 async def test_list_books_returns_200_empty(client, db):
     """GET /books returns 200 with pagination metadata."""
-    response = await client.get("/books")
+    response = await client.get("/v1/books")
     assert response.status_code == 200
     body = response.json()
     assert "items" in body
@@ -70,7 +70,7 @@ async def test_list_books_response_fields(client, db):
         ),
     )
 
-    response = await client.get("/books?genre=bk-fields-dystopian-slug")
+    response = await client.get("/v1/books?genre=bk-fields-dystopian-slug")
     assert response.status_code == 200
     body = response.json()
     assert len(body["items"]) == 1
@@ -108,7 +108,7 @@ async def test_list_books_filter_by_genre(client, db):
         ),
     )
 
-    response = await client.get("/books?genre=bk-mystery-genre-slug")
+    response = await client.get("/v1/books?genre=bk-mystery-genre-slug")
     assert response.status_code == 200
     body = response.json()
     slugs = [item["slug"] for item in body["items"]]
@@ -141,7 +141,7 @@ async def test_list_books_sort_date_desc_uses_first_publish_date(client, db):
         ),
     )
 
-    response = await client.get("/books?sort=date_desc&genre=bk-date-genre-slug")
+    response = await client.get("/v1/books?sort=date_desc&genre=bk-date-genre-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -175,7 +175,7 @@ async def test_list_books_sort_rating_desc(client, db):
         ),
     )
 
-    response = await client.get("/books?sort=rating_desc&genre=bk-rating-genre-slug")
+    response = await client.get("/v1/books?sort=rating_desc&genre=bk-rating-genre-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -209,13 +209,13 @@ async def test_list_books_pagination(client, db):
         ),
     )
 
-    r1 = await client.get("/books?sort=rating_desc&page=1&limit=1&genre=bk-page-genre-slug")
+    r1 = await client.get("/v1/books?sort=rating_desc&page=1&limit=1&genre=bk-page-genre-slug")
     assert r1.status_code == 200
     b1 = r1.json()
     assert len(b1["items"]) == 1
     assert b1["total"] == 2
 
-    r2 = await client.get("/books?sort=rating_desc&page=2&limit=1&genre=bk-page-genre-slug")
+    r2 = await client.get("/v1/books?sort=rating_desc&page=2&limit=1&genre=bk-page-genre-slug")
     assert r2.status_code == 200
     b2 = r2.json()
     assert len(b2["items"]) == 1

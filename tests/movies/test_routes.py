@@ -52,7 +52,7 @@ async def test_get_movie_returns_200(client, db):
     # Seed the movie directly via repository
     await repo.upsert_movie(db, _make_movie_dict("the-matrix-1999"))
 
-    response = await client.get("/movies/the-matrix-1999")
+    response = await client.get("/v1/movies/the-matrix-1999")
     assert response.status_code == 200
 
     body = response.json()
@@ -71,7 +71,7 @@ async def test_get_movie_returns_404(client, db):
     with (
         patch.object(service._tmdb, "search_movie", new_callable=AsyncMock, return_value=None),
     ):
-        response = await client.get("/movies/nonexistent-slug-404-test")
+        response = await client.get("/v1/movies/nonexistent-slug-404-test")
 
     assert response.status_code == 404
 
@@ -80,7 +80,7 @@ async def test_get_movie_credits_empty(client, db):
     """GET /movies/{slug} returns credits as [] when no credits exist."""
     await repo.upsert_movie(db, _make_movie_dict("credits-empty-movie-1999"))
 
-    response = await client.get("/movies/credits-empty-movie-1999")
+    response = await client.get("/v1/movies/credits-empty-movie-1999")
     assert response.status_code == 200
 
     body = response.json()
@@ -134,7 +134,7 @@ async def test_get_movie_credits_present_and_ordered(client, db):
         },
     )
 
-    response = await client.get("/movies/credits-ordered-movie-1999")
+    response = await client.get("/v1/movies/credits-ordered-movie-1999")
     assert response.status_code == 200
 
     body = response.json()

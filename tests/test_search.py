@@ -129,7 +129,7 @@ async def seeded_db(db):
 
 async def test_search_returns_results(client, seeded_db):
     """GET /search?q=inception returns 200 with matching movie."""
-    response = await client.get("/search?q=inception")
+    response = await client.get("/v1/search?q=inception")
     assert response.status_code == 200
     body = response.json()
     assert "results" in body
@@ -140,7 +140,7 @@ async def test_search_returns_results(client, seeded_db):
 
 async def test_search_filter_by_type(client, seeded_db):
     """GET /search?q=inception&type=movie returns only movie results."""
-    response = await client.get("/search?q=inception&type=movie")
+    response = await client.get("/v1/search?q=inception&type=movie")
     assert response.status_code == 200
     body = response.json()
     for result in body["results"]:
@@ -151,7 +151,7 @@ async def test_search_filter_by_type(client, seeded_db):
 
 async def test_search_filter_by_type_excludes_others(client, seeded_db):
     """GET /search?q=inception&type=series returns no movie results."""
-    response = await client.get("/search?q=inception&type=series")
+    response = await client.get("/v1/search?q=inception&type=series")
     assert response.status_code == 200
     body = response.json()
     for result in body["results"]:
@@ -163,7 +163,7 @@ async def test_search_filter_by_type_excludes_others(client, seeded_db):
 
 async def test_search_pagination(client, seeded_db):
     """GET /search?q=inception&page=1&limit=5 returns correct pagination fields."""
-    response = await client.get("/search?q=inception&page=1&limit=5")
+    response = await client.get("/v1/search?q=inception&page=1&limit=5")
     assert response.status_code == 200
     body = response.json()
     assert body["page"] == 1
@@ -174,13 +174,13 @@ async def test_search_pagination(client, seeded_db):
 
 async def test_search_missing_q_returns_422(client, seeded_db):
     """GET /search without q parameter returns 422."""
-    response = await client.get("/search")
+    response = await client.get("/v1/search")
     assert response.status_code == 422
 
 
 async def test_search_empty_q_returns_422(client, seeded_db):
     """GET /search?q= (empty string) returns 422."""
-    response = await client.get("/search?q=")
+    response = await client.get("/v1/search?q=")
     assert response.status_code == 422
 
 
@@ -205,7 +205,7 @@ async def test_search_no_results(client, seeded_db):
         ),
         patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
     assert response.status_code == 200
     body = response.json()
     assert body["results"] == []
@@ -214,7 +214,7 @@ async def test_search_no_results(client, seeded_db):
 
 async def test_search_result_fields(client, seeded_db):
     """Each result item includes the expected fields."""
-    response = await client.get("/search?q=inception")
+    response = await client.get("/v1/search?q=inception")
     assert response.status_code == 200
     body = response.json()
     assert len(body["results"]) > 0
@@ -254,7 +254,7 @@ async def test_search_fallback_fires_when_no_local_results(client, seeded_db):
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
     assert response.status_code == 200
     # All four ingest helpers must have been called exactly once
@@ -281,7 +281,7 @@ async def test_search_fallback_not_fired_when_local_results_exist(client, seeded
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=inception")
+        response = await client.get("/v1/search?q=inception")
 
     assert response.status_code == 200
     body = response.json()
@@ -309,7 +309,7 @@ async def test_search_fallback_type_movie_only_calls_tmdb_movies(client, seeded_
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=movie")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=movie")
 
     assert response.status_code == 200
     ingest_movie_mock.assert_called_once()
@@ -333,7 +333,7 @@ async def test_search_fallback_type_series_only_calls_tmdb_series(client, seeded
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=series")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=series")
 
     assert response.status_code == 200
     ingest_movie_mock.assert_not_called()
@@ -357,7 +357,7 @@ async def test_search_fallback_type_book_only_calls_open_library(client, seeded_
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=book")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=book")
 
     assert response.status_code == 200
     ingest_movie_mock.assert_not_called()
@@ -381,7 +381,7 @@ async def test_search_fallback_type_game_only_calls_igdb(client, seeded_db):
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=game")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=game")
 
     assert response.status_code == 200
     ingest_movie_mock.assert_not_called()
@@ -408,7 +408,7 @@ async def test_search_fallback_api_failure_does_not_abort_others(client, seeded_
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
     # Must still return 200 even though the movies ingest failed
     assert response.status_code == 200
@@ -445,7 +445,7 @@ async def test_search_fallback_one_ingest_failure_does_not_abort_others(client, 
         patch("backlogg.search.service._ingest_games", new=ok_games_ingest),
         patch(_REFRESH_PATCH, new=refresh_mock),
     ):
-        response = await client.get("/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
+        response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
     # Must not 500 — each ingest has its own isolated session
     assert response.status_code == 200
@@ -501,7 +501,7 @@ async def test_search_fallback_returns_ingested_items(client, db):
             patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
             patch(_REFRESH_PATCH, new=fake_refresh),
         ):
-            response = await ac.get("/search?q=galactic+traveler")
+            response = await ac.get("/v1/search?q=galactic+traveler")
     app.dependency_overrides.clear()
 
     assert response.status_code == 200

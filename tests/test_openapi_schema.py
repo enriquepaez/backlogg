@@ -84,12 +84,12 @@ def test_key_operations_have_summary():
     """AC1: several key operations expose a non-empty summary."""
     paths = _schema()["paths"]
     checks = [
-        ("/movies/{slug}", "get"),
-        ("/auth/login", "post"),
-        ("/feed", "get"),
-        ("/search", "get"),
-        ("/recommendations", "get"),
-        ("/lists", "post"),
+        ("/v1/movies/{slug}", "get"),
+        ("/v1/auth/login", "post"),
+        ("/v1/feed", "get"),
+        ("/v1/search", "get"),
+        ("/v1/recommendations", "get"),
+        ("/v1/lists", "post"),
     ]
     for path, method in checks:
         assert path in paths, f"missing path: {path}"

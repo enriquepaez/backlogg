@@ -33,13 +33,17 @@ from backlogg.core.config import settings
 
 # Detail reads: cacheable per item, revalidate with ETag. May be user-specific
 # (viewer_status) when authenticated.
-DETAIL_TEMPLATES = frozenset({"/movies/{slug}", "/series/{slug}", "/books/{slug}", "/games/{slug}"})
+DETAIL_TEMPLATES = frozenset(
+    {"/v1/movies/{slug}", "/v1/series/{slug}", "/v1/books/{slug}", "/v1/games/{slug}"}
+)
 
 # Catalog listings + the expensive aggregate reads. Never user-specific.
-LISTING_TEMPLATES = frozenset({"/movies", "/series", "/books", "/games", "/genres", "/trending"})
+LISTING_TEMPLATES = frozenset(
+    {"/v1/movies", "/v1/series", "/v1/books", "/v1/games", "/v1/genres", "/v1/trending"}
+)
 
 # Per-user state: must never land in a shared cache.
-PRIVATE_TEMPLATES = frozenset({"/feed", "/users/me"})
+PRIVATE_TEMPLATES = frozenset({"/v1/feed", "/v1/users/me"})
 
 
 def _route_template(request: Request) -> str | None:
@@ -75,9 +79,9 @@ def _listing_max_age(template: str) -> int:
     ``/trending`` and ``/genres`` advertise the same TTL the in-process cache
     holds them for; other catalog listings use the generic listing max-age.
     """
-    if template == "/trending":
+    if template == "/v1/trending":
         return settings.CACHE_TTL_TRENDING
-    if template == "/genres":
+    if template == "/v1/genres":
         return settings.CACHE_TTL_GENRES
     return settings.CACHE_CONTROL_LISTING_MAX_AGE
 

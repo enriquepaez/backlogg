@@ -77,10 +77,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -92,13 +94,13 @@ def _auth_headers(token: str) -> dict:
 
 
 async def test_get_feed_without_token_returns_401(client, db):
-    response = await client.get("/feed?tab=following")
+    response = await client.get("/v1/feed?tab=following")
     assert response.status_code == 401
 
 
 async def test_get_feed_invalid_tab_returns_422(client, db):
     token = await _register_and_login(client, "feed-route-user-1")
-    response = await client.get("/feed?tab=nonsense", headers=_auth_headers(token))
+    response = await client.get("/v1/feed?tab=nonsense", headers=_auth_headers(token))
     assert response.status_code == 422
 
 
@@ -112,18 +114,18 @@ async def test_get_feed_following_returns_followed_reviews(client, db):
     author_token = await _register_and_login(client, "feed-route-author")
 
     await client.put(
-        "/movies/feed-route-movie-1/rating",
+        "/v1/movies/feed-route-movie-1/rating",
         json={"score": 5, "review_text": "author movie review"},
         headers=_auth_headers(author_token),
     )
     await client.put(
-        "/series/feed-route-series-1/rating",
+        "/v1/series/feed-route-series-1/rating",
         json={"score": 4, "review_text": "author series review"},
         headers=_auth_headers(author_token),
     )
-    await client.post("/users/feed-route-author/follow", headers=_auth_headers(caller_token))
+    await client.post("/v1/users/feed-route-author/follow", headers=_auth_headers(caller_token))
 
-    response = await client.get("/feed?tab=following", headers=_auth_headers(caller_token))
+    response = await client.get("/v1/feed?tab=following", headers=_auth_headers(caller_token))
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
@@ -134,7 +136,7 @@ async def test_get_feed_following_returns_followed_reviews(client, db):
 
 async def test_get_feed_following_no_follows_returns_empty(client, db):
     token = await _register_and_login(client, "feed-route-loner")
-    response = await client.get("/feed?tab=following", headers=_auth_headers(token))
+    response = await client.get("/v1/feed?tab=following", headers=_auth_headers(token))
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 0
@@ -150,14 +152,16 @@ async def test_get_feed_popular_returns_recent_reviews_with_like_count(client, d
     liker_token = await _register_and_login(client, "feed-route-liker")
 
     put_response = await client.put(
-        "/movies/feed-route-movie-2/rating",
+        "/v1/movies/feed-route-movie-2/rating",
         json={"score": 5, "review_text": "popular review"},
         headers=_auth_headers(author_token),
     )
     rating_id = put_response.json()["id"]
-    await client.post(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
 
-    response = await client.get("/feed?tab=popular&limit=100", headers=_auth_headers(liker_token))
+    response = await client.get(
+        "/v1/feed?tab=popular&limit=100", headers=_auth_headers(liker_token)
+    )
     assert response.status_code == 200
     body = response.json()
     # The popular tab is global (all recent reviews), and rating routes commit

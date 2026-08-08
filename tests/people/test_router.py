@@ -39,7 +39,7 @@ async def test_get_person_returns_200(client, db):
         },
     )
 
-    response = await client.get("/people/tom-hanks-router-test")
+    response = await client.get("/v1/people/tom-hanks-router-test")
     assert response.status_code == 200
 
     body = response.json()
@@ -105,7 +105,7 @@ async def test_get_person_returns_200_with_credits(client, db):
         },
     )
 
-    response = await client.get("/people/morgan-freeman-router-test")
+    response = await client.get("/v1/people/morgan-freeman-router-test")
     assert response.status_code == 200
 
     body = response.json()
@@ -122,5 +122,5 @@ async def test_get_person_returns_200_with_credits(client, db):
 
 async def test_get_person_returns_404(client, db):
     """GET /people/{slug} returns 404 for unknown slug."""
-    response = await client.get("/people/nobody-here-absolutely-999xyz")
+    response = await client.get("/v1/people/nobody-here-absolutely-999xyz")
     assert response.status_code == 404

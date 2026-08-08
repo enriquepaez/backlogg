@@ -121,10 +121,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -138,7 +140,7 @@ def _auth_headers(token: str) -> dict:
 async def test_put_movie_rating_without_token_returns_401(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-1"))
     response = await client.put(
-        "/movies/route-rating-movie-1/rating", json={"score": 4, "review_text": "Great"}
+        "/v1/movies/route-rating-movie-1/rating", json={"score": 4, "review_text": "Great"}
     )
     assert response.status_code == 401
 
@@ -148,7 +150,7 @@ async def test_put_movie_rating_upserts_and_returns_200(client, db):
     token = await _register_and_login(client, "route-rating-user-1")
 
     response = await client.put(
-        "/movies/route-rating-movie-2/rating",
+        "/v1/movies/route-rating-movie-2/rating",
         json={"score": 5, "review_text": "Masterpiece"},
         headers=_auth_headers(token),
     )
@@ -165,7 +167,7 @@ async def test_put_movie_rating_invalid_score_returns_422(client, db):
     token = await _register_and_login(client, "route-rating-user-2")
 
     response = await client.put(
-        "/movies/route-rating-movie-3/rating",
+        "/v1/movies/route-rating-movie-3/rating",
         json={"score": 6, "review_text": "Too high"},
         headers=_auth_headers(token),
     )
@@ -176,7 +178,7 @@ async def test_put_movie_rating_slug_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-rating-user-3")
 
     response = await client.put(
-        "/movies/no-such-movie-route-rating/rating",
+        "/v1/movies/no-such-movie-route-rating/rating",
         json={"score": 3, "review_text": None},
         headers=_auth_headers(token),
     )
@@ -188,7 +190,7 @@ async def test_put_movie_rating_slug_not_found_returns_404(client, db):
 
 async def test_delete_movie_rating_without_token_returns_401(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-4"))
-    response = await client.delete("/movies/route-rating-movie-4/rating")
+    response = await client.delete("/v1/movies/route-rating-movie-4/rating")
     assert response.status_code == 401
 
 
@@ -197,12 +199,12 @@ async def test_delete_movie_rating_removes_it(client, db):
     token = await _register_and_login(client, "route-rating-user-4")
 
     await client.put(
-        "/movies/route-rating-movie-5/rating",
+        "/v1/movies/route-rating-movie-5/rating",
         json={"score": 3, "review_text": None},
         headers=_auth_headers(token),
     )
     response = await client.delete(
-        "/movies/route-rating-movie-5/rating", headers=_auth_headers(token)
+        "/v1/movies/route-rating-movie-5/rating", headers=_auth_headers(token)
     )
     assert response.status_code == 204
 
@@ -215,7 +217,7 @@ async def test_delete_movie_rating_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-rating-user-5")
 
     response = await client.delete(
-        "/movies/route-rating-movie-6/rating", headers=_auth_headers(token)
+        "/v1/movies/route-rating-movie-6/rating", headers=_auth_headers(token)
     )
     assert response.status_code == 404
 
@@ -229,15 +231,15 @@ async def test_get_movie_ratings_public_paginated_with_like_count(client, db):
     liker_token = await _register_and_login(client, "route-rating-user-7")
 
     put_response = await client.put(
-        "/movies/route-rating-movie-7/rating",
+        "/v1/movies/route-rating-movie-7/rating",
         json={"score": 5, "review_text": "So good"},
         headers=_auth_headers(author_token),
     )
     rating_id = put_response.json()["id"]
 
-    await client.post(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
 
-    response = await client.get("/movies/route-rating-movie-7/ratings")
+    response = await client.get("/v1/movies/route-rating-movie-7/ratings")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1
@@ -246,7 +248,7 @@ async def test_get_movie_ratings_public_paginated_with_like_count(client, db):
 
 
 async def test_get_movie_ratings_slug_not_found_returns_404(client, db):
-    response = await client.get("/movies/no-such-movie-route-ratings-list/ratings")
+    response = await client.get("/v1/movies/no-such-movie-route-ratings-list/ratings")
     assert response.status_code == 404
 
 
@@ -254,13 +256,13 @@ async def test_get_movie_ratings_slug_not_found_returns_404(client, db):
 
 
 async def test_post_like_without_token_returns_401(client, db):
-    response = await client.post("/ratings/1/like")
+    response = await client.post("/v1/ratings/1/like")
     assert response.status_code == 401
 
 
 async def test_post_like_rating_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-rating-user-8")
-    response = await client.post("/ratings/999999999/like", headers=_auth_headers(token))
+    response = await client.post("/v1/ratings/999999999/like", headers=_auth_headers(token))
     assert response.status_code == 404
 
 
@@ -270,18 +272,18 @@ async def test_post_like_idempotent_no_duplicate(client, db):
     liker_token = await _register_and_login(client, "route-rating-user-10")
 
     put_response = await client.put(
-        "/movies/route-rating-movie-8/rating",
+        "/v1/movies/route-rating-movie-8/rating",
         json={"score": 4, "review_text": "Nice"},
         headers=_auth_headers(author_token),
     )
     rating_id = put_response.json()["id"]
 
-    first = await client.post(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
-    second = await client.post(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    first = await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    second = await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
     assert first.status_code == 204
     assert second.status_code == 204
 
-    ratings = await client.get("/movies/route-rating-movie-8/ratings")
+    ratings = await client.get("/v1/movies/route-rating-movie-8/ratings")
     assert ratings.json()["items"][0]["like_count"] == 1
 
 
@@ -291,19 +293,21 @@ async def test_delete_like_idempotent(client, db):
     liker_token = await _register_and_login(client, "route-rating-user-12")
 
     put_response = await client.put(
-        "/movies/route-rating-movie-9/rating",
+        "/v1/movies/route-rating-movie-9/rating",
         json={"score": 4, "review_text": "Nice"},
         headers=_auth_headers(author_token),
     )
     rating_id = put_response.json()["id"]
-    await client.post(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
 
-    first = await client.delete(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
-    second = await client.delete(f"/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    first = await client.delete(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+    second = await client.delete(
+        f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token)
+    )
     assert first.status_code == 204
     assert second.status_code == 204
 
-    ratings = await client.get("/movies/route-rating-movie-9/ratings")
+    ratings = await client.get("/v1/movies/route-rating-movie-9/ratings")
     assert ratings.json()["items"][0]["like_count"] == 0
 
 
@@ -316,17 +320,17 @@ async def test_get_user_reviews_cross_type_public(client, db):
     token = await _register_and_login(client, "route-rating-user-13")
 
     await client.put(
-        "/movies/route-rating-movie-10/rating",
+        "/v1/movies/route-rating-movie-10/rating",
         json={"score": 5, "review_text": "Movie review"},
         headers=_auth_headers(token),
     )
     await client.put(
-        "/series/route-rating-series-1/rating",
+        "/v1/series/route-rating-series-1/rating",
         json={"score": 4, "review_text": "Series review"},
         headers=_auth_headers(token),
     )
 
-    response = await client.get("/users/route-rating-user-13/reviews")
+    response = await client.get("/v1/users/route-rating-user-13/reviews")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
@@ -335,7 +339,7 @@ async def test_get_user_reviews_cross_type_public(client, db):
 
 
 async def test_get_user_reviews_user_not_found_returns_404(client, db):
-    response = await client.get("/users/nobody-has-reviews-ever/reviews")
+    response = await client.get("/v1/users/nobody-has-reviews-ever/reviews")
     assert response.status_code == 404
 
 
@@ -347,19 +351,19 @@ async def test_series_rating_put_delete_get_symmetry(client, db):
     token = await _register_and_login(client, "route-rating-user-14")
 
     put_response = await client.put(
-        "/series/route-rating-series-2/rating",
+        "/v1/series/route-rating-series-2/rating",
         json={"score": 4, "review_text": "Solid"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
     assert put_response.json()["score"] == 4
 
-    get_response = await client.get("/series/route-rating-series-2/ratings")
+    get_response = await client.get("/v1/series/route-rating-series-2/ratings")
     assert get_response.status_code == 200
     assert get_response.json()["total"] == 1
 
     delete_response = await client.delete(
-        "/series/route-rating-series-2/rating", headers=_auth_headers(token)
+        "/v1/series/route-rating-series-2/rating", headers=_auth_headers(token)
     )
     assert delete_response.status_code == 204
 
@@ -369,19 +373,19 @@ async def test_book_rating_put_delete_get_symmetry(client, db):
     token = await _register_and_login(client, "route-rating-user-15")
 
     put_response = await client.put(
-        "/books/route-rating-book-1/rating",
+        "/v1/books/route-rating-book-1/rating",
         json={"score": 3, "review_text": "Decent"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
     assert put_response.json()["score"] == 3
 
-    get_response = await client.get("/books/route-rating-book-1/ratings")
+    get_response = await client.get("/v1/books/route-rating-book-1/ratings")
     assert get_response.status_code == 200
     assert get_response.json()["total"] == 1
 
     delete_response = await client.delete(
-        "/books/route-rating-book-1/rating", headers=_auth_headers(token)
+        "/v1/books/route-rating-book-1/rating", headers=_auth_headers(token)
     )
     assert delete_response.status_code == 204
 
@@ -391,19 +395,19 @@ async def test_game_rating_put_delete_get_symmetry(client, db):
     token = await _register_and_login(client, "route-rating-user-16")
 
     put_response = await client.put(
-        "/games/route-rating-game-1/rating",
+        "/v1/games/route-rating-game-1/rating",
         json={"score": 5, "review_text": "Fantastic"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
     assert put_response.json()["score"] == 5
 
-    get_response = await client.get("/games/route-rating-game-1/ratings")
+    get_response = await client.get("/v1/games/route-rating-game-1/ratings")
     assert get_response.status_code == 200
     assert get_response.json()["total"] == 1
 
     delete_response = await client.delete(
-        "/games/route-rating-game-1/rating", headers=_auth_headers(token)
+        "/v1/games/route-rating-game-1/rating", headers=_auth_headers(token)
     )
     assert delete_response.status_code == 204
 
@@ -422,13 +426,13 @@ async def test_put_movie_rating_then_get_detail_reflects_recalculated_aggregate(
     token = await _register_and_login(client, "route-rating-user-17")
 
     put_response = await client.put(
-        "/movies/route-rating-movie-detail-1/rating",
+        "/v1/movies/route-rating-movie-detail-1/rating",
         json={"score": 4, "review_text": "Good"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
 
-    detail_response = await client.get("/movies/route-rating-movie-detail-1")
+    detail_response = await client.get("/v1/movies/route-rating-movie-detail-1")
     assert detail_response.status_code == 200
     body = detail_response.json()
     assert body["rating_internal"] == 4
@@ -440,13 +444,13 @@ async def test_put_series_rating_then_get_detail_reflects_recalculated_aggregate
     token = await _register_and_login(client, "route-rating-user-18")
 
     put_response = await client.put(
-        "/series/route-rating-series-detail-1/rating",
+        "/v1/series/route-rating-series-detail-1/rating",
         json={"score": 5, "review_text": "Excellent"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
 
-    detail_response = await client.get("/series/route-rating-series-detail-1")
+    detail_response = await client.get("/v1/series/route-rating-series-detail-1")
     assert detail_response.status_code == 200
     body = detail_response.json()
     assert body["rating_internal"] == 5
@@ -458,13 +462,13 @@ async def test_put_book_rating_then_get_detail_reflects_recalculated_aggregate(c
     token = await _register_and_login(client, "route-rating-user-19")
 
     put_response = await client.put(
-        "/books/route-rating-book-detail-1/rating",
+        "/v1/books/route-rating-book-detail-1/rating",
         json={"score": 3, "review_text": "Fine"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
 
-    detail_response = await client.get("/books/route-rating-book-detail-1")
+    detail_response = await client.get("/v1/books/route-rating-book-detail-1")
     assert detail_response.status_code == 200
     body = detail_response.json()
     assert body["rating_internal"] == 3
@@ -476,13 +480,13 @@ async def test_put_game_rating_then_get_detail_reflects_recalculated_aggregate(c
     token = await _register_and_login(client, "route-rating-user-20")
 
     put_response = await client.put(
-        "/games/route-rating-game-detail-1/rating",
+        "/v1/games/route-rating-game-detail-1/rating",
         json={"score": 2, "review_text": "Meh"},
         headers=_auth_headers(token),
     )
     assert put_response.status_code == 200
 
-    detail_response = await client.get("/games/route-rating-game-detail-1")
+    detail_response = await client.get("/v1/games/route-rating-game-detail-1")
     assert detail_response.status_code == 200
     body = detail_response.json()
     assert body["rating_internal"] == 2

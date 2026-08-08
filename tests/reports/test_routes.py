@@ -89,10 +89,12 @@ async def _seed_review(db, slug: str, author_username: str) -> int:
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -109,7 +111,7 @@ def _admin() -> dict:
 
 async def test_report_without_token_returns_401(client, db):
     rating_id = await _seed_review(db, "report-route-movie-1", "report-route-author-1")
-    response = await client.post(f"/reviews/{rating_id}/report", json={"reason": "spam"})
+    response = await client.post(f"/v1/reviews/{rating_id}/report", json={"reason": "spam"})
     assert response.status_code == 401
 
 
@@ -118,7 +120,7 @@ async def test_report_returns_201_first_time(client, db):
     token = await _register_and_login(client, "report-route-reporter-2")
 
     response = await client.post(
-        f"/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
+        f"/v1/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
     )
     assert response.status_code == 201
     body = response.json()
@@ -131,7 +133,7 @@ async def test_report_without_body_is_accepted(client, db):
     rating_id = await _seed_review(db, "report-route-movie-3", "report-route-author-3")
     token = await _register_and_login(client, "report-route-reporter-3")
 
-    response = await client.post(f"/reviews/{rating_id}/report", headers=_auth(token))
+    response = await client.post(f"/v1/reviews/{rating_id}/report", headers=_auth(token))
     assert response.status_code == 201
     assert response.json()["reason"] is None
 
@@ -141,10 +143,10 @@ async def test_report_twice_is_idempotent_returns_200(client, db):
     token = await _register_and_login(client, "report-route-reporter-4")
 
     first = await client.post(
-        f"/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
+        f"/v1/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
     )
     second = await client.post(
-        f"/reviews/{rating_id}/report", json={"reason": "again"}, headers=_auth(token)
+        f"/v1/reviews/{rating_id}/report", json={"reason": "again"}, headers=_auth(token)
     )
     assert first.status_code == 201
     assert second.status_code == 200
@@ -156,7 +158,7 @@ async def test_report_twice_is_idempotent_returns_200(client, db):
 async def test_report_unknown_review_returns_404(client):
     token = await _register_and_login(client, "report-route-reporter-5")
     response = await client.post(
-        "/reviews/999999999/report", json={"reason": "x"}, headers=_auth(token)
+        "/v1/reviews/999999999/report", json={"reason": "x"}, headers=_auth(token)
     )
     assert response.status_code == 404
 
@@ -165,16 +167,18 @@ async def test_report_unknown_review_returns_404(client):
 
 
 async def test_list_reports_without_key_returns_401(client):
-    response = await client.get("/admin/reports")
+    response = await client.get("/v1/admin/reports")
     assert response.status_code == 401
 
 
 async def test_list_reports_returns_reports(client, db):
     rating_id = await _seed_review(db, "report-route-movie-6", "report-route-author-6")
     token = await _register_and_login(client, "report-route-reporter-6")
-    await client.post(f"/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token))
+    await client.post(
+        f"/v1/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
+    )
 
-    response = await client.get("/admin/reports", headers=_admin())
+    response = await client.get("/v1/admin/reports", headers=_admin())
     assert response.status_code == 200
     body = response.json()
     assert body["total"] >= 1
@@ -185,19 +189,19 @@ async def test_list_reports_status_filter(client, db):
     rating_id = await _seed_review(db, "report-route-movie-7", "report-route-author-7")
     token = await _register_and_login(client, "report-route-reporter-7")
     created = await client.post(
-        f"/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
+        f"/v1/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
     )
     report_id = created.json()["id"]
 
-    open_list = await client.get("/admin/reports?status=open", headers=_admin())
+    open_list = await client.get("/v1/admin/reports?status=open", headers=_admin())
     assert any(i["id"] == report_id for i in open_list.json()["items"])
 
-    resolved_list = await client.get("/admin/reports?status=resolved", headers=_admin())
+    resolved_list = await client.get("/v1/admin/reports?status=resolved", headers=_admin())
     assert all(i["id"] != report_id for i in resolved_list.json()["items"])
 
 
 async def test_list_reports_pagination(client, db):
-    response = await client.get("/admin/reports?page=1&limit=5", headers=_admin())
+    response = await client.get("/v1/admin/reports?page=1&limit=5", headers=_admin())
     assert response.status_code == 200
     body = response.json()
     assert body["page"] == 1
@@ -208,7 +212,7 @@ async def test_list_reports_pagination(client, db):
 
 
 async def test_resolve_without_key_returns_401(client):
-    response = await client.post("/admin/reports/1/resolve")
+    response = await client.post("/v1/admin/reports/1/resolve")
     assert response.status_code == 401
 
 
@@ -216,11 +220,11 @@ async def test_resolve_marks_report_resolved(client, db):
     rating_id = await _seed_review(db, "report-route-movie-8", "report-route-author-8")
     token = await _register_and_login(client, "report-route-reporter-8")
     created = await client.post(
-        f"/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
+        f"/v1/reviews/{rating_id}/report", json={"reason": "spam"}, headers=_auth(token)
     )
     report_id = created.json()["id"]
 
-    response = await client.post(f"/admin/reports/{report_id}/resolve", headers=_admin())
+    response = await client.post(f"/v1/admin/reports/{report_id}/resolve", headers=_admin())
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "resolved"
@@ -228,5 +232,5 @@ async def test_resolve_marks_report_resolved(client, db):
 
 
 async def test_resolve_unknown_report_returns_404(client):
-    response = await client.post("/admin/reports/777777777/resolve", headers=_admin())
+    response = await client.post("/v1/admin/reports/777777777/resolve", headers=_admin())
     assert response.status_code == 404

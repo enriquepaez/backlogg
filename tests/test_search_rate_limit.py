@@ -67,10 +67,10 @@ async def test_search_fallback_rate_limited_returns_429(client, monkeypatch):
     with p1, p2, p3, p4, p5:
         # Two misses trigger the fan-out and consume quota.
         for _ in range(2):
-            resp = await client.get(f"/search?q={_NO_LOCAL}")
+            resp = await client.get(f"/v1/search?q={_NO_LOCAL}")
             assert resp.status_code == 200
         # The third miss from the same IP is rejected before any external call.
-        resp = await client.get(f"/search?q={_NO_LOCAL}")
+        resp = await client.get(f"/v1/search?q={_NO_LOCAL}")
     assert resp.status_code == 429
     assert int(resp.headers["retry-after"]) >= 1
     assert resp.json()["detail"] == "Too many requests. Please try again later."
@@ -87,6 +87,6 @@ async def test_search_with_local_results_does_not_consume_quota(client, db, monk
     with p1, p2, p3, p4, p5:
         # Many local-hit queries — well beyond the fallback limit of 2.
         for _ in range(5):
-            resp = await client.get("/search?q=inception")
+            resp = await client.get("/v1/search?q=inception")
             assert resp.status_code == 200
             assert resp.json()["total"] > 0

@@ -46,10 +46,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -58,13 +60,13 @@ def _auth_headers(token: str) -> dict:
 
 
 async def test_recommendations_without_token_returns_401(client):
-    response = await client.get("/recommendations")
+    response = await client.get("/v1/recommendations")
     assert response.status_code == 401
 
 
 async def test_recommendations_invalid_type_returns_422(client):
     token = await _register_and_login(client, "rec-route-user-1")
-    response = await client.get("/recommendations?type=podcast", headers=_auth_headers(token))
+    response = await client.get("/v1/recommendations?type=podcast", headers=_auth_headers(token))
     assert response.status_code == 422
 
 
@@ -72,7 +74,7 @@ async def test_recommendations_happy_path_fallback(client, db):
     await upsert_book(db, _book_data("rec-route-book-1", "Rec Route Book 1"))
     token = await _register_and_login(client, "rec-route-user-2")
 
-    response = await client.get("/recommendations?type=book", headers=_auth_headers(token))
+    response = await client.get("/v1/recommendations?type=book", headers=_auth_headers(token))
     assert response.status_code == 200
     body = response.json()
     assert body["page"] == 1

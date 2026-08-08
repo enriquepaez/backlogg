@@ -120,7 +120,7 @@ async def client(db):
 
 async def test_genres_returns_200_empty(client, db):
     """GET /genres returns 200 with genres list field."""
-    response = await client.get("/genres")
+    response = await client.get("/v1/genres")
     assert response.status_code == 200
     body = response.json()
     assert "genres" in body
@@ -158,7 +158,7 @@ async def test_genres_all_types_present(client, db):
         ),
     )
 
-    response = await client.get("/genres")
+    response = await client.get("/v1/genres")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -186,7 +186,7 @@ async def test_genres_filter_by_movie(client, db):
         ),
     )
 
-    response = await client.get("/genres?type=movie")
+    response = await client.get("/v1/genres?type=movie")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -204,7 +204,7 @@ async def test_genres_filter_by_series(client, db):
         ),
     )
 
-    response = await client.get("/genres?type=series")
+    response = await client.get("/v1/genres?type=series")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -222,7 +222,7 @@ async def test_genres_filter_by_book(client, db):
         ),
     )
 
-    response = await client.get("/genres?type=book")
+    response = await client.get("/v1/genres?type=book")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -240,7 +240,7 @@ async def test_genres_filter_by_game(client, db):
         ),
     )
 
-    response = await client.get("/genres?type=game")
+    response = await client.get("/v1/genres?type=game")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -250,7 +250,7 @@ async def test_genres_filter_by_game(client, db):
 
 async def test_genres_invalid_type_returns_422(client, db):
     """GET /genres?type=invalid returns 422."""
-    response = await client.get("/genres?type=invalid")
+    response = await client.get("/v1/genres?type=invalid")
     assert response.status_code == 422
 
 
@@ -264,7 +264,7 @@ async def test_genres_response_fields(client, db):
         ),
     )
 
-    response = await client.get("/genres?type=movie")
+    response = await client.get("/v1/genres?type=movie")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -294,7 +294,7 @@ async def test_genres_count_reflects_real_items(client, db):
         _make_movie(slug="gcount-movie-b-2021", genres=[genre_data]),
     )
 
-    response = await client.get("/genres?type=movie")
+    response = await client.get("/v1/genres?type=movie")
     assert response.status_code == 200
     genres = response.json()["genres"]
 
@@ -329,7 +329,7 @@ async def test_genres_count_zero_for_empty_genre(client, db):
     )
 
     # GET /genres?type=movie should NOT include any series genres
-    response = await client.get("/genres?type=movie")
+    response = await client.get("/v1/genres?type=movie")
     assert response.status_code == 200
     genres = response.json()["genres"]
     slugs = {g["slug"] for g in genres}

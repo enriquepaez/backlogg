@@ -73,10 +73,12 @@ class _FakeClock:
 
 async def _register_and_login(client, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pass"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pass"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pass"}
+    )
     return login.json()["access_token"]
 
 
@@ -86,7 +88,7 @@ async def _register_and_login(client, username: str) -> str:
 async def test_detail_anonymous_is_public_and_has_etag(client, db):
     await movies_repo.upsert_movie(db, _make_movie_dict("cache-anon-movie-2001"))
 
-    response = await client.get("/movies/cache-anon-movie-2001")
+    response = await client.get("/v1/movies/cache-anon-movie-2001")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=300"
@@ -97,10 +99,10 @@ async def test_detail_anonymous_is_public_and_has_etag(client, db):
 async def test_detail_if_none_match_returns_304(client, db):
     await movies_repo.upsert_movie(db, _make_movie_dict("cache-304-movie-2001"))
 
-    first = await client.get("/movies/cache-304-movie-2001")
+    first = await client.get("/v1/movies/cache-304-movie-2001")
     etag = first.headers["etag"]
 
-    second = await client.get("/movies/cache-304-movie-2001", headers={"If-None-Match": etag})
+    second = await client.get("/v1/movies/cache-304-movie-2001", headers={"If-None-Match": etag})
     assert second.status_code == 304
     assert second.headers["etag"] == etag
     assert second.content == b""
@@ -110,7 +112,7 @@ async def test_detail_stale_etag_returns_full_body(client, db):
     await movies_repo.upsert_movie(db, _make_movie_dict("cache-stale-etag-2001"))
 
     response = await client.get(
-        "/movies/cache-stale-etag-2001", headers={"If-None-Match": '"not-the-current-etag"'}
+        "/v1/movies/cache-stale-etag-2001", headers={"If-None-Match": '"not-the-current-etag"'}
     )
     assert response.status_code == 200
     assert response.json()["slug"] == "cache-stale-etag-2001"
@@ -121,7 +123,7 @@ async def test_detail_authenticated_is_private_not_shared(client, db):
     token = await _register_and_login(client, "cache-detail-user")
 
     response = await client.get(
-        "/movies/cache-auth-movie-2001", headers={"Authorization": f"Bearer {token}"}
+        "/v1/movies/cache-auth-movie-2001", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
     # Authenticated detail includes viewer_status → never shared-cacheable.
@@ -137,11 +139,11 @@ async def test_detail_authenticated_supports_304(client, db):
     token = await _register_and_login(client, "cache-detail-304-user")
     auth = {"Authorization": f"Bearer {token}"}
 
-    first = await client.get("/movies/cache-auth-304-2001", headers=auth)
+    first = await client.get("/v1/movies/cache-auth-304-2001", headers=auth)
     etag = first.headers["etag"]
 
     second = await client.get(
-        "/movies/cache-auth-304-2001", headers={**auth, "If-None-Match": etag}
+        "/v1/movies/cache-auth-304-2001", headers={**auth, "If-None-Match": etag}
     )
     assert second.status_code == 304
 
@@ -150,13 +152,13 @@ async def test_detail_authenticated_supports_304(client, db):
 
 
 async def test_movies_listing_is_public(client, db):
-    response = await client.get("/movies")
+    response = await client.get("/v1/movies")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=60"
 
 
 async def test_genres_listing_is_public(client, db):
-    response = await client.get("/genres")
+    response = await client.get("/v1/genres")
     assert response.status_code == 200
     # /genres advertises its in-process cache TTL.
     assert response.headers["cache-control"] == "public, max-age=300"
@@ -173,7 +175,7 @@ async def test_trending_listing_is_public(client, db):
             new=AsyncMock(return_value=[]),
         ),
     ):
-        response = await client.get("/trending")
+        response = await client.get("/v1/trending")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=900"
 
@@ -184,7 +186,7 @@ async def test_trending_listing_is_public(client, db):
 async def test_users_me_is_private_no_store(client, db):
     token = await _register_and_login(client, "cache-me-user")
 
-    response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
+    response = await client.get("/v1/users/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
     assert "etag" not in response.headers
@@ -193,7 +195,7 @@ async def test_users_me_is_private_no_store(client, db):
 async def test_feed_is_private_no_store(client, db):
     token = await _register_and_login(client, "cache-feed-user")
 
-    response = await client.get("/feed", headers={"Authorization": f"Bearer {token}"})
+    response = await client.get("/v1/feed", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
 

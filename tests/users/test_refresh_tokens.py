@@ -134,7 +134,7 @@ async def client(db):
 
 async def _register_and_login_http(client, username: str) -> dict:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={
             "username": username,
             "email": f"{username}@example.com",
@@ -142,7 +142,7 @@ async def _register_and_login_http(client, username: str) -> dict:
         },
     )
     response = await client.post(
-        "/auth/login", json={"username": username, "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": username, "password": "s3cret-password"}
     )
     return response.json()
 
@@ -156,7 +156,7 @@ async def test_login_returns_token_pair(client):
 
 async def test_refresh_endpoint_rotates(client):
     pair = await _register_and_login_http(client, "rt-http-refresh")
-    response = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    response = await client.post("/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     assert response.status_code == 200
     new_pair = response.json()
     assert new_pair["refresh_token"] != pair["refresh_token"]
@@ -166,15 +166,15 @@ async def test_refresh_endpoint_rotates(client):
 async def test_refresh_endpoint_reuse_returns_401(client):
     pair = await _register_and_login_http(client, "rt-http-reuse")
     # First rotation succeeds.
-    await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    await client.post("/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     # Reusing the now-revoked token fails.
-    response = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    response = await client.post("/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     assert response.status_code == 401
 
 
 async def test_logout_endpoint_requires_auth(client):
     pair = await _register_and_login_http(client, "rt-http-logout-noauth")
-    response = await client.post("/auth/logout", json={"refresh_token": pair["refresh_token"]})
+    response = await client.post("/v1/auth/logout", json={"refresh_token": pair["refresh_token"]})
     assert response.status_code == 401
 
 
@@ -183,16 +183,16 @@ async def test_logout_endpoint_revokes_and_is_idempotent(client):
     headers = {"Authorization": f"Bearer {pair['access_token']}"}
 
     first = await client.post(
-        "/auth/logout", json={"refresh_token": pair["refresh_token"]}, headers=headers
+        "/v1/auth/logout", json={"refresh_token": pair["refresh_token"]}, headers=headers
     )
     assert first.status_code == 204
 
     # Idempotent: logging out again succeeds.
     second = await client.post(
-        "/auth/logout", json={"refresh_token": pair["refresh_token"]}, headers=headers
+        "/v1/auth/logout", json={"refresh_token": pair["refresh_token"]}, headers=headers
     )
     assert second.status_code == 204
 
     # The revoked refresh can no longer be rotated.
-    refresh = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    refresh = await client.post("/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     assert refresh.status_code == 401
