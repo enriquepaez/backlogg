@@ -24,7 +24,10 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 10080
+    # Short-lived access token (minutes). Long-lived sessions are handled by
+    # the persisted, rotating refresh token instead of a long-lived JWT.
+    JWT_EXPIRE_MINUTES: int = 15
+    REFRESH_EXPIRE_DAYS: int = 30
 
 
 settings = Settings()

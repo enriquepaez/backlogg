@@ -1,0 +1,25 @@
+meta {
+  name: Unread count
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/notifications/unread_count
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("unread_count is a number", function() {
+    expect(res.body.unread_count).to.be.a("number");
+  });
+}

@@ -7,10 +7,12 @@
 - **Content-Type**: `application/json`
 - **Admin auth**: los endpoints `/admin/*` requieren el header `X-API-Key`
   (ver sección Admin).
-- **User auth**: `POST /auth/login` devuelve un JWT (`access_token`). Los
-  endpoints que lo requieren esperan `Authorization: Bearer <token>` y
-  devuelven `401` si falta, es inválido o expiró (ver sección Auth & Users).
-  El resto de la API es pública.
+- **User auth**: `POST /auth/login` devuelve un par de tokens: un
+  `access_token` (JWT corto) y un `refresh_token` (opaco, rotatorio). Los
+  endpoints protegidos esperan `Authorization: Bearer <access_token>` y
+  devuelven `401` si falta, es inválido o expiró. El access token caduca pronto;
+  se renueva con `POST /auth/refresh` (rota el par) y se invalida con
+  `POST /auth/logout` (ver sección Auth & Users). El resto de la API es pública.
 - **CORS y security headers**: orígenes permitidos vía `CORS_ORIGINS`
   (comma-separated; sin configurar permite `localhost:3000` y `localhost:5173`).
   Todas las respuestas llevan `X-Content-Type-Options: nosniff`,
@@ -200,7 +202,33 @@ POST /auth/login
 ```
 
 Body: `{"username": string, "password": string}`.
-Response: `{"access_token": string, "token_type": "bearer"}`.
+Response: `{"access_token": string, "refresh_token": string, "token_type": "bearer"}`.
+El `access_token` es un JWT corto (`JWT_EXPIRE_MINUTES`, 15 por defecto); el
+`refresh_token` es un valor opaco rotatorio (`REFRESH_EXPIRE_DAYS`, 30 por
+defecto). El `refresh_token` solo se devuelve en esta respuesta y en la de
+`/auth/refresh` — guárdalo, no vuelve a mostrarse.
+
+```
+POST /auth/refresh
+→ 200  Par de tokens rotado
+→ 401  refresh inválido, expirado o revocado (incluye reuse)
+```
+
+Body: `{"refresh_token": string}`. No requiere `Authorization`.
+Response: `{"access_token": string, "refresh_token": string, "token_type": "bearer"}`.
+Rota el refresh: revoca el presentado y emite uno nuevo junto a un access nuevo.
+Reusar un refresh ya rotado/revocado devuelve `401` y revoca todos los refresh
+activos del usuario como defensa ante robo de token.
+
+```
+POST /auth/logout
+→ 204  Sesión cerrada (refresh revocado)
+→ 401  Sin token / access token inválido o expirado
+```
+
+Requiere `Authorization: Bearer <access_token>`.
+Body: `{"refresh_token": string}`. Revoca el refresh indicado. Idempotente:
+revocar dos veces (o un token desconocido) no falla, siempre `204`.
 
 ```
 GET /users/me

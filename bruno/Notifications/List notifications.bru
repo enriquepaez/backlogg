@@ -1,0 +1,31 @@
+meta {
+  name: List notifications
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/notifications
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated list", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+  });
+}
+
+docs {
+  Reverse-chronological notifications for the authenticated user. Each entry
+  includes the actor (username, display_name, avatar_url) and target info.
+}

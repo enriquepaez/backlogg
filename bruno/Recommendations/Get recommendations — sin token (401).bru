@@ -1,0 +1,17 @@
+meta {
+  name: Get recommendations — sin token (401)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/recommendations
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

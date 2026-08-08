@@ -1,0 +1,21 @@
+meta {
+  name: Feed — sin token (401)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/feed?tab=following
+  body: none
+  auth: none
+}
+
+params:query {
+  tab: following
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

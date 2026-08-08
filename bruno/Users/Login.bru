@@ -19,6 +19,7 @@ body:json {
 
 vars:post-response {
   authToken: res.body.access_token
+  refreshToken: res.body.refresh_token
 }
 
 tests {
@@ -28,5 +29,9 @@ tests {
 
   test("access_token present", function() {
     expect(res.body.access_token).to.be.a("string");
+  });
+
+  test("refresh_token present", function() {
+    expect(res.body.refresh_token).to.be.a("string");
   });
 }

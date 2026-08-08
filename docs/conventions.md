@@ -21,6 +21,23 @@
 - **Pydantic v2 models** como `response_model`. Nunca devolver dicts crudos.
 - Un `APIRouter` por dominio, montado en `backlogg/main.py`.
 
+## Colección Bruno (obligatoria)
+
+- **Todo endpoint expuesto por la API debe tener al menos una request en la
+  colección `bruno/`.** Un endpoint nuevo sin su `.bru` correspondiente es
+  motivo de rechazo.
+- Al añadir o modificar endpoints en una feature, actualiza `bruno/` en el
+  mismo cambio: crea el `.bru` del happy path y, cuando aporte valor, los casos
+  de error relevantes (401/403/404/422).
+- Organización: una carpeta por dominio (`bruno/<Dominio>/`), un `.bru` por
+  request. Sigue el formato existente: `meta` con `name`/`seq`, bloque de
+  método con `url: {{baseUrl}}/...`, `auth: bearer` con `token: {{authToken}}`
+  para endpoints autenticados, y un bloque `tests` que al menos verifique el
+  status code esperado.
+- Las variables compartidas (`baseUrl`, `authToken`, `refreshToken`,
+  `adminApiKey`) viven en `bruno/environments/local.bru`; no hardcodees hosts
+  ni tokens en las requests.
+
 ## SQLAlchemy 2.0
 
 - **Typed queries** con `select()`, `scalars()`, `scalar_one_or_none()`.

@@ -1,0 +1,27 @@
+meta {
+  name: Follow user
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/users/bruno_target/follow
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  Register a second user (e.g. bruno_target) first, then log in as bruno_tester.
+  Idempotent: following twice does not duplicate nor fail. Following yourself
+  returns 422. Generates a new_follower notification for the followed user.
+}

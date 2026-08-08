@@ -1,0 +1,40 @@
+meta {
+  name: Refresh token
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/auth/refresh
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "refresh_token": "{{refreshToken}}"
+  }
+}
+
+vars:post-response {
+  authToken: res.body.access_token
+  refreshToken: res.body.refresh_token
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("rotated pair returned", function() {
+    expect(res.body.access_token).to.be.a("string");
+    expect(res.body.refresh_token).to.be.a("string");
+  });
+}
+
+docs {
+  Run "Login" first — it stores refreshToken. This rotates the pair: the old
+  refresh token is revoked and a new one is issued (and re-captured here).
+  Reusing an already-rotated refresh token returns 401 and revokes the whole
+  active chain for that user.
+}

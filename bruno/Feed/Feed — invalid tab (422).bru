@@ -1,0 +1,25 @@
+meta {
+  name: Feed — invalid tab (422)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/feed?tab=bogus
+  body: none
+  auth: bearer
+}
+
+params:query {
+  tab: bogus
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 422", function() {
+    expect(res.status).to.equal(422);
+  });
+}

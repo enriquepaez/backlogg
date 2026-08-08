@@ -1,0 +1,32 @@
+meta {
+  name: Mark read
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/notifications/read
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "ids": null
+  }
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  ids omitted / null → mark all unread as read. Provide a list of ids to mark
+  only those. Idempotent.
+}

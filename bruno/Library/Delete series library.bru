@@ -1,0 +1,21 @@
+meta {
+  name: Delete series library
+  type: http
+  seq: 12
+}
+
+delete {
+  url: {{baseUrl}}/series/the-bear-2022/library
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}

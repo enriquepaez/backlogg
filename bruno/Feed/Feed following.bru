@@ -1,0 +1,35 @@
+meta {
+  name: Feed following
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/feed?tab=following
+  body: none
+  auth: bearer
+}
+
+params:query {
+  tab: following
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated list", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+  });
+}
+
+docs {
+  Reviews from users the caller follows, reverse-chronological. With no follows
+  the list is empty (not an error).
+}
