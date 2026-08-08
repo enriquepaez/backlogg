@@ -51,5 +51,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "120/60"
     RATE_LIMIT_SEARCH_FALLBACK: str = "20/60"
 
+    # Observability. Structured JSON logging at LOG_LEVEL; Sentry is only
+    # initialised when SENTRY_DSN is non-empty (absent = off, zero overhead).
+    LOG_LEVEL: str = "INFO"
+    SENTRY_DSN: str = ""
+
 
 settings = Settings()

@@ -696,7 +696,7 @@
         "Tests que verifican el request ID en la respuesta y el redactado de campos sensibles",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 39,
