@@ -305,6 +305,20 @@ Body (reemplazo parcial, todos los campos opcionales):
 `{"display_name": string | null, "bio": string | null, "avatar_url": string | null}`.
 
 ```
+DELETE /users/me
+→ 204  Cuenta borrada
+→ 401  Sin token / token inválido o expirado
+```
+
+Borra la cuenta del usuario autenticado (higiene GDPR). El borrado elimina en
+cascada (DB `ON DELETE CASCADE`) todos sus datos asociados: ratings,
+review_likes, follows (en ambos sentidos), biblioteca, listas, notificaciones
+(como recipient y como actor) y tokens (refresh + account). Tras el borrado se
+recomputan `rating_internal`/`rating_count_internal` de los items que el usuario
+había puntuado, y el `username`/`email` quedan libres para re-registro. Los
+refresh tokens quedan invalidados (un `/auth/refresh` posterior devuelve 401).
+
+```
 GET /users/{username}
 → 200  Perfil público (sin email)
 → 404  Username no encontrado

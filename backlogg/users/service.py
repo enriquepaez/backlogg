@@ -11,6 +11,7 @@ from backlogg.core.email import EmailSender
 from backlogg.follows import repository as follows_repo
 from backlogg.library import repository as library_repo
 from backlogg.library.schemas import LibraryCounts
+from backlogg.ratings import repository as ratings_repo
 from backlogg.users import repository as repo
 from backlogg.users.auth import (
     create_access_token,
@@ -183,6 +184,25 @@ async def update_current_user(db: AsyncSession, user: User, payload: UserUpdate)
     updated = await repo.update_user(db, user, data)
     await db.commit()
     return UserMeOut.model_validate(updated)
+
+
+async def delete_current_user(db: AsyncSession, user: User) -> None:
+    """Permanently delete the authenticated user's account (GDPR erasure).
+
+    All rows referencing ``users.id`` (ratings, review_likes, follows, library,
+    lists, notifications, refresh/account tokens) are removed by DB-level
+    ``ON DELETE CASCADE``. The cascade does not, however, recompute the catalog
+    aggregates of items the user had rated, so we first capture those items,
+    delete the user (flushing the cascade), and only then recalculate
+    ``rating_internal``/``rating_count_internal`` for each — the recompute now
+    reads ``user_ratings`` with the user's rows already gone. The final commit
+    persists both the deletion and the refreshed aggregates atomically.
+    """
+    rated_items = await ratings_repo.get_distinct_rated_items_for_user(db, user.id)
+    await repo.delete_user(db, user)
+    for item_type, item_id in rated_items:
+        await ratings_repo.recalculate_item_aggregates(db, item_type, item_id)
+    await db.commit()
 
 
 # ── Account recovery (email verification + password reset) ─────────────────────

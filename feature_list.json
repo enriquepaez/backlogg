@@ -4,7 +4,12 @@
   "rules": {
     "one_feature_at_a_time": true,
     "require_tests_to_close": true,
-    "valid_status": ["pending", "in_progress", "done", "blocked"]
+    "valid_status": [
+      "pending",
+      "in_progress",
+      "done",
+      "blocked"
+    ]
   },
   "features": [
     {
@@ -26,7 +31,9 @@
       "name": "movies",
       "title": "Movies — schema, TMDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Movie, cliente TMDB, seed inicial, GET /movies/{slug} con fallback on-demand.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Modelo SQLAlchemy Movie definido en backlogg/movies/models.py",
         "Alembic migration crea las tablas movies, movie_genres, movie_genres_join",
@@ -44,7 +51,9 @@
       "name": "series",
       "title": "Series — schema, TMDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Series, cliente TMDB, seed inicial, GET /series/{slug} con fallback on-demand.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Modelo SQLAlchemy Series definido en backlogg/series/models.py",
         "Alembic migration crea las tablas series, series_genres, series_genres_join",
@@ -61,7 +70,9 @@
       "name": "books",
       "title": "Books — schema, Open Library adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Book, cliente Open Library, seed inicial, GET /books/{slug} con fallback on-demand.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Modelo SQLAlchemy Book definido en backlogg/books/models.py",
         "Alembic migration crea las tablas books, book_genres, book_genres_join",
@@ -78,7 +89,9 @@
       "name": "games",
       "title": "Games — schema, IGDB adapter, seed, endpoint, on-demand fallback",
       "description": "Modelo Game, cliente IGDB (con token Twitch), seed inicial, GET /games/{slug} con fallback on-demand.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Modelo SQLAlchemy Game definido en backlogg/games/models.py",
         "Alembic migration crea las tablas games, game_genres, game_genres_join, game_platforms, game_platforms_join, company_credits, companies",
@@ -96,7 +109,13 @@
       "name": "people",
       "title": "People — sync TMDB/IGDB, GET /people/{slug}",
       "description": "Sincronización de personas desde TMDB e IGDB durante el seed. Endpoint GET /people/{slug}.",
-      "depends_on": [1, 2, 3, 4, 5],
+      "depends_on": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "El sync de películas/series desde TMDB persiste personas asociadas en people y credits",
         "GET /people/{slug} devuelve 200 con nombre, foto y lista de créditos",
@@ -112,7 +131,12 @@
       "name": "catalog_search",
       "title": "Cross-type search — vista materializada catalog_search, GET /search",
       "description": "Vista materializada PostgreSQL para búsqueda cross-type. Endpoint GET /search con filtros y paginación.",
-      "depends_on": [2, 3, 4, 5],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "Alembic migration crea la vista materializada catalog_search",
         "GET /search?q= devuelve resultados mezclados ordenados por relevancia",
@@ -130,7 +154,13 @@
       "name": "scheduler_sync",
       "title": "APScheduler sync — nightly cron jobs para los 4 tipos de contenido",
       "description": "Scheduler embebido en FastAPI que ejecuta sync nocturnos. Endpoint POST /admin/sync/{type} para testing manual.",
-      "depends_on": [2, 3, 4, 5, 7],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5,
+        7
+      ],
       "acceptance": [
         "El scheduler arranca automáticamente con la app FastAPI (en el lifespan)",
         "Los 4 jobs de sync se ejecutan en el horario configurado",
@@ -147,7 +177,15 @@
       "name": "deployment",
       "title": "Render deployment — Dockerfile, render.yaml, Neon, GitHub Actions CI",
       "description": "Empaquetado Docker, configuración Render con Neon PostgreSQL y pipeline CI con GitHub Actions.",
-      "depends_on": [2, 3, 4, 5, 6, 7, 8],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
       "acceptance": [
         "docker build produce una imagen funcional",
         "El servicio en Render despliega la app sin errores",
@@ -163,7 +201,9 @@
       "name": "admin_stats",
       "title": "Admin stats — GET /admin/stats con conteo y último sync por tipo",
       "description": "Endpoint GET /admin/stats que devuelve el número de items en DB y la fecha de última sincronización para cada tipo de contenido (movies, series, books, games).",
-      "depends_on": [8],
+      "depends_on": [
+        8
+      ],
       "acceptance": [
         "GET /admin/stats devuelve 200 con counts y last_synced_at para los 4 tipos",
         "Los counts reflejan el estado real de la DB (COUNT queries, no caché)",
@@ -179,7 +219,10 @@
       "name": "nightly_sync_trigger",
       "title": "Nightly sync via GitHub Actions — POST /admin/sync/{type}",
       "description": "Workflow de GitHub Actions con cron nocturno que llama a los 4 endpoints POST /admin/sync/{type} para mantener el contenido actualizado en Render free tier.",
-      "depends_on": [8, 9],
+      "depends_on": [
+        8,
+        9
+      ],
       "acceptance": [
         "Workflow .github/workflows/nightly-sync.yml existe",
         "Se dispara con cron '0 2 * * *'",
@@ -194,7 +237,10 @@
       "name": "nightly_sync_parallel",
       "title": "Nightly sync paralelo — jobs concurrentes + verificación post-sync",
       "description": "Refactorizar nightly-sync.yml para ejecutar los 4 syncs como jobs independientes en paralelo (reduciendo el tiempo total al máximo de los 4 en lugar de la suma). Añadir job 'verify' que depende de los 4 y llama a GET /admin/stats para confirmar que el contenido creció. Actualizar referencias a Fly.io → Render en feature_list.json.",
-      "depends_on": [10, 11],
+      "depends_on": [
+        10,
+        11
+      ],
       "acceptance": [
         "Los 4 syncs (movie, series, book, game) se ejecutan como jobs paralelos independientes",
         "El job 'verify' declara needs: [sync-movies, sync-series, sync-books, sync-games] y solo corre si todos pasan",
@@ -210,7 +256,9 @@
       "name": "catalog_search_unique_index",
       "title": "Fix — índice único en catalog_search para REFRESH CONCURRENTLY",
       "description": "REFRESH MATERIALIZED VIEW CONCURRENTLY falla en producción porque catalog_search no tiene índice único. Añadir migración Alembic 0007 que crea CREATE UNIQUE INDEX uq_catalog_search_type_id ON catalog_search (item_type, id).",
-      "depends_on": [7],
+      "depends_on": [
+        7
+      ],
       "acceptance": [
         "Migración alembic/versions/0007_catalog_search_unique_index.py existe",
         "La migración crea el índice único (item_type, id) en catalog_search",
@@ -224,7 +272,12 @@
       "name": "list_endpoints",
       "title": "List endpoints — GET /movies, /series, /books, /games con filtros y paginación",
       "description": "Endpoints de listado para cada tipo de contenido con paginación offset/limit, filtro por género (?genre=slug) y ordenación (?sort=rating_desc|rating_asc|date_desc|date_asc|title_asc). Sin on-demand fallback — solo muestra items ya en DB.",
-      "depends_on": [2, 3, 4, 5],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "GET /movies devuelve 200 con lista paginada de películas",
         "GET /movies?genre=action filtra por género correctamente",
@@ -246,7 +299,9 @@
       "name": "genres_endpoint",
       "title": "Genre discovery — GET /genres con conteo de items por tipo",
       "description": "Endpoint GET /genres?type=movie que devuelve todos los géneros con conteo de items asociados. Sin parámetro type devuelve géneros de todos los tipos. Base para la UI de filtros del frontend.",
-      "depends_on": [14],
+      "depends_on": [
+        14
+      ],
       "acceptance": [
         "GET /genres devuelve 200 con lista de géneros de todos los tipos",
         "GET /genres?type=movie devuelve solo géneros de películas",
@@ -264,7 +319,10 @@
       "name": "similar_items",
       "title": "Similar items — GET /movies/{slug}/similar y GET /series/{slug}/similar vía TMDB",
       "description": "Endpoints que devuelven items similares/recomendados usando TMDB recommendations API. Los items nuevos encontrados se persisten en la DB local. Hasta 10 resultados.",
-      "depends_on": [2, 3],
+      "depends_on": [
+        2,
+        3
+      ],
       "acceptance": [
         "GET /movies/{slug}/similar devuelve hasta 10 películas similares",
         "GET /series/{slug}/similar devuelve hasta 10 series similares",
@@ -282,7 +340,9 @@
       "name": "search_external_fallback",
       "title": "Search external fallback — fan-out a APIs externas cuando resultados locales = 0",
       "description": "Extender GET /search para que, cuando la consulta devuelve 0 resultados locales, haga fan-out en paralelo a TMDB (movies+series), Open Library (books) e IGDB (games), ingeste los top hits y re-consulte la vista local antes de responder. Si se filtra por type, solo consulta la API correspondiente.",
-      "depends_on": [7],
+      "depends_on": [
+        7
+      ],
       "acceptance": [
         "GET /search?q=<titulo-no-en-db> devuelve resultados tras ingestar desde APIs externas",
         "El fan-out se ejecuta en paralelo (asyncio.gather) para los tipos no filtrados",
@@ -300,7 +360,9 @@
       "name": "admin_api_key",
       "title": "Admin API key — protección de /admin/* con X-API-Key header",
       "description": "Todos los endpoints bajo /admin/* requieren el header X-API-Key con el valor de la variable de entorno ADMIN_API_KEY. Devuelve 401 si el header falta o es incorrecto. Si ADMIN_API_KEY no está configurada, los endpoints admin devuelven 503.",
-      "depends_on": [8],
+      "depends_on": [
+        8
+      ],
       "acceptance": [
         "POST /admin/sync/{type} sin X-API-Key devuelve 401",
         "POST /admin/sync/{type} con X-API-Key incorrecto devuelve 401",
@@ -318,7 +380,10 @@
       "name": "book_authors_people",
       "title": "Book authors as People — autores Open Library → tabla people con credits",
       "description": "Durante el sync de libros, extraer autores de Open Library (/authors/{id}.json), persistirlos en la tabla people y crear credits que los vinculan a cada libro. Paridad con movies/series (TMDB) y games (IGDB).",
-      "depends_on": [4, 6],
+      "depends_on": [
+        4,
+        6
+      ],
       "acceptance": [
         "El sync de libros persiste autores en la tabla people",
         "Cada autor tiene un credit con role='author' vinculado al libro",
@@ -336,7 +401,10 @@
       "name": "trending_popular",
       "title": "Trending/Popular — GET /trending vía TMDB trending endpoint",
       "description": "Endpoint GET /trending?type=movie|series&period=day|week que devuelve hasta 20 items trending usando TMDB Trending API. Los items se persisten en DB local si son nuevos. Sin type devuelve mix de movies y series.",
-      "depends_on": [2, 3],
+      "depends_on": [
+        2,
+        3
+      ],
       "acceptance": [
         "GET /trending devuelve 200 con hasta 20 items (mix movies + series)",
         "GET /trending?type=movie devuelve solo películas trending",
@@ -355,7 +423,12 @@
       "name": "credits_in_detail",
       "title": "Credits in detail — reparto/crew en GET /movies/{slug}, /series/{slug}, /games/{slug}",
       "description": "Añadir el campo credits[] a las respuestas de detalle de películas, series y juegos. Cada credit incluye nombre de la persona, slug, foto, rol y character_name si aplica. Usa los datos ya almacenados en la tabla credits.",
-      "depends_on": [2, 3, 5, 6],
+      "depends_on": [
+        2,
+        3,
+        5,
+        6
+      ],
       "acceptance": [
         "GET /movies/{slug} incluye credits[] en la respuesta",
         "GET /series/{slug} incluye credits[] en la respuesta",
@@ -374,7 +447,9 @@
       "name": "cors_and_security",
       "title": "CORS + security headers — configuración para acceso desde frontend",
       "description": "Configurar CORSMiddleware en FastAPI con orígenes permitidos via CORS_ORIGINS env var (comma-separated). Añadir headers de seguridad básicos: X-Content-Type-Options, X-Frame-Options, Referrer-Policy. Sin configuración de CORS_ORIGINS, permite localhost en desarrollo.",
-      "depends_on": [9],
+      "depends_on": [
+        9
+      ],
       "acceptance": [
         "CORSMiddleware añadido a la app FastAPI",
         "CORS_ORIGINS env var (comma-separated) define los orígenes permitidos",
@@ -393,7 +468,9 @@
       "name": "seed_config_wiring",
       "title": "Sync config — usar SEED_TOP_N_* en los jobs nocturnos",
       "description": "Los jobs de scheduler/jobs.py hardcodean limit=100 e ignoran los settings SEED_TOP_N_* documentados en docs/external-apis.md. Conectar cada sync job a su setting correspondiente para que el tamaño del seed sea configurable por entorno.",
-      "depends_on": [8],
+      "depends_on": [
+        8
+      ],
       "acceptance": [
         "sync_movies usa settings.SEED_TOP_N_MOVIES como limit (y equivalente para series, books, games)",
         "Ningún limit hardcodeado a 100 queda en backlogg/scheduler/jobs.py",
@@ -407,7 +484,9 @@
       "name": "sync_slice_cursor",
       "title": "Slice sync — cursor persistido y sync incremental por tramos",
       "description": "Cada run nocturno sincroniza un tramo de SYNC_SLICE_SIZE items (default 200) del listado popular de cada tipo, empezando en un offset persistido en la nueva tabla sync_cursors. Al alcanzar SEED_TOP_N_* o agotar resultados de la API, el cursor vuelve a 0. Permite crecer el catálogo hasta ~10k items por tipo (tope de TMDB popular) manteniendo constante la duración del nightly y dentro del free tier de Neon.",
-      "depends_on": [23],
+      "depends_on": [
+        23
+      ],
       "acceptance": [
         "Modelo SQLAlchemy SyncCursor y migración Alembic crean la tabla sync_cursors (item_type PK, offset, updated_at)",
         "Los adapters aceptan offset: TMDB traduce offset a páginas (20/página), Open Library e IGDB usan offset nativo",
@@ -426,7 +505,9 @@
       "name": "books_popular_source",
       "title": "Books popular source — reemplazar /trending/weekly.json por search.json paginable",
       "description": "sync_books usa GET /trending/weekly.json (Open Library), una lista acotada de 'tendencias de la semana' que nunca supera unos pocos cientos de entradas — por eso SEED_TOP_N_BOOKS no puede crecer de verdad (confirmado: el conteo de books se quedó igual tras un sync exitoso). Sustituir por GET /search.json?q=*:*&sort=readinglog, confirmado empíricamente en vivo: 43M+ works indexados, offset probado hasta 9900 sin error (HTTP 200), resultados ordenados por popularidad real de uso (readinglog_count: cuántos usuarios lo tienen en want-to-read/reading/read) — no por rating crudo (sort=rating surfacea libros oscuros con pocas valoraciones; sort=edition_count no existe y devuelve 500). Reusar el mismo field set que ya usa search_book: key,title,author_name,first_publish_year,cover_i,subject,isbn.",
-      "depends_on": [4],
+      "depends_on": [
+        4
+      ],
       "acceptance": [
         "El adapter Open Library expone un método (renombrado si aplica desde get_trending_books) que usa GET /search.json con query amplia (q=*:*) y sort=readinglog, soportando offset/limit reales",
         "sync_books en scheduler/jobs.py usa el nuevo método en lugar de /trending/weekly.json",
@@ -443,7 +524,10 @@
       "name": "direct_backfill_sync",
       "title": "Direct backfill sync — script que escribe directo a Neon sin pasar por el timeout HTTP de Render",
       "description": "El nightly vía POST /admin/sync/{type} está acotado por un timeout de infraestructura de ~15 minutos por request (confirmado: con SYNC_SLICE_SIZE=200 movies y series fallaron con curl exit 22 tras ~48-49 min incluyendo reintentos; con slice=100 vuelve a ser seguro). A ese ritmo (100/noche), alcanzar SEED_TOP_N_*=10000 tarda ~3 meses. Crear un script que invoque la misma lógica de sync_movies/sync_series/sync_books/sync_games (feature 24) directamente contra la DB de producción (Neon) y las APIs externas, sin pasar por Render/HTTP, ejecutado vía un nuevo workflow de GitHub Actions con workflow_dispatch. Cada tipo procesa tramos grandes en bucle hasta agotar el objetivo (offset vuelve a 0) o un presupuesto de tiempo de seguridad (bajo el límite de 6h de GitHub Actions), dejando el progreso en sync_cursors (compartido con el nightly) para poder repetir la ejecución manualmente hasta completar cada tipo.",
-      "depends_on": [24, 25],
+      "depends_on": [
+        24,
+        25
+      ],
       "acceptance": [
         "Nuevo script (p.ej. scripts/backfill_sync.py) invocable con uv run, que acepta el tipo de contenido (movie/series/book/game) y usa las funciones existentes sync_movies/sync_series/sync_books/sync_games de backlogg/scheduler/jobs.py sin duplicar lógica de upsert",
         "El script permite un tamaño de tramo mayor que el SYNC_SLICE_SIZE de producción sin modificar ese setting (p.ej. parámetro opcional slice_size en las funciones sync_*, o env var propia del proceso del script)",
@@ -484,7 +568,13 @@
       "name": "ratings_reviews",
       "title": "Ratings & reviews — puntuación 1-5 + texto, likes en reviews",
       "description": "Nuevo dominio backlogg/ratings/: una entrada por (usuario, item) con score 1-5 opcional y texto opcional, patrón polimórfico item_type/item_id como credits/external_ids. Recalcula rating_internal/rating_count_internal en el item afectado. Likes en reviews (ReviewLike) para alimentar el ranking del feed. GET /users/{username}/reviews cross-type.",
-      "depends_on": [27, 2, 3, 4, 5],
+      "depends_on": [
+        27,
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "Modelo UserRating (user_id, item_type, item_id, score 1-5 nullable, review_text nullable, timestamps) con UniqueConstraint(user_id, item_type, item_id)",
         "Modelo ReviewLike (user_id, rating_id, created_at) con UniqueConstraint(user_id, rating_id)",
@@ -506,7 +596,9 @@
       "name": "follows",
       "title": "Follows — seguir usuarios, listas de followers/following",
       "description": "Nuevo dominio backlogg/follows/: relación unidireccional sin aprobación entre usuarios. Extiende el perfil público con follower_count/following_count.",
-      "depends_on": [27],
+      "depends_on": [
+        27
+      ],
       "acceptance": [
         "Modelo Follow (follower_id, followed_id, created_at) con UniqueConstraint(follower_id, followed_id); un usuario no puede seguirse a sí mismo (422)",
         "Migración Alembic 0011_follows.py crea la tabla follows",
@@ -525,7 +617,10 @@
       "name": "activity_feed",
       "title": "Activity feed — GET /feed con pestañas following/popular",
       "description": "Nuevo dominio backlogg/feed/: feed de reviews sin tablas nuevas. Pestaña 'following' con las reviews recientes de los usuarios seguidos por el caller; pestaña 'popular' con las reviews más gustadas (últimos 30 días). Auth requerida en ambas pestañas.",
-      "depends_on": [28, 29],
+      "depends_on": [
+        28,
+        29
+      ],
       "acceptance": [
         "GET /feed?tab=following|popular&page=&limit= — auth requerida (401 sin token); 422 si tab no es following/popular",
         "tab=following devuelve reviews (UserRating) de usuarios que el caller sigue, orden reverse-chronological, paginado",
@@ -543,7 +638,13 @@
       "name": "user_library",
       "title": "User library — backlog por usuario (want/in_progress/completed/dropped)",
       "description": "Nuevo dominio backlogg/library/: una entrada por (usuario, item) con estado de backlog, patrón polimórfico item_type/item_id como user_ratings/credits. Es la feature que da nombre al proyecto: cada usuario mantiene su lista de pendientes/en curso/terminados/abandonados a través de los 4 tipos. Extiende el perfil público con conteos por estado y el detalle de item con el estado del caller.",
-      "depends_on": [27, 2, 3, 4, 5],
+      "depends_on": [
+        27,
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "Modelo LibraryEntry (user_id, item_type, item_id, status enum [want, in_progress, completed, dropped], created_at, updated_at) con UniqueConstraint(user_id, item_type, item_id)",
         "Migración Alembic 0012_user_library.py (down_revision = la última migración existente) crea la tabla library_entries",
@@ -563,7 +664,13 @@
       "name": "user_lists",
       "title": "User lists — colecciones curadas públicas/privadas con items ordenados",
       "description": "Nuevo dominio backlogg/lists/: listas nombradas creadas por usuarios (p.ej. 'Mejor sci-fi') con items cross-type ordenados y visibilidad público/privado. Un slug por (owner, lista).",
-      "depends_on": [27, 2, 3, 4, 5],
+      "depends_on": [
+        27,
+        2,
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "Modelo UserList (id, user_id, slug, title, description nullable, is_public bool, created_at, updated_at) con UniqueConstraint(user_id, slug)",
         "Modelo ListItem (list_id, item_type, item_id, position, added_at) con UniqueConstraint(list_id, item_type, item_id)",
@@ -585,7 +692,10 @@
       "name": "notifications",
       "title": "Notifications — nuevo follower y likes en tus reviews",
       "description": "Nuevo dominio backlogg/notifications/: tabla notifications generada por eventos sociales (nuevo follower, like en una review propia). Sin mensajería directa (fuera de scope). Feed de notificaciones del usuario autenticado con marca de leído.",
-      "depends_on": [28, 29],
+      "depends_on": [
+        28,
+        29
+      ],
       "acceptance": [
         "Modelo Notification (id, recipient_id, actor_id, type enum [new_follower, review_like], target_type nullable, target_id nullable, is_read bool default false, created_at) con índice (recipient_id, created_at desc)",
         "Migración Alembic 0014_notifications.py crea la tabla notifications",
@@ -606,7 +716,11 @@
       "name": "personalized_recommendations",
       "title": "Personalized recommendations — GET /recommendations desde library + ratings",
       "description": "Endpoint GET /recommendations que genera sugerencias personalizadas para el usuario autenticado a partir de sus items mejor valorados y de su library (want/completed), haciendo fan-out a las recomendaciones de TMDB (feature 16) y a solapamiento por género, excluyendo lo que ya ha visto o tiene.",
-      "depends_on": [31, 28, 16],
+      "depends_on": [
+        31,
+        28,
+        16
+      ],
       "acceptance": [
         "GET /recommendations — auth requerida (401 sin token), ?type= opcional, con limit/paginación",
         "Semillas: items del usuario con score >= 4 y/o status completed/want; si no hay semillas, hace fallback a trending/popular (lista no vacía cuando hay catálogo, sin error)",
@@ -624,7 +738,9 @@
       "name": "auth_refresh_tokens",
       "title": "Refresh tokens — access corto + refresh rotatorio con revocación",
       "description": "Sustituir el JWT de larga duración por un access token corto más un refresh token persistido y rotatorio. El login devuelve ambos; /auth/refresh emite un par nuevo e invalida el anterior; /auth/logout revoca el refresh. Detección de reuse.",
-      "depends_on": [27],
+      "depends_on": [
+        27
+      ],
       "acceptance": [
         "Modelo RefreshToken (id, user_id, token_hash, expires_at, revoked_at nullable, created_at) — nunca se persiste el token en claro, solo su hash",
         "Migración Alembic 0015_refresh_tokens.py crea la tabla refresh_tokens",
@@ -645,7 +761,9 @@
       "name": "account_recovery",
       "title": "Account recovery — verificación de email y reset de password (token-based)",
       "description": "Verificación de email y restablecimiento de contraseña mediante tokens de un solo uso con expiración. El correo se envía por SMTP a través de una interfaz de EmailSender: implementación real (SMTP vía smtplib de la stdlib; para pruebas se apunta a Gmail con una App Password, y a futuro a un dominio propio cambiando solo variables de entorno) cuando SMTP_HOST está configurado, y fallback que loguea el enlace en dev cuando no lo está. El flujo, la seguridad del token y el envío desacoplado son el entregable.",
-      "depends_on": [27],
+      "depends_on": [
+        27
+      ],
       "acceptance": [
         "Tabla de tokens de un solo uso (verificación de email y reset de password) con hash, propósito, expiración y timestamp de consumo; nunca en claro",
         "Migración Alembic 0016_account_recovery.py (incluye users.email_verified bool default false)",
@@ -668,7 +786,9 @@
       "name": "rate_limiting",
       "title": "Rate limiting — límites por IP/usuario en auth y fallback externo",
       "description": "Rate limiting para proteger endpoints sensibles (/auth/*, búsqueda con fallback externo, escrituras). Configurable por env; devuelve 429 con Retry-After. Almacenamiento in-process (suficiente para una instancia) tras una interfaz que permita mover a Redis después.",
-      "depends_on": [22],
+      "depends_on": [
+        22
+      ],
       "acceptance": [
         "Límites configurables por env (p.ej. RATE_LIMIT_AUTH, RATE_LIMIT_DEFAULT)",
         "POST /auth/login y POST /auth/register limitados por IP; superar el límite devuelve 429 con header Retry-After",
@@ -686,7 +806,9 @@
       "name": "observability",
       "title": "Observability — logging estructurado con request IDs + Sentry opcional",
       "description": "Logging estructurado (JSON) con correlación por request ID e integración opcional de Sentry activada por env (SENTRY_DSN). Sin proveedor configurado, la app funciona igual y sin overhead.",
-      "depends_on": [9],
+      "depends_on": [
+        9
+      ],
       "acceptance": [
         "Middleware que asigna/propaga un X-Request-ID por petición y lo incluye en todos los logs de esa petición y en la respuesta",
         "Logs estructurados (JSON) con nivel configurable por env (LOG_LEVEL); cada request registra método, path, status y duración",
@@ -703,7 +825,9 @@
       "name": "metrics_endpoint",
       "title": "Metrics — endpoint /metrics estilo Prometheus",
       "description": "Exponer métricas operativas en formato de exposición Prometheus: contadores de requests por endpoint/status, latencias y contadores de negocio (syncs, fan-outs externos). Sin datos sensibles ni PII.",
-      "depends_on": [38],
+      "depends_on": [
+        38
+      ],
       "acceptance": [
         "GET /metrics devuelve 200 en formato de exposición Prometheus",
         "Incluye al menos: total de requests por método+ruta+status y un histograma/summary de latencia",
@@ -720,7 +844,11 @@
       "name": "response_caching",
       "title": "Response caching — Cache-Control/ETag + caché in-process para lecturas calientes",
       "description": "Cabeceras Cache-Control/ETag en lecturas idempotentes (detalle, listados, géneros, trending) y una caché in-process con TTL para las respuestas más costosas (trending, genres). Interfaz reemplazable para mover a Redis después.",
-      "depends_on": [14, 15, 20],
+      "depends_on": [
+        14,
+        15,
+        20
+      ],
       "acceptance": [
         "GET de detalle y listados devuelven Cache-Control apropiado; el detalle soporta ETag + If-None-Match → 304",
         "Caché in-process con TTL para /trending y /genres (respuestas costosas), tras una interfaz reemplazable (in-process por defecto)",
@@ -736,7 +864,9 @@
       "name": "openapi_polish",
       "title": "OpenAPI polish — tags, descripciones y ejemplos para consumo por frontend",
       "description": "Enriquecer el esquema OpenAPI generado: tags por dominio, summaries/descripciones por operación, ejemplos de request/response y metadatos de la app. Facilita generar clientes y una UI a partir de /openapi.json.",
-      "depends_on": [30],
+      "depends_on": [
+        30
+      ],
       "acceptance": [
         "Cada router declara tags coherentes por dominio y summary/description por operación",
         "Los schemas de respuesta clave incluyen ejemplos (Pydantic model_config / json_schema_extra)",
@@ -747,6 +877,84 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 42,
+      "name": "account_deletion",
+      "title": "Account deletion — DELETE /users/me con borrado en cascada y recomputo de agregados",
+      "description": "Borrado de la cuenta del usuario autenticado (higiene GDPR). Elimina la fila del usuario (cascada DB a ratings/follows/library/lists/notifications/tokens) y recomputa rating_internal/rating_count_internal de los items que había puntuado. Path raíz durante desarrollo; se versionará a /v1 en la feature 45.",
+      "depends_on": [
+        27
+      ],
+      "acceptance": [
+        "DELETE /users/me requiere auth (401 sin token) y borra la cuenta del usuario autenticado (204)",
+        "El borrado elimina en cascada ratings, review_likes, follows, library, listas, notificaciones y tokens (refresh/account)",
+        "Tras el borrado se recomputan rating_internal/rating_count_internal de los items que el usuario había puntuado",
+        "Los refresh tokens del usuario quedan invalidados (no se puede refrescar tras el borrado)",
+        "El username/email quedan libres para re-registro",
+        "Tests: borrado feliz, 401 sin auth, recomputo de agregados verificado, cascada verificada",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 43,
+      "name": "review_reports",
+      "title": "Review reports — usuarios reportan reviews y cola de moderación admin",
+      "description": "Pipeline de reportes: un usuario marca una review como problemática; el admin la revisa desde una cola. Nueva tabla review_reports. Endpoint de usuario + endpoints admin protegidos por X-API-Key. Paths raíz durante desarrollo; se versionarán en la feature 45.",
+      "depends_on": [
+        28
+      ],
+      "acceptance": [
+        "Nueva tabla review_reports (reporter_id, rating_id, reason, status open/resolved, timestamps) + migración Alembic",
+        "POST /reviews/{id}/report (auth) crea un reporte; idempotente por (reporter, review)",
+        "GET /admin/reports (admin X-API-Key) lista reportes con filtro por estado y paginación",
+        "POST /admin/reports/{id}/resolve (admin) marca el reporte como resuelto",
+        "Reportar review inexistente → 404; sin auth → 401",
+        "Tests de repositorio/servicio/rutas",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 44,
+      "name": "content_moderation",
+      "title": "Content moderation — ocultar reviews y banear usuarios (admin)",
+      "description": "Acciones de moderación del admin: ocultar/mostrar reviews (excluidas de listados, feed y agregados) y banear/desbanear usuarios (bloqueados en login/refresh, su contenido oculto). Migración añade UserRating.is_hidden y users.is_banned. Paths raíz durante desarrollo; se versionarán en la feature 45.",
+      "depends_on": [
+        43,
+        28
+      ],
+      "acceptance": [
+        "Migración: UserRating.is_hidden (default false) y users.is_banned (default false)",
+        "POST /admin/reviews/{id}/hide y /unhide (admin) ocultan/muestran una review y recomputan agregados excluyendo ocultas",
+        "Reviews ocultas se excluyen de GET /{tipo}/{slug}/ratings, del feed y de /users/{username}/reviews, y no cuentan para rating_internal/rating_count_internal",
+        "POST /admin/users/{username}/ban y /unban (admin) marcan is_banned",
+        "Usuario baneado no puede hacer login ni refresh (401) y sus reviews quedan ocultas",
+        "Tests: hide excluye de listados+agregados, ban bloquea login/refresh, enforcement verificado",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 45,
+      "name": "api_versioning",
+      "title": "API versioning — prefijo /v1 para todo el backend inicial (paso final)",
+      "description": "Paso final tras completar el backend inicial (features 1–44): servir TODOS los endpoints de negocio bajo /v1 en un único barrido mecánico, sellando la superficie como v1. /health y /metrics quedan sin versionar (ops). Corte limpio sin alias en la raíz (no hay clientes en producción). El frontend Next.js consumirá /v1.",
+      "depends_on": [
+        42,
+        43,
+        44
+      ],
+      "acceptance": [
+        "Todos los routers de negocio se sirven bajo /v1, incluidos los añadidos en 42–44 (borrado de cuenta, reportes, moderación)",
+        "Los endpoints operativos /health y /metrics permanecen SIN versionar",
+        "No se mantienen alias en la raíz (corte limpio)",
+        "docs/api.md y las colecciones bruno reflejan el prefijo /v1",
+        "TODOS los tests se actualizan a las rutas /v1 y siguen en verde",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

@@ -157,6 +157,23 @@ async def update_me(
     return await service.update_current_user(db, current_user, payload)
 
 
+@users_router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own account",
+    description=(
+        "Permanently delete the authenticated user's account and all associated "
+        "data (ratings, likes, follows, library, lists, notifications, tokens). "
+        "Frees the username/email for re-registration. Requires auth."
+    ),
+)
+async def delete_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await service.delete_current_user(db, current_user)
+
+
 @users_router.get(
     "/{username}",
     response_model=UserOut,
