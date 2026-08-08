@@ -82,6 +82,24 @@ def _reset_rate_limiter():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_response_cache():
+    """Clear the in-process response cache before every test.
+
+    The cache is a process-wide singleton, so a value stored by one test (e.g. a
+    /trending or /genres response) would otherwise be served to unrelated tests
+    and mask real behaviour. Imported locally to respect the DB-isolation guard's
+    import ordering above.
+    """
+    from backlogg.core.cache import get_cache
+
+    cache = get_cache()
+    clear = getattr(cache, "clear", None)
+    if callable(clear):
+        clear()
+    yield
+
+
 # ── Database fixtures ─────────────────────────────────────────────────────────
 
 
