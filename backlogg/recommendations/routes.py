@@ -10,7 +10,12 @@ from backlogg.users.models import User
 recommendations_router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
-@recommendations_router.get("", response_model=RecommendationsOut)
+@recommendations_router.get(
+    "",
+    response_model=RecommendationsOut,
+    summary="Get recommendations",
+    description="Personalized cross-type recommendations from the caller's ratings/library. Auth.",
+)
 async def get_recommendations(
     type: RecommendationTypeFilter | None = Query(
         default=None, description="Optional content-type filter"

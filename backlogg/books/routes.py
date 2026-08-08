@@ -14,7 +14,12 @@ from backlogg.users.models import User
 router = APIRouter(prefix="/books", tags=["books"])
 
 
-@router.get("", response_model=BookListOut)
+@router.get(
+    "",
+    response_model=BookListOut,
+    summary="List books",
+    description="Paginated list of catalogued books (no external fallback); genre filter + sort.",
+)
 async def list_books(
     genre: str | None = Query(default=None, description="Filter by genre slug"),
     sort: BookSortEnum = Query(default=BookSortEnum.rating_desc, description="Sort order"),
@@ -25,7 +30,12 @@ async def list_books(
     return await service.list_books(db, genre=genre, sort=sort, page=page, limit=limit)
 
 
-@router.get("/{slug}/ratings", response_model=RatingListOut)
+@router.get(
+    "/{slug}/ratings",
+    response_model=RatingListOut,
+    summary="List book ratings",
+    description="Public, paginated ratings & reviews for a book, newest first.",
+)
 async def list_book_ratings(
     slug: str,
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -37,7 +47,12 @@ async def list_book_ratings(
     )
 
 
-@router.put("/{slug}/rating", response_model=RatingOut)
+@router.put(
+    "/{slug}/rating",
+    response_model=RatingOut,
+    summary="Rate a book",
+    description="Upsert the caller's score/review (full replace); recomputes aggregates. Auth.",
+)
 async def rate_book(
     slug: str,
     payload: RatingIn,
@@ -49,7 +64,12 @@ async def rate_book(
     )
 
 
-@router.delete("/{slug}/rating", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/rating",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own book rating",
+    description="Remove the caller's rating and recompute aggregates. Requires auth.",
+)
 async def delete_book_rating(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -58,7 +78,12 @@ async def delete_book_rating(
     await ratings_service.delete_item_rating(db, item_type="BOOK", slug=slug, user=current_user)
 
 
-@router.put("/{slug}/library", response_model=LibraryStatusOut)
+@router.put(
+    "/{slug}/library",
+    response_model=LibraryStatusOut,
+    summary="Set book library status",
+    description="Upsert the caller's backlog status for this book. Requires auth.",
+)
 async def set_book_library(
     slug: str,
     payload: LibraryEntryIn,
@@ -70,7 +95,12 @@ async def set_book_library(
     )
 
 
-@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/library",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove book from library",
+    description="Delete the caller's library entry for this book. Requires auth.",
+)
 async def delete_book_library(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -79,7 +109,12 @@ async def delete_book_library(
     await library_service.remove_library_entry(db, item_type="BOOK", slug=slug, user=current_user)
 
 
-@router.get("/{slug}", response_model=BookOut)
+@router.get(
+    "/{slug}",
+    response_model=BookOut,
+    summary="Get book detail",
+    description="Full book detail; on-demand Open Library fallback. Auth optional (viewer_status).",
+)
 async def get_book(
     slug: str,
     current_user: User | None = Depends(get_current_user_optional),

@@ -42,7 +42,117 @@ init_sentry()
 
 _logger = logging.getLogger("backlogg.main")
 
-app = FastAPI(title="Backlogg API")
+API_DESCRIPTION = """\
+Backlogg is a unified catalog API for **movies, series, books and games**,
+seeded from public external APIs (TMDB, Open Library, IGDB) via a nightly sync,
+plus a social layer on top of that catalog.
+
+**Catalog & discovery:** list and detail endpoints per content type, cross-type
+`/search` (with on-demand external fallback), `/genres`, `/trending`, `/people`
+and similar-item recommendations.
+
+**Social layer:** account management with refresh tokens and account recovery
+(`/auth`, `/users`), ratings & reviews, per-user library/backlog, curated
+`/lists`, `/follows`, an activity `/feed`, `/notifications` and personalized
+`/recommendations`.
+
+**Platform:** rate limiting, structured observability, Prometheus `/metrics`
+and response caching.
+
+## Authentication
+
+- **User endpoints** use `Authorization: Bearer <access_token>`. Obtain the
+  token pair from `POST /auth/login`; renew it with `POST /auth/refresh`.
+- **Admin endpoints** (`/admin/*`) require the `X-API-Key` header.
+
+Everything else is public. Direct messaging between users is out of scope.
+"""
+
+OPENAPI_TAGS = [
+    {
+        "name": "movies",
+        "description": "Movie catalog: list, detail (on-demand fallback) and similar titles.",
+    },
+    {
+        "name": "series",
+        "description": "TV series catalog: list, detail (on-demand fallback) and similar titles.",
+    },
+    {
+        "name": "books",
+        "description": "Book catalog: list and detail, with on-demand fallback from Open Library.",
+    },
+    {
+        "name": "games",
+        "description": "Game catalog: list and detail, with on-demand fallback from IGDB.",
+    },
+    {
+        "name": "people",
+        "description": "People (cast & crew) with their credits across the catalog.",
+    },
+    {
+        "name": "search",
+        "description": "Cross-type full-text search with a rate-limited external fallback.",
+    },
+    {
+        "name": "admin",
+        "description": "Internal ops (sync trigger, stats). Requires the `X-API-Key` header.",
+    },
+    {
+        "name": "genres",
+        "description": "Genres per content type with live item counts.",
+    },
+    {
+        "name": "trending",
+        "description": "Trending movies and series from the TMDB Trending API.",
+    },
+    {
+        "name": "auth",
+        "description": "Registration, login, token refresh/logout and account recovery.",
+    },
+    {
+        "name": "users",
+        "description": "User profiles: own profile (`/users/me`) and public profiles by username.",
+    },
+    {
+        "name": "ratings",
+        "description": "Ratings & reviews across all types, review likes and per-user listings.",
+    },
+    {
+        "name": "follows",
+        "description": "Unidirectional follow relationships and follower/following listings.",
+    },
+    {
+        "name": "feed",
+        "description": "Personalized activity feed (following) and a popular reviews tab.",
+    },
+    {
+        "name": "library",
+        "description": "Per-user backlog: want / in_progress / completed / dropped, cross-type.",
+    },
+    {
+        "name": "lists",
+        "description": "Curated cross-type lists with ordering and public/private visibility.",
+    },
+    {
+        "name": "notifications",
+        "description": "Social notifications (new follower, review like) for the caller.",
+    },
+    {
+        "name": "recommendations",
+        "description": "On-the-fly recommendations from the caller's ratings and library.",
+    },
+    {
+        "name": "metrics",
+        "description": "Prometheus metrics in the text exposition format. No authentication.",
+    },
+]
+
+app = FastAPI(
+    title="Backlogg API",
+    version="0.1.0",
+    description=API_DESCRIPTION,
+    openapi_tags=OPENAPI_TAGS,
+)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

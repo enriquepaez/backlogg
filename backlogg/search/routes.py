@@ -11,7 +11,12 @@ from backlogg.search.service import SearchService
 router = APIRouter(tags=["search"])
 
 
-@router.get("/search", response_model=SearchResponse)
+@router.get(
+    "/search",
+    response_model=SearchResponse,
+    summary="Search the catalog",
+    description="Cross-type full-text search; rate-limited external fallback on zero local hits.",
+)
 async def search_catalog(
     request: Request,
     q: str = Query(min_length=1),

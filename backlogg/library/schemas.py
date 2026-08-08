@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LibraryStatus(StrEnum):
@@ -37,6 +37,18 @@ class LibraryStatusOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "item_type": "MOVIE",
+                "slug": "dune-2021",
+                "status": "want",
+                "created_at": "2026-05-25T18:04:11Z",
+                "updated_at": "2026-05-25T18:04:11Z",
+            }
+        }
+    )
+
 
 class LibraryItemOut(BaseModel):
     item_type: str
@@ -59,6 +71,31 @@ class LibraryListOut(BaseModel):
     total: int
     page: int
     limit: int
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "items": [
+                    {
+                        "item": {
+                            "item_type": "MOVIE",
+                            "title": "Dune",
+                            "slug": "dune-2021",
+                            "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
+                            "release_date": "2021-10-22",
+                            "rating_external": 7.8,
+                        },
+                        "status": "completed",
+                        "created_at": "2026-05-25T18:04:11Z",
+                        "updated_at": "2026-05-26T09:12:00Z",
+                    }
+                ],
+                "total": 12,
+                "page": 1,
+                "limit": 20,
+            }
+        }
+    )
 
 
 class LibraryCounts(BaseModel):

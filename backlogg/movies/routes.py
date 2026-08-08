@@ -14,7 +14,12 @@ from backlogg.users.models import User
 router = APIRouter(prefix="/movies", tags=["movies"])
 
 
-@router.get("", response_model=MovieListOut)
+@router.get(
+    "",
+    response_model=MovieListOut,
+    summary="List movies",
+    description="Paginated list of catalogued movies (no external fallback); genre filter + sort.",
+)
 async def list_movies(
     genre: str | None = Query(default=None, description="Filter by genre slug"),
     sort: MovieSortEnum = Query(default=MovieSortEnum.rating_desc, description="Sort order"),
@@ -25,12 +30,22 @@ async def list_movies(
     return await service.list_movies(db, genre=genre, sort=sort, page=page, limit=limit)
 
 
-@router.get("/{slug}/similar", response_model=SimilarMoviesOut)
+@router.get(
+    "/{slug}/similar",
+    response_model=SimilarMoviesOut,
+    summary="Similar movies",
+    description="Up to 10 similar movies (TMDB). New items are persisted locally.",
+)
 async def get_similar_movies(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_movies(db, slug)
 
 
-@router.get("/{slug}/ratings", response_model=RatingListOut)
+@router.get(
+    "/{slug}/ratings",
+    response_model=RatingListOut,
+    summary="List movie ratings",
+    description="Public, paginated ratings & reviews for a movie, newest first.",
+)
 async def list_movie_ratings(
     slug: str,
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -42,7 +57,12 @@ async def list_movie_ratings(
     )
 
 
-@router.put("/{slug}/rating", response_model=RatingOut)
+@router.put(
+    "/{slug}/rating",
+    response_model=RatingOut,
+    summary="Rate a movie",
+    description="Upsert the caller's score/review (full replace); recomputes aggregates. Auth.",
+)
 async def rate_movie(
     slug: str,
     payload: RatingIn,
@@ -54,7 +74,12 @@ async def rate_movie(
     )
 
 
-@router.delete("/{slug}/rating", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/rating",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own movie rating",
+    description="Remove the caller's rating and recompute aggregates. Requires auth.",
+)
 async def delete_movie_rating(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -63,7 +88,12 @@ async def delete_movie_rating(
     await ratings_service.delete_item_rating(db, item_type="MOVIE", slug=slug, user=current_user)
 
 
-@router.put("/{slug}/library", response_model=LibraryStatusOut)
+@router.put(
+    "/{slug}/library",
+    response_model=LibraryStatusOut,
+    summary="Set movie library status",
+    description="Upsert the caller's backlog status for this movie. Requires auth.",
+)
 async def set_movie_library(
     slug: str,
     payload: LibraryEntryIn,
@@ -75,7 +105,12 @@ async def set_movie_library(
     )
 
 
-@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/library",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove movie from library",
+    description="Delete the caller's library entry for this movie. Requires auth.",
+)
 async def delete_movie_library(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -84,7 +119,12 @@ async def delete_movie_library(
     await library_service.remove_library_entry(db, item_type="MOVIE", slug=slug, user=current_user)
 
 
-@router.get("/{slug}", response_model=MovieOut)
+@router.get(
+    "/{slug}",
+    response_model=MovieOut,
+    summary="Get movie detail",
+    description="Full movie detail; on-demand fallback. Auth optional (adds viewer_status).",
+)
 async def get_movie(
     slug: str,
     current_user: User | None = Depends(get_current_user_optional),

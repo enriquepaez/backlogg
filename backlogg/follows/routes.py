@@ -13,7 +13,12 @@ from backlogg.users.models import User
 follows_router = APIRouter(prefix="/users", tags=["follows"])
 
 
-@follows_router.post("/{username}/follow", status_code=status.HTTP_204_NO_CONTENT)
+@follows_router.post(
+    "/{username}/follow",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Follow a user",
+    description="Follow a user. Idempotent; notifies them. Auth; 422 on self-follow.",
+)
 async def follow_user(
     username: str,
     current_user: User = Depends(get_current_user),
@@ -22,7 +27,12 @@ async def follow_user(
     await service.follow_user(db, username=username, user=current_user)
 
 
-@follows_router.delete("/{username}/follow", status_code=status.HTTP_204_NO_CONTENT)
+@follows_router.delete(
+    "/{username}/follow",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Unfollow a user",
+    description="Stop following a user. Idempotent. Requires auth.",
+)
 async def unfollow_user(
     username: str,
     current_user: User = Depends(get_current_user),
@@ -31,7 +41,12 @@ async def unfollow_user(
     await service.unfollow_user(db, username=username, user=current_user)
 
 
-@follows_router.get("/{username}/followers", response_model=FollowListOut)
+@follows_router.get(
+    "/{username}/followers",
+    response_model=FollowListOut,
+    summary="List followers",
+    description="Public, paginated list of a user's followers, newest first.",
+)
 async def list_followers(
     username: str,
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -41,7 +56,12 @@ async def list_followers(
     return await service.list_followers(db, username=username, page=page, limit=limit)
 
 
-@follows_router.get("/{username}/following", response_model=FollowListOut)
+@follows_router.get(
+    "/{username}/following",
+    response_model=FollowListOut,
+    summary="List following",
+    description="Public, paginated list of who a user follows, newest first.",
+)
 async def list_following(
     username: str,
     page: int = Query(default=1, ge=1, description="Page number"),
