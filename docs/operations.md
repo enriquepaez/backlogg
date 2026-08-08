@@ -13,6 +13,16 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
   schedulers embebidos en el proceso (la instancia dormida nunca los
   dispararía).
 
+## ⛔ El `.env` local es intocable
+
+El `.env` de desarrollo pertenece al usuario: contiene secretos reales, está en
+`.gitignore` y **no es recuperable desde el repo** si se sobrescribe. Ningún
+agente ni script debe generarlo, copiarlo ni sobrescribirlo
+(`cp .env.example .env`, `>`/`>>`, `rm`, `mv`, etc. sobre `.env` están
+prohibidos). Las plantillas se editan **solo** en `.env.example`. Para ejecutar
+algo que necesite variables de entorno en local, cárgalas del `.env` existente
+(`set -a; source .env; set +a`) sin reescribirlo.
+
 ## Configuración en Render
 
 | Env var | Valor actual | Notas |
