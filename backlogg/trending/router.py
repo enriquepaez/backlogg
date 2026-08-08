@@ -8,7 +8,12 @@ from backlogg.trending.schemas import ItemTypeEnum, PeriodEnum, TrendingOut
 router = APIRouter(prefix="/trending", tags=["trending"])
 
 
-@router.get("", response_model=TrendingOut)
+@router.get(
+    "",
+    response_model=TrendingOut,
+    summary="Get trending items",
+    description="Up to 20 trending movies and/or series (TMDB). New items are persisted locally.",
+)
 async def get_trending(
     type: ItemTypeEnum | None = None,
     period: PeriodEnum = PeriodEnum.week,

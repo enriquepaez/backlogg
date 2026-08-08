@@ -11,7 +11,12 @@ from backlogg.library.schemas import LibraryListOut, LibraryStatus, LibraryTypeF
 user_library_router = APIRouter(prefix="/users", tags=["library"])
 
 
-@user_library_router.get("/{username}/library", response_model=LibraryListOut)
+@user_library_router.get(
+    "/{username}/library",
+    response_model=LibraryListOut,
+    summary="Get a user's library",
+    description="Public, paginated, cross-type backlog for a user; optional status/type filters.",
+)
 async def get_user_library(
     username: str,
     status: LibraryStatus | None = Query(default=None, description="Filter by backlog status"),

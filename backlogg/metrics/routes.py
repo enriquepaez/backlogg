@@ -14,7 +14,11 @@ from backlogg.core.metrics import CONTENT_TYPE_LATEST, get_metrics
 router = APIRouter(tags=["metrics"])
 
 
-@router.get("/metrics")
+@router.get(
+    "/metrics",
+    summary="Prometheus metrics",
+    description="Operational metrics in the Prometheus text exposition format. No auth.",
+)
 async def metrics() -> PlainTextResponse:
     """Expose all registered metrics in Prometheus exposition format."""
     return PlainTextResponse(content=get_metrics().render(), media_type=CONTENT_TYPE_LATEST)

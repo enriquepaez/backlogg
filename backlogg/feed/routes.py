@@ -12,7 +12,12 @@ from backlogg.users.models import User
 feed_router = APIRouter(prefix="/feed", tags=["feed"])
 
 
-@feed_router.get("", response_model=FeedListOut)
+@feed_router.get(
+    "",
+    response_model=FeedListOut,
+    summary="Get activity feed",
+    description="Cross-type feed: following (followed users) or popular (30-day top). Auth.",
+)
 async def get_feed(
     tab: Literal["following", "popular"] = Query(
         default="following", description="Feed tab: following or popular"

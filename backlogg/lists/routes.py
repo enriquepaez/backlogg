@@ -21,7 +21,13 @@ lists_router = APIRouter(prefix="/lists", tags=["lists"])
 user_lists_router = APIRouter(prefix="/users", tags=["lists"])
 
 
-@lists_router.post("", response_model=UserListOut, status_code=status.HTTP_201_CREATED)
+@lists_router.post(
+    "",
+    response_model=UserListOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a list",
+    description="Create a curated list; slug derived from the title. Requires auth.",
+)
 async def create_list(
     payload: ListCreate,
     current_user: User = Depends(get_current_user),
@@ -30,7 +36,12 @@ async def create_list(
     return await service.create_list(db, payload, current_user)
 
 
-@lists_router.get("/{slug}", response_model=UserListOut)
+@lists_router.get(
+    "/{slug}",
+    response_model=UserListOut,
+    summary="Get list detail",
+    description="List detail with resolved items in order. Private lists 404 for non-owners.",
+)
 async def get_list(
     slug: str,
     viewer: User | None = Depends(get_current_user_optional),
@@ -39,7 +50,12 @@ async def get_list(
     return await service.get_list(db, slug, viewer)
 
 
-@lists_router.patch("/{slug}", response_model=UserListOut)
+@lists_router.patch(
+    "/{slug}",
+    response_model=UserListOut,
+    summary="Update a list",
+    description="Update title/description/is_public (slug never changes). Owner only.",
+)
 async def update_list(
     slug: str,
     payload: ListUpdate,
@@ -49,7 +65,12 @@ async def update_list(
     return await service.update_list(db, slug, payload, current_user)
 
 
-@lists_router.delete("/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+@lists_router.delete(
+    "/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a list",
+    description="Delete the list and cascade its items. Owner only.",
+)
 async def delete_list(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -58,7 +79,12 @@ async def delete_list(
     await service.delete_list(db, slug, current_user)
 
 
-@lists_router.post("/{slug}/items", response_model=UserListOut)
+@lists_router.post(
+    "/{slug}/items",
+    response_model=UserListOut,
+    summary="Add item to list",
+    description="Append an item at the end. Idempotent. Owner only. 404 if not in catalog.",
+)
 async def add_list_item(
     slug: str,
     payload: ListItemRef,
@@ -68,7 +94,12 @@ async def add_list_item(
     return await service.add_item(db, slug, payload, current_user)
 
 
-@lists_router.delete("/{slug}/items", response_model=UserListOut)
+@lists_router.delete(
+    "/{slug}/items",
+    response_model=UserListOut,
+    summary="Remove item from list",
+    description="Remove an item and re-pack positions. Idempotent. Owner only.",
+)
 async def remove_list_item(
     slug: str,
     payload: ListItemRef,
@@ -78,7 +109,12 @@ async def remove_list_item(
     return await service.remove_item(db, slug, payload, current_user)
 
 
-@lists_router.put("/{slug}/items/order", response_model=UserListOut)
+@lists_router.put(
+    "/{slug}/items/order",
+    response_model=UserListOut,
+    summary="Reorder list items",
+    description="Reorder items; payload must match the current items. Owner only. 422 on mismatch.",
+)
 async def reorder_list_items(
     slug: str,
     payload: ListReorder,
@@ -88,7 +124,12 @@ async def reorder_list_items(
     return await service.reorder_items(db, slug, payload, current_user)
 
 
-@user_lists_router.get("/{username}/lists", response_model=UserListsOut)
+@user_lists_router.get(
+    "/{username}/lists",
+    response_model=UserListsOut,
+    summary="List a user's lists",
+    description="A user's lists (public always; private only for the owner). Auth optional.",
+)
 async def get_user_lists(
     username: str,
     viewer: User | None = Depends(get_current_user_optional),

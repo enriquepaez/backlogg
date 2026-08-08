@@ -26,7 +26,13 @@ _SYNC_HANDLERS = {
 SyncType = Literal["movie", "series", "book", "game"]
 
 
-@router.post("/sync/{type}", status_code=200, response_model=SyncResponse)
+@router.post(
+    "/sync/{type}",
+    status_code=200,
+    response_model=SyncResponse,
+    summary="Trigger content sync",
+    description="Run a synchronous sync slice and block until it finishes. Requires `X-API-Key`.",
+)
 async def trigger_sync(type: SyncType) -> SyncResponse:
     """Trigger a synchronous sync for the given content type.
 
@@ -43,7 +49,12 @@ async def trigger_sync(type: SyncType) -> SyncResponse:
     return SyncResponse(type=type, **result)
 
 
-@router.get("/stats", response_model=StatsResponse)
+@router.get(
+    "/stats",
+    response_model=StatsResponse,
+    summary="Catalog stats",
+    description="Per-type item counts and last sync timestamp. Requires `X-API-Key`.",
+)
 async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     """Return item counts and last sync timestamp for each content type.
 

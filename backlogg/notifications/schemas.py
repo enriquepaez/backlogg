@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class NotificationActorOut(BaseModel):
@@ -32,6 +32,30 @@ class NotificationListOut(BaseModel):
     total: int
     page: int
     limit: int
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "items": [
+                    {
+                        "id": 91,
+                        "type": "review_like",
+                        "actor": {
+                            "username": "bob",
+                            "display_name": "Bob",
+                            "avatar_url": "https://cdn.example.com/a/bob.png",
+                        },
+                        "target": {"target_type": "review", "target_id": 512},
+                        "is_read": False,
+                        "created_at": "2026-05-25T18:04:11Z",
+                    }
+                ],
+                "total": 5,
+                "page": 1,
+                "limit": 20,
+            }
+        }
+    )
 
 
 class UnreadCountOut(BaseModel):

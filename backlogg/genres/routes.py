@@ -8,7 +8,12 @@ from backlogg.genres.schemas import GenreListOut, ItemTypeEnum
 router = APIRouter(prefix="/genres", tags=["genres"])
 
 
-@router.get("", response_model=GenreListOut)
+@router.get(
+    "",
+    response_model=GenreListOut,
+    summary="List genres",
+    description="Genres with live item counts; optional content-type filter (all types if unset).",
+)
 async def list_genres(
     type: ItemTypeEnum | None = Query(
         default=None,

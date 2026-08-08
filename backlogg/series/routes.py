@@ -14,7 +14,12 @@ from backlogg.users.models import User
 router = APIRouter(prefix="/series", tags=["series"])
 
 
-@router.get("", response_model=SeriesListOut)
+@router.get(
+    "",
+    response_model=SeriesListOut,
+    summary="List series",
+    description="Paginated list of catalogued series (no external fallback); genre filter + sort.",
+)
 async def list_series(
     genre: str | None = Query(default=None, description="Filter by genre slug"),
     sort: SeriesSortEnum = Query(default=SeriesSortEnum.rating_desc, description="Sort order"),
@@ -25,12 +30,22 @@ async def list_series(
     return await service.list_series(db, genre=genre, sort=sort, page=page, limit=limit)
 
 
-@router.get("/{slug}/similar", response_model=SimilarSeriesListOut)
+@router.get(
+    "/{slug}/similar",
+    response_model=SimilarSeriesListOut,
+    summary="Similar series",
+    description="Up to 10 similar series (TMDB). New items are persisted locally.",
+)
 async def get_similar_series(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_series(db, slug)
 
 
-@router.get("/{slug}/ratings", response_model=RatingListOut)
+@router.get(
+    "/{slug}/ratings",
+    response_model=RatingListOut,
+    summary="List series ratings",
+    description="Public, paginated ratings & reviews for a series, newest first.",
+)
 async def list_series_ratings(
     slug: str,
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -42,7 +57,12 @@ async def list_series_ratings(
     )
 
 
-@router.put("/{slug}/rating", response_model=RatingOut)
+@router.put(
+    "/{slug}/rating",
+    response_model=RatingOut,
+    summary="Rate a series",
+    description="Upsert the caller's score/review (full replace); recomputes aggregates. Auth.",
+)
 async def rate_series(
     slug: str,
     payload: RatingIn,
@@ -54,7 +74,12 @@ async def rate_series(
     )
 
 
-@router.delete("/{slug}/rating", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/rating",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own series rating",
+    description="Remove the caller's rating and recompute aggregates. Requires auth.",
+)
 async def delete_series_rating(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -63,7 +88,12 @@ async def delete_series_rating(
     await ratings_service.delete_item_rating(db, item_type="SERIES", slug=slug, user=current_user)
 
 
-@router.put("/{slug}/library", response_model=LibraryStatusOut)
+@router.put(
+    "/{slug}/library",
+    response_model=LibraryStatusOut,
+    summary="Set series library status",
+    description="Upsert the caller's backlog status for this series. Requires auth.",
+)
 async def set_series_library(
     slug: str,
     payload: LibraryEntryIn,
@@ -75,7 +105,12 @@ async def set_series_library(
     )
 
 
-@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/library",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove series from library",
+    description="Delete the caller's library entry for this series. Requires auth.",
+)
 async def delete_series_library(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -84,7 +119,12 @@ async def delete_series_library(
     await library_service.remove_library_entry(db, item_type="SERIES", slug=slug, user=current_user)
 
 
-@router.get("/{slug}", response_model=SeriesOut)
+@router.get(
+    "/{slug}",
+    response_model=SeriesOut,
+    summary="Get series detail",
+    description="Full series detail; on-demand fallback. Auth optional (adds viewer_status).",
+)
 async def get_series(
     slug: str,
     current_user: User | None = Depends(get_current_user_optional),

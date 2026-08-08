@@ -746,7 +746,7 @@
         "Tests que verifican la presencia de tags y ejemplos en el esquema generado",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

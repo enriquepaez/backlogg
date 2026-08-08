@@ -31,6 +31,8 @@ users_router = APIRouter(prefix="/users", tags=["users"])
     response_model=UserMeOut,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit_auth)],
+    summary="Register a new account",
+    description="Create a user account. Rate-limited per IP. Returns the profile including email.",
 )
 async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     return await service.register_user(db, payload)
@@ -40,17 +42,29 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     "/login",
     response_model=TokenPairOut,
     dependencies=[Depends(rate_limit_auth)],
+    summary="Log in",
+    description="Exchange credentials for an access + refresh token pair. Rate-limited per IP.",
 )
 async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     return await service.login_user(db, payload)
 
 
-@auth_router.post("/refresh", response_model=TokenPairOut)
+@auth_router.post(
+    "/refresh",
+    response_model=TokenPairOut,
+    summary="Refresh tokens",
+    description="Rotate the refresh token and issue a fresh pair. Reuse revokes all sessions.",
+)
 async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     return await service.refresh_tokens(db, payload)
 
 
-@auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@auth_router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Log out",
+    description="Revoke the given refresh token. Idempotent. Requires auth.",
+)
 async def logout(
     payload: LogoutRequest,
     current_user: User = Depends(get_current_user),
@@ -63,7 +77,11 @@ async def logout(
 
 
 @auth_router.post(
-    "/verify/request", response_model=MessageOut, status_code=status.HTTP_202_ACCEPTED
+    "/verify/request",
+    response_model=MessageOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request email verification",
+    description="Send an email-verification link to the caller (logged in dev). Requires auth.",
 )
 async def request_email_verification(
     current_user: User = Depends(get_current_user),
@@ -73,7 +91,12 @@ async def request_email_verification(
     return await service.request_email_verification(db, current_user, sender)
 
 
-@auth_router.post("/verify/confirm", response_model=MessageOut)
+@auth_router.post(
+    "/verify/confirm",
+    response_model=MessageOut,
+    summary="Confirm email verification",
+    description="Consume a single-use verification token; marks the email verified. Requires auth.",
+)
 async def confirm_email_verification(
     payload: VerifyConfirmRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -84,7 +107,11 @@ async def confirm_email_verification(
 
 
 @auth_router.post(
-    "/password/forgot", response_model=MessageOut, status_code=status.HTTP_202_ACCEPTED
+    "/password/forgot",
+    response_model=MessageOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request password reset",
+    description="Send a reset link if the email exists. Identical response either way.",
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
@@ -94,19 +121,34 @@ async def forgot_password(
     return await service.request_password_reset(db, payload, sender)
 
 
-@auth_router.post("/password/reset", response_model=MessageOut)
+@auth_router.post(
+    "/password/reset",
+    response_model=MessageOut,
+    summary="Reset password",
+    description="Consume a single-use reset token; changes password and revokes all sessions.",
+)
 async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     return await service.reset_password(db, payload)
 
 
 # NOTE: "/me" must be registered before "/{username}" — otherwise the
 # dynamic route would swallow "/me" as a username.
-@users_router.get("/me", response_model=UserMeOut)
+@users_router.get(
+    "/me",
+    response_model=UserMeOut,
+    summary="Get own profile",
+    description="The caller's own profile, including email. Requires auth.",
+)
 async def get_me(current_user: User = Depends(get_current_user)):
     return service.get_current_user_profile(current_user)
 
 
-@users_router.patch("/me", response_model=UserMeOut)
+@users_router.patch(
+    "/me",
+    response_model=UserMeOut,
+    summary="Update own profile",
+    description="Partial update of display_name / bio / avatar_url. Requires auth.",
+)
 async def update_me(
     payload: UserUpdate,
     current_user: User = Depends(get_current_user),
@@ -115,6 +157,11 @@ async def update_me(
     return await service.update_current_user(db, current_user, payload)
 
 
-@users_router.get("/{username}", response_model=UserOut)
+@users_router.get(
+    "/{username}",
+    response_model=UserOut,
+    summary="Get public profile",
+    description="Public profile by username (no email), with follower/library counts.",
+)
 async def get_user(username: str, db: AsyncSession = Depends(get_db)):
     return await service.get_user_profile(db, username)

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ListItemType(StrEnum):
@@ -68,6 +68,31 @@ class UserListOut(BaseModel):
     updated_at: datetime
     items: list[ListItemOut]
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "slug": "best-sci-fi",
+                "title": "Best sci-fi",
+                "description": "My favorite science fiction across media.",
+                "is_public": True,
+                "item_count": 2,
+                "created_at": "2026-05-20T10:00:00Z",
+                "updated_at": "2026-05-25T18:04:11Z",
+                "items": [
+                    {
+                        "item_type": "MOVIE",
+                        "title": "Dune",
+                        "slug": "dune-2021",
+                        "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
+                        "release_date": "2021-10-22",
+                        "rating_external": 7.8,
+                        "position": 1,
+                    }
+                ],
+            }
+        }
+    )
+
 
 class UserListSummary(BaseModel):
     """A list without its items, for the per-user listing."""
@@ -84,3 +109,22 @@ class UserListSummary(BaseModel):
 class UserListsOut(BaseModel):
     lists: list[UserListSummary]
     total: int
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "lists": [
+                    {
+                        "slug": "best-sci-fi",
+                        "title": "Best sci-fi",
+                        "description": "My favorite science fiction across media.",
+                        "is_public": True,
+                        "item_count": 12,
+                        "created_at": "2026-05-20T10:00:00Z",
+                        "updated_at": "2026-05-25T18:04:11Z",
+                    }
+                ],
+                "total": 3,
+            }
+        }
+    )

@@ -14,7 +14,12 @@ from backlogg.users.models import User
 router = APIRouter(prefix="/games", tags=["games"])
 
 
-@router.get("", response_model=GameListOut)
+@router.get(
+    "",
+    response_model=GameListOut,
+    summary="List games",
+    description="Paginated list of catalogued games (no external fallback); genre filter + sort.",
+)
 async def list_games(
     genre: str | None = Query(default=None, description="Filter by genre slug"),
     sort: GameSortEnum = Query(default=GameSortEnum.rating_desc, description="Sort order"),
@@ -25,7 +30,12 @@ async def list_games(
     return await service.list_games(db, genre=genre, sort=sort, page=page, limit=limit)
 
 
-@router.get("/{slug}/ratings", response_model=RatingListOut)
+@router.get(
+    "/{slug}/ratings",
+    response_model=RatingListOut,
+    summary="List game ratings",
+    description="Public, paginated ratings & reviews for a game, newest first.",
+)
 async def list_game_ratings(
     slug: str,
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -37,7 +47,12 @@ async def list_game_ratings(
     )
 
 
-@router.put("/{slug}/rating", response_model=RatingOut)
+@router.put(
+    "/{slug}/rating",
+    response_model=RatingOut,
+    summary="Rate a game",
+    description="Upsert the caller's score/review (full replace); recomputes aggregates. Auth.",
+)
 async def rate_game(
     slug: str,
     payload: RatingIn,
@@ -49,7 +64,12 @@ async def rate_game(
     )
 
 
-@router.delete("/{slug}/rating", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/rating",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own game rating",
+    description="Remove the caller's rating and recompute aggregates. Requires auth.",
+)
 async def delete_game_rating(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -58,7 +78,12 @@ async def delete_game_rating(
     await ratings_service.delete_item_rating(db, item_type="GAME", slug=slug, user=current_user)
 
 
-@router.put("/{slug}/library", response_model=LibraryStatusOut)
+@router.put(
+    "/{slug}/library",
+    response_model=LibraryStatusOut,
+    summary="Set game library status",
+    description="Upsert the caller's backlog status for this game. Requires auth.",
+)
 async def set_game_library(
     slug: str,
     payload: LibraryEntryIn,
@@ -70,7 +95,12 @@ async def set_game_library(
     )
 
 
-@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{slug}/library",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove game from library",
+    description="Delete the caller's library entry for this game. Requires auth.",
+)
 async def delete_game_library(
     slug: str,
     current_user: User = Depends(get_current_user),
@@ -79,7 +109,12 @@ async def delete_game_library(
     await library_service.remove_library_entry(db, item_type="GAME", slug=slug, user=current_user)
 
 
-@router.get("/{slug}", response_model=GameOut)
+@router.get(
+    "/{slug}",
+    response_model=GameOut,
+    summary="Get game detail",
+    description="Full game detail; on-demand IGDB fallback. Auth optional (adds viewer_status).",
+)
 async def get_game(
     slug: str,
     current_user: User | None = Depends(get_current_user_optional),
