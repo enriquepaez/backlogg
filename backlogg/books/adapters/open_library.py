@@ -16,8 +16,8 @@ _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 # Retry policy for the popular-books search: OL's Solr backend answers the
 # readinglog-sorted match-all query with intermittent 500s, but an immediate
 # retry of the same request consistently succeeds.
-_SEARCH_RETRY_ATTEMPTS = 3
-_SEARCH_RETRY_BACKOFF_S = 1.0
+_SEARCH_RETRY_ATTEMPTS = 5
+_SEARCH_RETRY_BACKOFF_S = 2.0
 
 logger = logging.getLogger(__name__)
 
