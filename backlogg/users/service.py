@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 from argon2 import PasswordHasher
@@ -6,26 +7,40 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.config import settings
+from backlogg.core.email import EmailSender
 from backlogg.follows import repository as follows_repo
 from backlogg.library import repository as library_repo
 from backlogg.library.schemas import LibraryCounts
 from backlogg.users import repository as repo
 from backlogg.users.auth import (
     create_access_token,
+    generate_opaque_token,
     generate_refresh_token,
+    hash_opaque_token,
     hash_refresh_token,
 )
-from backlogg.users.models import User
+from backlogg.users.models import (
+    TOKEN_PURPOSE_EMAIL_VERIFY,
+    TOKEN_PURPOSE_PASSWORD_RESET,
+    AccountToken,
+    User,
+)
 from backlogg.users.schemas import (
+    ForgotPasswordRequest,
     LogoutRequest,
+    MessageOut,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenPairOut,
     UserCreate,
     UserLogin,
     UserMeOut,
     UserOut,
     UserUpdate,
+    VerifyConfirmRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 _ph = PasswordHasher()
 
@@ -168,3 +183,131 @@ async def update_current_user(db: AsyncSession, user: User, payload: UserUpdate)
     updated = await repo.update_user(db, user, data)
     await db.commit()
     return UserMeOut.model_validate(updated)
+
+
+# ── Account recovery (email verification + password reset) ─────────────────────
+
+
+async def _issue_account_token(db: AsyncSession, user_id: int, purpose: str, ttl: timedelta) -> str:
+    """Generate an opaque single-use token, persist only its hash, return plaintext.
+
+    The plaintext is embedded in the email link for the HTTP flow only; it is
+    never persisted or logged.
+    """
+    plaintext = generate_opaque_token()
+    expires_at = datetime.now(UTC) + ttl
+    await repo.create_account_token(db, user_id, hash_opaque_token(plaintext), purpose, expires_at)
+    return plaintext
+
+
+async def _consume_valid_token(db: AsyncSession, token_str: str, purpose: str) -> AccountToken:
+    """Validate and consume a single-use token, or raise 400.
+
+    A token is valid only if it exists, matches ``purpose``, is not already
+    consumed, and has not expired. Consumption stamps ``consumed_at`` so the
+    same token can never be reused (a second attempt raises 400).
+    """
+    stored = await repo.get_account_token_by_hash(db, hash_opaque_token(token_str))
+    now = datetime.now(UTC)
+    if (
+        stored is None
+        or stored.purpose != purpose
+        or stored.consumed_at is not None
+        or stored.expires_at <= now
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    await repo.consume_account_token(db, stored, now)
+    return stored
+
+
+async def _send_email_safe(
+    sender: EmailSender, *, to: str, subject: str, html: str, text: str
+) -> None:
+    """Send an email, swallowing provider failures.
+
+    A mail-server outage must never break the endpoint response nor reveal
+    whether an email exists, so any exception is logged (without the recipient
+    or any credentials) and the flow continues.
+    """
+    try:
+        await sender.send(to=to, subject=subject, html=html, text=text)
+    except Exception:  # noqa: BLE001 - provider failure must never break the flow
+        logger.warning("Failed to send account email (subject=%r); continuing", subject)
+
+
+def _link(path: str, token: str) -> str:
+    return f"{settings.APP_BASE_URL.rstrip('/')}/{path}?token={token}"
+
+
+async def request_email_verification(
+    db: AsyncSession, user: User, sender: EmailSender
+) -> MessageOut:
+    """Issue an email-verification token for the authenticated user and email it."""
+    token = await _issue_account_token(
+        db,
+        user.id,
+        TOKEN_PURPOSE_EMAIL_VERIFY,
+        timedelta(hours=settings.EMAIL_VERIFY_EXPIRE_HOURS),
+    )
+    await db.commit()
+
+    link = _link("verify-email", token)
+    await _send_email_safe(
+        sender,
+        to=user.email,
+        subject="Verify your Backlogg email",
+        html=f'<p>Confirm your email address:</p><p><a href="{link}">{link}</a></p>',
+        text=f"Confirm your email address: {link}",
+    )
+    return MessageOut(detail="Verification email sent")
+
+
+async def confirm_email_verification(db: AsyncSession, payload: VerifyConfirmRequest) -> MessageOut:
+    """Consume a verification token and mark the user's email as verified."""
+    token = await _consume_valid_token(db, payload.token, TOKEN_PURPOSE_EMAIL_VERIFY)
+    await repo.set_email_verified(db, token.user_id)
+    await db.commit()
+    return MessageOut(detail="Email verified")
+
+
+async def request_password_reset(
+    db: AsyncSession, payload: ForgotPasswordRequest, sender: EmailSender
+) -> MessageOut:
+    """Start a password reset. Always returns the same message (no enumeration).
+
+    If the email maps to a user, a reset token is issued and emailed; if it does
+    not, nothing happens — but the response is identical so callers cannot probe
+    which emails are registered.
+    """
+    user = await repo.get_user_by_email(db, payload.email)
+    if user is not None:
+        token = await _issue_account_token(
+            db,
+            user.id,
+            TOKEN_PURPOSE_PASSWORD_RESET,
+            timedelta(hours=settings.PASSWORD_RESET_EXPIRE_HOURS),
+        )
+        await db.commit()
+
+        link = _link("reset-password", token)
+        await _send_email_safe(
+            sender,
+            to=user.email,
+            subject="Reset your Backlogg password",
+            html=f'<p>Reset your password:</p><p><a href="{link}">{link}</a></p>',
+            text=f"Reset your password: {link}",
+        )
+    return MessageOut(detail="If that email is registered, a reset link has been sent")
+
+
+async def reset_password(db: AsyncSession, payload: ResetPasswordRequest) -> MessageOut:
+    """Consume a reset token, set the new password and revoke active sessions.
+
+    Revoking every still-active refresh token (feature 35) forces re-login on
+    all devices after a password reset.
+    """
+    token = await _consume_valid_token(db, payload.token, TOKEN_PURPOSE_PASSWORD_RESET)
+    await repo.set_password_hash(db, token.user_id, hash_password(payload.new_password))
+    await repo.revoke_all_active_for_user(db, token.user_id, datetime.now(UTC))
+    await db.commit()
+    return MessageOut(detail="Password has been reset")

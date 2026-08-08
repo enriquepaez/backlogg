@@ -29,5 +29,20 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 15
     REFRESH_EXPIRE_DAYS: int = 30
 
+    # Account recovery (email verification + password reset).
+    # When SMTP_HOST is empty the EmailSender falls back to logging the link
+    # instead of sending — the app still boots and works in dev.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "no-reply@backlogg.local"
+    SMTP_STARTTLS: bool = True
+    APP_BASE_URL: str = "http://localhost:8000"
+
+    # One-time recovery token lifetimes.
+    EMAIL_VERIFY_EXPIRE_HOURS: int = 24
+    PASSWORD_RESET_EXPIRE_HOURS: int = 1
+
 
 settings = Settings()

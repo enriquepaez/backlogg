@@ -56,6 +56,20 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def generate_opaque_token() -> str:
+    """Generate a new opaque single-use token (email verify / password reset).
+
+    The plaintext value is embedded in the email link exactly once; only its
+    sha256 hash is ever persisted (see ``hash_opaque_token``).
+    """
+    return secrets.token_urlsafe(48)
+
+
+def hash_opaque_token(token: str) -> str:
+    """Return the sha256 hex digest of an opaque single-use token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db),

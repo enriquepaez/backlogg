@@ -22,17 +22,37 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
 | `ADMIN_API_KEY` | (secret) | Protege `/admin/*` |
 | `CORS_ORIGINS` | (opcional) | Orígenes permitidos, comma-separated |
 | `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/auth/*`. Sin configurar, `POST /auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
+| `REFRESH_EXPIRE_DAYS` | 30 | Vida del refresh token; `JWT_EXPIRE_MINUTES` es el access corto (15) |
+| `SMTP_HOST` | (config) | Host SMTP. **Vacío → `EmailSender` loguea el enlace en vez de enviar** (dev) |
+| `SMTP_PORT` | 587 | Puerto SMTP (STARTTLS estándar) |
+| `SMTP_USERNAME` | (config) | Usuario SMTP (opcional; si vacío no se hace `login`) |
+| `SMTP_PASSWORD` | (secret) | Password/app-password SMTP. Nunca aparece en logs ni en respuestas de error |
+| `SMTP_FROM_EMAIL` | (config) | Remitente del email. Default `no-reply@backlogg.local` |
+| `SMTP_STARTTLS` | true | Usar STARTTLS antes del login/envío |
+| `APP_BASE_URL` | (config) | Base pública para los enlaces de verificación/reset (`/verify-email?token=…`, `/reset-password?token=…`) |
+| `EMAIL_VERIFY_EXPIRE_HOURS` | 24 | Caducidad del token de verificación de email |
+| `PASSWORD_RESET_EXPIRE_HOURS` | 1 | Caducidad del token de reset de password |
 
-### Roadmap — env vars planificadas en Render (features 35-40)
+El envío de email usa SMTP genérico de la stdlib (`smtplib`), sin dependencias
+externas. `SMTP_PASSWORD` es un secreto: configúralo en Render como
+*environment secret*. La app nunca lo escribe en logs ni lo incluye en
+respuestas de error; un fallo de envío se registra con un mensaje genérico y el
+endpoint responde igual (sin revelar si el email existe).
+
+**Pruebas con Gmail (App Password):** requiere 2FA activado en la cuenta;
+genera una *App Password* (16 caracteres) en la config de seguridad de Google.
+Config: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_STARTTLS=true`,
+`SMTP_USERNAME=<tu-gmail>`, `SMTP_PASSWORD=<app-password>`,
+`SMTP_FROM_EMAIL=<tu-gmail>` (Gmail obliga a que el remitente sea tu propia
+cuenta). Límite ~500 envíos/día. Para producción con dominio propio, basta con
+cambiar las variables `SMTP_*` — el código no cambia.
+
+### Roadmap — env vars planificadas en Render (features 37-40)
 
 Se configuran cuando se despliegue cada feature. Detalle en `docs/external-apis.md`.
 
 | Env var | Feature | Notas |
 |---|---|---|
-| `RESEND_API_KEY` | 36 | (secret) API key de Resend. Sin ella, `EmailSender` loguea el enlace en vez de enviar |
-| `RESEND_FROM_EMAIL` | 36 | Remitente verificado en Resend (dominio verificado) |
-| `APP_BASE_URL` | 36 | Base pública para los enlaces de verificación/reset |
-| `REFRESH_EXPIRE_DAYS` | 35 | Vida del refresh token; `JWT_EXPIRE_MINUTES` pasa a valor corto |
 | `RATE_LIMIT_AUTH` / `RATE_LIMIT_DEFAULT` | 37 | Límites de rate limiting por ventana |
 | `SENTRY_DSN` | 38 | (secret) DSN de Sentry; ausente = integración off |
 | `LOG_LEVEL` | 38 | Nivel de logging estructurado |

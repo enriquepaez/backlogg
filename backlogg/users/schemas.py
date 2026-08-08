@@ -43,6 +43,7 @@ class UserMeOut(BaseModel):
     display_name: str | None
     bio: str | None
     avatar_url: str | None
+    email_verified: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -61,3 +62,25 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str
+
+
+# ── Account recovery (email verification + password reset) ─────────────────────
+
+
+class MessageOut(BaseModel):
+    """Generic acknowledgement response for recovery endpoints."""
+
+    detail: str
+
+
+class VerifyConfirmRequest(BaseModel):
+    token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=255)

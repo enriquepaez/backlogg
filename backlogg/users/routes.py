@@ -2,18 +2,23 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
+from backlogg.core.email import EmailSender, get_email_sender
 from backlogg.users import service
 from backlogg.users.auth import get_current_user
 from backlogg.users.models import User
 from backlogg.users.schemas import (
+    ForgotPasswordRequest,
     LogoutRequest,
+    MessageOut,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenPairOut,
     UserCreate,
     UserLogin,
     UserMeOut,
     UserOut,
     UserUpdate,
+    VerifyConfirmRequest,
 )
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -42,6 +47,46 @@ async def logout(
     db: AsyncSession = Depends(get_db),
 ):
     await service.logout_user(db, current_user, payload)
+
+
+# ── Account recovery: email verification ─────────────────────────────────────
+
+
+@auth_router.post(
+    "/verify/request", response_model=MessageOut, status_code=status.HTTP_202_ACCEPTED
+)
+async def request_email_verification(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    sender: EmailSender = Depends(get_email_sender),
+):
+    return await service.request_email_verification(db, current_user, sender)
+
+
+@auth_router.post("/verify/confirm", response_model=MessageOut)
+async def confirm_email_verification(
+    payload: VerifyConfirmRequest, db: AsyncSession = Depends(get_db)
+):
+    return await service.confirm_email_verification(db, payload)
+
+
+# ── Account recovery: password reset ─────────────────────────────────────────
+
+
+@auth_router.post(
+    "/password/forgot", response_model=MessageOut, status_code=status.HTTP_202_ACCEPTED
+)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    sender: EmailSender = Depends(get_email_sender),
+):
+    return await service.request_password_reset(db, payload, sender)
+
+
+@auth_router.post("/password/reset", response_model=MessageOut)
+async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    return await service.reset_password(db, payload)
 
 
 # NOTE: "/me" must be registered before "/{username}" — otherwise the

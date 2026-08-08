@@ -193,7 +193,7 @@ Body: `{"username": string, "email": string, "password": string (min 8),
 no hay slug ni id numérico expuestos.
 
 Response (`UserMeOut`, incluye email — solo se devuelve así en register/login/me):
-`username`, `email`, `display_name`, `bio`, `avatar_url`.
+`username`, `email`, `display_name`, `bio`, `avatar_url`, `email_verified`.
 
 ```
 POST /auth/login
@@ -229,6 +229,55 @@ POST /auth/logout
 Requiere `Authorization: Bearer <access_token>`.
 Body: `{"refresh_token": string}`. Revoca el refresh indicado. Idempotente:
 revocar dos veces (o un token desconocido) no falla, siempre `204`.
+
+#### Recuperación de cuenta (verificación de email + reset de password)
+
+El correo se envía a través de una interfaz `EmailSender`: implementación SMTP
+(stdlib `smtplib`) cuando `SMTP_HOST` está configurado, y un fallback que
+**loguea el enlace** (sin enviar) cuando no lo está — la app funciona en ambos
+casos. Los enlaces se construyen con `APP_BASE_URL`. Todos los tokens son **de
+un solo uso** y **caducan**; reusar un token consumido/expirado/desconocido
+devuelve `400`.
+
+```
+POST /auth/verify/request
+→ 202  Email de verificación enviado (o logueado en dev)
+→ 401  Sin token / access token inválido o expirado
+```
+
+Requiere `Authorization: Bearer <access_token>`. Genera un token de
+verificación para el usuario autenticado y le envía el enlace. Sin body.
+Response: `{"detail": string}`.
+
+```
+POST /auth/verify/confirm
+→ 200  Email verificado (users.email_verified = true)
+→ 400  Token inválido, expirado o ya usado
+```
+
+Body: `{"token": string}` (el token del enlace). No requiere `Authorization`.
+Response: `{"detail": string}`.
+
+```
+POST /auth/password/forgot
+→ 202  Siempre (exista o no el email — sin enumeración)
+```
+
+Body: `{"email": string}`. No requiere `Authorization`. Si el email está
+registrado, genera un token de reset y envía el enlace; si no, no hace nada.
+La respuesta es **idéntica** en ambos casos para no revelar qué emails existen.
+Un fallo del proveedor de email no altera la respuesta. Response: `{"detail": string}`.
+
+```
+POST /auth/password/reset
+→ 200  Password cambiada; se revocan los refresh activos del usuario
+→ 400  Token inválido, expirado o ya usado
+```
+
+Body: `{"token": string, "new_password": string (min 8)}`. No requiere
+`Authorization`. Consume el token de reset, cambia el `password_hash` y revoca
+todos los refresh tokens activos del usuario (fuerza re-login). Response:
+`{"detail": string}`.
 
 ```
 GET /users/me

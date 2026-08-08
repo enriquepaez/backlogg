@@ -1,0 +1,28 @@
+meta {
+  name: Verify email — confirm
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/auth/verify/confirm
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "token": "paste-the-token-from-the-verification-link"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  Consumes the single-use verification token and sets email_verified=true.
+  An invalid/expired/already-used token returns 400.
+}

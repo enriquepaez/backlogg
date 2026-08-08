@@ -1,0 +1,27 @@
+meta {
+  name: Verify email — request
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/auth/verify/request
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 202", function() {
+    expect(res.status).to.equal(202);
+  });
+}
+
+docs {
+  Run "Login" first — it stores authToken. Generates an email-verification
+  token and sends (or, without SMTP_HOST, logs) the link. Copy the token
+  from the logged link into "Verify email — confirm".
+}
