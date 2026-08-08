@@ -1,0 +1,35 @@
+meta {
+  name: Feed popular
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/feed?tab=popular
+  body: none
+  auth: bearer
+}
+
+params:query {
+  tab: popular
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated list", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+  });
+}
+
+docs {
+  Most-liked reviews from the last 30 days, ordered by like_count desc then
+  created_at desc.
+}

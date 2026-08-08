@@ -1,0 +1,22 @@
+meta {
+  name: Get followers
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/users/bruno_target/followers
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated list", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+  });
+}

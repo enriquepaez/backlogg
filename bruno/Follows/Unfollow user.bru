@@ -1,0 +1,25 @@
+meta {
+  name: Unfollow user
+  type: http
+  seq: 2
+}
+
+delete {
+  url: {{baseUrl}}/users/bruno_target/follow
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  Idempotent: unfollowing someone you don't follow still returns 204.
+}

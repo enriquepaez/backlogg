@@ -1,0 +1,21 @@
+meta {
+  name: Delete game library
+  type: http
+  seq: 14
+}
+
+delete {
+  url: {{baseUrl}}/games/baldurs-gate-iii/library
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}

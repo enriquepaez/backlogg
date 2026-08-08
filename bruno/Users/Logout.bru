@@ -1,0 +1,33 @@
+meta {
+  name: Logout
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/auth/logout
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "refresh_token": "{{refreshToken}}"
+  }
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  Requires a valid access token. Revokes the presented refresh token.
+  Idempotent: running it twice still returns 204. After logout the refresh
+  token no longer works ("Refresh token" returns 401).
+}

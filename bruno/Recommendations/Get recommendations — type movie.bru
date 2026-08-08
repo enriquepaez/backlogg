@@ -1,0 +1,31 @@
+meta {
+  name: Get recommendations — type movie
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/recommendations?type=movie
+  body: none
+  auth: bearer
+}
+
+params:query {
+  type: movie
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("only movie results", function() {
+    res.body.results.forEach(function(rec) {
+      expect(rec.item_type.toLowerCase()).to.equal("movie");
+    });
+  });
+}

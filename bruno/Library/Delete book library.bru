@@ -1,0 +1,21 @@
+meta {
+  name: Delete book library
+  type: http
+  seq: 13
+}
+
+delete {
+  url: {{baseUrl}}/books/harry-potter-and-the-philosophers-stone-1997/library
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
