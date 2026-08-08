@@ -679,7 +679,7 @@
         "Tests que verifican 429 tras exceder el límite y el reset tras la ventana",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 38,

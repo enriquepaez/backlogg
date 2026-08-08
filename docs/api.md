@@ -66,6 +66,10 @@ IGDB — solo la correspondiente si se filtra por `type`), ingesta los top hits
 y re-consulta la vista local antes de responder. Un fallo en una API externa
 no aborta las demás ni devuelve error al cliente.
 
+El fallback externo está **rate-limited por IP** (`RATE_LIMIT_SEARCH_FALLBACK`):
+superar el límite devuelve `429` con header `Retry-After` **sin** llamar a las
+APIs externas. Las consultas servidas desde el catálogo local no consumen cupo.
+
 ### List endpoints (los 4 tipos)
 
 ```
@@ -185,6 +189,7 @@ POST /auth/register
 → 201  Cuenta creada
 → 409  username o email ya en uso
 → 422  validación de payload (username/email/password fuera de formato o longitud)
+→ 429  demasiadas peticiones desde la misma IP (header Retry-After)
 ```
 
 Body: `{"username": string, "email": string, "password": string (min 8),
@@ -199,7 +204,12 @@ Response (`UserMeOut`, incluye email — solo se devuelve así en register/login
 POST /auth/login
 → 200  Login correcto
 → 401  Credenciales inválidas
+→ 429  demasiadas peticiones desde la misma IP (header Retry-After)
 ```
+
+`POST /auth/login` y `POST /auth/register` están rate-limited por IP
+(`RATE_LIMIT_AUTH`). Al exceder el límite responden `429` con header
+`Retry-After` (segundos) y un body genérico que no filtra IP ni límites.
 
 Body: `{"username": string, "password": string}`.
 Response: `{"access_token": string, "refresh_token": string, "token_type": "bearer"}`.
