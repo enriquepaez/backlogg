@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.books import repository as repo
 from backlogg.books.adapters.open_library import OpenLibraryClient, _slugify
 from backlogg.books.models import Book
-from backlogg.books.schemas import BookListItemOut, BookListOut, BookSortEnum
+from backlogg.books.schemas import (
+    BookGenreOut,
+    BookListItemOut,
+    BookListOut,
+    BookOut,
+    BookSortEnum,
+)
+from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Person
@@ -123,38 +130,56 @@ async def list_books(
     return BookListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_book(db: AsyncSession, slug: str) -> Book:
+def _book_to_out(book: Book, viewer_status: str | None) -> BookOut:
+    return BookOut(
+        id=book.id,
+        title=book.title,
+        original_title=book.original_title,
+        slug=book.slug,
+        overview=book.overview,
+        first_publish_date=book.first_publish_date,
+        original_language=book.original_language,
+        poster_url=book.poster_url,
+        rating_external=float(book.rating_external) if book.rating_external is not None else None,
+        rating_count_external=book.rating_count_external,
+        rating_internal=(float(book.rating_internal) if book.rating_internal is not None else None),
+        rating_count_internal=book.rating_count_internal,
+        genres=[BookGenreOut(id=g.id, name=g.name, slug=g.slug) for g in book.genres],
+        viewer_status=viewer_status,
+    )
+
+
+async def get_book(db: AsyncSession, slug: str, viewer_id: int | None = None) -> BookOut:
     # 1. Look up in local DB
     book = await repo.get_book_by_slug(db, slug)
-    if book:
-        return book
+    if book is None:
+        # 2. Derive a search title from the slug and query Open Library
+        query = _title_from_slug(slug)
+        search_result = await _ol_client.search_book(query)
+        if search_result is None:
+            raise HTTPException(status_code=404, detail="Book not found")
 
-    # 2. Derive a search title from the slug and query Open Library
-    query = _title_from_slug(slug)
-    search_result = await _ol_client.search_book(query)
-    if search_result is None:
-        raise HTTPException(status_code=404, detail="Book not found")
+        # 3. Optionally fetch full work detail for synopsis
+        # work_key is like "/works/OL123W" — strip the prefix to get the bare OLID
+        work_key = search_result.get("key", "")  # e.g. "/works/OL123W"
+        work_id = work_key.removeprefix("/works/") if work_key else None
+        work_detail: dict | None = None
+        if work_id:
+            work_detail = await _ol_client.get_work_detail(work_id)
 
-    # 3. Optionally fetch full work detail for synopsis
-    # work_key is like "/works/OL123W" — strip the prefix to get the bare OLID
-    work_key = search_result.get("key", "")  # e.g. "/works/OL123W"
-    work_id = work_key.removeprefix("/works/") if work_key else None
-    work_detail: dict | None = None
-    if work_id:
-        work_detail = await _ol_client.get_work_detail(work_id)
+        # 4. Convert to DB-ready dict and persist
+        book_data = _ol_client.book_to_dict(search_result, work_detail)
+        book = await repo.upsert_book(db, book_data)
 
-    # 4. Convert to DB-ready dict and persist
-    book_data = _ol_client.book_to_dict(search_result, work_detail)
-    book = await repo.upsert_book(db, book_data)
+        # 5. Persist the Open Library external ID
+        if work_id:
+            await upsert_external_id(db, "BOOK", book.id, "OPEN_LIBRARY", work_id)
 
-    # 5. Persist the Open Library external ID
-    if work_id:
-        await upsert_external_id(db, "BOOK", book.id, "OPEN_LIBRARY", work_id)
+        # 6. Persist authors as people + credits
+        if work_detail:
+            await _persist_book_authors(db, book, work_detail)
 
-    # 6. Persist authors as people + credits
-    if work_detail:
-        await _persist_book_authors(db, book, work_detail)
+        await db.commit()
 
-    await db.commit()
-
-    return book
+    viewer_status = await library_service.get_viewer_status(db, "BOOK", book.id, viewer_id)
+    return _book_to_out(book, viewer_status)

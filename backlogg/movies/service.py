@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.library import service as library_service
 from backlogg.movies import repository as repo
 from backlogg.movies.adapters.tmdb import TMDBClient, _slugify
 from backlogg.movies.models import Movie
@@ -169,7 +170,7 @@ async def list_movies(
     return MovieListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
+async def get_movie(db: AsyncSession, slug: str, viewer_id: int | None = None) -> MovieOut:
     # 1. Look up in local DB
     movie = await repo.get_movie_by_slug(db, slug)
     if movie is None:
@@ -199,6 +200,7 @@ async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
         await db.commit()
 
     credits = await get_credits_for_item(db, "MOVIE", movie.id)
+    viewer_status = await library_service.get_viewer_status(db, "MOVIE", movie.id, viewer_id)
     return MovieOut(
         id=movie.id,
         title=movie.title,
@@ -221,6 +223,7 @@ async def get_movie(db: AsyncSession, slug: str) -> MovieOut:
         rating_count_internal=movie.rating_count_internal,
         genres=[GenreOut(id=g.id, name=g.name, slug=g.slug) for g in movie.genres],
         credits=credits,
+        viewer_status=viewer_status,
     )
 
 

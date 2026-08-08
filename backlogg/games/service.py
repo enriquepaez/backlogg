@@ -13,6 +13,7 @@ from backlogg.games.schemas import (
     GamePlatformOut,
     GameSortEnum,
 )
+from backlogg.library import service as library_service
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 
@@ -51,7 +52,7 @@ async def list_games(
     return GameListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_game(db: AsyncSession, slug: str) -> GameOut:
+async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) -> GameOut:
     # 1. Look up in local DB
     game = await repo.get_game_by_slug(db, slug)
     if game is None:
@@ -77,6 +78,7 @@ async def get_game(db: AsyncSession, slug: str) -> GameOut:
         await db.commit()
 
     credits = await get_credits_for_item(db, "GAME", game.id)
+    viewer_status = await library_service.get_viewer_status(db, "GAME", game.id, viewer_id)
     return GameOut(
         id=game.id,
         title=game.title,
@@ -95,4 +97,5 @@ async def get_game(db: AsyncSession, slug: str) -> GameOut:
         genres=[GameGenreOut(id=g.id, name=g.name, slug=g.slug) for g in game.genres],
         platforms=[GamePlatformOut(id=p.id, name=p.name, slug=p.slug) for p in game.platforms],
         credits=credits,
+        viewer_status=viewer_status,
     )

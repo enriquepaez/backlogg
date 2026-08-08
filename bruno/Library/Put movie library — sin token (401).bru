@@ -1,0 +1,23 @@
+meta {
+  name: Put movie library — sin token (401)
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/movies/oppenheimer-2023/library
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "want"
+  }
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

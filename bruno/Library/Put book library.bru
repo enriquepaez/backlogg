@@ -1,0 +1,32 @@
+meta {
+  name: Put book library
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/books/harry-potter-and-the-philosophers-stone-1997/library
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "status": "want"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("upserted status", function() {
+    expect(res.body.status).to.equal("want");
+    expect(res.body.item_type).to.equal("book");
+  });
+}

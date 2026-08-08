@@ -1,0 +1,32 @@
+meta {
+  name: Put series library
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/series/the-bear-2022/library
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "status": "in_progress"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("upserted status", function() {
+    expect(res.body.status).to.equal("in_progress");
+    expect(res.body.item_type).to.equal("series");
+  });
+}

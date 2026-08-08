@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from backlogg.library.schemas import LibraryCounts
+
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -28,6 +30,7 @@ class UserOut(BaseModel):
     avatar_url: str | None
     follower_count: int
     following_count: int
+    library_counts: LibraryCounts
 
     model_config = ConfigDict(from_attributes=True)
 

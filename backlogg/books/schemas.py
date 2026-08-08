@@ -26,6 +26,7 @@ class BookOut(BaseModel):
     rating_internal: float | None
     rating_count_internal: int
     genres: list[BookGenreOut]
+    viewer_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

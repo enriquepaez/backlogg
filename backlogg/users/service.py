@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.follows import repository as follows_repo
+from backlogg.library import repository as library_repo
+from backlogg.library.schemas import LibraryCounts
 from backlogg.users import repository as repo
 from backlogg.users.auth import create_access_token
 from backlogg.users.models import User
@@ -78,6 +80,7 @@ async def get_user_profile(db: AsyncSession, username: str) -> UserOut:
 
     follower_count = await follows_repo.count_followers(db, user.id)
     following_count = await follows_repo.count_following(db, user.id)
+    library_counts = await library_repo.count_by_status(db, user.id)
     return UserOut(
         username=user.username,
         display_name=user.display_name,
@@ -85,6 +88,7 @@ async def get_user_profile(db: AsyncSession, username: str) -> UserOut:
         avatar_url=user.avatar_url,
         follower_count=follower_count,
         following_count=following_count,
+        library_counts=LibraryCounts(**library_counts),
     )
 
 

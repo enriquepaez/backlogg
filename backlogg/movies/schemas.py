@@ -48,6 +48,7 @@ class MovieOut(BaseModel):
     rating_count_internal: int
     genres: list[GenreOut]
     credits: list[CreditOut] = []
+    viewer_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,0 +1,32 @@
+meta {
+  name: Put movie library
+  type: http
+  seq: 1
+}
+
+put {
+  url: {{baseUrl}}/movies/oppenheimer-2023/library
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "status": "completed"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("upserted status", function() {
+    expect(res.body.status).to.equal("completed");
+    expect(res.body.item_type).to.equal("movie");
+  });
+}

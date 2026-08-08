@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
@@ -171,7 +172,7 @@ async def list_series(
     return SeriesListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-async def get_series(db: AsyncSession, slug: str) -> SeriesOut:
+async def get_series(db: AsyncSession, slug: str, viewer_id: int | None = None) -> SeriesOut:
     # 1. Look up in local DB
     series = await repo.get_series_by_slug(db, slug)
     if series is None:
@@ -203,6 +204,7 @@ async def get_series(db: AsyncSession, slug: str) -> SeriesOut:
         await db.commit()
 
     credits = await get_credits_for_item(db, "SERIES", series.id)
+    viewer_status = await library_service.get_viewer_status(db, "SERIES", series.id, viewer_id)
     return SeriesOut(
         id=series.id,
         title=series.title,
@@ -227,6 +229,7 @@ async def get_series(db: AsyncSession, slug: str) -> SeriesOut:
         rating_count_internal=series.rating_count_internal,
         genres=[SeriesGenreOut(id=g.id, name=g.name, slug=g.slug) for g in series.genres],
         credits=credits,
+        viewer_status=viewer_status,
     )
 
 

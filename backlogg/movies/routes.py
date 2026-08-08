@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
+from backlogg.library import service as library_service
+from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.movies import service
 from backlogg.movies.schemas import MovieListOut, MovieOut, MovieSortEnum, SimilarMoviesOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
-from backlogg.users.auth import get_current_user
+from backlogg.users.auth import get_current_user, get_current_user_optional
 from backlogg.users.models import User
 
 router = APIRouter(prefix="/movies", tags=["movies"])
@@ -61,6 +63,32 @@ async def delete_movie_rating(
     await ratings_service.delete_item_rating(db, item_type="MOVIE", slug=slug, user=current_user)
 
 
+@router.put("/{slug}/library", response_model=LibraryStatusOut)
+async def set_movie_library(
+    slug: str,
+    payload: LibraryEntryIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await library_service.set_library_status(
+        db, item_type="MOVIE", slug=slug, status=payload.status, user=current_user
+    )
+
+
+@router.delete("/{slug}/library", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_movie_library(
+    slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await library_service.remove_library_entry(db, item_type="MOVIE", slug=slug, user=current_user)
+
+
 @router.get("/{slug}", response_model=MovieOut)
-async def get_movie(slug: str, db: AsyncSession = Depends(get_db)):
-    return await service.get_movie(db, slug)
+async def get_movie(
+    slug: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    viewer_id = current_user.id if current_user else None
+    return await service.get_movie(db, slug, viewer_id=viewer_id)

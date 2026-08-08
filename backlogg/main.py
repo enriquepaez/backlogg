@@ -11,6 +11,7 @@ from backlogg.feed.routes import feed_router
 from backlogg.follows.routes import follows_router
 from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
+from backlogg.library.routes import user_library_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.people.routes import router as people_router
 from backlogg.ratings.routes import ratings_router, user_reviews_router
@@ -68,3 +69,4 @@ app.include_router(ratings_router)
 app.include_router(user_reviews_router)
 app.include_router(follows_router)
 app.include_router(feed_router)
+app.include_router(user_library_router)
