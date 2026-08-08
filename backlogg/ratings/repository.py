@@ -29,6 +29,21 @@ ITEM_MODELS: dict[str, type[DeclarativeBase]] = {
 }
 
 
+def visible_review_filters() -> tuple:
+    """Conditions that make a review publicly visible (content moderation).
+
+    A review is visible only when it is **not hidden** by per-review moderation
+    (``UserRating.is_hidden = false``) **and** its author is **not banned**
+    (``User.is_banned = false``). This single condition is reused across every
+    surface that lists reviews or aggregates them (public ratings list, the
+    per-user reviews list, the feed and ``recalculate_item_aggregates``) so
+    hidden reviews and banned users disappear from all of them consistently.
+
+    Any query using these filters must JOIN ``User`` on ``UserRating.user_id``.
+    """
+    return (UserRating.is_hidden.is_(False), User.is_banned.is_(False))
+
+
 async def get_item_by_slug(db: AsyncSession, item_type: str, slug: str) -> Any | None:
     """Look up a content item (Movie/Series/Book/Game) by slug for item_type."""
     model = ITEM_MODELS[item_type]
@@ -98,6 +113,18 @@ async def delete_rating(db: AsyncSession, rating: UserRating) -> None:
     await db.flush()
 
 
+async def set_rating_hidden(db: AsyncSession, rating: UserRating, hidden: bool) -> UserRating:
+    """Set a review's moderation flag. Idempotent — no-op if already in that state.
+
+    The caller (moderation service) recomputes the affected item's aggregates
+    afterwards so a newly hidden/unhidden review is reflected in the average.
+    """
+    if rating.is_hidden != hidden:
+        rating.is_hidden = hidden
+        await db.flush()
+    return rating
+
+
 async def get_distinct_rated_items_for_user(
     db: AsyncSession, user_id: int
 ) -> list[tuple[str, int]]:
@@ -119,14 +146,20 @@ async def recalculate_item_aggregates(db: AsyncSession, item_type: str, item_id:
     """Recompute rating_internal (AVG) / rating_count_internal (COUNT) for an item.
 
     Ignores ratings with a NULL score (text-only reviews don't count toward
-    the average). Persists directly on the movies/series/books/games row.
+    the average) and, per content moderation, any review that is not visible —
+    hidden reviews and reviews authored by a banned user (``visible_review_filters``,
+    which is why the query JOINs ``users``). Persists directly on the
+    movies/series/books/games row.
     """
     model = ITEM_MODELS[item_type]
     agg_result = await db.execute(
-        select(func.avg(UserRating.score), func.count(UserRating.score)).where(
+        select(func.avg(UserRating.score), func.count(UserRating.score))
+        .join(User, UserRating.user_id == User.id)
+        .where(
             UserRating.item_type == item_type,
             UserRating.item_id == item_id,
             UserRating.score.is_not(None),
+            *visible_review_filters(),
         )
     )
     avg_score, count_score = agg_result.one()
@@ -153,14 +186,25 @@ async def list_ratings_for_item(
     )
 
     count_result = await db.execute(
-        select(func.count()).where(UserRating.item_type == item_type, UserRating.item_id == item_id)
+        select(func.count())
+        .select_from(UserRating)
+        .join(User, UserRating.user_id == User.id)
+        .where(
+            UserRating.item_type == item_type,
+            UserRating.item_id == item_id,
+            *visible_review_filters(),
+        )
     )
     total = count_result.scalar_one()
 
     paged_stmt = (
         select(UserRating, User, like_count_subq.label("like_count"))
         .join(User, UserRating.user_id == User.id)
-        .where(UserRating.item_type == item_type, UserRating.item_id == item_id)
+        .where(
+            UserRating.item_type == item_type,
+            UserRating.item_id == item_id,
+            *visible_review_filters(),
+        )
         .order_by(UserRating.created_at.desc(), UserRating.id.desc())
         .offset((page - 1) * limit)
         .limit(limit)
@@ -193,7 +237,12 @@ async def list_user_reviews(
                 UserRating.updated_at.label("updated_at"),
             )
             .join(model, UserRating.item_id == model.id)
-            .where(UserRating.user_id == user_id, UserRating.item_type == item_type)
+            .join(User, UserRating.user_id == User.id)
+            .where(
+                UserRating.user_id == user_id,
+                UserRating.item_type == item_type,
+                *visible_review_filters(),
+            )
         )
         queries.append(q)
 

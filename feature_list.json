@@ -934,7 +934,7 @@
         "Tests: hide excluye de listados+agregados, ban bloquea login/refresh, enforcement verificado",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 45,

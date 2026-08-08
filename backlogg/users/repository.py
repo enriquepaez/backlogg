@@ -37,6 +37,19 @@ async def update_user(db: AsyncSession, user: User, data: dict) -> User:
     return user
 
 
+async def set_user_banned(db: AsyncSession, user: User, banned: bool) -> User:
+    """Set a user's moderation flag. Idempotent — no-op if already in that state.
+
+    The flush makes the new value visible to the aggregate recompute the
+    moderation service runs next (a banned user's reviews stop counting toward
+    every item they had rated).
+    """
+    if user.is_banned != banned:
+        user.is_banned = banned
+        await db.flush()
+    return user
+
+
 async def delete_user(db: AsyncSession, user: User) -> None:
     """Delete a user row and flush.
 

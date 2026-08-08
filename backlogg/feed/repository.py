@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.follows.models import Follow
 from backlogg.ratings.models import ReviewLike, UserRating
-from backlogg.ratings.repository import ITEM_MODELS
+from backlogg.ratings.repository import ITEM_MODELS, visible_review_filters
 from backlogg.users.models import User
 
 POPULAR_WINDOW_DAYS = 30
@@ -76,6 +76,7 @@ async def list_following_feed(
         _feed_select(item_type, model, like_subq).where(
             UserRating.item_type == item_type,
             UserRating.user_id.in_(followed_subq),
+            *visible_review_filters(),
         )
         for item_type, model in ITEM_MODELS.items()
     ]
@@ -103,6 +104,7 @@ async def list_popular_feed(db: AsyncSession, page: int, limit: int) -> tuple[li
         _feed_select(item_type, model, like_subq).where(
             UserRating.item_type == item_type,
             UserRating.created_at >= cutoff,
+            *visible_review_filters(),
         )
         for item_type, model in ITEM_MODELS.items()
     ]

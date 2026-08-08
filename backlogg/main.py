@@ -25,6 +25,7 @@ from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
 from backlogg.lists.routes import lists_router, user_lists_router
 from backlogg.metrics.routes import router as metrics_router
+from backlogg.moderation.routes import admin_moderation_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.notifications.routes import notifications_router
 from backlogg.people.routes import router as people_router
@@ -245,4 +246,5 @@ app.include_router(notifications_router)
 app.include_router(recommendations_router)
 app.include_router(reports_router)
 app.include_router(admin_reports_router)
+app.include_router(admin_moderation_router)
 app.include_router(metrics_router)

@@ -33,8 +33,8 @@ PRs **apilados**: cada rama sale de la anterior y su PR apunta a la rama padre (
 
 ### Estado
 - [x] 42 account_deletion — APPROVED + QA 11/11. PR #69.
-- [x] 43 review_reports — APPROVED + QA 13/13. PR pendiente de abrir (base feat/account_deletion).
-- [ ] 44 content_moderation
+- [x] 43 review_reports — APPROVED + QA 13/13. PR #70 (base feat/account_deletion).
+- [x] 44 content_moderation — APPROVED + QA 18/18. PR pendiente de abrir (base feat/review_reports).
 - [ ] 45 api_versioning
 
-En curso: cerrando la 43 (commit/push/PR), luego arranco la 44.
+En curso: cerrando la 44 (commit/push/PR), luego arranco la 45 (barrido /v1 final).
