@@ -348,6 +348,7 @@ CREATE TABLE users (
     display_name    VARCHAR(255),
     bio             TEXT,
     avatar_url      VARCHAR(1000),
+    email_verified  BOOLEAN NOT NULL DEFAULT false, -- set true via /auth/verify/confirm
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -356,7 +357,9 @@ CREATE TABLE users (
 `username` doubles as the URL identifier (`/users/{username}`) — no numeric
 id or separate slug is exposed. Auth uses a short-lived access token (JWT)
 plus a persisted, rotating refresh token (`refresh_tokens`, below);
-see `docs/api.md` for the endpoint contracts.
+see `docs/api.md` for the endpoint contracts. `email_verified` starts `false`
+and flips to `true` when the user confirms an email-verification token
+(`account_tokens`, below).
 
 ### `refresh_tokens`
 
@@ -381,6 +384,36 @@ CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens (user_id);
 
 Access token lifetime is `JWT_EXPIRE_MINUTES` (short, 15 by default); refresh
 token lifetime is `REFRESH_EXPIRE_DAYS` (30 by default).
+
+### `account_tokens`
+
+One row per issued account-recovery token, covering **both** email
+verification and password reset (distinguished by `purpose`). Like refresh
+tokens, the value is an opaque random string (`secrets.token_urlsafe`) and only
+its **sha256 hash** is stored — the plaintext lives only in the email link and
+is never persisted or logged. Tokens are **single-use** (`consumed_at` is
+stamped on first use) and **expiring** (`expires_at`); a token that is unknown,
+already consumed, expired, or presented for the wrong `purpose` is rejected with
+`400`.
+
+```sql
+CREATE TABLE account_tokens (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(64) NOT NULL UNIQUE,   -- sha256 hex, never plaintext
+    purpose     VARCHAR(20) NOT NULL,          -- 'email_verify' | 'password_reset'
+    expires_at  TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,                    -- NULL until first (and only) use
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_account_tokens_purpose
+        CHECK (purpose IN ('email_verify', 'password_reset'))
+);
+CREATE INDEX idx_account_tokens_user_id ON account_tokens (user_id);
+```
+
+Token lifetimes are configurable: `EMAIL_VERIFY_EXPIRE_HOURS` (24 by default)
+and `PASSWORD_RESET_EXPIRE_HOURS` (1 by default). A password reset also revokes
+every still-active `refresh_tokens` row for the user (forces re-login).
 
 ## Ratings & reviews
 

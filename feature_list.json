@@ -644,24 +644,24 @@
       "id": 36,
       "name": "account_recovery",
       "title": "Account recovery — verificación de email y reset de password (token-based)",
-      "description": "Verificación de email y restablecimiento de contraseña mediante tokens de un solo uso con expiración. El correo se envía con Resend a través de una interfaz de EmailSender: implementación real (Resend) cuando RESEND_API_KEY está configurada, y fallback que loguea el enlace en dev cuando no lo está. El flujo, la seguridad del token y el envío desacoplado son el entregable.",
+      "description": "Verificación de email y restablecimiento de contraseña mediante tokens de un solo uso con expiración. El correo se envía por SMTP a través de una interfaz de EmailSender: implementación real (SMTP vía smtplib de la stdlib; para pruebas se apunta a Gmail con una App Password, y a futuro a un dominio propio cambiando solo variables de entorno) cuando SMTP_HOST está configurado, y fallback que loguea el enlace en dev cuando no lo está. El flujo, la seguridad del token y el envío desacoplado son el entregable.",
       "depends_on": [27],
       "acceptance": [
         "Tabla de tokens de un solo uso (verificación de email y reset de password) con hash, propósito, expiración y timestamp de consumo; nunca en claro",
         "Migración Alembic 0016_account_recovery.py (incluye users.email_verified bool default false)",
-        "Dependencia resend añadida a pyproject.toml; settings RESEND_API_KEY, RESEND_FROM_EMAIL y APP_BASE_URL (para construir los enlaces) en backlogg/core/config.py",
-        "Interfaz EmailSender aislada de la lógica de negocio: implementación Resend cuando RESEND_API_KEY está presente; fallback que loguea el enlace (sin enviar) cuando falta — la app arranca y funciona en ambos casos",
+        "Sin dependencias nuevas: envío por SMTP con smtplib de la stdlib; settings SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_STARTTLS y APP_BASE_URL (para construir los enlaces) en backlogg/core/config.py",
+        "Interfaz EmailSender aislada de la lógica de negocio: implementación SmtpEmailSender cuando SMTP_HOST está presente; fallback que loguea el enlace (sin enviar) cuando falta — la app arranca y funciona en ambos casos",
         "POST /auth/verify/request (auth) genera token de verificación y envía el email de verificación; POST /auth/verify/confirm consume el token y marca email_verified=true; token inválido/expirado/usado → 400",
         "POST /auth/password/forgot (por email, sin auth) genera token de reset, envía el email y responde 202 siempre, sin revelar si el email existe (no enumeración)",
         "POST /auth/password/reset consume el token, cambia el password_hash y revoca los refresh tokens activos si la feature 35 está presente",
         "Los tokens caducan y son de un solo uso; reusarlos → 400",
-        "Un fallo de Resend al enviar no filtra si el email existe ni rompe la respuesta del endpoint (se registra y se responde igual)",
-        "La RESEND_API_KEY nunca aparece en logs ni en respuestas de error",
-        "docs/schema.md, docs/api.md y docs/operations.md (secret RESEND_API_KEY + variables de entorno) actualizados",
-        "Tests de servicio y endpoint con EmailSender mockeado (verificación, reset, no enumeración de emails, expiración/single-use, fallback sin API key)",
+        "Un fallo del envío SMTP no filtra si el email existe ni rompe la respuesta del endpoint (se registra y se responde igual)",
+        "La SMTP_PASSWORD nunca aparece en logs ni en respuestas de error",
+        "docs/schema.md, docs/api.md y docs/operations.md (variables SMTP_* + nota de App Password de Gmail para pruebas y dominio propio a futuro) actualizados",
+        "Tests de servicio y endpoint con EmailSender mockeado (verificación, reset, no enumeración de emails, expiración/single-use, fallback sin SMTP configurado)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 37,

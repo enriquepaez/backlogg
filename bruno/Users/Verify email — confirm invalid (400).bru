@@ -1,0 +1,23 @@
+meta {
+  name: Verify email — confirm invalid (400)
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/auth/verify/confirm
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "token": "definitely-not-a-real-token"
+  }
+}
+
+tests {
+  test("status 400", function() {
+    expect(res.status).to.equal(400);
+  });
+}

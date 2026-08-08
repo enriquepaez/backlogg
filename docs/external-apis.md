@@ -68,19 +68,21 @@
 - **Coverage note**: director data is sparse — only sync when available.
 - **external_ids source value**: `IGDB`
 
-## Resend (Email) — planificado (feature 36 `account_recovery`)
+## SMTP (Email) — feature 36 `account_recovery`
 
-- **Auth**: API key via header `Authorization: Bearer <RESEND_API_KEY>`
-- **Base URL**: `https://api.resend.com`
+- **Transporte**: SMTP genérico vía la stdlib (`smtplib` +
+  `email.message.EmailMessage`), sin dependencias externas.
 - **Uso**: emails transaccionales de verificación de cuenta y reset de password.
-- **Endpoint principal**: `POST /emails` — `{from, to, subject, html}` (usar el SDK
-  `resend` en lugar de HTTP crudo).
-- **Aislamiento**: detrás de una interfaz `EmailSender`. Con `RESEND_API_KEY`
-  presente envía vía Resend; sin ella, un fallback loguea el enlace y no envía —
-  así dev y CI arrancan sin API key.
-- **Requisitos**: el dominio del `from` (`RESEND_FROM_EMAIL`) debe estar
-  verificado en Resend. Free tier suficiente para volumen transaccional bajo.
-- **Seguridad**: `RESEND_API_KEY` es secret — nunca en logs ni en respuestas de error.
+- **Flujo**: `smtplib.SMTP(host, port)` → `starttls()` si `SMTP_STARTTLS` →
+  `login(user, pass)` si hay credenciales → `send_message` (text + HTML
+  alternativo). Envío síncrono ejecutado en un thread (`asyncio.to_thread`).
+- **Aislamiento**: detrás de una interfaz `EmailSender`. Con `SMTP_HOST`
+  presente envía vía SMTP; sin él, un fallback loguea el enlace y no envía —
+  así dev y CI arrancan sin servidor de correo.
+- **Pruebas**: Gmail con App Password (2FA; `smtp.gmail.com:587` STARTTLS;
+  remitente = tu gmail; ~500 envíos/día). Producción con dominio propio: solo
+  cambian las variables `SMTP_*`.
+- **Seguridad**: `SMTP_PASSWORD` es secret — nunca en logs ni en respuestas de error.
 
 ## Environment variables
 
@@ -103,8 +105,11 @@ Aún no leídas por el código; se añaden cuando se implemente cada feature.
 
 | Variable                              | Feature | Description                                                        |
 |---------------------------------------|---------|-------------------------------------------------------------------|
-| `RESEND_API_KEY`                      | 36      | API key de Resend; sin ella, `EmailSender` cae a log (no envía)    |
-| `RESEND_FROM_EMAIL`                   | 36      | Dirección remitente verificada en Resend                          |
+| `SMTP_HOST`                           | 36      | Host SMTP; vacío → `EmailSender` cae a log (no envía)             |
+| `SMTP_PORT`                           | 36      | Puerto SMTP (default 587, STARTTLS)                               |
+| `SMTP_USERNAME` / `SMTP_PASSWORD`     | 36      | Credenciales SMTP; `SMTP_PASSWORD` es secret (nunca en logs)      |
+| `SMTP_FROM_EMAIL`                     | 36      | Dirección remitente del email                                    |
+| `SMTP_STARTTLS`                       | 36      | Usar STARTTLS antes del login/envío (default true)               |
 | `APP_BASE_URL`                        | 36      | Base para construir los enlaces de verificación/reset             |
 | `REFRESH_EXPIRE_DAYS`                 | 35      | Vida del refresh token (el access `JWT_EXPIRE_MINUTES` pasa a corto)|
 | `RATE_LIMIT_AUTH` / `RATE_LIMIT_DEFAULT` | 37   | Límites de peticiones por ventana (auth y general)                |
