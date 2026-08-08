@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.core.database import async_session_factory
+from backlogg.core.rate_limit import enforce_search_fallback
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies import repository as movies_repo
@@ -141,17 +142,26 @@ class SearchService:
         item_type: str | None = None,
         page: int = 1,
         limit: int = 20,
+        client_ip: str | None = None,
     ) -> tuple[list[dict], int]:
         """Search the catalog and return (results, total).
 
         If the local catalog returns 0 results, fan-out to external APIs,
         ingest the hits, refresh the materialized view and re-query.
+
+        The external fan-out is rate limited per ``client_ip`` (when provided)
+        so a burst of misses cannot hammer the external APIs. Queries served
+        entirely from the local catalog do not consume any quota.
         """
         results, total = await self._repo.search(q=q, item_type=item_type, page=page, limit=limit)
 
         if total > 0:
-            # Fast path — local results found, skip fan-out
+            # Fast path — local results found, skip fan-out (no quota consumed)
             return results, total
+
+        # Gate the external fan-out per IP before touching any external API.
+        if client_ip is not None:
+            enforce_search_fallback(client_ip)
 
         # Slow path — fan-out to external APIs in parallel
         tasks = []

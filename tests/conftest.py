@@ -62,6 +62,26 @@ settings.DATABASE_URL = settings.TEST_DATABASE_URL
 os.environ["DATABASE_URL"] = settings.TEST_DATABASE_URL
 
 
+# ── Rate limiter isolation ────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Clear the in-process rate limiter before every test.
+
+    Endpoint tests share the same TestClient IP, so limiter state would otherwise
+    accumulate across unrelated tests and trip the limits. Imported locally to
+    respect the DB-isolation guard's import ordering above.
+    """
+    from backlogg.core.rate_limit import get_rate_limiter
+
+    limiter = get_rate_limiter()
+    reset = getattr(limiter, "reset", None)
+    if callable(reset):
+        reset()
+    yield
+
+
 # ── Database fixtures ─────────────────────────────────────────────────────────
 
 

@@ -44,5 +44,12 @@ class Settings(BaseSettings):
     EMAIL_VERIFY_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_EXPIRE_HOURS: int = 1
 
+    # Rate limiting. Format is "count/seconds" (e.g. "10/60" = 10 hits per 60s).
+    # Defaults are deliberately generous so normal traffic and the test suite
+    # never trip them by accumulation.
+    RATE_LIMIT_AUTH: str = "10/60"
+    RATE_LIMIT_DEFAULT: str = "120/60"
+    RATE_LIMIT_SEARCH_FALLBACK: str = "20/60"
+
 
 settings = Settings()

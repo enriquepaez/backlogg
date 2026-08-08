@@ -32,6 +32,9 @@ contrato de la API ver `docs/api.md`; para verificar trabajo de desarrollo,
 | `APP_BASE_URL` | (config) | Base pública para los enlaces de verificación/reset (`/verify-email?token=…`, `/reset-password?token=…`) |
 | `EMAIL_VERIFY_EXPIRE_HOURS` | 24 | Caducidad del token de verificación de email |
 | `PASSWORD_RESET_EXPIRE_HOURS` | 1 | Caducidad del token de reset de password |
+| `RATE_LIMIT_AUTH` | 10/60 | Límite por IP de `POST /auth/login` y `/auth/register`. Formato `count/segundos` |
+| `RATE_LIMIT_SEARCH_FALLBACK` | 20/60 | Límite por IP del fan-out externo de `/search` (feature 17) |
+| `RATE_LIMIT_DEFAULT` | 120/60 | Bucket general reutilizable por la interfaz de rate limiting |
 
 El envío de email usa SMTP genérico de la stdlib (`smtplib`), sin dependencias
 externas. `SMTP_PASSWORD` es un secreto: configúralo en Render como
@@ -47,13 +50,41 @@ Config: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_STARTTLS=true`,
 cuenta). Límite ~500 envíos/día. Para producción con dominio propio, basta con
 cambiar las variables `SMTP_*` — el código no cambia.
 
-### Roadmap — env vars planificadas en Render (features 37-40)
+### Rate limiting (feature 37)
+
+Límites por IP en endpoints sensibles, configurables por env con formato
+`count/segundos`:
+
+- `RATE_LIMIT_AUTH` (`10/60`) — `POST /auth/login` y `POST /auth/register`.
+- `RATE_LIMIT_SEARCH_FALLBACK` (`20/60`) — fan-out externo de `/search` (solo
+  cuando no hay resultados locales; las consultas servidas localmente no
+  consumen cupo).
+- `RATE_LIMIT_DEFAULT` (`120/60`) — bucket general reutilizable por la interfaz.
+
+Al exceder el límite la API responde `429` con header `Retry-After` (segundos) y
+un body genérico (`"Too many requests. Please try again later."`) que **no filtra
+la IP, los límites ni ningún estado interno**. El contador es in-process
+(suficiente para una instancia de Render) tras una interfaz reemplazable: mover a
+Redis solo requiere cambiar la factory `get_rate_limiter()`, sin tocar call
+sites. El cliente detrás del proxy de Render se identifica por el primer hop de
+`X-Forwarded-For`.
+
+**Dónde cambiar los límites:**
+
+- **En producción/entorno** — sobrescribe la env var correspondiente
+  (`RATE_LIMIT_AUTH`, `RATE_LIMIT_SEARCH_FALLBACK`, `RATE_LIMIT_DEFAULT`) en
+  Render o en tu `.env` (ver `.env.example`). No requiere redeploy de código.
+- **Los defaults** viven en `backlogg/core/config.py` (clase `Settings`).
+- **La lógica** (parser `count/segundos`, ventana deslizante, `Retry-After`,
+  factory) está aislada en `backlogg/core/rate_limit.py`; el wiring está en
+  `backlogg/users/routes.py` (auth) y `backlogg/search/service.py` (fallback).
+
+### Roadmap — env vars planificadas en Render (features 38-40)
 
 Se configuran cuando se despliegue cada feature. Detalle en `docs/external-apis.md`.
 
 | Env var | Feature | Notas |
 |---|---|---|
-| `RATE_LIMIT_AUTH` / `RATE_LIMIT_DEFAULT` | 37 | Límites de rate limiting por ventana |
 | `SENTRY_DSN` | 38 | (secret) DSN de Sentry; ausente = integración off |
 | `LOG_LEVEL` | 38 | Nivel de logging estructurado |
 
