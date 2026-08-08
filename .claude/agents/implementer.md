@@ -29,6 +29,11 @@ Eres un implementador. Tu trabajo es ejecutar **una sola** feature de
 
 ## Reglas duras
 
+- ⛔ **NUNCA toques el `.env` local.** Es del usuario, tiene secretos reales,
+  está en `.gitignore` y no se puede recuperar del repo. Nada de
+  `cp .env.example .env`, `>`/`>>`, `rm`, `mv` ni ninguna escritura sobre `.env`.
+  Edita solo `.env.example`. Para verificar, no generes `.env`: usa el entorno ya
+  presente o las variables de CI.
 - Una sola feature por sesión. Si un cambio toca otra feature, para y repórtalo.
 - Toda escritura de código va acompañada de su test antes del siguiente cambio.
 - Si una herramienta falla de forma inesperada: para, anota `blocked` en

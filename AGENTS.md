@@ -35,6 +35,13 @@
 
 ## 3. Reglas duras
 
+- ⛔ **NUNCA toques el `.env` local del usuario.** Es su archivo de desarrollo
+  con secretos reales, está en `.gitignore` y **no es recuperable** desde el repo
+  si se pierde. Prohibido `cp .env.example .env`, `>`/`>>` sobre `.env`, `rm`,
+  `mv` o cualquier escritura sobre `.env`. Para plantillas edita **solo**
+  `.env.example`. Si un test necesita variables de entorno, expórtalas en el
+  proceso (`set -a; source .env` en local ya lo hace el usuario) o usa las de CI;
+  jamás generes ni sobrescribas `.env`.
 - **Una sola feature a la vez.** No mezcles cambios de varias features.
 - **No declares una tarea `done` sin pruebas verdes.** Ejecuta `bash init.sh`
   y asegúrate de que termina sin errores.
