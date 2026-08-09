@@ -469,6 +469,35 @@ CREATE INDEX idx_review_likes_rating ON review_likes (rating_id);
 CREATE INDEX idx_review_likes_user ON review_likes (user_id);
 ```
 
+### `review_reports`
+
+A user's report flagging a review (a `user_ratings` row) as problematic, plus
+the admin moderation queue. One report per `(reporter_id, rating_id)` pair
+(`uq_review_report_pair`) makes reporting idempotent — reporting the same review
+twice never creates a second row. Both FKs cascade on delete, so a report
+disappears when either the reporter's account or the reported review is removed.
+`reason` is a short optional free-text note. `status` is an enum-like plain
+string constrained by a CHECK to `open`/`resolved` (same modelling as
+`account_tokens.purpose`); it starts `open` and flips to `resolved` (with
+`resolved_at` set) when an admin clears it via `POST /admin/reports/{id}/resolve`.
+
+```sql
+CREATE TABLE review_reports (
+    id           BIGSERIAL PRIMARY KEY,
+    reporter_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating_id    BIGINT NOT NULL REFERENCES user_ratings(id) ON DELETE CASCADE,
+    reason       VARCHAR(300),
+    status       VARCHAR(20) NOT NULL DEFAULT 'open',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at  TIMESTAMPTZ,
+
+    CONSTRAINT uq_review_report_pair UNIQUE (reporter_id, rating_id),
+    CONSTRAINT ck_review_reports_status CHECK (status IN ('open', 'resolved'))
+);
+
+CREATE INDEX idx_review_reports_status ON review_reports (status);
+```
+
 ## Follows
 
 ### `follows`

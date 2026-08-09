@@ -430,6 +430,46 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada item:
 `review_text`, `created_at`, `updated_at`. Incluye entradas con y sin
 `review_text`.
 
+### Review reports (moderación)
+
+Un usuario marca una review (una fila de `user_ratings`) como problemática; los
+admin la triagean desde una cola. Rutas en raíz (se versionarán en la feature 45).
+
+```
+POST /reviews/{id}/report
+→ 201  Reporte creado (primera vez)
+→ 200  Ya existía un reporte del mismo usuario para esa review (idempotente)
+→ 401  Sin token
+→ 404  Review (rating) no encontrada
+```
+
+`{id}` es el id numérico de la review (= `user_ratings.id`). Body opcional:
+`{"reason": string | null}` (máx. 300 chars). Idempotente por
+`(reporter, review)`: reportar dos veces la misma review devuelve el reporte
+existente **sin** sobrescribir el `reason` original. Response: `id`,
+`reporter_id`, `rating_id`, `reason`, `status` (`open`/`resolved`),
+`created_at`, `resolved_at`.
+
+```
+GET /admin/reports?status=&page=&limit=
+→ 200  Cola paginada, más reciente primero (requiere X-API-Key)
+→ 401  X-API-Key ausente o incorrecta
+```
+
+Filtro opcional `status` ∈ {`open`, `resolved`}. Response:
+`{"items": [...], "total": , "page": , "limit": }` — cada item con el mismo
+shape que la respuesta de `POST /reviews/{id}/report`.
+
+```
+POST /admin/reports/{id}/resolve
+→ 200  Reporte marcado como resuelto (idempotente; requiere X-API-Key)
+→ 401  X-API-Key ausente o incorrecta
+→ 404  Reporte no encontrado
+```
+
+Marca `status = 'resolved'` y sella `resolved_at`. Response: el reporte
+actualizado (mismo shape que arriba).
+
 ### Feed (activity feed)
 
 ```

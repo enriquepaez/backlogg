@@ -30,6 +30,7 @@ from backlogg.notifications.routes import notifications_router
 from backlogg.people.routes import router as people_router
 from backlogg.ratings.routes import ratings_router, user_reviews_router
 from backlogg.recommendations.routes import recommendations_router
+from backlogg.reports.routes import admin_reports_router, reports_router
 from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
 from backlogg.trending.router import router as trending_router
@@ -142,6 +143,10 @@ OPENAPI_TAGS = [
         "description": "On-the-fly recommendations from the caller's ratings and library.",
     },
     {
+        "name": "reports",
+        "description": "User-filed reports flagging reviews as problematic for admin moderation.",
+    },
+    {
         "name": "metrics",
         "description": "Prometheus metrics in the text exposition format. No authentication.",
     },
@@ -238,4 +243,6 @@ app.include_router(lists_router)
 app.include_router(user_lists_router)
 app.include_router(notifications_router)
 app.include_router(recommendations_router)
+app.include_router(reports_router)
+app.include_router(admin_reports_router)
 app.include_router(metrics_router)

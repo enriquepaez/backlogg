@@ -1,0 +1,23 @@
+meta {
+  name: Report review — sin token (401)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/reviews/1/report
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "reason": "spam"
+  }
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}
