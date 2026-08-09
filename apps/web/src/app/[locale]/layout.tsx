@@ -5,6 +5,7 @@ import { hasLocale, NextIntlClientProvider } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { QueryProvider } from "@/components/query-provider";
+import { ServiceWorkerProvider } from "@/components/service-worker-provider";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -63,10 +64,12 @@ export default async function LocaleLayout({
             disableTransitionOnChange
           >
             <QueryProvider>
-              <SiteHeader />
-              <main className="flex flex-1 flex-col">{children}</main>
-              <SiteFooter />
-              <Toaster />
+              <ServiceWorkerProvider>
+                <SiteHeader />
+                <main className="flex flex-1 flex-col">{children}</main>
+                <SiteFooter />
+                <Toaster />
+              </ServiceWorkerProvider>
             </QueryProvider>
           </ThemeProvider>
         </NextIntlClientProvider>

@@ -40,5 +40,10 @@
     "title": "Something went wrong",
     "description": "An unexpected error occurred. You can try again.",
     "retry": "Try again"
+  },
+  "Offline": {
+    "title": "You're offline",
+    "description": "This page isn't available without a connection. Reconnect and try again.",
+    "backHome": "Back to home"
   }
 }
