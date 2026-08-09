@@ -98,6 +98,23 @@ async def delete_rating(db: AsyncSession, rating: UserRating) -> None:
     await db.flush()
 
 
+async def get_distinct_rated_items_for_user(
+    db: AsyncSession, user_id: int
+) -> list[tuple[str, int]]:
+    """Return the distinct ``(item_type, item_id)`` a user has rated.
+
+    Used before deleting an account: the DB ``ON DELETE CASCADE`` removes the
+    user's ``user_ratings`` rows but does not recompute the affected items'
+    aggregates, so the caller must recalculate each of these items afterwards.
+    """
+    result = await db.execute(
+        select(UserRating.item_type, UserRating.item_id)
+        .where(UserRating.user_id == user_id)
+        .distinct()
+    )
+    return [(row[0], row[1]) for row in result.all()]
+
+
 async def recalculate_item_aggregates(db: AsyncSession, item_type: str, item_id: int) -> None:
     """Recompute rating_internal (AVG) / rating_count_internal (COUNT) for an item.
 

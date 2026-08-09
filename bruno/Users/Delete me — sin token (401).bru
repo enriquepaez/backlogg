@@ -1,0 +1,17 @@
+meta {
+  name: Delete me — sin token (401)
+  type: http
+  seq: 18
+}
+
+delete {
+  url: {{baseUrl}}/users/me
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}
