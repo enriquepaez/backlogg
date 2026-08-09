@@ -11,6 +11,9 @@ services:
   db:
     image: postgres:16
     container_name: backlogg-db
+    # Come back automatically after a reboot or a Docker daemon restart, so the
+    # dev/test database is up without having to remember `docker compose up -d`.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: dev

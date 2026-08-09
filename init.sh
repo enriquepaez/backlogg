@@ -97,7 +97,23 @@ echo ""
 echo "── 5. Tests (pytest) ───────────────────────────────────"
 
 if [ -d "tests" ] && [ -f "pyproject.toml" ]; then
-  if uv run pytest --tb=short -q 2>&1; then
+  # Preflight: the suite talks to Postgres on localhost:5432 (dev/test DB, run
+  # via `docker compose up -d`). If it's down, pytest floods the log with
+  # hundreds of identical connection errors, hiding the real cause — so detect
+  # it up front and point at the fix. Best-effort: skipped if pg_isready is
+  # unavailable (e.g. some CI images), where a DB service is provided anyway.
+  DB_DOWN=0
+  if command -v pg_isready >/dev/null 2>&1; then
+    if ! pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
+      DB_DOWN=1
+    fi
+  fi
+
+  if [ "$DB_DOWN" -eq 1 ]; then
+    fail "Postgres no responde en localhost:5432 — la DB de test está caída."
+    warn "Arráncala y reintenta:  docker compose up -d  &&  uv run alembic upgrade head"
+    EXIT_CODE=1
+  elif uv run pytest --tb=short -q 2>&1; then
     ok "Todos los tests pasan"
   else
     fail "Hay tests rotos"

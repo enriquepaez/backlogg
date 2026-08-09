@@ -1,44 +1,27 @@
 # Sesión actual
 
-## Backend inicial — COMPLETO y en `main`
+## FE-2 `api_client` — COMPLETO (pendiente de ship)
+- Rama `feat/fe2-api-client` (desde `main`). Reviewer: **APPROVED**. FE-2 `done` en `frontend_feature_list.json`.
+- Paquete `packages/api-client` (`@backlogg/api-client`): tipos generados desde OpenAPI del backend
+  (`openapi.json` 63 paths) + `openapi-typescript` (`src/schema.d.ts`) + factory `createApiClient`
+  sobre `openapi-fetch` (`src/index.ts`) + ejemplo tipado GET `/v1/movies` (`src/example.ts`) +
+  script `gen:api` (`scripts/gen-api.mjs`) + `README.md`.
+- Wiring: dep `workspace:*` en `web`; typecheck raíz = `pnpm -r typecheck`. Build de Next intacto.
+- Pipeline en verde: install, gen:api (determinista), typecheck (api-client+web), lint, build.
+- Resumen movido a `progress/history.md`.
 
-45/45 features `done`, API bajo `/v1`. Nota: los PRs #70/#71/#72 (apilados con base en la rama
-padre) se mergearon entre sí en vez de a `main`; se consolidaron con el **PR #73**
-(`feat/api_versioning` → `main`, ya mergeado). `main` tiene todo: `/v1`, migraciones 0017/0018,
-módulos reports + moderation.
+## Nota de entorno
+- `bash init.sh` (pytest backend) falla por **Postgres local caído** (`pg_isready` no response;
+  `systemctl postgresql` inactive). Irrelevante para features frontend. Para volver a correr el
+  backend habrá que levantar Postgres (`TEST_DATABASE_URL`).
 
-## Frontend — planificación COMPLETA (objetivo de la sesión cumplido)
+## Infra de dev incluida en el mismo commit (por petición del usuario)
+- `docker-compose.yml`: `restart: unless-stopped` en `db` → la DB local revive tras reiniciar.
+- `init.sh`: preflight `pg_isready` antes de pytest; si la DB está caída avisa con el remedio
+  (`docker compose up -d && uv run alembic upgrade head`) en vez de 508 tracebacks. Verificado
+  end-to-end: `bash init.sh` → 688 passed, "Entorno listo".
 
-- **Decisiones fijadas**: Next.js 16 (App Router) + React + TS · BFF con cookie httpOnly ·
-  Tailwind + shadcn/ui · cliente tipado desde `/openapi.json` · **paridad completa** con el backend ·
-  monorepo con workspaces · **Camino A** (Web+PWA ahora, nativa Expo después) ·
-  **i18n next-intl bilingüe es/en** (fallback `en`).
-- **Plan**: `docs/frontend-plan.md` (arquitectura, monorepo, auth BFF, rendering, wiring, riesgos).
-- **Backlog ejecutable**: `frontend_feature_list.json` — **31 features `FE-1..FE-30`** en M0-M6.
-
-### Estado del backlog frontend
-- [x] **FE-1** `monorepo_scaffold` — hecho, verificado y **en `main`** (PR #74 + #75). Next 16.3 build/typecheck verdes.
-- [ ] FE-2 api_client · FE-3 design_system · FE-3b i18n · FE-4 auth_bff · FE-5 app_shell · FE-6 pwa · FE-7 testing_ci (resto de M0)
-- [ ] M1-M6 (catálogo público, auth/cuenta, personal, social, listas/recs, admin moderación)
-
-## Rama y estado git — LIMPIO
-- Todo mergeado en `main`. PRs de frontend: #74 (scaffold + plan + backlog), #75 (dedup packageManager).
-- `git status` limpio; `main` es la única rama local (histórico de ramas mergeadas borrado).
-- En `main`: backend completo `/v1`, `docs/frontend-plan.md`, `frontend_feature_list.json`,
-  scaffold `apps/web` (Next 16), workspace (`pnpm-workspace.yaml`, `package.json`, lock).
-- Verificado en `main` limpio: `pnpm install --frozen-lockfile`, `tsc --noEmit`, `next build` → verdes.
-
-## Arranque de la próxima sesión (FE-2)
-1. `git checkout -b feat/fe2-api-client` (nunca trabajar en `main`).
-2. Exportar OpenAPI del backend: `python -c "import json,backlogg.main as m; print(json.dumps(m.app.openapi()))" > apps/web/openapi.json` (o servirlo).
-3. `packages/api-client` con `openapi-typescript` (tipos) + `openapi-fetch` (cliente) + script `gen:api`.
-4. Cerrar con typecheck en verde y un fetch de ejemplo tipado (GET /v1/movies).
-
-## Notas operativas para la próxima sesión
-- **Next 16 tiene breaking changes** vs Next 15: consultar `apps/web/node_modules/next/dist/docs/`
-  (01-app) antes de escribir código de framework. Next regenera `apps/web/{AGENTS,CLAUDE}.md` en cada
-  `next dev` (commiteados a propósito).
-- `create-next-app` / `pnpm install` / `next dev` necesitaron **sandbox desactivado** (el chequeo de
-  escritura del proceso chocaba con el sandbox); la escritura directa al repo sí funciona.
-- Siguiente paso natural: **FE-2** (generar el cliente tipado contra `/openapi.json`), luego el resto de M0.
-- pnpm 11.20 instalado vía npm global (node por mise v26).
+## Siguiente feature disponible (M0)
+Con FE-2 `done`, quedan disponibles (deps satisfechas): **FE-3** design_system (deps FE-1),
+**FE-3b** i18n (deps FE-1), **FE-4** auth_bff (deps FE-2), **FE-7** testing_ci (deps FE-2).
+Orden natural: FE-3 → FE-3b → FE-4 → FE-5 (app_shell, deps FE-3/3b/4) → FE-6 → FE-7.

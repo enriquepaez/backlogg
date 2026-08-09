@@ -50,7 +50,7 @@
         "Script 'gen:api' regenera los tipos; documentado cómo actualizarlos cuando cambie el backend",
         "typecheck en verde; un fetch de ejemplo (p.ej. GET /v1/movies) compila con tipos correctos"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 3,
