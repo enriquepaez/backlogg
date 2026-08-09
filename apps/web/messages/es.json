@@ -8,8 +8,23 @@
   "Home": {
     "title": "Registra todo lo que ves, lees y juegas.",
     "description": "Mantén una biblioteca personal, puntúa lo que terminas y descubre qué disfrutar a continuación — en películas, series, libros y juegos.",
-    "exploreShowcase": "Explora el sistema de diseño",
-    "documentation": "Documentación"
+    "searchCta": "Buscar en el catálogo",
+    "trendingTitle": "Tendencias esta semana",
+    "trendingEmpty": "No hay tendencias por ahora. Vuelve pronto.",
+    "featuredEmpty": "Todavía no hay nada aquí. Vuelve pronto.",
+    "viewAll": "Ver todo: {type}",
+    "types": {
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Juegos"
+    },
+    "typeBadge": {
+      "movie": "Película",
+      "series": "Serie",
+      "book": "Libro",
+      "game": "Juego"
+    }
   },
   "LanguageSwitcher": {
     "label": "Idioma",

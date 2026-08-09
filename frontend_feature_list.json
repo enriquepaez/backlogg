@@ -163,7 +163,7 @@
         "Enlaces a browse por tipo y a search; i18n en todas las cadenas",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 10,

@@ -8,8 +8,23 @@
   "Home": {
     "title": "Track everything you watch, read and play.",
     "description": "Keep a personal library, rate what you finish and discover what to enjoy next — across movies, series, books and games.",
-    "exploreShowcase": "Explore the design system",
-    "documentation": "Documentation"
+    "searchCta": "Search the catalog",
+    "trendingTitle": "Trending this week",
+    "trendingEmpty": "No trending titles right now. Check back soon.",
+    "featuredEmpty": "Nothing here yet. Check back soon.",
+    "viewAll": "View all {type}",
+    "types": {
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    },
+    "typeBadge": {
+      "movie": "Movie",
+      "series": "Series",
+      "book": "Book",
+      "game": "Game"
+    }
   },
   "LanguageSwitcher": {
     "label": "Language",
