@@ -4,6 +4,10 @@ import type { components } from "@backlogg/api-client";
 
 type MovieOut = components["schemas"]["MovieOut"];
 type MovieListOut = components["schemas"]["MovieListOut"];
+type SeriesListOut = components["schemas"]["SeriesListOut"];
+type BookListOut = components["schemas"]["BookListOut"];
+type GameListOut = components["schemas"]["GameListOut"];
+type TrendingOut = components["schemas"]["TrendingOut"];
 
 /**
  * Base URL these handlers are registered against. Tests build their
@@ -68,6 +72,84 @@ export const movieListFixture: MovieListOut = {
 };
 
 /**
+ * List fixtures for the other three catalog types (FE-8 home landing:
+ * "featured" sections). `MovieListItemOut` / `SeriesListItemOut` /
+ * `BookListItemOut` / `GameListItemOut` all share the exact same shape, so
+ * these mirror `movieListFixture.items[0]` with a type-appropriate title.
+ */
+export const seriesListFixture: SeriesListOut = {
+  items: [
+    {
+      id: 2,
+      title: "Chernobyl",
+      slug: "chernobyl",
+      poster_url: "https://image.tmdb.org/t/p/w500/chernobyl.jpg",
+      release_date: "2019-05-06",
+      rating_external: 8.5,
+      genres: ["drama"],
+    },
+  ],
+  total: 1,
+  page: 1,
+  limit: 20,
+};
+
+export const bookListFixture: BookListOut = {
+  items: [
+    {
+      id: 3,
+      title: "Dune",
+      slug: "OL893415W",
+      poster_url: "https://covers.openlibrary.org/b/id/12-L.jpg",
+      release_date: "1965-08-01",
+      rating_external: 4.3,
+      genres: ["science-fiction"],
+    },
+  ],
+  total: 1,
+  page: 1,
+  limit: 20,
+};
+
+export const gameListFixture: GameListOut = {
+  items: [
+    {
+      id: 4,
+      title: "Hades",
+      slug: "hades",
+      poster_url: "https://images.igdb.com/igdb/image/upload/t_cover_big/hades.jpg",
+      release_date: "2020-09-17",
+      rating_external: 9.1,
+      genres: ["roguelike"],
+    },
+  ],
+  total: 1,
+  page: 1,
+  limit: 20,
+};
+
+export const trendingFixture: TrendingOut = {
+  results: [
+    {
+      item_type: "MOVIE",
+      title: duneFixture.title,
+      slug: duneFixture.slug,
+      poster_url: duneFixture.poster_url,
+      release_date: duneFixture.release_date,
+      rating_external: duneFixture.rating_external,
+    },
+    {
+      item_type: "SERIES",
+      title: seriesListFixture.items[0].title,
+      slug: seriesListFixture.items[0].slug,
+      poster_url: seriesListFixture.items[0].poster_url,
+      release_date: seriesListFixture.items[0].release_date,
+      rating_external: seriesListFixture.items[0].rating_external,
+    },
+  ],
+};
+
+/**
  * Minimal, reusable set of `/v1` handlers. Extend this array (or use
  * `server.use(...)` from `./server` for a one-off override in a single test)
  * as more of the API surface needs mocking in unit/integration tests.
@@ -82,5 +164,21 @@ export const handlers = [
       return HttpResponse.json(duneFixture);
     }
     return HttpResponse.json({ detail: "Movie not found" }, { status: 404 });
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/series`, () => {
+    return HttpResponse.json(seriesListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/books`, () => {
+    return HttpResponse.json(bookListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/games`, () => {
+    return HttpResponse.json(gameListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/trending`, () => {
+    return HttpResponse.json(trendingFixture);
   }),
 ];

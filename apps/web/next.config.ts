@@ -3,7 +3,19 @@ import createNextIntlPlugin from "next-intl/plugin";
 import { withSerwist } from "@serwist/turbopack";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    // Poster hosts for the catalog (FE-8 home landing is the first feature
+    // rendering them via `next/image`). One entry per source adapter — see
+    // `docs/external-apis.md` and the `poster_url` builders they document:
+    remotePatterns: [
+      // TMDB (movies, series, and the trending endpoint — all TMDB-backed).
+      { protocol: "https", hostname: "image.tmdb.org", pathname: "/**" },
+      // Open Library (books) — `backlogg/books/adapters/open_library.py`.
+      { protocol: "https", hostname: "covers.openlibrary.org", pathname: "/**" },
+      // IGDB (games) — `backlogg/games/adapters/igdb.py`.
+      { protocol: "https", hostname: "images.igdb.com", pathname: "/**" },
+    ],
+  },
 };
 
 // Auto-detects ./src/i18n/request.ts as the request config.
