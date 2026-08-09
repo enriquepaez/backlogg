@@ -1,23 +1,37 @@
 # Sesión actual
 
-## Tanda de pulido backend (pre-frontend) — COMPLETA
+## Backend inicial — COMPLETO y en `main`
 
-Las 4 features de pulido están `done`, con PRs apilados abiertos (sin mergear, a la espera del usuario).
-Con esto el backend inicial queda cerrado: **45/45 features `done`**.
+45/45 features `done`, API bajo `/v1`. Nota: los PRs #70/#71/#72 (apilados con base en la rama
+padre) se mergearon entre sí en vez de a `main`; se consolidaron con el **PR #73**
+(`feat/api_versioning` → `main`, ya mergeado). `main` tiene todo: `/v1`, migraciones 0017/0018,
+módulos reports + moderation.
 
-| id | feature | PR | base | QA leader |
-|----|---------|----|------|-----------|
-| 42 | account_deletion | #69 | main | 11/11 |
-| 43 | review_reports | #70 | feat/account_deletion | 13/13 |
-| 44 | content_moderation | #71 | feat/review_reports | 18/18 |
-| 45 | api_versioning |  #72        | feat/content_moderation | 18/18 |
+## Frontend — planificación COMPLETA (objetivo de la sesión cumplido)
 
-**Orden de merge (apilado):** 42 → 43 → 44 → 45. GitHub reapunta cada PR a main a medida que se mergea el anterior.
+- **Decisiones fijadas**: Next.js 16 (App Router) + React + TS · BFF con cookie httpOnly ·
+  Tailwind + shadcn/ui · cliente tipado desde `/openapi.json` · **paridad completa** con el backend ·
+  monorepo con workspaces · **Camino A** (Web+PWA ahora, nativa Expo después) ·
+  **i18n next-intl bilingüe es/en** (fallback `en`).
+- **Plan**: `docs/frontend-plan.md` (arquitectura, monorepo, auth BFF, rendering, wiring, riesgos).
+- **Backlog ejecutable**: `frontend_feature_list.json` — **31 features `FE-1..FE-30`** en M0-M6.
 
-Migraciones nuevas: `0017` (review_reports), `0018` (content_moderation). La DB de dev ya está en `0018`.
-Prod (Neon) migrará al desplegar (entrypoint corre `alembic upgrade head`).
+### Estado del backlog frontend
+- [x] **FE-1** `monorepo_scaffold` — hecho y verificado (Next 16.3 arranca 200 en :3000). Commit en `feat/frontend-scaffold`.
+- [ ] FE-2 api_client · FE-3 design_system · FE-3b i18n · FE-4 auth_bff · FE-5 app_shell · FE-6 pwa · FE-7 testing_ci (resto de M0)
+- [ ] M1-M6 (catálogo público, auth/cuenta, personal, social, listas/recs, admin moderación)
 
-## Siguiente etapa: frontend
-- Stack decidido: **Next.js + React + TypeScript**.
-- Consumirá la API bajo **`/v1`** (`/health` y `/metrics` quedan sin versionar).
-- No arrancado; pendiente de nueva sesión.
+## Rama y estado git
+- Rama actual: `feat/frontend-scaffold` (basada en `main`).
+- Contiene: `docs/frontend-plan.md`, `frontend_feature_list.json`, scaffold de `apps/web` (Next 16),
+  archivos de workspace (`pnpm-workspace.yaml`, `package.json`, lock), `.gitignore` ampliado.
+- **Sin PR aún**: se abrirá al cerrar M0 (o antes si se prefiere).
+
+## Notas operativas para la próxima sesión
+- **Next 16 tiene breaking changes** vs Next 15: consultar `apps/web/node_modules/next/dist/docs/`
+  (01-app) antes de escribir código de framework. Next regenera `apps/web/{AGENTS,CLAUDE}.md` en cada
+  `next dev` (commiteados a propósito).
+- `create-next-app` / `pnpm install` / `next dev` necesitaron **sandbox desactivado** (el chequeo de
+  escritura del proceso chocaba con el sandbox); la escritura directa al repo sí funciona.
+- Siguiente paso natural: **FE-2** (generar el cliente tipado contra `/openapi.json`), luego el resto de M0.
+- pnpm 11.20 instalado vía npm global (node por mise v26).

@@ -145,10 +145,10 @@ Identificadores `FE-n`. Dependencias entre milestones son secuenciales salvo not
 
 ## 9. Items abiertos / riesgos
 
+- **Backlog frontend**: creado en **`frontend_feature_list.json`** (separado del backend Python).
+  31 features `FE-1..FE-30` en M0-M6; FE-1 `done`. Es la fuente de verdad del roadmap ejecutable.
 - **Harness de agentes**: implementer/reviewer y `init.sh` son backend-Python. Si el frontend se
-  orquesta con agentes, hay que crear variantes frontend (verificación = typecheck + lint + test + build)
-  y decidir si el backlog frontend va en un `frontend_feature_list.json` separado (recomendado, para no
-  mezclar con el backend Python).
+  orquesta con agentes, hay que crear variantes frontend (verificación = typecheck + lint + test + build).
 - **ISR**: estrategia de revalidación del catálogo (tiempo fijo vs on-demand cuando el sync nocturno actualiza).
 - **PWA Web Push**: en iOS solo con PWA instalada (16.4+). Gestionar expectativas; nativo lo resuelve mejor a futuro.
 - **Despliegue**: elegir Vercel vs Render para el web.
