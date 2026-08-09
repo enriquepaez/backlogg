@@ -29,9 +29,9 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 |---|---|---|
 | `SEED_TOP_N_*` | 10000 | Objetivo de catálogo por tipo (movies/series/books/games) |
 | `SYNC_SLICE_SIZE` | 100 | Tramo por request de sync; >100 arriesga el timeout de ~15 min por request de Render |
-| `ADMIN_API_KEY` | (secret) | Protege `/admin/*` |
+| `ADMIN_API_KEY` | (secret) | Protege `/v1/admin/*` |
 | `CORS_ORIGINS` | (opcional) | Orígenes permitidos, comma-separated |
-| `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/auth/*`. Sin configurar, `POST /auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
+| `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/v1/auth/*`. Sin configurar, `POST /v1/auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
 | `REFRESH_EXPIRE_DAYS` | 30 | Vida del refresh token; `JWT_EXPIRE_MINUTES` es el access corto (15) |
 | `SMTP_HOST` | (config) | Host SMTP. **Vacío → `EmailSender` loguea el enlace en vez de enviar** (dev) |
 | `SMTP_PORT` | 587 | Puerto SMTP (STARTTLS estándar) |
@@ -42,8 +42,8 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 | `APP_BASE_URL` | (config) | Base pública para los enlaces de verificación/reset (`/verify-email?token=…`, `/reset-password?token=…`) |
 | `EMAIL_VERIFY_EXPIRE_HOURS` | 24 | Caducidad del token de verificación de email |
 | `PASSWORD_RESET_EXPIRE_HOURS` | 1 | Caducidad del token de reset de password |
-| `RATE_LIMIT_AUTH` | 10/60 | Límite por IP de `POST /auth/login` y `/auth/register`. Formato `count/segundos` |
-| `RATE_LIMIT_SEARCH_FALLBACK` | 20/60 | Límite por IP del fan-out externo de `/search` (feature 17) |
+| `RATE_LIMIT_AUTH` | 10/60 | Límite por IP de `POST /v1/auth/login` y `/v1/auth/register`. Formato `count/segundos` |
+| `RATE_LIMIT_SEARCH_FALLBACK` | 20/60 | Límite por IP del fan-out externo de `/v1/search` (feature 17) |
 | `RATE_LIMIT_DEFAULT` | 120/60 | Bucket general reutilizable por la interfaz de rate limiting |
 | `LOG_LEVEL` | INFO | Nivel del logging estructurado JSON (DEBUG/INFO/WARNING/ERROR) |
 | `SENTRY_DSN` | (secret) | DSN de Sentry. **Vacío → integración off** (no se importa `sentry-sdk`, sin overhead) |
@@ -67,8 +67,8 @@ cambiar las variables `SMTP_*` — el código no cambia.
 Límites por IP en endpoints sensibles, configurables por env con formato
 `count/segundos`:
 
-- `RATE_LIMIT_AUTH` (`10/60`) — `POST /auth/login` y `POST /auth/register`.
-- `RATE_LIMIT_SEARCH_FALLBACK` (`20/60`) — fan-out externo de `/search` (solo
+- `RATE_LIMIT_AUTH` (`10/60`) — `POST /v1/auth/login` y `POST /v1/auth/register`.
+- `RATE_LIMIT_SEARCH_FALLBACK` (`20/60`) — fan-out externo de `/v1/search` (solo
   cuando no hay resultados locales; las consultas servidas localmente no
   consumen cupo).
 - `RATE_LIMIT_DEFAULT` (`120/60`) — bucket general reutilizable por la interfaz.
@@ -148,9 +148,9 @@ Añadir/rotar con `gh secret set <NOMBRE>` (valor interactivo, nunca en chat/log
 ## Sync nocturno
 
 `.github/workflows/nightly-sync.yml` — cron `0 2 * * *` UTC. Hace wake-up de
-la instancia (`GET /health`), llama a los 4 `POST /admin/sync/{type}` en
+la instancia (`GET /health`), llama a los 4 `POST /v1/admin/sync/{type}` en
 secuencia (paralelo saturaba la instancia free) y verifica con
-`GET /admin/stats` que cada `last_synced_at` es reciente (< 2 h).
+`GET /v1/admin/stats` que cada `last_synced_at` es reciente (< 2 h).
 
 ```bash
 # Lanzarlo manualmente
@@ -248,7 +248,7 @@ curl "$RENDER_API_URL/metrics"
 Series expuestas: `http_requests_total{method,path,status}`,
 `http_request_duration_seconds` (histograma con `_bucket`/`_sum`/`_count`),
 `backlogg_syncs_total{type}` y `backlogg_external_fanout_total{source}`. El label
-`path` usa siempre la **plantilla de ruta** (`/movies/{slug}`), nunca la URL con
+`path` usa siempre la **plantilla de ruta** (`/v1/movies/{slug}`), nunca la URL con
 valores reales, para no filtrar identificadores ni disparar la cardinalidad.
 No requiere ningún setting nuevo; el endpoint está siempre activo y `/metrics`
 se excluye de su propia instrumentación. Ver `docs/api.md` para el detalle.

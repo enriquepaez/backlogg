@@ -180,7 +180,7 @@ async def test_trending_returns_200_with_mix(client, db):
             new=AsyncMock(return_value=_tmdb_series_detail(9002, "Test Trending Show")),
         ),
     ):
-        response = await client.get("/trending")
+        response = await client.get("/v1/trending")
 
     assert response.status_code == 200
     body = response.json()
@@ -205,7 +205,7 @@ async def test_trending_type_movie_only(client, db):
             new=AsyncMock(return_value=_tmdb_movie_detail(9003, "Only Movie Trending")),
         ),
     ):
-        response = await client.get("/trending?type=movie")
+        response = await client.get("/v1/trending?type=movie")
 
     assert response.status_code == 200
     body = response.json()
@@ -226,7 +226,7 @@ async def test_trending_type_series_only(client, db):
             new=AsyncMock(return_value=_tmdb_series_detail(9004, "Only Series Trending")),
         ),
     ):
-        response = await client.get("/trending?type=series")
+        response = await client.get("/v1/trending?type=series")
 
     assert response.status_code == 200
     body = response.json()
@@ -253,7 +253,7 @@ async def test_trending_period_day(client, db):
             new=AsyncMock(return_value=_tmdb_series_detail(9006, "Day Trending Show")),
         ),
     ):
-        response = await client.get("/trending?period=day")
+        response = await client.get("/v1/trending?period=day")
 
     assert response.status_code == 200
     movies_mock.assert_called_once_with("day")
@@ -280,7 +280,7 @@ async def test_trending_period_week(client, db):
             new=AsyncMock(return_value=_tmdb_series_detail(9008, "Week Trending Show")),
         ),
     ):
-        response = await client.get("/trending?period=week")
+        response = await client.get("/v1/trending?period=week")
 
     assert response.status_code == 200
     movies_mock.assert_called_once_with("week")
@@ -307,7 +307,7 @@ async def test_trending_default_period_is_week(client, db):
             new=AsyncMock(return_value=_tmdb_series_detail(9010, "Default Period Show")),
         ),
     ):
-        response = await client.get("/trending")
+        response = await client.get("/v1/trending")
 
     assert response.status_code == 200
     movies_mock.assert_called_once_with("week")
@@ -316,7 +316,7 @@ async def test_trending_default_period_is_week(client, db):
 
 async def test_trending_invalid_type_returns_422(client, db):
     """GET /trending?type=invalid returns 422 (Pydantic validation error)."""
-    response = await client.get("/trending?type=invalid")
+    response = await client.get("/v1/trending?type=invalid")
     assert response.status_code == 422
 
 
@@ -338,7 +338,7 @@ async def test_trending_result_fields(client, db):
             new=AsyncMock(return_value=_tmdb_movie_detail(9011, "Fields Check Movie")),
         ),
     ):
-        response = await client.get("/trending?type=movie")
+        response = await client.get("/v1/trending?type=movie")
 
     assert response.status_code == 200
     body = response.json()
@@ -374,7 +374,7 @@ async def test_trending_items_persisted_in_db(client, db):
             new=AsyncMock(return_value=_tmdb_movie_detail(9012, "Persist Test Movie")),
         ),
     ):
-        response = await client.get("/trending?type=movie")
+        response = await client.get("/v1/trending?type=movie")
 
     assert response.status_code == 200
     # The movie must now exist in the local DB
@@ -421,7 +421,7 @@ async def test_trending_up_to_20_items(client, db):
             new=series_detail_mock,
         ),
     ):
-        response = await client.get("/trending")
+        response = await client.get("/v1/trending")
 
     assert response.status_code == 200
     body = response.json()
@@ -461,7 +461,7 @@ async def test_trending_items_found_in_db_skip_tmdb_detail(client, db):
         ),
         patch("backlogg.trending.service._movies_tmdb.get_movie_detail", new=detail_mock),
     ):
-        response = await client.get("/trending?type=movie")
+        response = await client.get("/v1/trending?type=movie")
 
     assert response.status_code == 200
     # Detail must NOT have been called since movie was already in DB

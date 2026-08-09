@@ -1,0 +1,32 @@
+meta {
+  name: List reports
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/reports?status=open&page=1&limit=20
+  body: none
+  auth: none
+}
+
+params:query {
+  status: open
+  page: 1
+  limit: 20
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  Admin moderation queue. Paginated, newest first. Optional ``status`` filter
+  (open/resolved). Requires the X-API-Key header.
+}

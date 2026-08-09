@@ -80,10 +80,12 @@ async def client(db):
 
 async def _register_and_login(client: AsyncClient, username: str) -> str:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": "s3cret-pw"},
     )
-    login = await client.post("/auth/login", json={"username": username, "password": "s3cret-pw"})
+    login = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-pw"}
+    )
     return login.json()["access_token"]
 
 
@@ -95,14 +97,14 @@ def _auth(token: str) -> dict:
 
 
 async def test_create_list_without_token_returns_401(client, db):
-    response = await client.post("/lists", json={"title": "No Auth List"})
+    response = await client.post("/v1/lists", json={"title": "No Auth List"})
     assert response.status_code == 401
 
 
 async def test_create_list_returns_201_with_derived_slug(client, db):
     token = await _register_and_login(client, "route-lists-user-1")
     response = await client.post(
-        "/lists", json={"title": "Best Sci-Fi", "description": "d"}, headers=_auth(token)
+        "/v1/lists", json={"title": "Best Sci-Fi", "description": "d"}, headers=_auth(token)
     )
     assert response.status_code == 201
     body = response.json()
@@ -117,11 +119,11 @@ async def test_create_list_returns_201_with_derived_slug(client, db):
 
 async def test_patch_list_by_owner(client, db):
     token = await _register_and_login(client, "route-lists-user-2")
-    created = await client.post("/lists", json={"title": "Patch Me"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Patch Me"}, headers=_auth(token))
     slug = created.json()["slug"]
 
     response = await client.patch(
-        f"/lists/{slug}", json={"title": "Patched", "is_public": False}, headers=_auth(token)
+        f"/v1/lists/{slug}", json={"title": "Patched", "is_public": False}, headers=_auth(token)
     )
     assert response.status_code == 200
     assert response.json()["title"] == "Patched"
@@ -133,11 +135,13 @@ async def test_patch_list_by_owner(client, db):
 async def test_patch_list_by_non_owner_returns_403(client, db):
     owner_token = await _register_and_login(client, "route-lists-user-3")
     other_token = await _register_and_login(client, "route-lists-user-4")
-    created = await client.post("/lists", json={"title": "Owned List"}, headers=_auth(owner_token))
+    created = await client.post(
+        "/v1/lists", json={"title": "Owned List"}, headers=_auth(owner_token)
+    )
     slug = created.json()["slug"]
 
     response = await client.patch(
-        f"/lists/{slug}", json={"title": "Hijack"}, headers=_auth(other_token)
+        f"/v1/lists/{slug}", json={"title": "Hijack"}, headers=_auth(other_token)
     )
     assert response.status_code == 403
 
@@ -145,32 +149,32 @@ async def test_patch_list_by_non_owner_returns_403(client, db):
 async def test_patch_unknown_list_returns_404(client, db):
     token = await _register_and_login(client, "route-lists-user-5")
     response = await client.patch(
-        "/lists/no-such-route-list", json={"title": "x"}, headers=_auth(token)
+        "/v1/lists/no-such-route-list", json={"title": "x"}, headers=_auth(token)
     )
     assert response.status_code == 404
 
 
 async def test_delete_list_by_owner(client, db):
     token = await _register_and_login(client, "route-lists-user-6")
-    created = await client.post("/lists", json={"title": "Delete Me"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Delete Me"}, headers=_auth(token))
     slug = created.json()["slug"]
 
-    response = await client.delete(f"/lists/{slug}", headers=_auth(token))
+    response = await client.delete(f"/v1/lists/{slug}", headers=_auth(token))
     assert response.status_code == 204
 
     # Gone afterwards.
-    assert (await client.get(f"/lists/{slug}")).status_code == 404
+    assert (await client.get(f"/v1/lists/{slug}")).status_code == 404
 
 
 async def test_delete_list_by_non_owner_returns_403(client, db):
     owner_token = await _register_and_login(client, "route-lists-user-7")
     other_token = await _register_and_login(client, "route-lists-user-8")
     created = await client.post(
-        "/lists", json={"title": "Protected List"}, headers=_auth(owner_token)
+        "/v1/lists", json={"title": "Protected List"}, headers=_auth(owner_token)
     )
     slug = created.json()["slug"]
 
-    response = await client.delete(f"/lists/{slug}", headers=_auth(other_token))
+    response = await client.delete(f"/v1/lists/{slug}", headers=_auth(other_token))
     assert response.status_code == 403
 
 
@@ -181,11 +185,11 @@ async def test_add_and_remove_items_idempotent(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-list-movie-1"))
     await series_repo.upsert_series(db, _series_data("route-list-series-1"))
     token = await _register_and_login(client, "route-lists-user-9")
-    created = await client.post("/lists", json={"title": "Item Ops"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Item Ops"}, headers=_auth(token))
     slug = created.json()["slug"]
 
     r1 = await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-1"},
         headers=_auth(token),
     )
@@ -193,7 +197,7 @@ async def test_add_and_remove_items_idempotent(client, db):
     assert r1.json()["item_count"] == 1
 
     r2 = await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "series", "slug": "route-list-series-1"},
         headers=_auth(token),
     )
@@ -201,7 +205,7 @@ async def test_add_and_remove_items_idempotent(client, db):
 
     # Idempotent add.
     r3 = await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-1"},
         headers=_auth(token),
     )
@@ -210,7 +214,7 @@ async def test_add_and_remove_items_idempotent(client, db):
     # Remove.
     r4 = await client.request(
         "DELETE",
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-1"},
         headers=_auth(token),
     )
@@ -220,7 +224,7 @@ async def test_add_and_remove_items_idempotent(client, db):
     # Idempotent remove (no-op success).
     r5 = await client.request(
         "DELETE",
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-1"},
         headers=_auth(token),
     )
@@ -230,11 +234,11 @@ async def test_add_and_remove_items_idempotent(client, db):
 
 async def test_add_item_unknown_content_returns_404(client, db):
     token = await _register_and_login(client, "route-lists-user-10")
-    created = await client.post("/lists", json={"title": "Ghost Items"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Ghost Items"}, headers=_auth(token))
     slug = created.json()["slug"]
 
     response = await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "does-not-exist-movie"},
         headers=_auth(token),
     )
@@ -245,11 +249,11 @@ async def test_add_item_by_non_owner_returns_403(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-list-movie-2"))
     owner_token = await _register_and_login(client, "route-lists-user-11")
     other_token = await _register_and_login(client, "route-lists-user-12")
-    created = await client.post("/lists", json={"title": "Guarded"}, headers=_auth(owner_token))
+    created = await client.post("/v1/lists", json={"title": "Guarded"}, headers=_auth(owner_token))
     slug = created.json()["slug"]
 
     response = await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-2"},
         headers=_auth(other_token),
     )
@@ -263,22 +267,22 @@ async def test_reorder_items(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-list-movie-3"))
     await series_repo.upsert_series(db, _series_data("route-list-series-2"))
     token = await _register_and_login(client, "route-lists-user-13")
-    created = await client.post("/lists", json={"title": "Reorder Ops"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Reorder Ops"}, headers=_auth(token))
     slug = created.json()["slug"]
 
     await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-3"},
         headers=_auth(token),
     )
     await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "series", "slug": "route-list-series-2"},
         headers=_auth(token),
     )
 
     response = await client.put(
-        f"/lists/{slug}/items/order",
+        f"/v1/lists/{slug}/items/order",
         json={
             "items": [
                 {"item_type": "series", "slug": "route-list-series-2"},
@@ -298,22 +302,22 @@ async def test_reorder_mismatch_returns_422(client, db):
     await movies_repo.upsert_movie(db, _movie_data("route-list-movie-4"))
     await series_repo.upsert_series(db, _series_data("route-list-series-3"))
     token = await _register_and_login(client, "route-lists-user-14")
-    created = await client.post("/lists", json={"title": "Bad Reorder"}, headers=_auth(token))
+    created = await client.post("/v1/lists", json={"title": "Bad Reorder"}, headers=_auth(token))
     slug = created.json()["slug"]
 
     await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "movie", "slug": "route-list-movie-4"},
         headers=_auth(token),
     )
     await client.post(
-        f"/lists/{slug}/items",
+        f"/v1/lists/{slug}/items",
         json={"item_type": "series", "slug": "route-list-series-3"},
         headers=_auth(token),
     )
 
     response = await client.put(
-        f"/lists/{slug}/items/order",
+        f"/v1/lists/{slug}/items/order",
         json={"items": [{"item_type": "movie", "slug": "route-list-movie-4"}]},
         headers=_auth(token),
     )
@@ -325,10 +329,12 @@ async def test_reorder_mismatch_returns_422(client, db):
 
 async def test_get_public_list_is_accessible_anonymously(client, db):
     token = await _register_and_login(client, "route-lists-user-15")
-    created = await client.post("/lists", json={"title": "Open Collection"}, headers=_auth(token))
+    created = await client.post(
+        "/v1/lists", json={"title": "Open Collection"}, headers=_auth(token)
+    )
     slug = created.json()["slug"]
 
-    response = await client.get(f"/lists/{slug}")
+    response = await client.get(f"/v1/lists/{slug}")
     assert response.status_code == 200
     assert response.json()["slug"] == slug
 
@@ -337,18 +343,18 @@ async def test_get_private_list_hidden_from_others(client, db):
     owner_token = await _register_and_login(client, "route-lists-user-16")
     other_token = await _register_and_login(client, "route-lists-user-17")
     created = await client.post(
-        "/lists",
+        "/v1/lists",
         json={"title": "Secret Collection", "is_public": False},
         headers=_auth(owner_token),
     )
     slug = created.json()["slug"]
 
     # Owner can see it.
-    assert (await client.get(f"/lists/{slug}", headers=_auth(owner_token))).status_code == 200
+    assert (await client.get(f"/v1/lists/{slug}", headers=_auth(owner_token))).status_code == 200
     # Anonymous → 404.
-    assert (await client.get(f"/lists/{slug}")).status_code == 404
+    assert (await client.get(f"/v1/lists/{slug}")).status_code == 404
     # Other user → 404.
-    assert (await client.get(f"/lists/{slug}", headers=_auth(other_token))).status_code == 404
+    assert (await client.get(f"/v1/lists/{slug}", headers=_auth(other_token))).status_code == 404
 
 
 # ── GET /users/{username}/lists ──────────────────────────────────────────────
@@ -356,22 +362,22 @@ async def test_get_private_list_hidden_from_others(client, db):
 
 async def test_get_user_lists_public_vs_owner(client, db):
     owner_token = await _register_and_login(client, "route-lists-user-18")
-    await client.post("/lists", json={"title": "Public A"}, headers=_auth(owner_token))
+    await client.post("/v1/lists", json={"title": "Public A"}, headers=_auth(owner_token))
     await client.post(
-        "/lists", json={"title": "Private B", "is_public": False}, headers=_auth(owner_token)
+        "/v1/lists", json={"title": "Private B", "is_public": False}, headers=_auth(owner_token)
     )
 
     # Anonymous sees only the public one.
-    anon = await client.get("/users/route-lists-user-18/lists")
+    anon = await client.get("/v1/users/route-lists-user-18/lists")
     assert anon.status_code == 200
     assert anon.json()["total"] == 1
     assert anon.json()["lists"][0]["is_public"] is True
 
     # Owner sees both.
-    owner = await client.get("/users/route-lists-user-18/lists", headers=_auth(owner_token))
+    owner = await client.get("/v1/users/route-lists-user-18/lists", headers=_auth(owner_token))
     assert owner.json()["total"] == 2
 
 
 async def test_get_user_lists_unknown_user_returns_404(client, db):
-    response = await client.get("/users/nobody-lists-route/lists")
+    response = await client.get("/v1/users/nobody-lists-route/lists")
     assert response.status_code == 404

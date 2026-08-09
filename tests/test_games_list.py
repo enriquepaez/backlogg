@@ -52,7 +52,7 @@ async def client(db):
 
 async def test_list_games_returns_200_empty(client, db):
     """GET /games returns 200 with pagination metadata."""
-    response = await client.get("/games")
+    response = await client.get("/v1/games")
     assert response.status_code == 200
     body = response.json()
     assert "items" in body
@@ -74,7 +74,7 @@ async def test_list_games_response_fields(client, db):
         ),
     )
 
-    response = await client.get("/games?genre=gm-fields-rpg-slug")
+    response = await client.get("/v1/games?genre=gm-fields-rpg-slug")
     assert response.status_code == 200
     body = response.json()
     assert len(body["items"]) == 1
@@ -112,7 +112,7 @@ async def test_list_games_filter_by_genre(client, db):
         ),
     )
 
-    response = await client.get("/games?genre=gm-fps-genre-slug")
+    response = await client.get("/v1/games?genre=gm-fps-genre-slug")
     assert response.status_code == 200
     body = response.json()
     slugs = [item["slug"] for item in body["items"]]
@@ -145,7 +145,7 @@ async def test_list_games_sort_rating_desc(client, db):
         ),
     )
 
-    response = await client.get("/games?sort=rating_desc&genre=gm-sort-rating-slug")
+    response = await client.get("/v1/games?sort=rating_desc&genre=gm-sort-rating-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -179,7 +179,7 @@ async def test_list_games_sort_date_desc(client, db):
         ),
     )
 
-    response = await client.get("/games?sort=date_desc&genre=gm-date-genre-slug")
+    response = await client.get("/v1/games?sort=date_desc&genre=gm-date-genre-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -213,13 +213,13 @@ async def test_list_games_pagination(client, db):
         ),
     )
 
-    r1 = await client.get("/games?sort=rating_desc&page=1&limit=1&genre=gm-page-genre-slug")
+    r1 = await client.get("/v1/games?sort=rating_desc&page=1&limit=1&genre=gm-page-genre-slug")
     assert r1.status_code == 200
     b1 = r1.json()
     assert len(b1["items"]) == 1
     assert b1["total"] == 2
 
-    r2 = await client.get("/games?sort=rating_desc&page=2&limit=1&genre=gm-page-genre-slug")
+    r2 = await client.get("/v1/games?sort=rating_desc&page=2&limit=1&genre=gm-page-genre-slug")
     assert r2.status_code == 200
     b2 = r2.json()
     assert len(b2["items"]) == 1

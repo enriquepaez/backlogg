@@ -20,7 +20,7 @@ API externa, persiste el ítem y lo devuelve en la misma petición.
 - **SQLAlchemy 2.0** (typed) + **Alembic** — ORM y migraciones
 - **Pydantic v2** — validación de request/response
 - **GitHub Actions** — sync nocturno (`.github/workflows/nightly-sync.yml`)
-  que llama a los endpoints `/admin/sync/{type}`; la instancia free de Render
+  que llama a los endpoints `/v1/admin/sync/{type}`; la instancia free de Render
   duerme sin tráfico, por lo que no puede haber schedulers embebidos en el proceso
 - **PostgreSQL** (Neon en producción)
 - **ruff** — linting y formato
@@ -42,8 +42,8 @@ backlogg/
 │   ├── service.py         # Lógica de negocio + on-demand fallback
 │   ├── routes.py          # FastAPI router (sin lógica, solo delega)
 │   └── adapters/          # Clientes de APIs externas
-├── admin/                 # POST /admin/sync/{type}, GET /admin/stats
-│   └── auth.py            # X-API-Key dependency para /admin/*
+├── admin/                 # POST /v1/admin/sync/{type}, GET /v1/admin/stats
+│   └── auth.py            # X-API-Key dependency para /v1/admin/*
 ├── scheduler/
 │   ├── jobs.py            # sync_movies/series/books/games (por tramos)
 │   └── repository.py      # Cursores de sync (tabla sync_cursors)
@@ -111,7 +111,7 @@ PostgreSQL
 
 El catálogo se puebla por dos caminos además del fallback on-demand:
 
-- **Nightly** (GitHub Actions → `POST /admin/sync/{type}`): cada noche avanza
+- **Nightly** (GitHub Actions → `POST /v1/admin/sync/{type}`): cada noche avanza
   un tramo de `SYNC_SLICE_SIZE` items por tipo, con cursor persistido en
   `sync_cursors`.
 - **Backfill** (GitHub Actions → `scripts/backfill_sync.py`): reutiliza los

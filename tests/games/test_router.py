@@ -50,7 +50,7 @@ async def test_get_game_returns_200(client, db):
     """GET /games/{slug} returns 200 with correct fields for a seeded game."""
     await repo.upsert_game(db, _make_game_dict("doom-1993-endpoint"))
 
-    response = await client.get("/games/doom-1993-endpoint")
+    response = await client.get("/v1/games/doom-1993-endpoint")
     assert response.status_code == 200
 
     body = response.json()
@@ -74,7 +74,7 @@ async def test_get_game_returns_404(client, db):
         ),
         patch.object(service._igdb_client, "search_games", new_callable=AsyncMock, return_value=[]),
     ):
-        response = await client.get("/games/nonexistent-game-slug-404-test")
+        response = await client.get("/v1/games/nonexistent-game-slug-404-test")
 
     assert response.status_code == 404
 
@@ -97,7 +97,7 @@ async def test_get_game_fallback_endpoint(client, db):
             return_value=game_dict,
         ),
     ):
-        response = await client.get("/games/quake-1996-endpoint")
+        response = await client.get("/v1/games/quake-1996-endpoint")
 
     assert response.status_code == 200
     body = response.json()
@@ -109,7 +109,7 @@ async def test_get_game_credits_empty(client, db):
     """GET /games/{slug} returns credits as [] when no credits exist."""
     await repo.upsert_game(db, _make_game_dict("credits-empty-game-1993"))
 
-    response = await client.get("/games/credits-empty-game-1993")
+    response = await client.get("/v1/games/credits-empty-game-1993")
     assert response.status_code == 200
 
     body = response.json()
@@ -163,7 +163,7 @@ async def test_get_game_credits_present_and_ordered(client, db):
         },
     )
 
-    response = await client.get("/games/credits-ordered-game-1993")
+    response = await client.get("/v1/games/credits-ordered-game-1993")
     assert response.status_code == 200
 
     body = response.json()

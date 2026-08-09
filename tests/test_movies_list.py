@@ -53,7 +53,7 @@ async def client(db):
 
 async def test_list_movies_returns_200_empty(client, db):
     """GET /movies returns 200 with pagination metadata."""
-    response = await client.get("/movies")
+    response = await client.get("/v1/movies")
     assert response.status_code == 200
     body = response.json()
     assert "items" in body
@@ -77,7 +77,7 @@ async def test_list_movies_response_fields(client, db):
         ),
     )
 
-    response = await client.get("/movies?genre=mv-fields-comedy-slug")
+    response = await client.get("/v1/movies?genre=mv-fields-comedy-slug")
     assert response.status_code == 200
     body = response.json()
     assert len(body["items"]) == 1
@@ -118,7 +118,7 @@ async def test_list_movies_filter_by_genre(client, db):
         ),
     )
 
-    response = await client.get("/movies?genre=mv-scifi-filter-slug")
+    response = await client.get("/v1/movies?genre=mv-scifi-filter-slug")
     assert response.status_code == 200
     body = response.json()
     slugs = [item["slug"] for item in body["items"]]
@@ -151,7 +151,7 @@ async def test_list_movies_sort_rating_desc(client, db):
         ),
     )
 
-    response = await client.get("/movies?sort=rating_desc&genre=mv-sort-rating-slug")
+    response = await client.get("/v1/movies?sort=rating_desc&genre=mv-sort-rating-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -186,7 +186,7 @@ async def test_list_movies_sort_date_desc(client, db):
         ),
     )
 
-    response = await client.get("/movies?sort=date_desc&genre=mv-sort-date-slug")
+    response = await client.get("/v1/movies?sort=date_desc&genre=mv-sort-date-slug")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -220,7 +220,7 @@ async def test_list_movies_pagination(client, db):
         ),
     )
 
-    r1 = await client.get("/movies?sort=rating_desc&page=1&limit=1&genre=mv-page-genre-slug")
+    r1 = await client.get("/v1/movies?sort=rating_desc&page=1&limit=1&genre=mv-page-genre-slug")
     assert r1.status_code == 200
     b1 = r1.json()
     assert len(b1["items"]) == 1
@@ -228,7 +228,7 @@ async def test_list_movies_pagination(client, db):
     assert b1["limit"] == 1
     assert b1["total"] == 2
 
-    r2 = await client.get("/movies?sort=rating_desc&page=2&limit=1&genre=mv-page-genre-slug")
+    r2 = await client.get("/v1/movies?sort=rating_desc&page=2&limit=1&genre=mv-page-genre-slug")
     assert r2.status_code == 200
     b2 = r2.json()
     assert len(b2["items"]) == 1

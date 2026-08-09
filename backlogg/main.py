@@ -25,11 +25,13 @@ from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
 from backlogg.lists.routes import lists_router, user_lists_router
 from backlogg.metrics.routes import router as metrics_router
+from backlogg.moderation.routes import admin_moderation_router
 from backlogg.movies.routes import router as movies_router
 from backlogg.notifications.routes import notifications_router
 from backlogg.people.routes import router as people_router
 from backlogg.ratings.routes import ratings_router, user_reviews_router
 from backlogg.recommendations.routes import recommendations_router
+from backlogg.reports.routes import admin_reports_router, reports_router
 from backlogg.search.routes import router as search_router
 from backlogg.series.routes import router as series_router
 from backlogg.trending.router import router as trending_router
@@ -142,6 +144,10 @@ OPENAPI_TAGS = [
         "description": "On-the-fly recommendations from the caller's ratings and library.",
     },
     {
+        "name": "reports",
+        "description": "User-filed reports flagging reviews as problematic for admin moderation.",
+    },
+    {
         "name": "metrics",
         "description": "Prometheus metrics in the text exposition format. No authentication.",
     },
@@ -218,24 +224,34 @@ async def health():
     return {"status": "ok"}
 
 
-app.include_router(movies_router)
-app.include_router(series_router)
-app.include_router(books_router)
-app.include_router(games_router)
-app.include_router(people_router)
-app.include_router(search_router)
-app.include_router(admin_router)
-app.include_router(genres_router)
-app.include_router(trending_router)
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(ratings_router)
-app.include_router(user_reviews_router)
-app.include_router(follows_router)
-app.include_router(feed_router)
-app.include_router(user_library_router)
-app.include_router(lists_router)
-app.include_router(user_lists_router)
-app.include_router(notifications_router)
-app.include_router(recommendations_router)
+# Business routers are served under a single /v1 prefix (clean cut, no root
+# aliases). Each router already declares its own prefix (e.g. /movies, /auth,
+# /admin), so prefix="/v1" prepends it -> /v1/movies, /v1/auth/login, etc.
+# Operational endpoints (/health above, /metrics below) stay UNVERSIONED.
+_V1 = "/v1"
+app.include_router(movies_router, prefix=_V1)
+app.include_router(series_router, prefix=_V1)
+app.include_router(books_router, prefix=_V1)
+app.include_router(games_router, prefix=_V1)
+app.include_router(people_router, prefix=_V1)
+app.include_router(search_router, prefix=_V1)
+app.include_router(admin_router, prefix=_V1)
+app.include_router(genres_router, prefix=_V1)
+app.include_router(trending_router, prefix=_V1)
+app.include_router(auth_router, prefix=_V1)
+app.include_router(users_router, prefix=_V1)
+app.include_router(ratings_router, prefix=_V1)
+app.include_router(user_reviews_router, prefix=_V1)
+app.include_router(follows_router, prefix=_V1)
+app.include_router(feed_router, prefix=_V1)
+app.include_router(user_library_router, prefix=_V1)
+app.include_router(lists_router, prefix=_V1)
+app.include_router(user_lists_router, prefix=_V1)
+app.include_router(notifications_router, prefix=_V1)
+app.include_router(recommendations_router, prefix=_V1)
+app.include_router(reports_router, prefix=_V1)
+app.include_router(admin_reports_router, prefix=_V1)
+app.include_router(admin_moderation_router, prefix=_V1)
+
+# Operational endpoints remain unversioned.
 app.include_router(metrics_router)

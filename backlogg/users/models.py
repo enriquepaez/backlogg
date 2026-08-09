@@ -34,6 +34,9 @@ class User(Base):
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Per-user moderation flag. A banned user cannot log in or refresh, and all
+    # of their reviews become invisible on the same surfaces as a hidden review.
+    is_banned: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

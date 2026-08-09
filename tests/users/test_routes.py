@@ -29,7 +29,7 @@ def _register_payload(username: str, email: str, password: str = "s3cret-passwor
 
 async def test_register_returns_201(client):
     response = await client.post(
-        "/auth/register", json=_register_payload("route-user-1", "route-user-1@example.com")
+        "/v1/auth/register", json=_register_payload("route-user-1", "route-user-1@example.com")
     )
     assert response.status_code == 201
     body = response.json()
@@ -41,21 +41,23 @@ async def test_register_returns_201(client):
 
 async def test_register_duplicate_username_returns_409(client):
     await client.post(
-        "/auth/register", json=_register_payload("route-user-dup", "route-user-dup-a@example.com")
+        "/v1/auth/register",
+        json=_register_payload("route-user-dup", "route-user-dup-a@example.com"),
     )
     response = await client.post(
-        "/auth/register", json=_register_payload("route-user-dup", "route-user-dup-b@example.com")
+        "/v1/auth/register",
+        json=_register_payload("route-user-dup", "route-user-dup-b@example.com"),
     )
     assert response.status_code == 409
 
 
 async def test_register_duplicate_email_returns_409(client):
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json=_register_payload("route-user-dup-email-a", "route-dup-email@example.com"),
     )
     response = await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json=_register_payload("route-user-dup-email-b", "route-dup-email@example.com"),
     )
     assert response.status_code == 409
@@ -66,10 +68,10 @@ async def test_register_duplicate_email_returns_409(client):
 
 async def test_login_returns_200_with_token(client):
     await client.post(
-        "/auth/register", json=_register_payload("route-login-user", "route-login@example.com")
+        "/v1/auth/register", json=_register_payload("route-login-user", "route-login@example.com")
     )
     response = await client.post(
-        "/auth/login", json={"username": "route-login-user", "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": "route-login-user", "password": "s3cret-password"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -79,18 +81,18 @@ async def test_login_returns_200_with_token(client):
 
 async def test_login_invalid_credentials_returns_401(client):
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json=_register_payload("route-login-user-2", "route-login-2@example.com"),
     )
     response = await client.post(
-        "/auth/login", json={"username": "route-login-user-2", "password": "wrong-password"}
+        "/v1/auth/login", json={"username": "route-login-user-2", "password": "wrong-password"}
     )
     assert response.status_code == 401
 
 
 async def test_login_unknown_username_returns_401(client):
     response = await client.post(
-        "/auth/login", json={"username": "nobody-registered-this-user", "password": "whatever"}
+        "/v1/auth/login", json={"username": "nobody-registered-this-user", "password": "whatever"}
     )
     assert response.status_code == 401
 
@@ -99,20 +101,20 @@ async def test_login_unknown_username_returns_401(client):
 
 
 async def test_get_me_without_token_returns_401(client):
-    response = await client.get("/users/me")
+    response = await client.get("/v1/users/me")
     assert response.status_code == 401
 
 
 async def test_get_me_with_valid_token_returns_200(client):
     await client.post(
-        "/auth/register", json=_register_payload("route-me-user", "route-me@example.com")
+        "/v1/auth/register", json=_register_payload("route-me-user", "route-me@example.com")
     )
     login_response = await client.post(
-        "/auth/login", json={"username": "route-me-user", "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": "route-me-user", "password": "s3cret-password"}
     )
     token = login_response.json()["access_token"]
 
-    response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
+    response = await client.get("/v1/users/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     body = response.json()
     assert body["username"] == "route-me-user"
@@ -120,7 +122,9 @@ async def test_get_me_with_valid_token_returns_200(client):
 
 
 async def test_get_me_with_invalid_token_returns_401(client):
-    response = await client.get("/users/me", headers={"Authorization": "Bearer not-a-valid-token"})
+    response = await client.get(
+        "/v1/users/me", headers={"Authorization": "Bearer not-a-valid-token"}
+    )
     assert response.status_code == 401
 
 
@@ -128,21 +132,21 @@ async def test_get_me_with_invalid_token_returns_401(client):
 
 
 async def test_patch_me_without_token_returns_401(client):
-    response = await client.patch("/users/me", json={"display_name": "New Name"})
+    response = await client.patch("/v1/users/me", json={"display_name": "New Name"})
     assert response.status_code == 401
 
 
 async def test_patch_me_updates_profile(client):
     await client.post(
-        "/auth/register", json=_register_payload("route-patch-user", "route-patch@example.com")
+        "/v1/auth/register", json=_register_payload("route-patch-user", "route-patch@example.com")
     )
     login_response = await client.post(
-        "/auth/login", json={"username": "route-patch-user", "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": "route-patch-user", "password": "s3cret-password"}
     )
     token = login_response.json()["access_token"]
 
     response = await client.patch(
-        "/users/me",
+        "/v1/users/me",
         json={"display_name": "Patched Name", "bio": "Patched bio"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -157,9 +161,9 @@ async def test_patch_me_updates_profile(client):
 
 async def test_get_user_public_profile_returns_200_without_email(client):
     await client.post(
-        "/auth/register", json=_register_payload("route-public-user", "route-public@example.com")
+        "/v1/auth/register", json=_register_payload("route-public-user", "route-public@example.com")
     )
-    response = await client.get("/users/route-public-user")
+    response = await client.get("/v1/users/route-public-user")
     assert response.status_code == 200
     body = response.json()
     assert body["username"] == "route-public-user"
@@ -167,5 +171,5 @@ async def test_get_user_public_profile_returns_200_without_email(client):
 
 
 async def test_get_user_public_profile_returns_404(client):
-    response = await client.get("/users/nobody-has-this-username-ever")
+    response = await client.get("/v1/users/nobody-has-this-username-ever")
     assert response.status_code == 404
