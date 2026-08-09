@@ -14,6 +14,7 @@
 | Scope v1 | **Paridad completa** con el backend (M0–M6) | Todo lo que expone la API |
 | Repo | **Monorepo con workspaces** | Web y futura app nativa comparten `packages/` |
 | Plataforma | **Camino A: Web + PWA ahora, nativa después** | PWA cubre "app" ya; nativa Expo futura reusa el core |
+| i18n | **next-intl, bilingüe ES + EN** desde el scaffold | Segmento `app/[locale]/`; fallback `en` + detección por navegador. Traduce UI, no el contenido del catálogo |
 
 ## 2. Por qué "app-ready" sin tocar el backend
 
@@ -93,6 +94,7 @@ Identificadores `FE-n`. Dependencias entre milestones son secuenciales salvo not
 - **FE-1** Scaffold monorepo (pnpm workspaces, `apps/web` Next 15 TS, `packages/{api-client,core,config}`, tsconfig/eslint/prettier compartidos).
 - **FE-2** Generación del cliente API (`openapi-typescript` + `openapi-fetch` desde `/openapi.json`; script de regeneración; `packages/api-client`).
 - **FE-3** Design system base (Tailwind v4 + shadcn/ui init; tokens de tema claro/oscuro; layout raíz, header/nav/footer, tipografía).
+- **FE-3b** i18n con next-intl (segmento `app/[locale]/`, middleware de locale, catálogos `es`/`en`, fallback `en` + detección; helpers de traducción server+client). Claves de mensaje desde el día 1 (nada de strings hardcodeados).
 - **FE-4** Fundación auth BFF (Route Handlers login/refresh/logout; cookie httpOnly; helper `apiFetch` con auto-refresh; `middleware.ts` de rutas privadas).
 - **FE-5** App shell y convenciones (loading/error/not-found, toasts, QueryClient provider, config de entorno).
 - **FE-6** PWA base (manifest, iconos, service worker, instalable).

@@ -45,3 +45,15 @@ htmlcov/
 
 # Alembic
 # (no ignorar alembic/versions — son los archivos de migración)
+
+# --- JS / frontend (monorepo) ---
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+playwright-report/
+test-results/
+.vercel/
