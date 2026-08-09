@@ -147,7 +147,7 @@
         "MSW mockea /v1 para tests sin backend",
         "Workflow de GitHub Actions: typecheck+lint+test+build del frontend en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 9,

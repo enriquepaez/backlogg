@@ -8,5 +8,9 @@ allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
   esbuild: true
+  # msw's postinstall only copies the browser Service Worker file
+  # (`msw init`, for `setupWorker`); these tests use `msw/node`
+  # (`setupServer`) exclusively, so the browser worker script isn't needed.
+  msw: false
   sharp: false
   unrs-resolver: false
