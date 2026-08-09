@@ -1,0 +1,20 @@
+{
+  "Metadata": {
+    "home": {
+      "title": "backlogg",
+      "description": "Registra y puntúa las películas, series, libros y juegos que te encantan."
+    }
+  },
+  "Home": {
+    "brand": "backlogg",
+    "title": "Registra todo lo que ves, lees y juegas.",
+    "description": "Mantén una biblioteca personal, puntúa lo que terminas y descubre qué disfrutar a continuación — en películas, series, libros y juegos.",
+    "exploreShowcase": "Explora el sistema de diseño",
+    "documentation": "Documentación"
+  },
+  "LanguageSwitcher": {
+    "label": "Idioma",
+    "en": "English",
+    "es": "Español"
+  }
+}

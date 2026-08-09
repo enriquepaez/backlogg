@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { setRequestLocale } from "next-intl/server";
 
 export const metadata = {
   title: "Design system showcase",
@@ -35,7 +36,14 @@ const buttonVariants = [
   "link",
 ] as const;
 
-export default function ShowcasePage() {
+// Internal kitchen-sink page. Its copy is intentionally left as English demo
+// content (not translated) since it only exercises the design-system
+// primitives and is not user-facing product UI.
+export default async function ShowcasePage({
+  params,
+}: PageProps<"/[locale]/showcase">) {
+  const { locale } = await params;
+  setRequestLocale(locale);
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-10 px-6 py-12">
       <header className="flex flex-wrap items-start justify-between gap-4">
