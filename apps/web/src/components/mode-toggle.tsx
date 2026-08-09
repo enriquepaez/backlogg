@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -11,11 +12,26 @@ const options = [
   { value: "dark", label: "Dark", icon: Moon },
 ] as const;
 
+const noopSubscribe = () => () => {};
+
 export function ModeToggle() {
-  // `theme` is `undefined` on the server and on the first client render, so no
-  // option is marked active until next-themes resolves the value after mount.
-  // This keeps server and client markup identical and avoids hydration errors.
+  // next-themes reads the persisted theme from `localStorage` synchronously
+  // inside a `useState` lazy initializer, which runs during the client's
+  // first (hydration) render — not in a post-mount effect. The server has no
+  // access to `localStorage` and always renders off `defaultTheme`. So if a
+  // theme other than the default was previously persisted, `theme` already
+  // differs between the server-rendered markup and the client's first render
+  // pass, causing a hydration mismatch. `useSyncExternalStore`'s server
+  // snapshot always reports `false` (matching the server-rendered markup),
+  // while the client snapshot reports `true` from its first render onward —
+  // this is React's recommended way to model a value that legitimately
+  // differs between server and client without a setState-in-effect cascade.
   const { theme, setTheme } = useTheme();
+  const mounted = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
 
   return (
     <div
@@ -24,7 +40,7 @@ export function ModeToggle() {
       className="inline-flex items-center gap-1 rounded-lg border border-border p-1"
     >
       {options.map(({ value, label, icon: Icon }) => {
-        const active = theme === value;
+        const active = mounted && theme === value;
         return (
           <Button
             key={value}

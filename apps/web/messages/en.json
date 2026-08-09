@@ -6,7 +6,6 @@
     }
   },
   "Home": {
-    "brand": "backlogg",
     "title": "Track everything you watch, read and play.",
     "description": "Keep a personal library, rate what you finish and discover what to enjoy next — across movies, series, books and games.",
     "exploreShowcase": "Explore the design system",
@@ -16,5 +15,30 @@
     "label": "Language",
     "en": "English",
     "es": "Español"
+  },
+  "Nav": {
+    "brand": "backlogg",
+    "primaryNav": "Main navigation",
+    "home": "Home",
+    "showcase": "Showcase",
+    "login": "Log in",
+    "logout": "Log out",
+    "logoutError": "Couldn't log out. Please try again."
+  },
+  "Footer": {
+    "rights": "© {year} backlogg. All rights reserved."
+  },
+  "Loading": {
+    "label": "Loading…"
+  },
+  "NotFound": {
+    "title": "Page not found",
+    "description": "The page you're looking for doesn't exist or was moved.",
+    "backHome": "Back to home"
+  },
+  "ErrorPage": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred. You can try again.",
+    "retry": "Try again"
   }
 }

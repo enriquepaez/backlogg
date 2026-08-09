@@ -61,10 +61,25 @@ export async function apiFetch<T>(call: ApiCall<T>): Promise<ApiFetchResult<T>> 
  * Memoized per-request with React `cache()` so multiple Server Components can
  * call it without duplicate `/v1/users/me` requests. Doubles as a session
  * verifier (a non-null result means the session is valid / was refreshed).
+ *
+ * This is the first caller of `apiFetch` invoked directly from Server
+ * Component render (the app shell's nav, on every page — see FE-5). Network
+ * failures (backend unreachable) must degrade to "no session" rather than
+ * throw: an uncaught exception here would happen in `[locale]/layout.tsx`
+ * itself, which sits ABOVE `[locale]/error.tsx` in the tree and is therefore
+ * NOT covered by that error boundary (see `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/error.md`:
+ * "error.js ... does not wrap the layout.js ... above it in the same
+ * segment") — it would take down the whole app shell instead of just
+ * showing an anonymous nav.
  */
 export const getCurrentUser = cache(async (): Promise<UserMe | null> => {
-  const { data, response } = await apiFetch<UserMe>((client, token) =>
-    client.GET("/v1/users/me", { headers: authHeader(token) }),
-  );
-  return response.status === 200 && data ? data : null;
+  try {
+    const { data, response } = await apiFetch<UserMe>((client, token) =>
+      client.GET("/v1/users/me", { headers: authHeader(token) }),
+    );
+    return response.status === 200 && data ? data : null;
+  } catch (error) {
+    console.error("getCurrentUser: failed to reach the API", error);
+    return null;
+  }
 });
