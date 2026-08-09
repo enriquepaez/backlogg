@@ -15,7 +15,10 @@ import {
   MOCK_API_BASE_URL,
   bookListFixture,
   gameListFixture,
+  genreListFixture,
+  movieGenreFilteredFixture,
   movieListFixture,
+  movieListPage2Fixture,
   seriesListFixture,
   trendingFixture,
 } from "@/test/msw/handlers";
@@ -25,9 +28,8 @@ vi.mock("@/lib/auth/session", () => ({
   getApiClient: () => createApiClient(MOCK_API_BASE_URL),
 }));
 
-const { getAllFeatured, getFeatured, getTrending } = await import(
-  "./catalog"
-);
+const { getAllFeatured, getFeatured, getGenres, getTrending, isCatalogType, listCatalog } =
+  await import("./catalog");
 
 describe("getTrending", () => {
   it("returns the trending results on success", async () => {
@@ -97,5 +99,91 @@ describe("getAllFeatured", () => {
       book: bookListFixture.items,
       game: gameListFixture.items,
     });
+  });
+});
+
+describe("listCatalog", () => {
+  it("returns the unfiltered page-1 list by default", async () => {
+    expect(await listCatalog("movie")).toEqual({
+      ok: true,
+      ...movieListFixture,
+    });
+  });
+
+  it("applies the genre filter", async () => {
+    expect(await listCatalog("movie", { genre: "science-fiction" })).toEqual({
+      ok: true,
+      ...movieGenreFilteredFixture,
+    });
+  });
+
+  it("applies the page param", async () => {
+    expect(await listCatalog("movie", { page: 2 })).toEqual({
+      ok: true,
+      ...movieListPage2Fixture,
+    });
+  });
+
+  it("returns ok: false on a non-200 response — distinct from an empty result", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/series`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await listCatalog("series")).toEqual({ ok: false });
+  });
+
+  it("returns ok: false when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/books`, () => HttpResponse.error()),
+    );
+
+    expect(await listCatalog("book")).toEqual({ ok: false });
+  });
+});
+
+describe("getGenres", () => {
+  it("returns genre options on success", async () => {
+    expect(await getGenres("movie")).toEqual(
+      genreListFixture.genres.map((genre) => ({
+        name: genre.name,
+        slug: genre.slug,
+        count: genre.count,
+      })),
+    );
+  });
+
+  it("degrades to an empty array on a non-200 response", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/genres`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getGenres("movie")).toEqual([]);
+  });
+
+  it("degrades to an empty array when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/genres`, () => HttpResponse.error()),
+    );
+
+    expect(await getGenres("movie")).toEqual([]);
+  });
+});
+
+describe("isCatalogType", () => {
+  it("accepts the four known catalog types", () => {
+    expect(isCatalogType("movie")).toBe(true);
+    expect(isCatalogType("series")).toBe(true);
+    expect(isCatalogType("book")).toBe(true);
+    expect(isCatalogType("game")).toBe(true);
+  });
+
+  it("rejects anything else", () => {
+    expect(isCatalogType("movies")).toBe(false);
+    expect(isCatalogType("")).toBe(false);
+    expect(isCatalogType("MOVIE")).toBe(false);
   });
 });

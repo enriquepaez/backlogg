@@ -4,7 +4,12 @@
   "rules": {
     "one_feature_at_a_time": true,
     "require_green_to_close": true,
-    "valid_status": ["pending", "in_progress", "done", "blocked"],
+    "valid_status": [
+      "pending",
+      "in_progress",
+      "done",
+      "blocked"
+    ],
     "verify_pipeline": "pnpm --filter web typecheck && pnpm --filter web lint && pnpm --filter web build; tests (Vitest/Playwright) donde apliquen; QA manual en navegador para features de UI",
     "next_version_note": "Next.js 16 tiene breaking changes respecto a Next 15. Consultar apps/web/node_modules/next/dist/docs/ (01-app) antes de escribir código de framework.",
     "i18n_note": "Sin strings hardcodeados: toda cadena de UI va como clave de mensaje next-intl (es/en). El contenido del catálogo NO se traduce (llega en su idioma de origen).",
@@ -43,7 +48,9 @@
       "name": "api_client",
       "title": "Cliente API tipado desde /openapi.json",
       "description": "packages/api-client: tipos generados con openapi-typescript desde el esquema OpenAPI de /v1, más un wrapper tipado (openapi-fetch) para llamar a la API. Script de regeneración.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Esquema OpenAPI exportado del backend (python -c 'app.openapi()') o servido, y consumido por openapi-typescript",
         "packages/api-client expone tipos de todas las operaciones /v1 y un cliente tipado",
@@ -59,7 +66,9 @@
       "name": "design_system",
       "title": "Design system base (Tailwind + shadcn/ui)",
       "description": "Init de shadcn/ui sobre Tailwind v4; tokens de tema claro/oscuro; primitivos base (Button, Input, Card, Dialog, etc.); tipografía; toggle de tema.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "shadcn/ui inicializado; componentes base disponibles en el repo (no como dep opaca)",
         "Tema claro/oscuro con tokens; toggle funcional y respeta prefers-color-scheme",
@@ -75,7 +84,9 @@
       "name": "i18n",
       "title": "i18n con next-intl (es/en)",
       "description": "Segmento app/[locale]/, middleware de locale (fallback en + detección por navegador), catálogos de mensajes es/en, helpers de traducción server y client.",
-      "depends_on": [1],
+      "depends_on": [
+        1
+      ],
       "acceptance": [
         "Rutas bajo /[locale]; /es y /en resuelven; locale por defecto en con detección Accept-Language",
         "Catálogos messages/es.json y messages/en.json; helper t() en server y client components",
@@ -91,7 +102,9 @@
       "name": "auth_bff",
       "title": "Fundación de auth BFF (cookie httpOnly)",
       "description": "Route Handlers /api/auth/{login,refresh,logout} que proxan a /v1/auth/*; refresh token en cookie httpOnly/Secure/SameSite; helper apiFetch server-side con auto-refresh ante 401; middleware.ts protegiendo rutas privadas.",
-      "depends_on": [2],
+      "depends_on": [
+        2
+      ],
       "acceptance": [
         "POST /api/auth/login guarda el refresh en cookie httpOnly y no expone tokens al cliente",
         "apiFetch adjunta el access token server-side y reintenta una vez tras refrescar ante 401",
@@ -108,7 +121,11 @@
       "name": "app_shell",
       "title": "App shell y convenciones",
       "description": "Layout raíz, header/nav (con estado de auth y selector de idioma/tema), footer; convenciones loading/error/not-found; provider de TanStack Query; toasts; config de entorno.",
-      "depends_on": [3, 4, 5],
+      "depends_on": [
+        3,
+        4,
+        5
+      ],
       "acceptance": [
         "Layout con header/nav/footer responsive; nav refleja sesión (logueado/anónimo)",
         "loading.tsx/error.tsx/not-found.tsx y patrón de toasts establecidos",
@@ -124,7 +141,9 @@
       "name": "pwa_baseline",
       "title": "PWA base (instalable)",
       "description": "Web app manifest, iconos, service worker (Serwist o next-pwa), estrategia de caché básica del app shell; instalabilidad.",
-      "depends_on": [6],
+      "depends_on": [
+        6
+      ],
       "acceptance": [
         "manifest + iconos; la app es instalable (criterios PWA en Lighthouse)",
         "Service worker registrado con caché del app shell; funciona offline el shell básico",
@@ -140,7 +159,9 @@
       "name": "testing_ci",
       "title": "Testing + CI del frontend",
       "description": "Vitest + Testing Library (unit), Playwright (e2e), MSW (mock de /v1). Job de CI: typecheck + lint + test + build. Genera OpenAPI del backend en CI para el cliente tipado.",
-      "depends_on": [2],
+      "depends_on": [
+        2
+      ],
       "acceptance": [
         "Vitest+Testing Library configurados con un test de ejemplo verde",
         "Playwright configurado con un e2e de humo (home carga)",
@@ -156,7 +177,10 @@
       "name": "home_landing",
       "title": "Home / landing",
       "description": "Portada con trending y destacados por tipo; entradas a browse y search. SSR/ISR.",
-      "depends_on": [6, 2],
+      "depends_on": [
+        6,
+        2
+      ],
       "acceptance": [
         "Home renderiza trending (GET /v1/trending) y secciones por tipo",
         "SSR/ISR con revalidación; metadatos OG básicos",
@@ -172,14 +196,17 @@
       "name": "browse_by_type",
       "title": "Browse por tipo (movies/series/books/games)",
       "description": "Listado paginado por tipo con filtro por género, sort y paginación. SSR/ISR.",
-      "depends_on": [6, 2],
+      "depends_on": [
+        6,
+        2
+      ],
       "acceptance": [
         "GET /v1/{movies,series,books,games} con genre/sort/page/limit; UI de filtros y paginación",
         "Grid de posters con datos del ListItemOut; estados vacío/carga/error",
         "SSR/ISR; URLs shareables con los filtros en query params",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 11,
@@ -188,7 +215,10 @@
       "name": "item_detail",
       "title": "Detalle de item",
       "description": "Página de detalle por slug: poster, metadatos, rating_internal/external, credits, similar, hueco de viewer_status (auth-opcional). SSR/ISR + OG metadata.",
-      "depends_on": [6, 2],
+      "depends_on": [
+        6,
+        2
+      ],
       "acceptance": [
         "GET /v1/{tipo}/{slug}; render de metadatos, ratings y credits",
         "Sección 'similar' (GET /v1/{tipo}/{slug}/similar) para movies/series",
@@ -204,7 +234,10 @@
       "name": "global_search",
       "title": "Búsqueda global",
       "description": "Buscador cross-type con filtro por tipo y paginación; manejo de 429 (rate limit del fallback externo).",
-      "depends_on": [6, 2],
+      "depends_on": [
+        6,
+        2
+      ],
       "acceptance": [
         "GET /v1/search?q=&type=&page=&limit=; resultados con item_type y datos base",
         "Estado vacío ('sin resultados'), 422 (q vacía) manejado, 429 con Retry-After surfaced con UX de espera",
@@ -220,7 +253,10 @@
       "name": "genres_trending_browse",
       "title": "Browse de géneros y trending",
       "description": "Páginas de exploración por género y de trending por tipo/periodo.",
-      "depends_on": [6, 2],
+      "depends_on": [
+        6,
+        2
+      ],
       "acceptance": [
         "GET /v1/genres (con filtro por tipo) y GET /v1/trending (type/period) en UI navegable",
         "Enlaces desde género a browse filtrado por ese género",
@@ -236,7 +272,10 @@
       "name": "register_login",
       "title": "Registro y login",
       "description": "Formularios de registro y login (react-hook-form + zod) a través del BFF; manejo de 409/422/429.",
-      "depends_on": [5, 6],
+      "depends_on": [
+        5,
+        6
+      ],
       "acceptance": [
         "Registro (POST /v1/auth/register vía BFF): validación zod espejo (username [a-zA-Z0-9_-] 3-50, password min 8), 409 username/email en uso, 422",
         "Login (POST /v1/auth/login vía BFF) crea sesión (cookie httpOnly)",
@@ -252,7 +291,9 @@
       "name": "session_ux",
       "title": "UX de sesión",
       "description": "Estado de auth en el cliente, menú de cuenta en el header, logout, ciclo de refresh transparente end-to-end.",
-      "depends_on": [14],
+      "depends_on": [
+        14
+      ],
       "acceptance": [
         "Header muestra estado logueado/anónimo; menú de cuenta con logout",
         "El access token corto se refresca de forma transparente sin re-login (verificado dejando expirar)",
@@ -268,7 +309,10 @@
       "name": "email_verification",
       "title": "Verificación de email",
       "description": "Página /verify-email (destino de los enlaces del backend) que consume el token y confirma; disparo de reenvío desde ajustes.",
-      "depends_on": [5, 6],
+      "depends_on": [
+        5,
+        6
+      ],
       "acceptance": [
         "Ruta /verify-email?token= → POST /v1/auth/verify/confirm; éxito/expirado(400)/inválido con UI clara",
         "Acción 'reenviar verificación' (POST /v1/auth/verify/request) desde cuenta",
@@ -284,7 +328,10 @@
       "name": "password_recovery",
       "title": "Recuperación de password",
       "description": "Páginas 'olvidé mi contraseña' (forgot) y /reset-password (destino del enlace) con el flujo de reset.",
-      "depends_on": [5, 6],
+      "depends_on": [
+        5,
+        6
+      ],
       "acceptance": [
         "Forgot (POST /v1/auth/password/forgot) siempre 202 sin enumeración; UI neutra",
         "Ruta /reset-password?token= → POST /v1/auth/password/reset; token single-use/expirado(400) manejado",
@@ -300,7 +347,9 @@
       "name": "account_settings",
       "title": "Ajustes de cuenta (+ borrado)",
       "description": "Editar perfil (display_name, bio, avatar_url), pedir verificación de email, y borrar cuenta con confirmación.",
-      "depends_on": [15],
+      "depends_on": [
+        15
+      ],
       "acceptance": [
         "GET/PATCH /v1/users/me: editar perfil con validación y feedback",
         "Borrado de cuenta (DELETE /v1/users/me) con doble confirmación; cierra sesión tras 204",
@@ -316,7 +365,10 @@
       "name": "rate_review",
       "title": "Puntuar y reseñar",
       "description": "Widget de rating (1-5) + compositor de review en el detalle; crear/editar/borrar; botón de reportar review.",
-      "depends_on": [11, 15],
+      "depends_on": [
+        11,
+        15
+      ],
       "acceptance": [
         "PUT /v1/{tipo}/{slug}/rating (score + review_text opcional) y DELETE; optimistic UI",
         "viewer_status/rating propio reflejado tras la acción; agregados actualizados",
@@ -332,7 +384,10 @@
       "name": "reviews_display_likes",
       "title": "Listado de reviews + likes",
       "description": "Reviews por item con autor y like_count; like/unlike.",
-      "depends_on": [11, 15],
+      "depends_on": [
+        11,
+        15
+      ],
       "acceptance": [
         "GET /v1/{tipo}/{slug}/ratings paginado con like_count; reviews ocultas no aparecen",
         "Like/unlike (POST/DELETE /v1/ratings/{id}/like) con optimistic UI",
@@ -348,7 +403,10 @@
       "name": "library_backlog",
       "title": "Biblioteca / backlog",
       "description": "Añadir/cambiar estado (want/in_progress/completed/dropped) desde el detalle; página de biblioteca con filtros y counts.",
-      "depends_on": [11, 15],
+      "depends_on": [
+        11,
+        15
+      ],
       "acceptance": [
         "PUT/DELETE /v1/{tipo}/{slug}/library; viewer_status reflejado en el detalle",
         "Página de biblioteca (GET /v1/users/{username}/library) con filtros por status/type y counts",
@@ -364,7 +422,9 @@
       "name": "user_profile",
       "title": "Perfil público de usuario",
       "description": "Página /u/{username}: reviews, biblioteca, counts de followers/following, listas públicas.",
-      "depends_on": [15],
+      "depends_on": [
+        15
+      ],
       "acceptance": [
         "GET /v1/users/{username} (perfil sin email) + secciones de reviews (GET /v1/users/{username}/reviews) y biblioteca",
         "Counts de followers/following y listas públicas visibles",
@@ -380,7 +440,10 @@
       "name": "follows",
       "title": "Follows",
       "description": "Botón follow/unfollow en perfiles; listas de followers/following.",
-      "depends_on": [22, 15],
+      "depends_on": [
+        22,
+        15
+      ],
       "acceptance": [
         "POST/DELETE /v1/users/{username}/follow idempotente; botón con estado y optimistic UI",
         "GET /v1/users/{username}/{followers,following} paginados",
@@ -396,7 +459,10 @@
       "name": "activity_feed",
       "title": "Feed de actividad",
       "description": "Feed con pestañas following/popular y paginación.",
-      "depends_on": [20, 15],
+      "depends_on": [
+        20,
+        15
+      ],
       "acceptance": [
         "GET /v1/feed?tab=following|popular&page=&limit= (auth); 401 sin sesión redirige",
         "Render de entradas con autor, item y like_count; tab inválido evitado en UI",
@@ -412,7 +478,9 @@
       "name": "notifications",
       "title": "Notificaciones",
       "description": "Campana con badge de unread_count; lista de notificaciones; marcar como leídas.",
-      "depends_on": [15],
+      "depends_on": [
+        15
+      ],
       "acceptance": [
         "GET /v1/notifications + GET /v1/notifications/unread_count (badge)",
         "POST /v1/notifications/read marca leídas y refresca el badge",
@@ -428,7 +496,9 @@
       "name": "lists_crud",
       "title": "CRUD de listas",
       "description": "Crear/editar/borrar listas (título, descripción, pública/privada).",
-      "depends_on": [15],
+      "depends_on": [
+        15
+      ],
       "acceptance": [
         "POST /v1/lists (slug derivado), PATCH/DELETE /v1/lists/{slug} (owner 403/404)",
         "GET /v1/users/{username}/lists (públicas siempre; privadas solo owner)",
@@ -444,7 +514,10 @@
       "name": "list_items",
       "title": "Items de lista (+ reorder)",
       "description": "Añadir/quitar items y reordenar (drag-and-drop); página pública de lista con items resueltos en orden.",
-      "depends_on": [26, 11],
+      "depends_on": [
+        26,
+        11
+      ],
       "acceptance": [
         "POST/DELETE /v1/lists/{slug}/items ({item_type, slug}) idempotente",
         "PUT /v1/lists/{slug}/items/order con drag-and-drop; validación del set exacto (422)",
@@ -460,7 +533,10 @@
       "name": "recommendations",
       "title": "Recomendaciones",
       "description": "Página de recomendaciones personalizadas con filtro por tipo y motivos legibles.",
-      "depends_on": [15, 11],
+      "depends_on": [
+        15,
+        11
+      ],
       "acceptance": [
         "GET /v1/recommendations (auth, ?type=, page/limit); render con 'reason' legible",
         "Estado de fallback (populares) cuando no hay semillas, comunicado en UI",
@@ -476,7 +552,10 @@
       "name": "admin_auth",
       "title": "Auth admin (X-API-Key server-side)",
       "description": "Sección admin gated; la X-API-Key vive SOLO en el servidor (BFF), nunca en el bundle cliente.",
-      "depends_on": [5, 6],
+      "depends_on": [
+        5,
+        6
+      ],
       "acceptance": [
         "Route Handlers admin en el BFF inyectan X-API-Key server-side hacia /v1/admin/*",
         "La clave nunca aparece en el cliente ni en el HTML; sección admin protegida",
@@ -492,7 +571,10 @@
       "name": "report_queue",
       "title": "Cola de reportes",
       "description": "Cola de reportes de reviews con filtro por estado y acción de resolver.",
-      "depends_on": [29, 20],
+      "depends_on": [
+        29,
+        20
+      ],
       "acceptance": [
         "GET /v1/admin/reports?status=&page=&limit= (vía BFF admin) con paginación y filtro",
         "POST /v1/admin/reports/{id}/resolve marca resuelto y refresca la cola",
@@ -508,7 +590,9 @@
       "name": "moderation_actions",
       "title": "Acciones de moderación",
       "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin.",
-      "depends_on": [29],
+      "depends_on": [
+        29
+      ],
       "acceptance": [
         "POST /v1/admin/reviews/{id}/{hide,unhide} con feedback de estado",
         "POST /v1/admin/users/{username}/{ban,unban} con confirmación",

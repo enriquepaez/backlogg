@@ -3,6 +3,10 @@
     "home": {
       "title": "backlogg",
       "description": "Track and rate the movies, series, books and games you love."
+    },
+    "browse": {
+      "title": "{type} — backlogg",
+      "description": "Browse {type} on backlogg: filter by genre and sort by rating, date or title."
     }
   },
   "Home": {
@@ -24,6 +28,34 @@
       "series": "Series",
       "book": "Book",
       "game": "Game"
+    }
+  },
+  "Browse": {
+    "heading": {
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    },
+    "filters": {
+      "genreLabel": "Genre",
+      "genreAll": "All genres",
+      "sortLabel": "Sort by",
+      "sort": {
+        "rating_desc": "Highest rated",
+        "rating_asc": "Lowest rated",
+        "date_desc": "Newest",
+        "date_asc": "Oldest",
+        "title_asc": "Title (A–Z)"
+      }
+    },
+    "empty": "No titles match these filters.",
+    "error": "Something went wrong loading this list. Please try again.",
+    "pagination": {
+      "nav": "Pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page} of {totalPages}"
     }
   },
   "LanguageSwitcher": {
