@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -38,6 +39,9 @@ class UserRating(Base):
     item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     review_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-review moderation flag. A hidden review is preserved in the table but
+    # excluded from public listings, the feed and the rating aggregates.
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

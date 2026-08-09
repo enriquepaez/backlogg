@@ -94,10 +94,12 @@ async def _issue_refresh_token(db: AsyncSession, user_id: int) -> str:
 async def login_user(db: AsyncSession, payload: UserLogin) -> TokenPairOut:
     """Validate credentials and issue an access + refresh token pair.
 
-    Raises 401 on any credential mismatch.
+    Raises 401 on any credential mismatch. A banned user is rejected with the
+    same generic 401 even when the password is correct — the response never
+    reveals that the account exists or that it is banned (no enumeration).
     """
     user = await repo.get_user_by_username(db, payload.username)
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or not verify_password(payload.password, user.password_hash) or user.is_banned:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     access_token = create_access_token(user.id)
@@ -127,6 +129,12 @@ async def refresh_tokens(db: AsyncSession, payload: RefreshRequest) -> TokenPair
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     if stored.expires_at <= now:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # A banned user cannot refresh: reject with the same generic 401 (the token
+    # stays revoked/unrotated) so a ban immediately locks the session out.
+    owner = await repo.get_user_by_id(db, stored.user_id)
+    if owner is None or owner.is_banned:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     # Rotate: revoke the presented token and issue a fresh pair.

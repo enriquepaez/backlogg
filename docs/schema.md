@@ -349,6 +349,7 @@ CREATE TABLE users (
     bio             TEXT,
     avatar_url      VARCHAR(1000),
     email_verified  BOOLEAN NOT NULL DEFAULT false, -- set true via /auth/verify/confirm
+    is_banned       BOOLEAN NOT NULL DEFAULT false, -- content moderation (admin)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -360,6 +361,12 @@ plus a persisted, rotating refresh token (`refresh_tokens`, below);
 see `docs/api.md` for the endpoint contracts. `email_verified` starts `false`
 and flips to `true` when the user confirms an email-verification token
 (`account_tokens`, below).
+
+`is_banned` is a content-moderation flag flipped by admins via
+`POST /admin/users/{username}/ban` / `/unban`. A banned user cannot log in or
+refresh (both `401`), and **all** of their reviews become invisible on the same
+surfaces as a hidden review (see `user_ratings.is_hidden` below): they are
+excluded from listings, the feed and the rating aggregates.
 
 ### `refresh_tokens`
 
@@ -433,6 +440,7 @@ CREATE TABLE user_ratings (
     item_id         BIGINT NOT NULL,
     score           INTEGER,                  -- 1-5, nullable (text-only review)
     review_text     TEXT,
+    is_hidden       BOOLEAN NOT NULL DEFAULT false, -- content moderation (admin)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -444,9 +452,19 @@ CREATE INDEX idx_user_ratings_item ON user_ratings (item_type, item_id);
 CREATE INDEX idx_user_ratings_user ON user_ratings (user_id);
 ```
 
-After every create/update/delete of a `user_ratings` row, the application
-recalculates and persists `rating_internal` (`AVG(score)` ignoring nulls)
-and `rating_count_internal` (`COUNT(score)` ignoring nulls) on the affected
+`is_hidden` is a per-review content-moderation flag flipped by admins via
+`POST /admin/reviews/{id}/hide` / `/unhide`. It is one half of the reusable
+**"visible review"** condition applied consistently across the codebase
+(`backlogg/ratings/repository.py::visible_review_filters`): a review is visible
+only when `is_hidden = false` **and** its author is **not banned**
+(`users.is_banned = false`, which is why those queries JOIN `users`). Non-visible
+reviews are excluded from `GET /{type}/{slug}/ratings`, `GET /users/{username}/reviews`,
+the feed and the rating aggregates.
+
+After every create/update/delete of a `user_ratings` row — and after every
+hide/unhide or ban/unban moderation action — the application recalculates and
+persists `rating_internal` (`AVG(score)` over **visible** reviews, ignoring nulls)
+and `rating_count_internal` (`COUNT(score)` over visible reviews) on the affected
 movies/series/books/games row (`backlogg/ratings/repository.py`,
 `recalculate_item_aggregates` — same cross-domain write precedent as
 `backlogg/admin/repository.py`).

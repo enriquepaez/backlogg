@@ -470,6 +470,44 @@ POST /admin/reports/{id}/resolve
 Marca `status = 'resolved'` y sella `resolved_at`. Response: el reporte
 actualizado (mismo shape que arriba).
 
+### Content moderation (admin)
+
+Acciones de moderación del admin sobre reviews y usuarios. Todas requieren el
+header `X-API-Key`. Rutas en raíz (se versionarán en la feature 45).
+
+**Condición de visibilidad (reutilizable).** Una review es visible sólo cuando
+`is_hidden = false` **y** su autor no está baneado (`users.is_banned = false`).
+Una review no visible se excluye de `GET /{tipo}/{slug}/ratings`, del feed y de
+`GET /users/{username}/reviews`, y **no cuenta** para
+`rating_internal`/`rating_count_internal`.
+
+```
+POST /admin/reviews/{id}/hide
+POST /admin/reviews/{id}/unhide
+→ 200  Review oculta / restaurada (idempotente; requiere X-API-Key)
+→ 401  X-API-Key ausente o incorrecta
+→ 404  Review (rating) no encontrada
+```
+
+`{id}` es el id numérico de la review (= `user_ratings.id`). Tras cambiar
+`is_hidden` se recomputan los agregados del item afectado excluyendo las reviews
+no visibles. Response: `{"id": , "is_hidden": bool}`.
+
+```
+POST /admin/users/{username}/ban
+POST /admin/users/{username}/unban
+→ 200  Usuario baneado / desbaneado (idempotente; requiere X-API-Key)
+→ 401  X-API-Key ausente o incorrecta
+→ 404  Usuario no encontrado
+```
+
+Marca `users.is_banned`. Un usuario baneado **no puede hacer login ni refresh**
+(ambos devuelven `401` genérico, sin revelar el baneo — coherente con la política
+de no-enumeración) y **todas sus reviews quedan ocultas** (excluidas de las mismas
+superficies que una review oculta). Al banear/desbanear se recomputan los agregados
+de **todos** los items que el usuario había puntuado. Response:
+`{"username": , "is_banned": bool}`.
+
 ### Feed (activity feed)
 
 ```

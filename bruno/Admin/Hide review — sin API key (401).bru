@@ -1,0 +1,22 @@
+meta {
+  name: Hide review — sin API key (401)
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/admin/reviews/1/hide
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}
+
+docs {
+  Moderation actions require the X-API-Key header. Without it the request is
+  rejected with 401 before any moderation happens.
+}
