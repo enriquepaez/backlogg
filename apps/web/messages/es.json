@@ -3,6 +3,10 @@
     "home": {
       "title": "backlogg",
       "description": "Registra y puntúa las películas, series, libros y juegos que te encantan."
+    },
+    "browse": {
+      "title": "{type} — backlogg",
+      "description": "Explora {type} en backlogg: filtra por género y ordena por puntuación, fecha o título."
     }
   },
   "Home": {
@@ -24,6 +28,34 @@
       "series": "Serie",
       "book": "Libro",
       "game": "Juego"
+    }
+  },
+  "Browse": {
+    "heading": {
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Juegos"
+    },
+    "filters": {
+      "genreLabel": "Género",
+      "genreAll": "Todos los géneros",
+      "sortLabel": "Ordenar por",
+      "sort": {
+        "rating_desc": "Mejor puntuadas",
+        "rating_asc": "Peor puntuadas",
+        "date_desc": "Más recientes",
+        "date_asc": "Más antiguas",
+        "title_asc": "Título (A–Z)"
+      }
+    },
+    "empty": "Ningún título coincide con estos filtros.",
+    "error": "Algo salió mal al cargar esta lista. Inténtalo de nuevo.",
+    "pagination": {
+      "nav": "Paginación",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page} de {totalPages}"
     }
   },
   "LanguageSwitcher": {

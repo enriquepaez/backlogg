@@ -8,6 +8,7 @@ type SeriesListOut = components["schemas"]["SeriesListOut"];
 type BookListOut = components["schemas"]["BookListOut"];
 type GameListOut = components["schemas"]["GameListOut"];
 type TrendingOut = components["schemas"]["TrendingOut"];
+type GenreListOut = components["schemas"]["GenreListOut"];
 
 /**
  * Base URL these handlers are registered against. Tests build their
@@ -128,6 +129,44 @@ export const gameListFixture: GameListOut = {
   limit: 20,
 };
 
+/**
+ * Second page of the movies list (FE-9 browse: pagination). `total: 30` with
+ * `limit: 24` (the browse page's fixed page size, see `BROWSE_PAGE_SIZE` in
+ * `src/lib/catalog.ts`) puts this at page 2 of 2.
+ */
+export const movieListPage2Fixture: MovieListOut = {
+  items: [
+    {
+      id: 5,
+      title: "Arrival",
+      slug: "arrival-2016",
+      poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
+      release_date: "2016-11-11",
+      rating_external: 7.9,
+      genres: [duneFixture.genres[0].slug],
+    },
+  ],
+  total: 30,
+  page: 2,
+  limit: 24,
+};
+
+/** Movies list filtered to a single genre (FE-9 browse: genre filter). */
+export const movieGenreFilteredFixture: MovieListOut = {
+  items: [movieListFixture.items[0]],
+  total: 1,
+  page: 1,
+  limit: 24,
+};
+
+/** Genre options for the movies browse filter (FE-9), `GET /v1/genres?type=movie`. */
+export const genreListFixture: GenreListOut = {
+  genres: [
+    { name: "Science Fiction", slug: "science-fiction", item_type: "movie", count: 42 },
+    { name: "Adventure", slug: "adventure", item_type: "movie", count: 17 },
+  ],
+};
+
 export const trendingFixture: TrendingOut = {
   results: [
     {
@@ -155,8 +194,31 @@ export const trendingFixture: TrendingOut = {
  * as more of the API surface needs mocking in unit/integration tests.
  */
 export const handlers = [
-  http.get(`${MOCK_API_BASE_URL}/v1/movies`, () => {
+  // Respects `genre`/`page` (FE-9 browse: filter + pagination) so tests can
+  // exercise those states; falls back to the page-1/unfiltered fixture
+  // (also what FE-8's `getFeatured` — sort+limit only, no genre/page — hits).
+  http.get(`${MOCK_API_BASE_URL}/v1/movies`, ({ request }) => {
+    const url = new URL(request.url);
+    const genre = url.searchParams.get("genre");
+    const page = url.searchParams.get("page");
+
+    if (genre === "science-fiction") {
+      return HttpResponse.json(movieGenreFilteredFixture);
+    }
+    if (page === "2") {
+      return HttpResponse.json(movieListPage2Fixture);
+    }
     return HttpResponse.json(movieListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/genres`, ({ request }) => {
+    const url = new URL(request.url);
+    const type = url.searchParams.get("type");
+
+    if (type && type !== "movie") {
+      return HttpResponse.json({ genres: [] } satisfies GenreListOut);
+    }
+    return HttpResponse.json(genreListFixture);
   }),
 
   http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug`, ({ params }) => {
