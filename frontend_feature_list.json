@@ -99,7 +99,7 @@
         "middleware redirige a login en rutas privadas sin sesión; reuse/expiración → limpia sesión",
         "Flujo login→refresh→logout verificado contra el backend real"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 6,
