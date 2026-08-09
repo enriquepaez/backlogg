@@ -40,5 +40,10 @@
     "title": "Algo salió mal",
     "description": "Ocurrió un error inesperado. Puedes intentarlo de nuevo.",
     "retry": "Reintentar"
+  },
+  "Offline": {
+    "title": "Estás sin conexión",
+    "description": "Esta página no está disponible sin conexión. Reconéctate e inténtalo de nuevo.",
+    "backHome": "Volver al inicio"
   }
 }

@@ -65,10 +65,16 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
 export const config = {
   matcher: [
     {
-      // Match all pathnames except for API routes, Next internals and
-      // static assets (anything with a dot). This is what runs the locale
-      // negotiation and the token-refresh check above.
-      source: "/((?!api|trpc|_next|_vercel|.*\\..*).*)",
+      // Match all pathnames except for API routes, Next internals, static
+      // assets (anything with a dot) and the extension-less PWA icon routes
+      // (FE-6: `icon`/`apple-icon` file-convention routes and the
+      // `icons/[name]` manifest routes in `src/app/`, none of which have a
+      // dot in their URL — `<head>`'s auto-generated `<link rel="icon">` /
+      // `<link rel="apple-touch-icon">` tags and `manifest.ts`'s `icons`
+      // array reference them as absolute, locale-agnostic root paths, so
+      // they must not be redirected into a locale prefix). This is what runs
+      // the locale negotiation and the token-refresh check above.
+      source: "/((?!api|trpc|_next|_vercel|icon|apple-icon|.*\\..*).*)",
       // Skip prefetch requests (Link hover/viewport prefetching, which the
       // app shell's `getCurrentUser()` usage makes frequent since every
       // route becomes dynamic once a layout reads cookies). Two concurrent
