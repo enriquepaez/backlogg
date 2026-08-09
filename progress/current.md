@@ -1,16 +1,24 @@
 # Sesión actual
 
-## FE-4 `auth_bff` — DONE (pendiente QA manual del usuario + ship)
-- Rama `feat/fe4-auth-bff` (desde main con FE-3b mergeado, PR #79). Reviewer: **APPROVED**.
-- FE-4 marcada `done` en `frontend_feature_list.json`. Resumen en `progress/history.md`. Temporales limpiados.
-- Pipeline verde: `pnpm --filter web typecheck && lint && build` (exit 0). E2E del implementer contra backend real: los 9 escenarios OK.
+## FE-5 `app_shell` — DONE (pendiente QA manual del usuario + ship)
+- Rama `feat/fe5-app-shell` (desde `main` con FE-4 mergeado, PR #80). Reviewer: **APPROVED** (sin cambios requeridos, verificación E2E independiente).
+- FE-5 marcada `done` en `frontend_feature_list.json`. Resumen en `progress/history.md`. Temporales (`progress/impl_6.md`, `progress/review_6.md`) limpiados.
+- Pipeline verde: `pnpm --filter web typecheck && lint && build` (exit 0), re-ejecutado de forma independiente por el reviewer.
+- Fix del bug de cookies en RSC (arrastrado de FE-4) resuelto: refresh proactivo movido a `proxy.ts` (`lib/auth/proxy-refresh.ts`), verificado E2E por implementer y reviewer por separado contra backend real (rotación limpia sin cascada, reuse-detection intacta).
 - Cambios en working tree **sin commit** (a la espera de confirmación del usuario para commit/push/PR).
 
-### SEGUIMIENTO para FE-5 (hallazgo no bloqueante del review)
-- `session.ts` `safeSet/safeClear` tragan escritura de cookie en render RSC read-only. Si el access expira y se refresca DENTRO del render de un Server Component, el backend rota (revoca el refresh viejo) pero la cookie no se persiste → siguiente request = refresh revocado → backend lo trata como REUSE → revoca TODAS las sesiones.
-- Hoy inofensivo (no hay página RSC protegida). **Resolver al montar FE-5** (primer consumidor de `getCurrentUser` en render): enrutar el refresh disparado desde RSC por Route Handler/Server Action que pueda persistir cookies.
-- Cosmético: rama redundante en `apps/web/src/app/api/auth/login/route.ts:48`.
+### Bugfix incidental durante QA manual (mismo commit, misma rama)
+- Hallado por el usuario en QA real: hydration mismatch en `ModeToggle` (`mode-toggle.tsx`) — `next-themes` lee `localStorage` de forma síncrona en el primer render del cliente, pudiendo diferir del HTML del servidor (renderizado con `defaultTheme="system"`) si el navegador ya tenía un tema persistido de pruebas anteriores.
+- Fix: `active` ahora se gatea con `useSyncExternalStore` (server snapshot `false`, client snapshot `true`) en vez de leer `theme` directamente — mismo patrón recomendado por React para valores que difieren legítimamente entre servidor y cliente. Único archivo tocado.
+- Verificado con Playwright (instalado efímero) en 4 escenarios (sin tema persistido, dark persistido, light persistido, dark por `prefers-color-scheme`): cero mensajes de hidratación en consola. `sonner.tsx` (segundo consumidor de `useTheme()`) investigado y dejado intacto — no reproduce mismatch (su lista de toasts renderiza `null` sin toasts activos).
+- Pipeline verde re-ejecutado por el leader tras el fix.
+
+### Residuales no bloqueantes documentados (no requieren acción inmediata)
+- Ventana muy estrecha de fail-open si el backend cae justo durante el refresh proactivo del proxy (clase de riesgo mucho más angosta que el bug original).
+- `/[locale]` y `/[locale]/showcase` pasaron de estático a dinámico (leen cookies en el layout compartido) — a tener en cuenta al diseñar SSR/ISR del catálogo en M1.
+- Carrera de prefetch en refresh concurrente — mitigada a nivel de matcher, no eliminada del todo (riesgo compartido por cualquier diseño de refresh rotatorio).
 
 ## Siguiente feature disponible (M0)
-Con FE-4 `done`: **FE-5** app_shell (deps FE-3 ✅, FE-3b ✅, FE-4 ✅) y **FE-7** testing_ci (deps FE-2 ✅).
-Orden natural M0 restante: FE-5 → FE-6 (pwa, deps FE-5) → FE-7.
+Con FE-5 `done`: **FE-6** pwa_baseline (dep FE-5 ✅, id=7) y **FE-7** testing_ci (dep FE-2 ✅, id=8) quedan disponibles.
+Por "menor id con dependencias satisfechas": siguiente pick natural = **FE-6**.
+Orden natural M0 restante: FE-6 (pwa) → FE-7 (testing/CI) — cierra M0.

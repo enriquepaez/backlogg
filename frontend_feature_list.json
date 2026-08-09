@@ -115,7 +115,7 @@
         "QueryClient provider montado; config de entorno (API_INTERNAL_URL) tipada",
         "typecheck+lint+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 7,

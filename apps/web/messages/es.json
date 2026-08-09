@@ -6,7 +6,6 @@
     }
   },
   "Home": {
-    "brand": "backlogg",
     "title": "Registra todo lo que ves, lees y juegas.",
     "description": "Mantén una biblioteca personal, puntúa lo que terminas y descubre qué disfrutar a continuación — en películas, series, libros y juegos.",
     "exploreShowcase": "Explora el sistema de diseño",
@@ -16,5 +15,30 @@
     "label": "Idioma",
     "en": "English",
     "es": "Español"
+  },
+  "Nav": {
+    "brand": "backlogg",
+    "primaryNav": "Navegación principal",
+    "home": "Inicio",
+    "showcase": "Muestra",
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo."
+  },
+  "Footer": {
+    "rights": "© {year} backlogg. Todos los derechos reservados."
+  },
+  "Loading": {
+    "label": "Cargando…"
+  },
+  "NotFound": {
+    "title": "Página no encontrada",
+    "description": "La página que buscas no existe o fue movida.",
+    "backHome": "Volver al inicio"
+  },
+  "ErrorPage": {
+    "title": "Algo salió mal",
+    "description": "Ocurrió un error inesperado. Puedes intentarlo de nuevo.",
+    "retry": "Reintentar"
   }
 }
