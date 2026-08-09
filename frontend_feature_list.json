@@ -82,7 +82,7 @@
         "Al menos una pantalla usa claves de mensaje (cero strings hardcodeados de UI)",
         "Cambio de idioma funcional; typecheck+lint+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 5,

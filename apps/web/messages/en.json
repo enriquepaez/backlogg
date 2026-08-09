@@ -1,0 +1,20 @@
+{
+  "Metadata": {
+    "home": {
+      "title": "backlogg",
+      "description": "Track and rate the movies, series, books and games you love."
+    }
+  },
+  "Home": {
+    "brand": "backlogg",
+    "title": "Track everything you watch, read and play.",
+    "description": "Keep a personal library, rate what you finish and discover what to enjoy next — across movies, series, books and games.",
+    "exploreShowcase": "Explore the design system",
+    "documentation": "Documentation"
+  },
+  "LanguageSwitcher": {
+    "label": "Language",
+    "en": "English",
+    "es": "Español"
+  }
+}

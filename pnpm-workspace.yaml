@@ -5,5 +5,7 @@ packages:
 # Build-script approvals (pnpm). Moved here from apps/web by design:
 # the workspace root owns a single pnpm config for the whole monorepo.
 allowBuilds:
+  '@parcel/watcher': false
+  '@swc/core': false
   sharp: false
   unrs-resolver: false
