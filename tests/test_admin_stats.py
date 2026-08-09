@@ -30,13 +30,13 @@ _TS = datetime(2026, 5, 25, 3, 0, 0, tzinfo=UTC)
 
 async def test_stats_returns_200(client):
     """GET /admin/stats returns 200."""
-    response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     assert response.status_code == 200
 
 
 async def test_stats_response_has_all_types(client):
     """GET /admin/stats response contains all 4 content types."""
-    response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     body = response.json()
     assert "movies" in body
     assert "series" in body
@@ -46,7 +46,7 @@ async def test_stats_response_has_all_types(client):
 
 async def test_stats_response_structure(client):
     """Each content type has count and last_synced_at keys."""
-    response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     body = response.json()
     for key in ("movies", "series", "books", "games"):
         assert "count" in body[key], f"{key} missing 'count'"
@@ -55,7 +55,7 @@ async def test_stats_response_structure(client):
 
 async def test_stats_count_is_integer(client):
     """count is always an integer (not null, not string)."""
-    response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     assert response.status_code == 200
     body = response.json()
     for key in ("movies", "series", "books", "games"):
@@ -95,7 +95,7 @@ async def test_stats_returns_correct_values_from_db(client):
 
     app.dependency_overrides[get_db] = override_get_db
     try:
-        response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+        response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -115,7 +115,7 @@ async def test_stats_last_synced_at_can_be_null(client):
     null is an acceptable value type (no schema validation error).
     The response must be 200 regardless.
     """
-    response = await client.get("/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    response = await client.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
     assert response.status_code == 200
     body = response.json()
     for key in ("movies", "series", "books", "games"):

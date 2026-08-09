@@ -45,7 +45,7 @@ async def test_get_book_returns_200(client, db):
     """GET /books/{slug} returns 200 with correct fields for a seeded book."""
     await repo.upsert_book(db, _make_book_dict("the-hobbit-1937"))
 
-    response = await client.get("/books/the-hobbit-1937")
+    response = await client.get("/v1/books/the-hobbit-1937")
     assert response.status_code == 200
 
     body = response.json()
@@ -61,6 +61,6 @@ async def test_get_book_returns_200(client, db):
 async def test_get_book_returns_404(client, db):
     """GET /books/{slug} returns 404 when not in DB and Open Library has nothing."""
     with patch.object(service._ol_client, "search_book", new_callable=AsyncMock, return_value=None):
-        response = await client.get("/books/nonexistent-slug-404-test")
+        response = await client.get("/v1/books/nonexistent-slug-404-test")
 
     assert response.status_code == 404

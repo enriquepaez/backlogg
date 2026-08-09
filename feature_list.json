@@ -954,7 +954,7 @@
         "TODOS los tests se actualizan a las rutas /v1 y siguen en verde",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

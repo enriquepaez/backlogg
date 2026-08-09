@@ -46,9 +46,9 @@ def _register_payload(username: str, email: str, password: str = "s3cret-passwor
 
 async def _register_and_login(client, username: str, email: str) -> dict:
     """Register a user, log in, and return the token pair dict."""
-    await client.post("/auth/register", json=_register_payload(username, email))
+    await client.post("/v1/auth/register", json=_register_payload(username, email))
     login = await client.post(
-        "/auth/login", json={"username": username, "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": username, "password": "s3cret-password"}
     )
     return login.json()
 
@@ -80,13 +80,13 @@ def _movie_data(slug: str, title: str = "Deletion Movie") -> dict:
 
 
 async def test_delete_me_without_token_returns_401(client):
-    response = await client.delete("/users/me")
+    response = await client.delete("/v1/users/me")
     assert response.status_code == 401
 
 
 async def test_delete_me_with_invalid_token_returns_401(client):
     response = await client.delete(
-        "/users/me", headers={"Authorization": "Bearer not-a-valid-token"}
+        "/v1/users/me", headers={"Authorization": "Bearer not-a-valid-token"}
     )
     assert response.status_code == 401
 
@@ -98,22 +98,24 @@ async def test_delete_me_returns_204_and_removes_account(client):
     tokens = await _register_and_login(client, "del-happy-user", "del-happy@example.com")
     access = tokens["access_token"]
 
-    response = await client.delete("/users/me", headers={"Authorization": f"Bearer {access}"})
+    response = await client.delete("/v1/users/me", headers={"Authorization": f"Bearer {access}"})
     assert response.status_code == 204
     assert response.content == b""
 
     # The public profile no longer resolves.
-    profile = await client.get("/users/del-happy-user")
+    profile = await client.get("/v1/users/del-happy-user")
     assert profile.status_code == 404
 
 
 async def test_delete_me_frees_username_and_email_for_reregistration(client):
     tokens = await _register_and_login(client, "del-reuse-user", "del-reuse@example.com")
-    await client.delete("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    await client.delete(
+        "/v1/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
 
     # Same username AND email can be registered again.
     again = await client.post(
-        "/auth/register", json=_register_payload("del-reuse-user", "del-reuse@example.com")
+        "/v1/auth/register", json=_register_payload("del-reuse-user", "del-reuse@example.com")
     )
     assert again.status_code == 201
 
@@ -125,18 +127,18 @@ async def test_refresh_after_deletion_returns_401(client):
     tokens = await _register_and_login(client, "del-refresh-user", "del-refresh@example.com")
 
     # Sanity: the refresh token works before deletion.
-    ok = await client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    ok = await client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
     assert ok.status_code == 200
     refresh_after_rotate = ok.json()["refresh_token"]
 
     login2 = await client.post(
-        "/auth/login", json={"username": "del-refresh-user", "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": "del-refresh-user", "password": "s3cret-password"}
     )
     access = login2.json()["access_token"]
-    await client.delete("/users/me", headers={"Authorization": f"Bearer {access}"})
+    await client.delete("/v1/users/me", headers={"Authorization": f"Bearer {access}"})
 
     # Neither the rotated token nor a freshly issued one can refresh anymore.
-    dead = await client.post("/auth/refresh", json={"refresh_token": refresh_after_rotate})
+    dead = await client.post("/v1/auth/refresh", json={"refresh_token": refresh_after_rotate})
     assert dead.status_code == 401
 
 

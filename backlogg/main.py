@@ -224,27 +224,34 @@ async def health():
     return {"status": "ok"}
 
 
-app.include_router(movies_router)
-app.include_router(series_router)
-app.include_router(books_router)
-app.include_router(games_router)
-app.include_router(people_router)
-app.include_router(search_router)
-app.include_router(admin_router)
-app.include_router(genres_router)
-app.include_router(trending_router)
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(ratings_router)
-app.include_router(user_reviews_router)
-app.include_router(follows_router)
-app.include_router(feed_router)
-app.include_router(user_library_router)
-app.include_router(lists_router)
-app.include_router(user_lists_router)
-app.include_router(notifications_router)
-app.include_router(recommendations_router)
-app.include_router(reports_router)
-app.include_router(admin_reports_router)
-app.include_router(admin_moderation_router)
+# Business routers are served under a single /v1 prefix (clean cut, no root
+# aliases). Each router already declares its own prefix (e.g. /movies, /auth,
+# /admin), so prefix="/v1" prepends it -> /v1/movies, /v1/auth/login, etc.
+# Operational endpoints (/health above, /metrics below) stay UNVERSIONED.
+_V1 = "/v1"
+app.include_router(movies_router, prefix=_V1)
+app.include_router(series_router, prefix=_V1)
+app.include_router(books_router, prefix=_V1)
+app.include_router(games_router, prefix=_V1)
+app.include_router(people_router, prefix=_V1)
+app.include_router(search_router, prefix=_V1)
+app.include_router(admin_router, prefix=_V1)
+app.include_router(genres_router, prefix=_V1)
+app.include_router(trending_router, prefix=_V1)
+app.include_router(auth_router, prefix=_V1)
+app.include_router(users_router, prefix=_V1)
+app.include_router(ratings_router, prefix=_V1)
+app.include_router(user_reviews_router, prefix=_V1)
+app.include_router(follows_router, prefix=_V1)
+app.include_router(feed_router, prefix=_V1)
+app.include_router(user_library_router, prefix=_V1)
+app.include_router(lists_router, prefix=_V1)
+app.include_router(user_lists_router, prefix=_V1)
+app.include_router(notifications_router, prefix=_V1)
+app.include_router(recommendations_router, prefix=_V1)
+app.include_router(reports_router, prefix=_V1)
+app.include_router(admin_reports_router, prefix=_V1)
+app.include_router(admin_moderation_router, prefix=_V1)
+
+# Operational endpoints remain unversioned.
 app.include_router(metrics_router)

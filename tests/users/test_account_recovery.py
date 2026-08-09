@@ -418,7 +418,7 @@ async def client(db, sender):
 
 async def _register_and_login_http(client, username: str) -> dict:
     await client.post(
-        "/auth/register",
+        "/v1/auth/register",
         json={
             "username": username,
             "email": f"{username}@example.com",
@@ -426,13 +426,13 @@ async def _register_and_login_http(client, username: str) -> dict:
         },
     )
     response = await client.post(
-        "/auth/login", json={"username": username, "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": username, "password": "s3cret-password"}
     )
     return response.json()
 
 
 async def test_verify_request_requires_auth(client):
-    response = await client.post("/auth/verify/request")
+    response = await client.post("/v1/auth/verify/request")
     assert response.status_code == 401
 
 
@@ -440,58 +440,60 @@ async def test_verify_request_and_confirm_flow(client, sender):
     pair = await _register_and_login_http(client, "http-verify-user")
     headers = {"Authorization": f"Bearer {pair['access_token']}"}
 
-    req = await client.post("/auth/verify/request", headers=headers)
+    req = await client.post("/v1/auth/verify/request", headers=headers)
     assert req.status_code == 202
 
     token = sender.sent[0]["text"].split("token=")[1]
-    confirm = await client.post("/auth/verify/confirm", json={"token": token})
+    confirm = await client.post("/v1/auth/verify/confirm", json={"token": token})
     assert confirm.status_code == 200
 
-    me = await client.get("/users/me", headers=headers)
+    me = await client.get("/v1/users/me", headers=headers)
     assert me.json()["email_verified"] is True
 
 
 async def test_verify_confirm_invalid_returns_400(client):
-    response = await client.post("/auth/verify/confirm", json={"token": "bogus"})
+    response = await client.post("/v1/auth/verify/confirm", json={"token": "bogus"})
     assert response.status_code == 400
 
 
 async def test_forgot_password_always_202(client):
     # Unknown email.
-    unknown = await client.post("/auth/password/forgot", json={"email": "nobody-here@example.com"})
+    unknown = await client.post(
+        "/v1/auth/password/forgot", json={"email": "nobody-here@example.com"}
+    )
     assert unknown.status_code == 202
 
     # Known email.
     await _register_and_login_http(client, "http-forgot-user")
     known = await client.post(
-        "/auth/password/forgot", json={"email": "http-forgot-user@example.com"}
+        "/v1/auth/password/forgot", json={"email": "http-forgot-user@example.com"}
     )
     assert known.status_code == 202
 
 
 async def test_password_reset_flow(client, sender):
     await _register_and_login_http(client, "http-reset-user")
-    await client.post("/auth/password/forgot", json={"email": "http-reset-user@example.com"})
+    await client.post("/v1/auth/password/forgot", json={"email": "http-reset-user@example.com"})
     token = sender.sent[-1]["text"].split("token=")[1]
 
     reset = await client.post(
-        "/auth/password/reset", json={"token": token, "new_password": "totally-new-pass"}
+        "/v1/auth/password/reset", json={"token": token, "new_password": "totally-new-pass"}
     )
     assert reset.status_code == 200
 
     # Old password no longer works, new one does.
     old = await client.post(
-        "/auth/login", json={"username": "http-reset-user", "password": "s3cret-password"}
+        "/v1/auth/login", json={"username": "http-reset-user", "password": "s3cret-password"}
     )
     assert old.status_code == 401
     new = await client.post(
-        "/auth/login", json={"username": "http-reset-user", "password": "totally-new-pass"}
+        "/v1/auth/login", json={"username": "http-reset-user", "password": "totally-new-pass"}
     )
     assert new.status_code == 200
 
 
 async def test_password_reset_invalid_token_returns_400(client):
     response = await client.post(
-        "/auth/password/reset", json={"token": "bogus", "new_password": "whatever-8chars"}
+        "/v1/auth/password/reset", json={"token": "bogus", "new_password": "whatever-8chars"}
     )
     assert response.status_code == 400

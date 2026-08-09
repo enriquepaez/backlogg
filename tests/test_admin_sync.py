@@ -48,7 +48,7 @@ async def test_sync_movie_returns_200(client):
     """POST /admin/sync/movie runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"movie": mock_handler}):
-        response = await client.post("/admin/sync/movie", headers={"X-API-Key": _VALID_KEY})
+        response = await client.post("/v1/admin/sync/movie", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -63,7 +63,7 @@ async def test_sync_series_returns_200(client):
     """POST /admin/sync/series runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"series": mock_handler}):
-        response = await client.post("/admin/sync/series", headers={"X-API-Key": _VALID_KEY})
+        response = await client.post("/v1/admin/sync/series", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -78,7 +78,7 @@ async def test_sync_book_returns_200(client):
     """POST /admin/sync/book runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"book": mock_handler}):
-        response = await client.post("/admin/sync/book", headers={"X-API-Key": _VALID_KEY})
+        response = await client.post("/v1/admin/sync/book", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -93,7 +93,7 @@ async def test_sync_game_returns_200(client):
     """POST /admin/sync/game runs sync synchronously and returns 200 with result."""
     mock_handler = AsyncMock(return_value=_SYNC_RESULT)
     with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"game": mock_handler}):
-        response = await client.post("/admin/sync/game", headers={"X-API-Key": _VALID_KEY})
+        response = await client.post("/v1/admin/sync/game", headers={"X-API-Key": _VALID_KEY})
 
     assert response.status_code == 200
     body = response.json()
@@ -109,13 +109,13 @@ async def test_sync_game_returns_200(client):
 
 async def test_sync_unknown_type_returns_422(client):
     """POST /admin/sync/unknown returns 422 (unprocessable entity)."""
-    response = await client.post("/admin/sync/unknown", headers={"X-API-Key": _VALID_KEY})
+    response = await client.post("/v1/admin/sync/unknown", headers={"X-API-Key": _VALID_KEY})
     assert response.status_code == 422
 
 
 async def test_sync_empty_type_returns_422(client):
     """POST /admin/sync/ (no type) returns 404 (route not matched)."""
-    response = await client.post("/admin/sync/", headers={"X-API-Key": _VALID_KEY})
+    response = await client.post("/v1/admin/sync/", headers={"X-API-Key": _VALID_KEY})
     # FastAPI returns 404 for missing path segment, not 422
     assert response.status_code in (404, 422)
 
