@@ -25,6 +25,16 @@ function detectRunningDevServerPort(): string | undefined {
 const PORT = process.env.PLAYWRIGHT_PORT ?? detectRunningDevServerPort() ?? "3100";
 const baseURL = `http://127.0.0.1:${PORT}`;
 
+// `API_INTERNAL_URL` the Next server is started with — see the `webServer`
+// array below. Was a bare unreachable address before FE-14 (nothing listened
+// on it, so every `/v1` call from the app failed as a network error); now
+// `e2e/mock-backend.mjs` actually listens here so `session-ux.spec.ts`
+// (FE-14) can exercise the real server-side token-refresh/logout cycle. See
+// that file's module doc comment for why `item-detail.spec.ts` /
+// `browse.spec.ts`'s "backend unreachable" assertions still hold unchanged
+// against it.
+const MOCK_BACKEND_PORT = process.env.MOCK_BACKEND_PORT ?? "39999";
+
 // Smoke E2E config (FE-7). Runs against `next dev` rather than a production
 // `next build && next start`: this is a single "does the home page load"
 // check, not a perf/production-parity suite, and `next dev` starts in ~1-2s
@@ -42,19 +52,30 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: `pnpm exec next dev --port ${PORT}`,
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    env: {
-      // Present but deliberately unreachable: exercises the same
-      // "backend unreachable -> render as anonymous" fallback documented in
-      // `src/lib/api-fetch.ts` (`getCurrentUser`) and
-      // `src/lib/auth/proxy-refresh.ts` (`refreshBeforeRender`), instead of
-      // depending on a real backend just to smoke-test that the home page
-      // renders.
-      API_INTERNAL_URL: "http://127.0.0.1:39999",
+  // An array so both processes are started (and torn down) together for the
+  // whole run — Playwright waits on each entry's readiness check before
+  // running any test. See `e2e/mock-backend.mjs`'s doc comment for why a
+  // single shared mock backend (rather than a second `next dev`) is the only
+  // viable way to exercise a real `/v1/auth/refresh` round trip here: Next
+  // only allows one `next dev` per project directory (see
+  // `detectRunningDevServerPort` above), so there is exactly one Next server,
+  // with one fixed `API_INTERNAL_URL`, for every spec file in this suite.
+  webServer: [
+    {
+      command: `node e2e/mock-backend.mjs`,
+      port: Number(MOCK_BACKEND_PORT),
+      reuseExistingServer: false,
+      timeout: 30_000,
+      env: { MOCK_BACKEND_PORT },
     },
-  },
+    {
+      command: `pnpm exec next dev --port ${PORT}`,
+      url: baseURL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: {
+        API_INTERNAL_URL: `http://127.0.0.1:${MOCK_BACKEND_PORT}`,
+      },
+    },
+  ],
 });

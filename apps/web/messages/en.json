@@ -230,6 +230,7 @@
     "genres": "Genres",
     "showcase": "Showcase",
     "login": "Log in",
+    "accountMenu": "Account menu",
     "logout": "Log out",
     "logoutError": "Couldn't log out. Please try again."
   },

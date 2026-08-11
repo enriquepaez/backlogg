@@ -300,7 +300,7 @@
         "Logout limpia sesión y redirige; rutas privadas quedan protegidas",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 16,

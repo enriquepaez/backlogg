@@ -230,6 +230,7 @@
     "genres": "Géneros",
     "showcase": "Muestra",
     "login": "Iniciar sesión",
+    "accountMenu": "Menú de cuenta",
     "logout": "Cerrar sesión",
     "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo."
   },
