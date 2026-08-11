@@ -29,7 +29,7 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b border-border bg-background">
-      <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-4 sm:px-10">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 py-4 sm:px-8 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-wrap items-center gap-6">
           <Link href="/" className="text-lg font-semibold tracking-tight">
             {t("brand")}
@@ -40,6 +40,12 @@ export async function SiteHeader() {
             </Link>
             <Link href="/search" className="hover:text-foreground">
               {t("search")}
+            </Link>
+            <Link href="/trending" className="hover:text-foreground">
+              {t("trending")}
+            </Link>
+            <Link href="/genres" className="hover:text-foreground">
+              {t("genres")}
             </Link>
             <Link href="/showcase" className="hover:text-foreground">
               {t("showcase")}

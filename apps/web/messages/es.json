@@ -15,6 +15,14 @@
     "search": {
       "title": "Buscar — backlogg",
       "description": "Busca películas, series, libros y juegos en el catálogo de backlogg."
+    },
+    "genres": {
+      "title": "Géneros — backlogg",
+      "description": "Explora el catálogo de backlogg por género: películas, series, libros y juegos."
+    },
+    "trending": {
+      "title": "Tendencias — backlogg",
+      "description": "Descubre qué es tendencia ahora mismo en películas y series en backlogg."
     }
   },
   "Home": {
@@ -23,6 +31,7 @@
     "searchCta": "Buscar en el catálogo",
     "trendingTitle": "Tendencias esta semana",
     "trendingEmpty": "No hay tendencias por ahora. Vuelve pronto.",
+    "trendingViewAll": "Ver todas las tendencias",
     "featuredEmpty": "Todavía no hay nada aquí. Vuelve pronto.",
     "viewAll": "Ver todo: {type}",
     "types": {
@@ -64,6 +73,36 @@
       "previous": "Anterior",
       "next": "Siguiente",
       "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
+  "Genres": {
+    "heading": "Géneros",
+    "description": "Explora el catálogo por género y accede directamente a un listado filtrado.",
+    "empty": "No se encontraron géneros.",
+    "error": "Algo salió mal al cargar los géneros. Inténtalo de nuevo.",
+    "filters": {
+      "typeLabel": "Tipo",
+      "all": "Todos los tipos",
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Juegos"
+    }
+  },
+  "Trending": {
+    "heading": "Tendencias",
+    "empty": "No hay tendencias por ahora. Vuelve pronto.",
+    "error": "Algo salió mal al cargar las tendencias. Inténtalo de nuevo.",
+    "filters": {
+      "typeLabel": "Tipo",
+      "all": "Películas y series",
+      "movie": "Películas",
+      "series": "Series",
+      "periodLabel": "Periodo",
+      "period": {
+        "day": "Hoy",
+        "week": "Esta semana"
+      }
     }
   },
   "Search": {
@@ -136,6 +175,8 @@
     "primaryNav": "Navegación principal",
     "home": "Inicio",
     "search": "Buscar",
+    "trending": "Tendencias",
+    "genres": "Géneros",
     "showcase": "Muestra",
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",

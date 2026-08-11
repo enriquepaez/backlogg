@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   MOCK_API_BASE_URL,
+  allGenresFixture,
   bookListFixture,
   chernobylFixture,
   duneBookFixture,
@@ -23,10 +24,12 @@ import {
   movieGenreFilteredFixture,
   movieListFixture,
   movieListPage2Fixture,
+  seriesGenresFixture,
   seriesListFixture,
   similarMoviesFixture,
   similarSeriesFixture,
   trendingFixture,
+  trendingMoviesOnlyFixture,
 } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 
@@ -37,10 +40,12 @@ vi.mock("@/lib/auth/session", () => ({
 const {
   getAllFeatured,
   getFeatured,
+  getGenrePage,
   getGenres,
   getItemDetail,
   getSimilarItems,
   getTrending,
+  getTrendingPage,
   isCatalogType,
   listCatalog,
 } = await import("./catalog");
@@ -184,6 +189,65 @@ describe("getGenres", () => {
     );
 
     expect(await getGenres("movie")).toEqual([]);
+  });
+});
+
+describe("getGenrePage", () => {
+  it("returns all genres (with item_type) when no type is given", async () => {
+    expect(await getGenrePage()).toEqual({ ok: true, genres: allGenresFixture.genres });
+  });
+
+  it("applies the type filter", async () => {
+    expect(await getGenrePage("series")).toEqual({ ok: true, genres: seriesGenresFixture.genres });
+  });
+
+  it("returns ok: false on a non-200 response — distinct from an empty result", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/genres`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getGenrePage()).toEqual({ ok: false });
+  });
+
+  it("returns ok: false when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/genres`, () => HttpResponse.error()),
+    );
+
+    expect(await getGenrePage()).toEqual({ ok: false });
+  });
+});
+
+describe("getTrendingPage", () => {
+  it("returns the mixed movie+series results by default", async () => {
+    expect(await getTrendingPage()).toEqual({ ok: true, results: trendingFixture.results });
+  });
+
+  it("applies the type filter", async () => {
+    expect(await getTrendingPage({ type: "movie" })).toEqual({
+      ok: true,
+      results: trendingMoviesOnlyFixture.results,
+    });
+  });
+
+  it("returns ok: false on a non-200 response — distinct from an empty result", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/trending`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getTrendingPage()).toEqual({ ok: false });
+  });
+
+  it("returns ok: false when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/trending`, () => HttpResponse.error()),
+    );
+
+    expect(await getTrendingPage()).toEqual({ ok: false });
   });
 });
 

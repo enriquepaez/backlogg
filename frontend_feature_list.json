@@ -263,7 +263,7 @@
         "i18n; estados de carga/error",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 14,

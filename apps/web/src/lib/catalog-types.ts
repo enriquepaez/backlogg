@@ -90,6 +90,33 @@ export type CatalogListPage = {
 };
 
 /**
+ * A genre annotated with its content type — the shape `GET /v1/genres`
+ * actually returns (`GenreWithCountOut.item_type`), used by the `/genres`
+ * browse page (FE-12) to group genres per type and to build the link to
+ * `/browse/{item_type}?genre=slug`. Unlike {@link CatalogGenre} (the
+ * per-type filter dropdown option on `/browse/{type}`, FE-9), `item_type` is
+ * redundant there — the caller already knows which type it asked for — so
+ * that shape omits it.
+ */
+export type GenreWithType = CatalogGenre & { item_type: CatalogType };
+
+/**
+ * Trending only covers movies and series (TMDB Trending API — see
+ * `docs/api.md`'s `/v1/trending`), unlike {@link CatalogType}, which also
+ * includes books and games for the rest of the catalog.
+ */
+export type TrendingType = "movie" | "series";
+
+export const TRENDING_TYPES: readonly TrendingType[] = ["movie", "series"];
+
+/** Sort of `/v1/trending`'s `period` query param (`docs/api.md`). */
+export type TrendingPeriod = "day" | "week";
+
+export const TRENDING_PERIODS: readonly TrendingPeriod[] = ["day", "week"];
+
+export const DEFAULT_TRENDING_PERIOD: TrendingPeriod = "week";
+
+/**
  * Result of `listCatalog` (see `./catalog.ts`). Unlike `getFeatured` (which
  * silently degrades to an empty array — a failed home page section is a
  * minor, non-blocking gap) the browse page's grid is the whole point of the
