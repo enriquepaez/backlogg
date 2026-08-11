@@ -14,12 +14,18 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MOCK_API_BASE_URL,
   bookListFixture,
+  chernobylFixture,
+  duneBookFixture,
+  duneFixture,
   gameListFixture,
   genreListFixture,
+  hadesFixture,
   movieGenreFilteredFixture,
   movieListFixture,
   movieListPage2Fixture,
   seriesListFixture,
+  similarMoviesFixture,
+  similarSeriesFixture,
   trendingFixture,
 } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
@@ -28,8 +34,16 @@ vi.mock("@/lib/auth/session", () => ({
   getApiClient: () => createApiClient(MOCK_API_BASE_URL),
 }));
 
-const { getAllFeatured, getFeatured, getGenres, getTrending, isCatalogType, listCatalog } =
-  await import("./catalog");
+const {
+  getAllFeatured,
+  getFeatured,
+  getGenres,
+  getItemDetail,
+  getSimilarItems,
+  getTrending,
+  isCatalogType,
+  listCatalog,
+} = await import("./catalog");
 
 describe("getTrending", () => {
   it("returns the trending results on success", async () => {
@@ -170,6 +184,100 @@ describe("getGenres", () => {
     );
 
     expect(await getGenres("movie")).toEqual([]);
+  });
+});
+
+describe("getItemDetail", () => {
+  it("returns the movie on success", async () => {
+    expect(await getItemDetail("movie", duneFixture.slug)).toEqual({
+      status: "ok",
+      item: duneFixture,
+    });
+  });
+
+  it("returns the series on success", async () => {
+    expect(await getItemDetail("series", chernobylFixture.slug)).toEqual({
+      status: "ok",
+      item: chernobylFixture,
+    });
+  });
+
+  it("returns the book on success", async () => {
+    expect(await getItemDetail("book", duneBookFixture.slug)).toEqual({
+      status: "ok",
+      item: duneBookFixture,
+    });
+  });
+
+  it("returns the game on success", async () => {
+    expect(await getItemDetail("game", hadesFixture.slug)).toEqual({
+      status: "ok",
+      item: hadesFixture,
+    });
+  });
+
+  it("reports status: not-found on a real backend 404 (unknown slug)", async () => {
+    expect(await getItemDetail("movie", "does-not-exist")).toEqual({
+      status: "not-found",
+    });
+  });
+
+  it("reports status: error (not not-found) on a non-200/404 response — a transient failure must not look like a permanent 404", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getItemDetail("movie", duneFixture.slug)).toEqual({ status: "error" });
+  });
+
+  it("reports status: error when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug`, () => HttpResponse.error()),
+    );
+
+    expect(await getItemDetail("movie", duneFixture.slug)).toEqual({ status: "error" });
+  });
+});
+
+describe("getSimilarItems", () => {
+  it("returns similar movies on success", async () => {
+    expect(await getSimilarItems("movie", duneFixture.slug)).toEqual(
+      similarMoviesFixture.results,
+    );
+  });
+
+  it("returns similar series on success", async () => {
+    expect(await getSimilarItems("series", chernobylFixture.slug)).toEqual(
+      similarSeriesFixture.results,
+    );
+  });
+
+  it("returns an empty array for books without attempting a request (no similar endpoint)", async () => {
+    expect(await getSimilarItems("book", duneBookFixture.slug)).toEqual([]);
+  });
+
+  it("returns an empty array for games without attempting a request (no similar endpoint)", async () => {
+    expect(await getSimilarItems("game", hadesFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array on a non-200 response", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/similar`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getSimilarItems("movie", duneFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/series/:slug/similar`, () => HttpResponse.error()),
+    );
+
+    expect(await getSimilarItems("series", chernobylFixture.slug)).toEqual([]);
   });
 });
 

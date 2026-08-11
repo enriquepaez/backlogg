@@ -7,6 +7,10 @@
     "browse": {
       "title": "{type} — backlogg",
       "description": "Browse {type} on backlogg: filter by genre and sort by rating, date or title."
+    },
+    "item": {
+      "title": "{title} — backlogg",
+      "descriptionFallback": "Details, ratings and credits for {title} on backlogg."
     }
   },
   "Home": {
@@ -56,6 +60,37 @@
       "previous": "Previous",
       "next": "Next",
       "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
+  "ItemDetail": {
+    "error": "Something went wrong loading this title. Please try again.",
+    "originalTitleLabel": "Original title",
+    "genresLabel": "Genres",
+    "ratingExternalLabel": "External rating",
+    "ratingInternalLabel": "Backlogg rating",
+    "ratingCount": "({count})",
+    "noRatings": "No ratings yet",
+    "fields": {
+      "releaseDate": "Release date",
+      "runtime": "Runtime",
+      "runtimeValue": "{minutes} min",
+      "status": "Status",
+      "originalLanguage": "Original language",
+      "firstAirDate": "First aired",
+      "lastAirDate": "Last aired",
+      "seasons": "Seasons",
+      "episodes": "Episodes",
+      "firstPublishDate": "First published",
+      "gameType": "Type",
+      "platforms": "Platforms"
+    },
+    "credits": {
+      "heading": "Credits",
+      "empty": "No credit information available."
+    },
+    "similar": {
+      "heading": "You might also like",
+      "empty": "No similar titles yet."
     }
   },
   "LanguageSwitcher": {

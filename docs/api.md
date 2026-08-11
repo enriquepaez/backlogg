@@ -167,7 +167,8 @@ GET /v1/books/{slug}
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_publish_date`,
 `original_language`, `poster_url`, `rating_external`, `rating_count_external`,
-`rating_internal`, `rating_count_internal`, `genres[]`, `viewer_status` (ver Movies)
+`rating_internal`, `rating_count_internal`, `genres[]`, `credits[]`, `viewer_status`
+(ver Movies). El autor se expone como credit con `role: "AUTHOR"`.
 
 ### Games
 
@@ -182,7 +183,7 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_d
 `rating_count_external`, `rating_internal`, `rating_count_internal`, `genres[]`,
 `platforms[]`, `credits[]`, `viewer_status` (ver Movies)
 
-**`credits[]`** (en detail de movies, series y games): cada credit incluye
+**`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
 `billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
 

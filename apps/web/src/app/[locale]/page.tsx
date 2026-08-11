@@ -69,15 +69,19 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
         isEmpty={trending.length === 0}
         emptyMessage={t("trendingEmpty")}
       >
-        {trending.map((item) => (
-          <CatalogCard
-            key={`${item.item_type}-${item.slug}`}
-            title={item.title}
-            posterUrl={item.poster_url}
-            ratingExternal={item.rating_external}
-            typeLabel={t(`typeBadge.${trendingItemType(item)}`)}
-          />
-        ))}
+        {trending.map((item) => {
+          const type = trendingItemType(item);
+          return (
+            <CatalogCard
+              key={`${item.item_type}-${item.slug}`}
+              title={item.title}
+              posterUrl={item.poster_url}
+              ratingExternal={item.rating_external}
+              typeLabel={t(`typeBadge.${type}`)}
+              href={`/${type}/${item.slug}`}
+            />
+          );
+        })}
       </CatalogSection>
 
       {CATALOG_TYPES.map((type) => {
@@ -97,6 +101,7 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
                 title={item.title}
                 posterUrl={item.poster_url}
                 ratingExternal={item.rating_external}
+                href={`/${type}/${item.slug}`}
               />
             ))}
           </CatalogSection>

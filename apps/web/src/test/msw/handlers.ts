@@ -4,11 +4,16 @@ import type { components } from "@backlogg/api-client";
 
 type MovieOut = components["schemas"]["MovieOut"];
 type MovieListOut = components["schemas"]["MovieListOut"];
+type SeriesOut = components["schemas"]["SeriesOut"];
 type SeriesListOut = components["schemas"]["SeriesListOut"];
+type BookOut = components["schemas"]["BookOut"];
 type BookListOut = components["schemas"]["BookListOut"];
+type GameOut = components["schemas"]["GameOut"];
 type GameListOut = components["schemas"]["GameListOut"];
 type TrendingOut = components["schemas"]["TrendingOut"];
 type GenreListOut = components["schemas"]["GenreListOut"];
+type SimilarMoviesOut = components["schemas"]["SimilarMoviesOut"];
+type SimilarSeriesListOut = components["schemas"]["SimilarSeriesListOut"];
 
 /**
  * Base URL these handlers are registered against. Tests build their
@@ -130,6 +135,126 @@ export const gameListFixture: GameListOut = {
 };
 
 /**
+ * Detail fixtures for series/book/game (FE-10 item detail), mirroring
+ * `duneFixture` (movie) above — one representative item per type, matching
+ * the response fields documented in `docs/api.md`.
+ */
+export const chernobylFixture: SeriesOut = {
+  id: 2,
+  title: "Chernobyl",
+  original_title: "Chernobyl",
+  slug: "chernobyl",
+  overview: "In April 1986, an explosion at the Chernobyl nuclear power plant.",
+  first_air_date: "2019-05-06",
+  last_air_date: "2019-06-03",
+  number_of_seasons: 1,
+  number_of_episodes: 5,
+  status: "Ended",
+  original_language: "en",
+  poster_url: "https://image.tmdb.org/t/p/w500/chernobyl.jpg",
+  backdrop_url: "https://image.tmdb.org/t/p/w780/chernobyl-bd.jpg",
+  rating_external: 8.5,
+  rating_count_external: 3200,
+  rating_internal: null,
+  rating_count_internal: 0,
+  genres: [{ id: 5, name: "Drama", slug: "drama" }],
+  credits: [
+    {
+      role: "cast",
+      person_name: "Jared Harris",
+      person_slug: "jared-harris",
+      character_name: "Valery Legasov",
+      profile_url: null,
+      billing_order: 0,
+    },
+  ],
+  viewer_status: null,
+};
+
+export const duneBookFixture: BookOut = {
+  id: 3,
+  title: "Dune",
+  original_title: "Dune",
+  slug: "OL893415W",
+  overview: "Set on the desert planet Arrakis.",
+  first_publish_date: "1965-08-01",
+  original_language: "en",
+  poster_url: "https://covers.openlibrary.org/b/id/12-L.jpg",
+  rating_external: 4.3,
+  rating_count_external: 500,
+  rating_internal: null,
+  rating_count_internal: 0,
+  genres: [{ id: 3, name: "Science Fiction", slug: "science-fiction" }],
+  credits: [
+    {
+      role: "AUTHOR",
+      person_name: "Frank Herbert",
+      person_slug: "frank-herbert",
+      character_name: null,
+      profile_url: null,
+      billing_order: null,
+    },
+  ],
+  viewer_status: null,
+};
+
+export const hadesFixture: GameOut = {
+  id: 4,
+  title: "Hades",
+  original_title: "Hades",
+  slug: "hades",
+  overview: "Defy the god of the dead as you hack and slash out of the Underworld.",
+  release_date: "2020-09-17",
+  game_type: "main_game",
+  original_language: "en",
+  poster_url: "https://images.igdb.com/igdb/image/upload/t_cover_big/hades.jpg",
+  backdrop_url: "https://images.igdb.com/igdb/image/upload/t_screenshot_big/hades-bd.jpg",
+  rating_external: 9.1,
+  rating_count_external: 1500,
+  rating_internal: null,
+  rating_count_internal: 0,
+  genres: [{ id: 6, name: "Roguelike", slug: "roguelike" }],
+  platforms: [{ id: 1, name: "PC", slug: "pc" }],
+  credits: [
+    {
+      role: "developer",
+      person_name: "Supergiant Games",
+      person_slug: "supergiant-games",
+      character_name: null,
+      profile_url: null,
+      billing_order: 0,
+    },
+  ],
+  viewer_status: null,
+};
+
+/** `GET /v1/movies/{slug}/similar` (FE-10). */
+export const similarMoviesFixture: SimilarMoviesOut = {
+  results: [
+    {
+      title: "Arrival",
+      slug: "arrival-2016",
+      poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
+      release_date: "2016-11-11",
+      rating_external: 7.9,
+    },
+  ],
+};
+
+/** `GET /v1/series/{slug}/similar` (FE-10). */
+export const similarSeriesFixture: SimilarSeriesListOut = {
+  results: [
+    {
+      title: "The Last of Us",
+      slug: "the-last-of-us",
+      poster_url: "https://image.tmdb.org/t/p/w500/tlou.jpg",
+      release_date: "2023-01-15",
+      rating_external: 8.7,
+    },
+  ],
+};
+
+/**
  * Second page of the movies list (FE-9 browse: pagination). `total: 30` with
  * `limit: 24` (the browse page's fixed page size, see `BROWSE_PAGE_SIZE` in
  * `src/lib/catalog.ts`) puts this at page 2 of 2.
@@ -228,16 +353,55 @@ export const handlers = [
     return HttpResponse.json({ detail: "Movie not found" }, { status: 404 });
   }),
 
+  // FE-10 item detail: similar movies. Registered separately from
+  // `/v1/movies/:slug` above — msw's `:slug` param matches exactly one path
+  // segment, so it never intercepts the extra `/similar` segment.
+  http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/similar`, ({ params }) => {
+    if (params.slug === duneFixture.slug) {
+      return HttpResponse.json(similarMoviesFixture);
+    }
+    return HttpResponse.json({ detail: "Movie not found" }, { status: 404 });
+  }),
+
   http.get(`${MOCK_API_BASE_URL}/v1/series`, () => {
     return HttpResponse.json(seriesListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/series/:slug`, ({ params }) => {
+    if (params.slug === chernobylFixture.slug) {
+      return HttpResponse.json(chernobylFixture);
+    }
+    return HttpResponse.json({ detail: "Series not found" }, { status: 404 });
+  }),
+
+  // FE-10 item detail: similar series.
+  http.get(`${MOCK_API_BASE_URL}/v1/series/:slug/similar`, ({ params }) => {
+    if (params.slug === chernobylFixture.slug) {
+      return HttpResponse.json(similarSeriesFixture);
+    }
+    return HttpResponse.json({ detail: "Series not found" }, { status: 404 });
   }),
 
   http.get(`${MOCK_API_BASE_URL}/v1/books`, () => {
     return HttpResponse.json(bookListFixture);
   }),
 
+  http.get(`${MOCK_API_BASE_URL}/v1/books/:slug`, ({ params }) => {
+    if (params.slug === duneBookFixture.slug) {
+      return HttpResponse.json(duneBookFixture);
+    }
+    return HttpResponse.json({ detail: "Book not found" }, { status: 404 });
+  }),
+
   http.get(`${MOCK_API_BASE_URL}/v1/games`, () => {
     return HttpResponse.json(gameListFixture);
+  }),
+
+  http.get(`${MOCK_API_BASE_URL}/v1/games/:slug`, ({ params }) => {
+    if (params.slug === hadesFixture.slug) {
+      return HttpResponse.json(hadesFixture);
+    }
+    return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
   }),
 
   http.get(`${MOCK_API_BASE_URL}/v1/trending`, () => {

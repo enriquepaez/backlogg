@@ -225,7 +225,7 @@
         "generateMetadata con OG por item; fallback on-demand del backend respetado (200 tras primer fetch)",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 12,

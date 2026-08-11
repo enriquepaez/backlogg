@@ -7,6 +7,10 @@
     "browse": {
       "title": "{type} — backlogg",
       "description": "Explora {type} en backlogg: filtra por género y ordena por puntuación, fecha o título."
+    },
+    "item": {
+      "title": "{title} — backlogg",
+      "descriptionFallback": "Detalles, puntuaciones y reparto de {title} en backlogg."
     }
   },
   "Home": {
@@ -56,6 +60,37 @@
       "previous": "Anterior",
       "next": "Siguiente",
       "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
+  "ItemDetail": {
+    "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",
+    "originalTitleLabel": "Título original",
+    "genresLabel": "Géneros",
+    "ratingExternalLabel": "Puntuación externa",
+    "ratingInternalLabel": "Puntuación en backlogg",
+    "ratingCount": "({count})",
+    "noRatings": "Todavía sin puntuaciones",
+    "fields": {
+      "releaseDate": "Fecha de estreno",
+      "runtime": "Duración",
+      "runtimeValue": "{minutes} min",
+      "status": "Estado",
+      "originalLanguage": "Idioma original",
+      "firstAirDate": "Primera emisión",
+      "lastAirDate": "Última emisión",
+      "seasons": "Temporadas",
+      "episodes": "Episodios",
+      "firstPublishDate": "Primera publicación",
+      "gameType": "Tipo",
+      "platforms": "Plataformas"
+    },
+    "credits": {
+      "heading": "Créditos",
+      "empty": "No hay información de créditos disponible."
+    },
+    "similar": {
+      "heading": "También te puede interesar",
+      "empty": "Todavía no hay títulos similares."
     }
   },
   "LanguageSwitcher": {

@@ -2,6 +2,7 @@ import { ImageOff, Star } from "lucide-react";
 import Image from "next/image";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { Link } from "@/i18n/navigation";
 
 export type CatalogCardProps = {
   /** Item title. Catalog content is never translated (see `apps/web/AGENTS.md` / i18n note). */
@@ -14,21 +15,29 @@ export type CatalogCardProps = {
    * omitted for the per-type "featured" grids where it would be redundant.
    */
   typeLabel?: string;
+  /**
+   * Item detail page path (e.g. `/movie/dune-2021`, FE-10), made available
+   * once FE-10 shipped a route to link to. When omitted the card renders as
+   * a plain, non-interactive tile — used by contexts that don't (yet) have
+   * anywhere to send the click.
+   */
+  href?: string;
 };
 
 /**
  * Presentational poster card shared by the home page's trending and
- * "featured" sections (FE-8). Deliberately not a link: FE-9/FE-10 (browse +
- * item detail) don't exist yet, and linking cards to a detail page is out of
- * scope for this feature (see `progress/current.md`).
+ * "featured" sections (FE-8), the `/browse/{type}` grid (FE-9), and the item
+ * detail page's "similar" section (FE-10). Wrapped in a `Link` to
+ * `/{type}/{slug}` whenever a caller passes `href`.
  */
 export function CatalogCard({
   title,
   posterUrl,
   ratingExternal,
   typeLabel,
+  href,
 }: CatalogCardProps) {
-  return (
+  const card = (
     <Card size="sm" className="w-full">
       <div className="relative aspect-2/3 w-full bg-muted">
         {posterUrl ? (
@@ -66,5 +75,18 @@ export function CatalogCard({
         </p>
       </CardContent>
     </Card>
+  );
+
+  if (!href) {
+    return card;
+  }
+
+  return (
+    <Link
+      href={href}
+      className="block rounded-xl outline-none transition-opacity hover:opacity-90 focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      {card}
+    </Link>
   );
 }
