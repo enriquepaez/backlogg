@@ -11,6 +11,10 @@
     "item": {
       "title": "{title} — backlogg",
       "descriptionFallback": "Details, ratings and credits for {title} on backlogg."
+    },
+    "search": {
+      "title": "Search — backlogg",
+      "description": "Search movies, series, books and games across backlogg's catalog."
     }
   },
   "Home": {
@@ -62,6 +66,35 @@
       "pageStatus": "Page {page} of {totalPages}"
     }
   },
+  "Search": {
+    "heading": "Search",
+    "inputLabel": "Search",
+    "placeholder": "Search movies, series, books and games…",
+    "prompt": "Start typing to search.",
+    "untitled": "Untitled",
+    "empty": "No results for \"{query}\".",
+    "invalidQuery": "The search query can't be empty.",
+    "error": "Something went wrong while searching. Please try again.",
+    "filters": {
+      "typeLabel": "Type",
+      "all": "All types",
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    },
+    "rateLimited": {
+      "waiting": "Too many searches. Try again in {seconds}s.",
+      "ready": "You can try again now.",
+      "retry": "Retry"
+    },
+    "pagination": {
+      "nav": "Pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
   "ItemDetail": {
     "error": "Something went wrong loading this title. Please try again.",
     "originalTitleLabel": "Original title",
@@ -102,6 +135,7 @@
     "brand": "backlogg",
     "primaryNav": "Main navigation",
     "home": "Home",
+    "search": "Search",
     "showcase": "Showcase",
     "login": "Log in",
     "logout": "Log out",

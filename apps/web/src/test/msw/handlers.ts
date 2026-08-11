@@ -14,6 +14,7 @@ type TrendingOut = components["schemas"]["TrendingOut"];
 type GenreListOut = components["schemas"]["GenreListOut"];
 type SimilarMoviesOut = components["schemas"]["SimilarMoviesOut"];
 type SimilarSeriesListOut = components["schemas"]["SimilarSeriesListOut"];
+type SearchResponse = components["schemas"]["SearchResponse"];
 
 /**
  * Base URL these handlers are registered against. Tests build their
@@ -313,6 +314,33 @@ export const trendingFixture: TrendingOut = {
   ],
 };
 
+/** `GET /v1/search` on a real hit (FE-11 global search). */
+export const searchResultsFixture: SearchResponse = {
+  results: [
+    {
+      id: duneFixture.id,
+      item_type: "MOVIE",
+      slug: duneFixture.slug,
+      title: duneFixture.title,
+      overview: duneFixture.overview,
+      poster_url: duneFixture.poster_url,
+      release_date: duneFixture.release_date,
+      rating_external: duneFixture.rating_external,
+    },
+  ],
+  total: 1,
+  page: 1,
+  limit: 24,
+};
+
+/** `GET /v1/search` when the query matches nothing (FE-11: empty-results state). */
+export const searchEmptyFixture: SearchResponse = {
+  results: [],
+  total: 0,
+  page: 1,
+  limit: 24,
+};
+
 /**
  * Minimal, reusable set of `/v1` handlers. Extend this array (or use
  * `server.use(...)` from `./server` for a one-off override in a single test)
@@ -406,5 +434,32 @@ export const handlers = [
 
   http.get(`${MOCK_API_BASE_URL}/v1/trending`, () => {
     return HttpResponse.json(trendingFixture);
+  }),
+
+  // FE-11 global search. `q` is required by the real backend (422 on empty)
+  // — mirrored here so `searchCatalog`'s defensive 422 branch is exercised
+  // even though the page never sends an empty `q`. `no-results`/
+  // `rate-limited` are magic query values a test can opt into via `q=`
+  // instead of overriding this handler with `server.use(...)` every time.
+  http.get(`${MOCK_API_BASE_URL}/v1/search`, ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get("q");
+
+    if (!q) {
+      return HttpResponse.json(
+        { detail: [{ loc: ["query", "q"], msg: "field required", type: "value_error" }] },
+        { status: 422 },
+      );
+    }
+    if (q === "no-results") {
+      return HttpResponse.json(searchEmptyFixture);
+    }
+    if (q === "rate-limited") {
+      return new HttpResponse(JSON.stringify({ detail: "Too Many Requests" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "30" },
+      });
+    }
+    return HttpResponse.json(searchResultsFixture);
   }),
 ];

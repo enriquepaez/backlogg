@@ -244,7 +244,7 @@
         "Debounce del input; URL con la query",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 13,

@@ -11,6 +11,10 @@
     "item": {
       "title": "{title} — backlogg",
       "descriptionFallback": "Detalles, puntuaciones y reparto de {title} en backlogg."
+    },
+    "search": {
+      "title": "Buscar — backlogg",
+      "description": "Busca películas, series, libros y juegos en el catálogo de backlogg."
     }
   },
   "Home": {
@@ -62,6 +66,35 @@
       "pageStatus": "Página {page} de {totalPages}"
     }
   },
+  "Search": {
+    "heading": "Buscar",
+    "inputLabel": "Buscar",
+    "placeholder": "Busca películas, series, libros y juegos…",
+    "prompt": "Escribe algo para empezar a buscar.",
+    "untitled": "Sin título",
+    "empty": "Ningún resultado para «{query}».",
+    "invalidQuery": "La búsqueda no puede estar vacía.",
+    "error": "Algo salió mal al buscar. Inténtalo de nuevo.",
+    "filters": {
+      "typeLabel": "Tipo",
+      "all": "Todos los tipos",
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Juegos"
+    },
+    "rateLimited": {
+      "waiting": "Demasiadas búsquedas. Inténtalo de nuevo en {seconds}s.",
+      "ready": "Ya puedes volver a intentarlo.",
+      "retry": "Reintentar"
+    },
+    "pagination": {
+      "nav": "Paginación",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
   "ItemDetail": {
     "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",
     "originalTitleLabel": "Título original",
@@ -102,6 +135,7 @@
     "brand": "backlogg",
     "primaryNav": "Navegación principal",
     "home": "Inicio",
+    "search": "Buscar",
     "showcase": "Muestra",
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",

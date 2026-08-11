@@ -38,6 +38,9 @@ export async function SiteHeader() {
             <Link href="/" className="hover:text-foreground">
               {t("home")}
             </Link>
+            <Link href="/search" className="hover:text-foreground">
+              {t("search")}
+            </Link>
             <Link href="/showcase" className="hover:text-foreground">
               {t("showcase")}
             </Link>
