@@ -293,6 +293,25 @@ export const genreListFixture: GenreListOut = {
   ],
 };
 
+/**
+ * All genres across all four types (FE-12 `/genres` browse page),
+ * `GET /v1/genres` with no `type` filter. Includes the same movie genres as
+ * {@link genreListFixture} plus one genre for each of the other three types.
+ */
+export const allGenresFixture: GenreListOut = {
+  genres: [
+    ...genreListFixture.genres,
+    { name: "Drama", slug: "drama", item_type: "series", count: 8 },
+    { name: "Science Fiction", slug: "science-fiction", item_type: "book", count: 3 },
+    { name: "Roguelike", slug: "roguelike", item_type: "game", count: 5 },
+  ],
+};
+
+/** Genres filtered to `type=series` (FE-12 `/genres?type=series`). */
+export const seriesGenresFixture: GenreListOut = {
+  genres: [{ name: "Drama", slug: "drama", item_type: "series", count: 8 }],
+};
+
 export const trendingFixture: TrendingOut = {
   results: [
     {
@@ -312,6 +331,11 @@ export const trendingFixture: TrendingOut = {
       rating_external: seriesListFixture.items[0].rating_external,
     },
   ],
+};
+
+/** Trending filtered to `type=movie` (FE-12 `/trending?type=movie`). */
+export const trendingMoviesOnlyFixture: TrendingOut = {
+  results: [trendingFixture.results[0]],
 };
 
 /** `GET /v1/search` on a real hit (FE-11 global search). */
@@ -368,7 +392,14 @@ export const handlers = [
     const url = new URL(request.url);
     const type = url.searchParams.get("type");
 
-    if (type && type !== "movie") {
+    // No `type` (FE-12 `/genres`): all four types mixed together.
+    if (!type) {
+      return HttpResponse.json(allGenresFixture);
+    }
+    if (type === "series") {
+      return HttpResponse.json(seriesGenresFixture);
+    }
+    if (type !== "movie") {
       return HttpResponse.json({ genres: [] } satisfies GenreListOut);
     }
     return HttpResponse.json(genreListFixture);
@@ -432,7 +463,15 @@ export const handlers = [
     return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
   }),
 
-  http.get(`${MOCK_API_BASE_URL}/v1/trending`, () => {
+  // Respects `type` (FE-12 `/trending?type=`) so tests can exercise the
+  // filtered state; ignores `period` (the fixture doesn't vary by period).
+  http.get(`${MOCK_API_BASE_URL}/v1/trending`, ({ request }) => {
+    const url = new URL(request.url);
+    const type = url.searchParams.get("type");
+
+    if (type === "movie") {
+      return HttpResponse.json(trendingMoviesOnlyFixture);
+    }
     return HttpResponse.json(trendingFixture);
   }),
 

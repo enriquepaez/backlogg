@@ -15,6 +15,14 @@
     "search": {
       "title": "Search — backlogg",
       "description": "Search movies, series, books and games across backlogg's catalog."
+    },
+    "genres": {
+      "title": "Genres — backlogg",
+      "description": "Browse backlogg's catalog by genre — movies, series, books and games."
+    },
+    "trending": {
+      "title": "Trending — backlogg",
+      "description": "See what's trending in movies and series right now on backlogg."
     }
   },
   "Home": {
@@ -23,6 +31,7 @@
     "searchCta": "Search the catalog",
     "trendingTitle": "Trending this week",
     "trendingEmpty": "No trending titles right now. Check back soon.",
+    "trendingViewAll": "View all trending",
     "featuredEmpty": "Nothing here yet. Check back soon.",
     "viewAll": "View all {type}",
     "types": {
@@ -64,6 +73,36 @@
       "previous": "Previous",
       "next": "Next",
       "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
+  "Genres": {
+    "heading": "Genres",
+    "description": "Browse the catalog by genre and jump straight into a filtered list.",
+    "empty": "No genres found.",
+    "error": "Something went wrong loading genres. Please try again.",
+    "filters": {
+      "typeLabel": "Type",
+      "all": "All types",
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    }
+  },
+  "Trending": {
+    "heading": "Trending",
+    "empty": "No trending titles right now. Check back soon.",
+    "error": "Something went wrong loading trending titles. Please try again.",
+    "filters": {
+      "typeLabel": "Type",
+      "all": "Movies & series",
+      "movie": "Movies",
+      "series": "Series",
+      "periodLabel": "Period",
+      "period": {
+        "day": "Today",
+        "week": "This week"
+      }
     }
   },
   "Search": {
@@ -136,6 +175,8 @@
     "primaryNav": "Main navigation",
     "home": "Home",
     "search": "Search",
+    "trending": "Trending",
+    "genres": "Genres",
     "showcase": "Showcase",
     "login": "Log in",
     "logout": "Log out",

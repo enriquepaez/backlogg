@@ -9,6 +9,9 @@ import {
   type CatalogListResult,
   type CatalogSort,
   type CatalogType,
+  type GenreWithType,
+  type TrendingPeriod,
+  type TrendingType,
 } from "./catalog-types";
 
 /**
@@ -220,6 +223,83 @@ export async function getGenres(type: CatalogType): Promise<CatalogGenre[]> {
     console.error(`getGenres(${type}): failed to reach the API`, error);
     return [];
   }
+}
+
+export type GenrePageResult = { ok: true; genres: GenreWithType[] } | { ok: false };
+
+/**
+ * All genres (optionally filtered by content type), for the `/genres` browse
+ * page (FE-12). Unlike {@link getGenres} — the `/browse/{type}` filter
+ * dropdown's data source, which silently degrades to an empty array because a
+ * missing filter list there isn't fatal — this page's whole point IS the
+ * genre list, so failures are reported explicitly via `ok: false`, same
+ * reasoning as {@link listCatalog}. Also keeps `item_type` (dropped by
+ * {@link getGenres}, redundant there since the caller already knows the
+ * type it asked for) since this page groups genres by type and links each
+ * one to `/browse/{item_type}?genre=slug`.
+ */
+export async function getGenrePage(type?: CatalogType): Promise<GenrePageResult> {
+  try {
+    const { data, response } = await getApiClient().GET("/v1/genres", {
+      params: { query: { type } },
+      next: { revalidate: BROWSE_REVALIDATE_SECONDS },
+    });
+    if (response.status !== 200 || !data) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      genres: data.genres.map((genre) => ({
+        name: genre.name,
+        slug: genre.slug,
+        count: genre.count,
+        item_type: genre.item_type as CatalogType,
+      })),
+    };
+  } catch (error) {
+    console.error(`getGenrePage(${type}): failed to reach the API`, error);
+    return { ok: false };
+  }
+}
+
+export type TrendingPageOptions = { type?: TrendingType; period?: TrendingPeriod };
+
+export type TrendingPageResult = { ok: true; results: TrendingItem[] } | { ok: false };
+
+/**
+ * Trending items filtered by type/period, for the `/trending` browse page
+ * (FE-12). Same explicit `ok`-tagged pattern as {@link getGenrePage}/
+ * {@link listCatalog} — unlike {@link getTrending} (the home page's trending
+ * section, which silently degrades to an empty array since a failed home
+ * section is a minor, non-blocking gap), this page's whole point IS the
+ * trending list.
+ */
+export async function getTrendingPage(
+  options: TrendingPageOptions = {},
+): Promise<TrendingPageResult> {
+  try {
+    const { data, response } = await getApiClient().GET("/v1/trending", {
+      params: { query: { type: options.type, period: options.period } },
+      next: { revalidate: TRENDING_REVALIDATE_SECONDS },
+    });
+    if (response.status !== 200 || !data) {
+      return { ok: false };
+    }
+    return { ok: true, results: data.results };
+  } catch (error) {
+    console.error("getTrendingPage: failed to reach the API", error);
+    return { ok: false };
+  }
+}
+
+/**
+ * Maps the trending endpoint's uppercase `item_type` (`TrendingItemOut`) to
+ * the lowercase {@link TrendingType} vocabulary used elsewhere (routes,
+ * `Home.typeBadge`). Shared by the home page's trending section (FE-8) and
+ * the `/trending` browse page (FE-12).
+ */
+export function trendingItemType(item: TrendingItem): TrendingType {
+  return item.item_type === "MOVIE" ? "movie" : "series";
 }
 
 /** All four "featured" lists, fetched in parallel, keyed by {@link CatalogType}. */

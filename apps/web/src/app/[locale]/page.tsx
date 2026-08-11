@@ -68,6 +68,8 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
         heading={t("trendingTitle")}
         isEmpty={trending.length === 0}
         emptyMessage={t("trendingEmpty")}
+        viewAllHref="/trending"
+        viewAllLabel={t("trendingViewAll")}
       >
         {trending.map((item) => {
           const type = trendingItemType(item);
