@@ -1,7 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { CatalogCard } from "./catalog-card";
+// `@/i18n/navigation`'s `Link` doesn't resolve under plain Vitest/jsdom (see
+// `catalog-section.test.tsx` for the same mock + rationale) — needed here
+// too now that `CatalogCard` conditionally wraps itself in that `Link`
+// (FE-10, `href` prop).
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({ href, ...props }: React.ComponentProps<"a">) => (
+    <a href={href} {...props} />
+  ),
+}));
+
+const { CatalogCard } = await import("./catalog-card");
 
 describe("CatalogCard", () => {
   it("renders the poster image with the title as alt text", () => {
@@ -64,5 +74,26 @@ describe("CatalogCard", () => {
     );
 
     expect(screen.getByText("Hades")).toBeInTheDocument();
+  });
+
+  it("wraps itself in a link to the item detail page when href is given", () => {
+    render(
+      <CatalogCard
+        title="Dune"
+        posterUrl={null}
+        ratingExternal={null}
+        href="/movie/dune-2021"
+      />,
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/movie/dune-2021");
+  });
+
+  it("renders as a plain (non-link) tile when href is omitted", () => {
+    render(
+      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+    );
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

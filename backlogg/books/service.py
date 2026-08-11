@@ -17,8 +17,10 @@ from backlogg.books.schemas import (
 )
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
+from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Person
+from backlogg.shared.schemas import CreditOut
 
 _ol_client = OpenLibraryClient()
 
@@ -130,7 +132,7 @@ async def list_books(
     return BookListOut(items=list_items, total=total, page=page, limit=limit)
 
 
-def _book_to_out(book: Book, viewer_status: str | None) -> BookOut:
+def _book_to_out(book: Book, credits: list[CreditOut], viewer_status: str | None) -> BookOut:
     return BookOut(
         id=book.id,
         title=book.title,
@@ -145,6 +147,7 @@ def _book_to_out(book: Book, viewer_status: str | None) -> BookOut:
         rating_internal=(float(book.rating_internal) if book.rating_internal is not None else None),
         rating_count_internal=book.rating_count_internal,
         genres=[BookGenreOut(id=g.id, name=g.name, slug=g.slug) for g in book.genres],
+        credits=credits,
         viewer_status=viewer_status,
     )
 
@@ -181,5 +184,6 @@ async def get_book(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
 
         await db.commit()
 
+    credits = await get_credits_for_item(db, "BOOK", book.id)
     viewer_status = await library_service.get_viewer_status(db, "BOOK", book.id, viewer_id)
-    return _book_to_out(book, viewer_status)
+    return _book_to_out(book, credits, viewer_status)

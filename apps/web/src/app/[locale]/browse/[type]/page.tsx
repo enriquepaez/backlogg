@@ -125,6 +125,7 @@ export default async function BrowsePage({
                 title={item.title}
                 posterUrl={item.poster_url}
                 ratingExternal={item.rating_external}
+                href={`/${type}/${item.slug}`}
               />
             ))}
           </div>

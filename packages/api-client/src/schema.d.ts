@@ -1390,6 +1390,8 @@ export interface components {
             rating_count_internal: number;
             /** Genres */
             genres: components["schemas"]["BookGenreOut"][];
+            /** Credits */
+            credits: components["schemas"]["backlogg__shared__schemas__CreditOut"][];
             /** Viewer Status */
             viewer_status?: string | null;
         };

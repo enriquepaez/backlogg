@@ -14,8 +14,11 @@ import {
 /**
  * Public (no-auth, no-cookies) fetch helpers for the catalog's public pages:
  * the home page's trending (TMDB-backed) and "featured" per-type sections
- * (FE-8), and the `/browse/{type}` paginated, filterable list (FE-9). Local
- * catalog only, no external fallback for any of it.
+ * (FE-8), the `/browse/{type}` paginated, filterable list (FE-9), and the
+ * `/{type}/{slug}` item detail page + its "similar" section (FE-10). Local
+ * catalog only, no external fallback for any of it — except the item detail
+ * fetch itself, which hits the backend's own on-demand fallback (see
+ * {@link getItemDetail}'s doc comment).
  *
  * Reuses the shared `getApiClient()` from `@/lib/auth/session` — that module
  * already starts with `import "server-only"`, which guards this file
@@ -35,9 +38,10 @@ import {
  * Most exports here degrade to an empty array on failure (network error or
  * non-200 response) instead of throwing: this is public SEO content where
  * one failing section must not take down the rest of the render — same
- * spirit as `getCurrentUser()` in `src/lib/api-fetch.ts`. The one exception
- * is {@link listCatalog}, whose result IS the page (`/browse/{type}`) — see
- * its own doc comment for why it reports failure explicitly instead.
+ * spirit as `getCurrentUser()` in `src/lib/api-fetch.ts`. The exceptions are
+ * {@link listCatalog} and {@link getItemDetail}, whose result IS the page
+ * (`/browse/{type}` and `/{type}/{slug}` respectively) — see their own doc
+ * comments for why they report failure explicitly instead.
  */
 
 export * from "./catalog-types";
@@ -229,4 +233,153 @@ export async function getAllFeatured(): Promise<
     getFeatured("game"),
   ]);
   return { movie, series, book, game };
+}
+
+export type MovieDetail = components["schemas"]["MovieOut"];
+export type SeriesDetail = components["schemas"]["SeriesOut"];
+export type BookDetail = components["schemas"]["BookOut"];
+export type GameDetail = components["schemas"]["GameOut"];
+
+/**
+ * `GET /v1/{type}/{slug}` response shape, keyed by {@link CatalogType}. Unlike
+ * {@link CatalogListItem} (identical fields across all four list endpoints),
+ * the four detail shapes genuinely differ (e.g. `runtime` vs
+ * `number_of_seasons` vs `first_publish_date` vs `platforms`) — callers of
+ * {@link getItemDetail} narrow `ItemDetail` back down using the same `type`
+ * value the result came from (see `[locale]/[type]/[slug]/page.tsx`).
+ */
+export type ItemDetail = MovieDetail | SeriesDetail | BookDetail | GameDetail;
+
+/**
+ * Result of {@link getItemDetail} (FE-10 item detail page). Three states,
+ * not just success/failure, because the page needs to tell apart a
+ * backend-confirmed "this slug doesn't exist anywhere" (`docs/api.md`: 404
+ * means "Not found in DB or external API" — the on-demand fallback already
+ * ran and found nothing) from merely failing to reach the API at all
+ * (network error, timeout, unexpected 5xx). Only the former is safe to
+ * surface via `notFound()`. A transient failure must not be treated as a
+ * permanent 404: the backend's on-demand fallback (`docs/architecture.md`)
+ * can itself take a while the first time a slug is requested — it still
+ * completes within that same request and returns 200, but if the fetch from
+ * *this* app fails for any reason (e.g. a slow external-API round trip on
+ * the backend outlasting some intermediary timeout), the right response is
+ * an inline, retryable error state, not a hard "page not found" that would
+ * get treated as permanent by a search engine or a returning user. A reload
+ * simply calls {@link getItemDetail} again — by then the item is already
+ * persisted locally, so the retry is fast and returns `"ok"`. See FE-10's
+ * acceptance criteria in `frontend_feature_list.json`.
+ */
+export type ItemDetailResult<T> =
+  | { status: "ok"; item: T }
+  | { status: "not-found" }
+  | { status: "error" };
+
+/**
+ * ISR window for a single item's detail fetch. Shorter than
+ * {@link FEATURED_REVALIDATE_SECONDS}/{@link BROWSE_REVALIDATE_SECONDS}: this
+ * is the endpoint the on-demand fallback most directly targets (a slug
+ * requested here for the first time gets persisted synchronously and
+ * returned in the same response), so a freshly-created item's own page
+ * should reflect that soon rather than wait up to 6h.
+ */
+const ITEM_REVALIDATE_SECONDS = 60 * 60; // 1h
+
+/**
+ * Fetch one item's full detail by type + slug (FE-10). Only ever reports a
+ * `"not-found"` result for a real backend 404 — any other failure (network
+ * error, non-200/404 status) reports `"error"` instead. See
+ * {@link ItemDetailResult} for why that distinction matters.
+ */
+export async function getItemDetail(
+  type: CatalogType,
+  slug: string,
+): Promise<ItemDetailResult<ItemDetail>> {
+  const next = { revalidate: ITEM_REVALIDATE_SECONDS };
+
+  try {
+    const client = getApiClient();
+
+    switch (type) {
+      case "movie": {
+        const { data, response } = await client.GET("/v1/movies/{slug}", {
+          params: { path: { slug } },
+          next,
+        });
+        if (response.status === 200 && data) return { status: "ok", item: data };
+        return response.status === 404 ? { status: "not-found" } : { status: "error" };
+      }
+      case "series": {
+        const { data, response } = await client.GET("/v1/series/{slug}", {
+          params: { path: { slug } },
+          next,
+        });
+        if (response.status === 200 && data) return { status: "ok", item: data };
+        return response.status === 404 ? { status: "not-found" } : { status: "error" };
+      }
+      case "book": {
+        const { data, response } = await client.GET("/v1/books/{slug}", {
+          params: { path: { slug } },
+          next,
+        });
+        if (response.status === 200 && data) return { status: "ok", item: data };
+        return response.status === 404 ? { status: "not-found" } : { status: "error" };
+      }
+      case "game": {
+        const { data, response } = await client.GET("/v1/games/{slug}", {
+          params: { path: { slug } },
+          next,
+        });
+        if (response.status === 200 && data) return { status: "ok", item: data };
+        return response.status === 404 ? { status: "not-found" } : { status: "error" };
+      }
+    }
+  } catch (error) {
+    console.error(`getItemDetail(${type}, ${slug}): failed to reach the API`, error);
+    return { status: "error" };
+  }
+}
+
+/** A `similar` result item — identical shape for movies (`SimilarMovieOut`) and series (`SimilarSeriesOut`). */
+export type SimilarItem = components["schemas"]["SimilarMovieOut"];
+
+/**
+ * "Similar" items for the item detail page's similar section (FE-10) — only
+ * defined for movies and series (`GET /v1/{movies,series}/{slug}/similar`,
+ * TMDB recommendations, `docs/api.md`). Books and games have no equivalent
+ * endpoint, so this degrades to an empty array for those types without
+ * attempting a request. Also degrades to an empty array on any failure
+ * (network error or non-200 response) — same spirit as
+ * {@link getTrending}/{@link getFeatured}: this is a secondary section, not
+ * the point of the page (unlike {@link getItemDetail}, whose failure IS the
+ * page).
+ */
+export async function getSimilarItems(
+  type: CatalogType,
+  slug: string,
+): Promise<SimilarItem[]> {
+  if (type !== "movie" && type !== "series") {
+    return [];
+  }
+
+  try {
+    const client = getApiClient();
+    const next = { revalidate: ITEM_REVALIDATE_SECONDS };
+
+    if (type === "movie") {
+      const { data, response } = await client.GET("/v1/movies/{slug}/similar", {
+        params: { path: { slug } },
+        next,
+      });
+      return response.status === 200 && data ? data.results : [];
+    }
+
+    const { data, response } = await client.GET("/v1/series/{slug}/similar", {
+      params: { path: { slug } },
+      next,
+    });
+    return response.status === 200 && data ? data.results : [];
+  } catch (error) {
+    console.error(`getSimilarItems(${type}, ${slug}): failed to reach the API`, error);
+    return [];
+  }
 }

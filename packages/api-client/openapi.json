@@ -4384,6 +4384,13 @@
             "type": "array",
             "title": "Genres"
           },
+          "credits": {
+            "items": {
+              "$ref": "#/components/schemas/backlogg__shared__schemas__CreditOut"
+            },
+            "type": "array",
+            "title": "Credits"
+          },
           "viewer_status": {
             "anyOf": [
               {
@@ -4410,7 +4417,8 @@
           "rating_count_external",
           "rating_internal",
           "rating_count_internal",
-          "genres"
+          "genres",
+          "credits"
         ],
         "title": "BookOut"
       },

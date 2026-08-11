@@ -1,0 +1,200 @@
+import { ImageOff, Star } from "lucide-react";
+import Image from "next/image";
+
+import { ViewerStatusSlot } from "@/components/viewer-status-slot";
+
+export type ItemMetadataField = {
+  label: string;
+  value: string;
+};
+
+export type ItemHeroProps = {
+  /** Item title. Catalog content is never translated (see `apps/web/AGENTS.md` / i18n note). */
+  title: string;
+  /** Omitted from the metadata row when equal to `title` (most items don't have a distinct original title). */
+  originalTitle: string | null;
+  overview: string | null;
+  posterUrl: string | null;
+  /** `null` for books (`BookOut` has no `backdrop_url`, see `docs/api.md`). */
+  backdropUrl: string | null;
+  ratingExternal: number | null;
+  ratingCountExternal: number | null;
+  ratingInternal: number | null;
+  ratingCountInternal: number;
+  /** Genre names (already resolved from `GenreOut`/`BookGenreOut`/etc by the caller). */
+  genres: string[];
+  /** Type-specific metadata (release date, runtime, seasons, platforms, ...), built by the page per {@link CatalogType}. */
+  fields: ItemMetadataField[];
+  /** `MovieOut.viewer_status` (etc) — see `ViewerStatusSlot`. */
+  viewerStatus: string | null | undefined;
+  originalTitleLabel: string;
+  genresLabel: string;
+  ratingExternalLabel: string;
+  ratingInternalLabel: string;
+  noRatingsLabel: string;
+};
+
+/**
+ * One rating (external or internal), or the "no ratings yet" fallback for
+ * the internal one — `rating_internal` is `null` until at least one user has
+ * rated the item (`docs/schema.md`), which is expected to be common early
+ * on since ratings/reviews (FE-18) haven't shipped yet.
+ */
+function RatingBadge({
+  label,
+  value,
+  count,
+  noRatingsLabel,
+}: {
+  label: string;
+  value: number | null;
+  count: number | null;
+  noRatingsLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-sm">
+      <Star aria-hidden className="size-4 fill-current text-yellow-500" />
+      <span className="sr-only">{label}</span>
+      {value !== null ? (
+        <span className="font-medium">
+          {value.toFixed(1)}
+          {count !== null && count > 0 ? (
+            <span className="ml-1 text-muted-foreground">({count})</span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">{noRatingsLabel}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Item detail page's hero section (FE-10): backdrop, poster, title, ratings,
+ * overview, genres, type-specific metadata fields, and the `viewer_status`
+ * extension point. Purely presentational — like `CatalogCard`/`CatalogSection`
+ * (FE-8/FE-9), it takes plain, already-translated label strings as props
+ * instead of calling `useTranslations` itself: the page (a Server Component)
+ * resolves `ItemDetail`'s messages once via `getTranslations` and threads
+ * them down, so this component doesn't need an opinion on whether it's
+ * rendered in a server or client context.
+ */
+export function ItemHero({
+  title,
+  originalTitle,
+  overview,
+  posterUrl,
+  backdropUrl,
+  ratingExternal,
+  ratingCountExternal,
+  ratingInternal,
+  ratingCountInternal,
+  genres,
+  fields,
+  viewerStatus,
+  originalTitleLabel,
+  genresLabel,
+  ratingExternalLabel,
+  ratingInternalLabel,
+  noRatingsLabel,
+}: ItemHeroProps) {
+  return (
+    <section className="relative">
+      {backdropUrl ? (
+        <div className="absolute inset-0 -z-10 overflow-hidden">
+          <Image
+            src={backdropUrl}
+            alt=""
+            aria-hidden
+            fill
+            sizes="100vw"
+            className="object-cover opacity-20"
+            priority
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/40 to-background" />
+        </div>
+      ) : null}
+
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-16 sm:flex-row">
+        <div className="relative aspect-2/3 w-48 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-64">
+          {posterUrl ? (
+            <Image
+              src={posterUrl}
+              alt={title}
+              fill
+              sizes="(max-width: 640px) 192px, 256px"
+              className="object-cover"
+              priority
+            />
+          ) : (
+            <div
+              role="img"
+              aria-label={title}
+              className="flex h-full w-full items-center justify-center text-muted-foreground"
+            >
+              <ImageOff aria-hidden className="size-10" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
+            {originalTitle && originalTitle !== title ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {originalTitleLabel}: {originalTitle}
+              </p>
+            ) : null}
+          </div>
+
+          {genres.length > 0 ? (
+            <div aria-label={genresLabel} className="flex flex-wrap gap-2">
+              {genres.map((genre) => (
+                <span
+                  key={genre}
+                  className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
+                >
+                  {genre}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <RatingBadge
+              label={ratingExternalLabel}
+              value={ratingExternal}
+              count={ratingCountExternal}
+              noRatingsLabel={noRatingsLabel}
+            />
+            <RatingBadge
+              label={ratingInternalLabel}
+              value={ratingInternal}
+              count={ratingCountInternal}
+              noRatingsLabel={noRatingsLabel}
+            />
+          </div>
+
+          {overview ? (
+            <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+              {overview}
+            </p>
+          ) : null}
+
+          {fields.length > 0 ? (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+              {fields.map((field) => (
+                <div key={field.label}>
+                  <dt className="text-muted-foreground">{field.label}</dt>
+                  <dd className="font-medium">{field.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+
+          <ViewerStatusSlot status={viewerStatus} />
+        </div>
+      </div>
+    </section>
+  );
+}
