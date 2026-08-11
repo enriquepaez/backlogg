@@ -23,6 +23,14 @@
     "trending": {
       "title": "Trending — backlogg",
       "description": "See what's trending in movies and series right now on backlogg."
+    },
+    "register": {
+      "title": "Sign up — backlogg",
+      "description": "Create a backlogg account to track and rate movies, series, books and games."
+    },
+    "login": {
+      "title": "Log in — backlogg",
+      "description": "Log in to your backlogg account."
     }
   },
   "Home": {
@@ -163,6 +171,49 @@
     "similar": {
       "heading": "You might also like",
       "empty": "No similar titles yet."
+    }
+  },
+  "Auth": {
+    "genericError": "Something went wrong. Please try again.",
+    "rateLimited": {
+      "waiting": "Too many attempts. Try again in {seconds}s.",
+      "ready": "You can try again now."
+    },
+    "register": {
+      "heading": "Create your account",
+      "description": "Track and rate movies, series, books and games.",
+      "usernameLabel": "Username",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "displayNameLabel": "Display name",
+      "displayNameOptional": "(optional)",
+      "submit": "Create account",
+      "submitting": "Creating account…",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Log in",
+      "conflict": "That username or email is already in use.",
+      "errors": {
+        "username": "3–50 characters: letters, numbers, - and _ only.",
+        "email": "Enter a valid email address.",
+        "password": "Password must be at least 8 characters.",
+        "displayName": "255 characters max."
+      }
+    },
+    "login": {
+      "heading": "Log in",
+      "description": "Welcome back.",
+      "usernameLabel": "Username",
+      "passwordLabel": "Password",
+      "submit": "Log in",
+      "submitting": "Logging in…",
+      "noAccount": "Don't have an account?",
+      "registerLink": "Sign up",
+      "accountCreated": "Your account was created successfully. Sign in to continue.",
+      "invalidCredentials": "Invalid username or password.",
+      "errors": {
+        "username": "Enter your username.",
+        "password": "Enter your password."
+      }
     }
   },
   "LanguageSwitcher": {

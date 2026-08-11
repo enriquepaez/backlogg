@@ -23,6 +23,14 @@
     "trending": {
       "title": "Tendencias — backlogg",
       "description": "Descubre qué es tendencia ahora mismo en películas y series en backlogg."
+    },
+    "register": {
+      "title": "Regístrate — backlogg",
+      "description": "Crea una cuenta en backlogg para registrar y valorar películas, series, libros y juegos."
+    },
+    "login": {
+      "title": "Inicia sesión — backlogg",
+      "description": "Inicia sesión en tu cuenta de backlogg."
     }
   },
   "Home": {
@@ -163,6 +171,49 @@
     "similar": {
       "heading": "También te puede interesar",
       "empty": "Todavía no hay títulos similares."
+    }
+  },
+  "Auth": {
+    "genericError": "Algo salió mal. Inténtalo de nuevo.",
+    "rateLimited": {
+      "waiting": "Demasiados intentos. Inténtalo de nuevo en {seconds}s.",
+      "ready": "Ya puedes volver a intentarlo."
+    },
+    "register": {
+      "heading": "Crea tu cuenta",
+      "description": "Registra y valora películas, series, libros y juegos.",
+      "usernameLabel": "Usuario",
+      "emailLabel": "Email",
+      "passwordLabel": "Contraseña",
+      "displayNameLabel": "Nombre visible",
+      "displayNameOptional": "(opcional)",
+      "submit": "Crear cuenta",
+      "submitting": "Creando cuenta…",
+      "haveAccount": "¿Ya tienes cuenta?",
+      "loginLink": "Inicia sesión",
+      "conflict": "Ese usuario o email ya está en uso.",
+      "errors": {
+        "username": "3–50 caracteres: letras, números, - y _ solamente.",
+        "email": "Introduce un email válido.",
+        "password": "La contraseña debe tener al menos 8 caracteres.",
+        "displayName": "255 caracteres como máximo."
+      }
+    },
+    "login": {
+      "heading": "Inicia sesión",
+      "description": "Bienvenido de nuevo.",
+      "usernameLabel": "Usuario",
+      "passwordLabel": "Contraseña",
+      "submit": "Iniciar sesión",
+      "submitting": "Iniciando sesión…",
+      "noAccount": "¿No tienes cuenta?",
+      "registerLink": "Regístrate",
+      "accountCreated": "Tu cuenta se creó correctamente. Inicia sesión para continuar.",
+      "invalidCredentials": "Usuario o contraseña incorrectos.",
+      "errors": {
+        "username": "Introduce tu usuario.",
+        "password": "Introduce tu contraseña."
+      }
     }
   },
   "LanguageSwitcher": {

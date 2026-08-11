@@ -282,7 +282,7 @@
         "429 con Retry-After manejado con UX; mensajes i18n",
         "Flujo verificado en navegador contra el backend"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 15,
