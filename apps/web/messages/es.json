@@ -31,6 +31,10 @@
     "login": {
       "title": "Inicia sesión — backlogg",
       "description": "Inicia sesión en tu cuenta de backlogg."
+    },
+    "verifyEmail": {
+      "title": "Verifica tu email — backlogg",
+      "description": "Confirma el email de tu cuenta de backlogg."
     }
   },
   "Home": {
@@ -214,6 +218,17 @@
         "username": "Introduce tu usuario.",
         "password": "Introduce tu contraseña."
       }
+    },
+    "verifyEmail": {
+      "heading": "Verifica tu email",
+      "description": "Confirmando el enlace de tu email.",
+      "verifying": "Verificando tu email…",
+      "success": "Tu email ha sido verificado. Ya puedes iniciar sesión.",
+      "continueCta": "Iniciar sesión",
+      "invalidToken": "Este enlace de verificación no es válido, ha caducado o ya se usó.",
+      "missingToken": "A este enlace de verificación le falta el token. Usa el enlace de tu email.",
+      "error": "Algo salió mal. Inténtalo de nuevo.",
+      "backHome": "Volver al inicio"
     }
   },
   "LanguageSwitcher": {
@@ -232,7 +247,10 @@
     "login": "Iniciar sesión",
     "accountMenu": "Menú de cuenta",
     "logout": "Cerrar sesión",
-    "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo."
+    "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo.",
+    "resendVerification": "Reenviar email de verificación",
+    "resendVerificationSuccess": "Email de verificación enviado. Revisa tu bandeja de entrada.",
+    "resendVerificationError": "No se pudo enviar el email de verificación. Inténtalo de nuevo."
   },
   "Footer": {
     "rights": "© {year} backlogg. Todos los derechos reservados."

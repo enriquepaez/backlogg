@@ -24,6 +24,7 @@ export async function SiteHeader() {
         username: user.username,
         displayName: user.display_name,
         avatarUrl: user.avatar_url,
+        emailVerified: user.email_verified,
       }
     : null;
 

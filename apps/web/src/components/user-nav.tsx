@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { LogOut, MailCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -13,18 +13,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/lib/auth/use-logout";
+import { useResendVerification } from "@/lib/auth/use-resend-verification";
 
 /**
- * Minimal, client-safe subset of `UserMeOut` — deliberately excludes `email`
- * and `email_verified`. Passing the full DTO from the Server Component down
- * to this (client-rendered) component would ship those fields to the
- * browser for no reason (see `node_modules/next/dist/docs/01-app/02-guides/data-security.md`,
- * "Component-level data access": pass only what the UI needs).
+ * Minimal, client-safe subset of `UserMeOut` — deliberately excludes `email`.
+ * Passing the full DTO from the Server Component down to this (client-
+ * rendered) component would ship that field to the browser for no reason
+ * (see `node_modules/next/dist/docs/01-app/02-guides/data-security.md`,
+ * "Component-level data access": pass only what the UI needs). `emailVerified`
+ * IS included (FE-15): it drives whether the "resend verification" menu item
+ * below renders, which is a UI decision, not sensitive data.
  */
 export type NavUser = {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
+  emailVerified: boolean;
 };
 
 function initials(user: NavUser): string {
@@ -33,20 +37,20 @@ function initials(user: NavUser): string {
 }
 
 /**
- * Session-aware header entry point (FE-14: "menú de cuenta con logout").
+ * Session-aware header entry point (FE-14: "menú de cuenta con logout";
+ * FE-15 adds the conditional "resend verification" entry).
  *
  * A Radix `DropdownMenu` (shadcn/ui primitives, `src/components/ui/dropdown-
  * menu.tsx`) rather than the previous inline avatar+name+button: it is the
  * natural place to hang the account entries later features add (edit
- * profile / verify email / delete account in FE-17, notifications in FE-24,
- * etc.) without another header restructure, and it comes with
- * click-outside/Escape-to-close and full keyboard navigation for free from
- * Radix. Today it only has one item (logout), but the trigger already reads
- * as an account affordance rather than a bare logout button.
+ * profile / delete account in FE-17, notifications in FE-24, etc.) without
+ * another header restructure, and it comes with click-outside/Escape-to-close
+ * and full keyboard navigation for free from Radix.
  */
 export function UserNav({ user }: { user: NavUser }) {
   const t = useTranslations("Nav");
-  const { logout, pending } = useLogout();
+  const { logout, pending: loggingOut } = useLogout();
+  const { resend, pending: resending } = useResendVerification();
   const name = user.displayName ?? user.username;
 
   return (
@@ -83,7 +87,16 @@ export function UserNav({ user }: { user: NavUser }) {
       <DropdownMenuContent align="end">
         <DropdownMenuLabel className="max-w-48 truncate">{name}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" disabled={pending} onSelect={logout}>
+        {!user.emailVerified ? (
+          <>
+            <DropdownMenuItem disabled={resending} onSelect={resend}>
+              <MailCheck aria-hidden="true" />
+              {t("resendVerification")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        <DropdownMenuItem variant="destructive" disabled={loggingOut} onSelect={logout}>
           <LogOut aria-hidden="true" />
           {t("logout")}
         </DropdownMenuItem>

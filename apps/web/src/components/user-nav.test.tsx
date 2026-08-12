@@ -18,9 +18,27 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+// Same rationale as `logout-button.test.tsx`: exercise the real `sonner`
+// module shape but spy on the two calls this component's actions can trigger
+// (`useLogout` never calls `toast.success`; `useResendVerification` calls
+// both, depending on outcome).
+const toastSuccess = vi.fn();
+const toastError = vi.fn();
+vi.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}));
+
 const { UserNav } = await import("./user-nav");
 
-const testUser = { username: "alice", displayName: "Alice A.", avatarUrl: null };
+const testUser = {
+  username: "alice",
+  displayName: "Alice A.",
+  avatarUrl: null,
+  emailVerified: true,
+};
 
 // Radix's `DropdownMenuTrigger` opens on `pointerdown` (mouse button 0), not
 // `click` — see `@radix-ui/react-dropdown-menu`'s `DropdownMenuTrigger`
@@ -36,6 +54,8 @@ function openMenu() {
 beforeEach(() => {
   push.mockClear();
   refresh.mockClear();
+  toastSuccess.mockClear();
+  toastError.mockClear();
 });
 
 afterEach(() => {
@@ -116,5 +136,63 @@ describe("UserNav", () => {
 
     await waitFor(() => expect(logoutCall).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it("does not show a resend-verification entry when the email is already verified", async () => {
+    render(<UserNav user={testUser} />);
+
+    openMenu();
+    await screen.findByRole("menu");
+
+    expect(screen.queryByRole("menuitem", { name: /resendVerification/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a resend-verification entry when the email is not verified", async () => {
+    render(<UserNav user={{ ...testUser, emailVerified: false }} />);
+
+    openMenu();
+
+    expect(
+      await screen.findByRole("menuitem", { name: /resendVerification/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("selecting resend verification calls the route and shows a success toast", async () => {
+    const resendCall = vi.fn();
+    server.use(
+      http.post("/api/auth/verify/request", () => {
+        resendCall();
+        return HttpResponse.json({ ok: true }, { status: 202 });
+      }),
+    );
+
+    render(<UserNav user={{ ...testUser, emailVerified: false }} />);
+
+    openMenu();
+    const resendItem = await screen.findByRole("menuitem", { name: /resendVerification/i });
+
+    await act(async () => {
+      fireEvent.click(resendItem);
+    });
+
+    await waitFor(() => expect(resendCall).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("resendVerificationSuccess"));
+  });
+
+  it("shows an error toast when resending verification fails", async () => {
+    server.use(
+      http.post("/api/auth/verify/request", () => new HttpResponse(null, { status: 401 })),
+    );
+
+    render(<UserNav user={{ ...testUser, emailVerified: false }} />);
+
+    openMenu();
+    const resendItem = await screen.findByRole("menuitem", { name: /resendVerification/i });
+
+    await act(async () => {
+      fireEvent.click(resendItem);
+    });
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("resendVerificationError"));
   });
 });

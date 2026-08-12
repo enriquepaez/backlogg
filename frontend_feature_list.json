@@ -319,7 +319,7 @@
         "APP_BASE_URL del backend documentado apuntando al origen del web",
         "QA en navegador (con captura SMTP de dev o enlace logueado)"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 17,
