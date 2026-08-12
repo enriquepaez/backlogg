@@ -1,0 +1,123 @@
+{
+  "project": "backlogg",
+  "description": "Backlog de bugs/issues detectados en QA manual (backend + frontend), fuera del flujo de feature_list.json/frontend_feature_list.json. Fuente de verdad para bugs — no usar progress/issues.md, que queda obsoleto y no se actualiza más.",
+  "rules": {
+    "valid_status": ["open", "resolved"],
+    "valid_severity": ["low", "medium", "high"],
+    "one_issue_at_a_time": false,
+    "require_verification_to_close": true
+  },
+  "issues": [
+    {
+      "id": 1,
+      "title": "Credits vacíos en todo el contenido del seed",
+      "area": "backend",
+      "severity": "high",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": "2026-07-04",
+      "resolution_ref": "PR #37 + #39",
+      "symptom": "Todos los items sincronizados en el seed inicial tienen credits: [] (253 películas, 241 series, 112 juegos). La tabla people está vacía para el contenido seedeado. Solo el contenido ingerido después vía on-demand fallback tiene créditos.",
+      "cause": "El sync inicial (que pobló la DB) se ejecutó antes de que la feature #6 (people) y #21 (credits in detail) estuvieran implementadas. Las funciones _persist_movie_people, _persist_series_people, _persist_game_companies existen en el código, pero nunca se ejecutaron contra el contenido actual de la DB.",
+      "solution": "Ejecutar un re-sync completo vía los endpoints admin (POST /admin/sync/movie|series|game). Hace upsert idempotente de todo el contenido + pobla people y credits. El re-sync completo se ejecuta ahora cada noche vía workflow (PR #39).",
+      "verification": "Tras el sync, GET /movies/{slug} de cualquier película seedeada debe devolver credits[] no vacío. GET /admin/stats debe mostrar last_synced_at actualizado.",
+      "notes": "Desbloqueado por Issue 6. Reabierto como Issue 7 el 2026-08-13 — el fix no se sostuvo."
+    },
+    {
+      "id": 2,
+      "title": "On-demand fallback de movies ignora el año del slug",
+      "area": "backend",
+      "severity": "medium",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": null,
+      "resolution_ref": "PR #38",
+      "symptom": "GET /movies/blade-runner-1982 devuelve Blade Runner 2049 (2017) en lugar de Blade Runner (1982).",
+      "cause": "_title_from_slug (backlogg/movies/service.py) extrae solo el título del slug, descartando el año. El fallback busca en TMDB solo por título y toma el primer resultado (el más popular).",
+      "solution": "Pasar el año al TMDB search cuando esté disponible en el slug — TMDB acepta primary_release_year como parámetro en /search/movie.",
+      "verification": "GET /movies/blade-runner-1982 debe devolver la película de Ridley Scott (1982), no Blade Runner 2049.",
+      "notes": null
+    },
+    {
+      "id": 3,
+      "title": "On-demand fallback de games no funciona",
+      "area": "backend",
+      "severity": "medium",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": null,
+      "resolution_ref": "PR #38",
+      "symptom": "GET /games/doom-1993, GET /games/minecraft devuelven 404. El fallback de games nunca encuentra nada porque busca por slug exacto en IGDB.",
+      "cause": "IGDBClient.get_game_by_slug(slug) busca `where slug = \"...\"` literal, pero IGDB usa sus propios slugs (doom, minecraft) que no siempre coinciden con los slugs internos (que añaden año). Movies y series resuelven esto con title-search; games solo tenía búsqueda por slug exacto.",
+      "solution": "Añadir fallback de búsqueda por título cuando get_game_by_slug devuelve None: extraer título del slug, llamar a IGDBClient.search_games(title), tomar el primer resultado con más rating_count.",
+      "verification": "GET /games/doom-1993 debe devolver Doom (o el más cercano), GET /games/minecraft debe devolver Minecraft.",
+      "notes": null
+    },
+    {
+      "id": 4,
+      "title": "Géneros de libros son tags crudos de Open Library",
+      "area": "backend",
+      "severity": "low",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": null,
+      "resolution_ref": "PR #38",
+      "symptom": "Los géneros de libros incluyen strings de catalogación bibliográfica sin normalizar: \"American fiction (fictional works by one author)\", \"Long island (n.y.), fiction\", \"Lectures et morceaux choisis\" (francés), \"Traffic accidents\".",
+      "cause": "El adapter de Open Library usa los subjects del work sin normalización ni filtrado.",
+      "solution": "Filtrar por allowlist de géneros conocidos (Fiction, Science Fiction, Fantasy, Mystery, etc.) + truncar subjects largos o con paréntesis.",
+      "verification": "GET /books/harry-potter-and-the-philosophers-stone-1997 no debe mostrar géneros tipo \"Wizards -- Juvenile fiction\".",
+      "notes": null
+    },
+    {
+      "id": 5,
+      "title": "Test fixtures en la base de datos de producción",
+      "area": "backend",
+      "severity": "medium",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": "2026-07-05",
+      "resolution_ref": "rama fix/test-db-isolation",
+      "symptom": "Aparecen items en la DB local con datos de tests: \"Recommended Movie 2008\" (poster_url falsa), \"Dune 1965 search test\" (slug con sufijo de test).",
+      "cause": "Tests que usan la DB de test real (backlogg_test) pero que en algún momento se ejecutaron contra la DB principal, o fixtures que apuntan a la misma DB. Severidad elevada a media el 2026-07-04 porque el sync nocturno funcional puebla la DB compartida y rompía 2 tests (init.sh en rojo).",
+      "solution": "DB backlogg_test dedicada en Neon, TEST_DATABASE_URL en .env y CI, conftest.py aislado con guardia de seguridad + TRUNCATE de sesión. 6 filas falsas borradas de prod (2 movies, 2 series, 1 book, 1 game).",
+      "verification": "GET /movies?limit=100&sort=date_asc no debe mostrar items con slugs de test.",
+      "notes": "Reviewer: APPROVED."
+    },
+    {
+      "id": 6,
+      "title": "Personas duplicadas causan 500 en on-demand fallback",
+      "area": "backend",
+      "severity": "high",
+      "status": "resolved",
+      "discovered": "2026-06-21",
+      "resolved": null,
+      "resolution_ref": "PR #37",
+      "symptom": "GET /movies/the-truman-show-1998 devuelve 500: IntegrityError, duplicate key value violates unique constraint \"uq_external_id\", Key (source, external_id)=(TMDB, 350) already exists.",
+      "cause": "En _persist_movie_people (y equivalentes de series/books), la deduplicación de personas se hacía por slug (upsert_person, ON CONFLICT ON CONSTRAINT uq_person_slug). Si el mismo actor TMDB aparece en dos películas con nombres ligeramente distintos, se creaban dos registros people con distinto id; al enlazar el segundo al mismo TMDB ID, violaba uq_external_id.",
+      "solution": "En _persist_movie_people/_persist_series_people/_persist_book_authors, antes de upsert_person consultar external_ids por (source='TMDB', external_id=str(tmdb_person_id)) para obtener el person_id existente si lo hay. Solo crear/actualizar la persona si no hay registro previo en external_ids.",
+      "verification": "GET /movies/the-truman-show-1998 debe devolver 200 con credits[] no vacío.",
+      "notes": "Descubierto al verificar Issue 1 en vivo. Este fix (_get_or_create_person_tmdb) sigue aplicado y correcto — confirmado durante el diagnóstico de Issue 7."
+    },
+    {
+      "id": 7,
+      "title": "Credits vacíos en casi todo el catálogo (recurrencia de Issue 1)",
+      "area": "backend",
+      "severity": "high",
+      "status": "open",
+      "discovered": "2026-08-13",
+      "resolved": null,
+      "resolution_ref": null,
+      "symptom": "DB local (backlogg-db, docker compose) verificada por psql: 104 movies en total, pero solo 3 tienen algún credit (The Matrix, Dune, Fight Club — probablemente de pruebas manuales/on-demand anteriores, no del sync nocturno normal). La película usada en QA de FE-18 (Spider-Man: Brand New Day, id=23, tmdb_id=969681, sincronizada 2026-08-08) tiene cero filas en credits.",
+      "cause": "Diagnóstico parcial, no confirmado con reproducción en vivo del job completo. _persist_movie_people (backlogg/movies/service.py:78) sí se invoca tanto en el fallback on-demand (get_movie, línea 198) como en el sync nocturno (backlogg/scheduler/jobs.py::sync_movies, línea 173) — el código no 'olvida' llamarlo, y el fix de deduplicación de personas de Issue 6 (_get_or_create_person_tmdb) ya está aplicado y correcto. Una llamada directa y aislada a TMDBClient().get_movie_credits(969681) funciona correctamente ahora mismo (cast/crew reales), así que la API key/endpoint no están rotos de forma permanente. En sync_movies (backlogg/scheduler/jobs.py:172-179), la llamada a _persist_movie_people está envuelta en un try/except Exception que solo hace logger.exception(...) + rollback silencioso — no incrementa errors, no queda visible en GET /admin/stats, y no hay reintento. Sospecha principal: rate limiting de TMDB sin backoff/throttling en TMDBClient (backlogg/movies/adapters/tmdb.py), ya que cada item sincronizado dispara 2-3 llamadas HTTP secuenciales. No confirmado — no asumir sin verificar reproduciendo un sync real o revisando logs de una corrida real de GitHub Actions.",
+      "solution": null,
+      "solution_candidates": [
+        "Backoff/retry (ej. tenacity) en TMDBClient para 429/5xx, en get_movie_credits/get_movie_detail/get_top_movies.",
+        "Que el fallo de _persist_movie_people en sync_movies incremente errors (visibilidad real en GET /admin/stats) en vez de tragarse silenciosamente.",
+        "Backfill dirigido (similar a scripts/backfill_sync.py, o un modo nuevo) que re-recorra items existentes con credits: [] y reintente solo _persist_movie_people, sin re-hacer el resto del upsert.",
+        "Confirmar si aplica igual a series/games (mismo patrón de _persist_series_people/companies) o es específico de movies — no verificado todavía."
+      ],
+      "verification": "GET /v1/movies/{slug} de varias películas sincronizadas vía el job nocturno normal (no on-demand) debe devolver credits[] no vacío. SELECT count(DISTINCT item_id) FROM credits WHERE item_type='MOVIE' contra SELECT count(*) FROM movies debería acercarse mucho más que 3/104.",
+      "notes": "Descubierto durante QA manual de FE-18 (rate_review) por el usuario, al notar ItemCredits vacío en el detalle de película. Es una recurrencia de Issue 1 — el fix de esa fecha no se sostuvo o tiene un fallo estructural no detectado entonces."
+    }
+  ]
+}

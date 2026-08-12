@@ -19,6 +19,8 @@
 | Archivo / carpeta              | Qué contiene                                                | Cuándo leerlo         |
 |--------------------------------|-------------------------------------------------------------|-----------------------|
 | `feature_list.json`            | Lista de features con estado (pending/in_progress/done)     | Siempre, al empezar   |
+| `frontend_feature_list.json`   | Backlog de features de frontend (`apps/web`), mismo formato | Al trabajar en frontend |
+| `issues_list.json`             | Backlog de bugs/issues (open/resolved), fuente de verdad — `progress/issues.md` quedó obsoleto | Al reportar o resolver un bug |
 | `progress/current.md`          | Estado de la sesión actual                                  | Siempre, al empezar   |
 | `progress/history.md`          | Bitácora append-only de sesiones anteriores                 | Si necesitas contexto |
 | `docs/architecture.md`         | Estructura, principios y flujo de datos del proyecto        | Antes de implementar  |
