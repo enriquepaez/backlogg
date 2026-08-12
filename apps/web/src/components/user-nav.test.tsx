@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { act } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
@@ -6,11 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "@/test/msw/server";
 
 // Same rationale as `login-form.test.tsx` for mocking `@/i18n/navigation`
-// and `next-intl`.
+// and `next-intl`. `Link` is mocked the same way `site-header.test.tsx` does
+// it (a plain `<a>`), needed here since FE-17 adds a `Link`-based "settings"
+// menu item.
 const push = vi.fn();
 const refresh = vi.fn();
 
 vi.mock("@/i18n/navigation", () => ({
+  Link: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
   useRouter: () => ({ push, refresh }),
 }));
 
@@ -86,6 +94,15 @@ describe("UserNav", () => {
 
     expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /logout/i })).toBeInTheDocument();
+  });
+
+  it("shows a settings entry that links to /settings", async () => {
+    render(<UserNav user={testUser} />);
+
+    openMenu();
+
+    const settingsItem = await screen.findByRole("menuitem", { name: /settings/i });
+    expect(settingsItem).toHaveAttribute("href", "/settings");
   });
 
   it("closes the menu on Escape", async () => {

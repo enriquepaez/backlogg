@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, MailCheck } from "lucide-react";
+import { LogOut, MailCheck, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Link } from "@/i18n/navigation";
 import { useLogout } from "@/lib/auth/use-logout";
 import { useResendVerification } from "@/lib/auth/use-resend-verification";
 
@@ -38,14 +39,16 @@ function initials(user: NavUser): string {
 
 /**
  * Session-aware header entry point (FE-14: "menú de cuenta con logout";
- * FE-15 adds the conditional "resend verification" entry).
+ * FE-15 adds the conditional "resend verification" entry; FE-17 adds the
+ * "settings" entry linking to `/settings`, the only entry point into that
+ * page's profile-edit/delete-account flows).
  *
  * A Radix `DropdownMenu` (shadcn/ui primitives, `src/components/ui/dropdown-
  * menu.tsx`) rather than the previous inline avatar+name+button: it is the
- * natural place to hang the account entries later features add (edit
- * profile / delete account in FE-17, notifications in FE-24, etc.) without
- * another header restructure, and it comes with click-outside/Escape-to-close
- * and full keyboard navigation for free from Radix.
+ * natural place to hang the account entries later features add (notifications
+ * in FE-24, etc.) without another header restructure, and it comes with
+ * click-outside/Escape-to-close and full keyboard navigation for free from
+ * Radix.
  */
 export function UserNav({ user }: { user: NavUser }) {
   const t = useTranslations("Nav");
@@ -87,6 +90,12 @@ export function UserNav({ user }: { user: NavUser }) {
       <DropdownMenuContent align="end">
         <DropdownMenuLabel className="max-w-48 truncate">{name}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/settings">
+            <Settings aria-hidden="true" />
+            {t("settings")}
+          </Link>
+        </DropdownMenuItem>
         {!user.emailVerified ? (
           <>
             <DropdownMenuItem disabled={resending} onSelect={resend}>

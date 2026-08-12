@@ -43,6 +43,10 @@
     "resetPassword": {
       "title": "Restablecer contraseña — backlogg",
       "description": "Elige una nueva contraseña para tu cuenta de backlogg."
+    },
+    "settings": {
+      "title": "Ajustes de cuenta — backlogg",
+      "description": "Gestiona tu perfil de backlogg, la verificación de email y tu cuenta."
     }
   },
   "Home": {
@@ -268,6 +272,47 @@
       }
     }
   },
+  "Settings": {
+    "heading": "Ajustes de cuenta",
+    "description": "Gestiona tu perfil, la verificación de email y tu cuenta.",
+    "genericError": "Algo salió mal. Inténtalo de nuevo.",
+    "profile": {
+      "heading": "Perfil",
+      "description": "Esta información puede ser visible para otros usuarios.",
+      "displayNameLabel": "Nombre para mostrar",
+      "bioLabel": "Biografía",
+      "avatarUrlLabel": "URL del avatar",
+      "submit": "Guardar cambios",
+      "submitting": "Guardando…",
+      "success": "Tu perfil se ha actualizado.",
+      "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+      "errors": {
+        "displayName": "Máximo 255 caracteres.",
+        "bio": "Máximo 2000 caracteres.",
+        "avatarUrl": "Introduce una URL de imagen válida (http o https)."
+      }
+    },
+    "verification": {
+      "heading": "Verificación de email",
+      "verified": "Tu email está verificado.",
+      "unverified": "Tu email todavía no está verificado.",
+      "verifyAction": "Verificar email",
+      "requesting": "Enviando…"
+    },
+    "deleteAccount": {
+      "sectionHeading": "Zona de peligro",
+      "sectionDescription": "Borra permanentemente tu cuenta y todos los datos asociados. Esta acción no se puede deshacer.",
+      "openDialog": "Borrar cuenta",
+      "heading": "¿Borrar tu cuenta?",
+      "description": "Esto borrará permanentemente tu cuenta, puntuaciones, reseñas, biblioteca, listas y notificaciones. Esta acción no se puede deshacer.",
+      "confirmLabel": "Escribe {username} para confirmar",
+      "cancel": "Cancelar",
+      "confirmButton": "Borrar mi cuenta",
+      "confirming": "Borrando…",
+      "success": "Tu cuenta ha sido borrada.",
+      "error": "No se pudo borrar tu cuenta. Inténtalo de nuevo."
+    }
+  },
   "LanguageSwitcher": {
     "label": "Idioma",
     "en": "English",
@@ -283,6 +328,7 @@
     "showcase": "Muestra",
     "login": "Iniciar sesión",
     "accountMenu": "Menú de cuenta",
+    "settings": "Ajustes",
     "logout": "Cerrar sesión",
     "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo.",
     "resendVerification": "Reenviar email de verificación",
