@@ -35,6 +35,14 @@
     "verifyEmail": {
       "title": "Verifica tu email — backlogg",
       "description": "Confirma el email de tu cuenta de backlogg."
+    },
+    "forgotPassword": {
+      "title": "Olvidé mi contraseña — backlogg",
+      "description": "Solicita un enlace para restablecer la contraseña de tu cuenta de backlogg."
+    },
+    "resetPassword": {
+      "title": "Restablecer contraseña — backlogg",
+      "description": "Elige una nueva contraseña para tu cuenta de backlogg."
     }
   },
   "Home": {
@@ -214,6 +222,7 @@
       "registerLink": "Regístrate",
       "accountCreated": "Tu cuenta se creó correctamente. Inicia sesión para continuar.",
       "invalidCredentials": "Usuario o contraseña incorrectos.",
+      "forgotPasswordLink": "¿Olvidaste tu contraseña?",
       "errors": {
         "username": "Introduce tu usuario.",
         "password": "Introduce tu contraseña."
@@ -229,6 +238,34 @@
       "missingToken": "A este enlace de verificación le falta el token. Usa el enlace de tu email.",
       "error": "Algo salió mal. Inténtalo de nuevo.",
       "backHome": "Volver al inicio"
+    },
+    "forgotPassword": {
+      "heading": "¿Olvidaste tu contraseña?",
+      "description": "Introduce tu email y te enviaremos un enlace para restablecerla.",
+      "emailLabel": "Email",
+      "submit": "Enviar enlace",
+      "submitting": "Enviando…",
+      "success": "Si existe una cuenta con ese email, te hemos enviado un enlace para restablecer tu contraseña.",
+      "backToLogin": "Volver a iniciar sesión",
+      "errors": {
+        "email": "Introduce un email válido."
+      }
+    },
+    "resetPassword": {
+      "heading": "Restablece tu contraseña",
+      "description": "Elige una nueva contraseña para tu cuenta.",
+      "passwordLabel": "Nueva contraseña",
+      "submit": "Restablecer contraseña",
+      "submitting": "Restableciendo…",
+      "success": "Tu contraseña se ha restablecido. Inicia sesión de nuevo con tu nueva contraseña.",
+      "continueCta": "Iniciar sesión",
+      "invalidToken": "Este enlace para restablecer la contraseña no es válido, ha caducado o ya se usó.",
+      "missingToken": "A este enlace le falta el token. Usa el enlace de tu email.",
+      "error": "Algo salió mal. Inténtalo de nuevo.",
+      "backToForgot": "Solicitar un nuevo enlace",
+      "errors": {
+        "password": "La contraseña debe tener al menos 8 caracteres."
+      }
     }
   },
   "LanguageSwitcher": {

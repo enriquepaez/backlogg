@@ -12,6 +12,11 @@ const refresh = vi.fn();
 
 vi.mock("@/i18n/navigation", () => ({
   useRouter: () => ({ push, refresh }),
+  Link: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 vi.mock("next-intl", () => ({
@@ -42,6 +47,15 @@ afterEach(() => {
 });
 
 describe("LoginForm", () => {
+  it("links to /forgot-password (FE-16)", () => {
+    render(<LoginForm />);
+
+    expect(screen.getByRole("link", { name: "forgotPasswordLink" })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+  });
+
   it("renders no error line for any field before any error occurs", () => {
     render(<LoginForm />);
 

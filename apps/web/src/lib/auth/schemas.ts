@@ -47,6 +47,30 @@ export const loginSchema = z.object({
 export type LoginFormValues = z.infer<typeof loginSchema>;
 
 /**
+ * Client-side mirror of `ForgotPasswordRequest` (`docs/api.md`:
+ * `POST /v1/auth/password/forgot`) — an email format check before the
+ * request is sent. The backend answers `202` unconditionally regardless of
+ * this format check (no enumeration either way), so this only avoids a
+ * pointless round trip for an obviously malformed input.
+ */
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().min(3).max(255).email(),
+});
+
+export type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
+
+/**
+ * Client-side mirror of `ResetPasswordRequest` (`docs/api.md`:
+ * `POST /v1/auth/password/reset`) — reuses `passwordSchema` (min 8) for
+ * `new_password`, the same constraint the backend enforces.
+ */
+export const resetPasswordSchema = z.object({
+  password: passwordSchema,
+});
+
+export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
+
+/**
  * Applies every top-level field failure from a zod validation error to a
  * react-hook-form `setError`, using the field name itself as the error
  * `message`.
