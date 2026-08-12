@@ -43,6 +43,10 @@
     "resetPassword": {
       "title": "Reset password — backlogg",
       "description": "Choose a new password for your backlogg account."
+    },
+    "settings": {
+      "title": "Account settings — backlogg",
+      "description": "Manage your backlogg profile, email verification and account."
     }
   },
   "Home": {
@@ -268,6 +272,47 @@
       }
     }
   },
+  "Settings": {
+    "heading": "Account settings",
+    "description": "Manage your profile, email verification and account.",
+    "genericError": "Something went wrong. Please try again.",
+    "profile": {
+      "heading": "Profile",
+      "description": "This information may be visible to other users.",
+      "displayNameLabel": "Display name",
+      "bioLabel": "Bio",
+      "avatarUrlLabel": "Avatar URL",
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "success": "Your profile has been updated.",
+      "unauthorized": "Your session has expired. Please log in again.",
+      "errors": {
+        "displayName": "255 characters max.",
+        "bio": "2000 characters max.",
+        "avatarUrl": "Enter a valid image URL (http or https)."
+      }
+    },
+    "verification": {
+      "heading": "Email verification",
+      "verified": "Your email is verified.",
+      "unverified": "Your email is not verified yet.",
+      "verifyAction": "Verify email",
+      "requesting": "Sending…"
+    },
+    "deleteAccount": {
+      "sectionHeading": "Danger zone",
+      "sectionDescription": "Permanently delete your account and all associated data. This cannot be undone.",
+      "openDialog": "Delete account",
+      "heading": "Delete your account?",
+      "description": "This will permanently delete your account, ratings, reviews, library, lists and notifications. This action cannot be undone.",
+      "confirmLabel": "Type {username} to confirm",
+      "cancel": "Cancel",
+      "confirmButton": "Delete my account",
+      "confirming": "Deleting…",
+      "success": "Your account has been deleted.",
+      "error": "Couldn't delete your account. Please try again."
+    }
+  },
   "LanguageSwitcher": {
     "label": "Language",
     "en": "English",
@@ -283,6 +328,7 @@
     "showcase": "Showcase",
     "login": "Log in",
     "accountMenu": "Account menu",
+    "settings": "Settings",
     "logout": "Log out",
     "logoutError": "Couldn't log out. Please try again.",
     "resendVerification": "Resend verification email",

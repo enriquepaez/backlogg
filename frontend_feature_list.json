@@ -356,7 +356,7 @@
         "Estado email_verified visible con acción de verificar; i18n",
         "QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 19,
@@ -598,6 +598,24 @@
         "POST /v1/admin/users/{username}/{ban,unban} con confirmación",
         "Refresco de la vista tras cada acción; i18n",
         "typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 32,
+      "code": "FE-31",
+      "milestone": "M2",
+      "name": "avatar_upload",
+      "title": "Subida de avatar (imagen) en vez de solo URL",
+      "description": "Permitir subir una imagen de perfil desde /settings en vez de pegar solo una URL externa. Requiere prerrequisito de backend no existente hoy: no hay endpoint de subida ni capa de almacenamiento de archivos (avatar_url es hoy un VARCHAR(1000) de solo texto, docs/schema.md:350). Bloqueada hasta que exista una feature de backend equivalente (storage/upload) en feature_list.json.",
+      "depends_on": [
+        18
+      ],
+      "acceptance": [
+        "Backend: endpoint de subida (multipart) + almacenamiento (ej. S3/R2) que devuelva una URL servible; validación de tipo/tamaño",
+        "Frontend: en /settings, reemplazar o complementar el input de URL por un selector de archivo con preview y barra de progreso",
+        "Fallback: seguir permitiendo pegar una URL externa si no se sube archivo",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
       "status": "pending"
     }
