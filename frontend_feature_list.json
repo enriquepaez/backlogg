@@ -338,7 +338,7 @@
         "Tras reset, sesiones/refresh invalidadas (coherente con backend); i18n",
         "QA en navegador end-to-end"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 18,

@@ -35,6 +35,14 @@
     "verifyEmail": {
       "title": "Verify your email — backlogg",
       "description": "Confirm your backlogg account's email address."
+    },
+    "forgotPassword": {
+      "title": "Forgot password — backlogg",
+      "description": "Request a password reset link for your backlogg account."
+    },
+    "resetPassword": {
+      "title": "Reset password — backlogg",
+      "description": "Choose a new password for your backlogg account."
     }
   },
   "Home": {
@@ -214,6 +222,7 @@
       "registerLink": "Sign up",
       "accountCreated": "Your account was created successfully. Sign in to continue.",
       "invalidCredentials": "Invalid username or password.",
+      "forgotPasswordLink": "Forgot your password?",
       "errors": {
         "username": "Enter your username.",
         "password": "Enter your password."
@@ -229,6 +238,34 @@
       "missingToken": "This verification link is missing its token. Please use the link from your email.",
       "error": "Something went wrong. Please try again.",
       "backHome": "Back to home"
+    },
+    "forgotPassword": {
+      "heading": "Forgot your password?",
+      "description": "Enter your email and we'll send you a link to reset it.",
+      "emailLabel": "Email",
+      "submit": "Send reset link",
+      "submitting": "Sending…",
+      "success": "If an account exists for that email, we've sent a link to reset your password.",
+      "backToLogin": "Back to log in",
+      "errors": {
+        "email": "Enter a valid email address."
+      }
+    },
+    "resetPassword": {
+      "heading": "Reset your password",
+      "description": "Choose a new password for your account.",
+      "passwordLabel": "New password",
+      "submit": "Reset password",
+      "submitting": "Resetting…",
+      "success": "Your password has been reset. Please log in again with your new password.",
+      "continueCta": "Log in",
+      "invalidToken": "This password reset link is invalid, expired, or has already been used.",
+      "missingToken": "This password reset link is missing its token. Please use the link from your email.",
+      "error": "Something went wrong. Please try again.",
+      "backToForgot": "Request a new link",
+      "errors": {
+        "password": "Password must be at least 8 characters."
+      }
     }
   },
   "LanguageSwitcher": {

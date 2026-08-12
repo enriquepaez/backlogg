@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useRouter } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { applyZodFieldErrors, loginSchema, type LoginFormValues } from "@/lib/auth/schemas";
 import { useCountdown } from "@/lib/use-countdown";
 
@@ -128,7 +128,15 @@ export function LoginForm() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="login-password">{t("passwordLabel")}</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="login-password">{t("passwordLabel")}</Label>
+          <Link
+            href="/forgot-password"
+            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+          >
+            {t("forgotPasswordLink")}
+          </Link>
+        </div>
         <Input
           id="login-password"
           type="password"
