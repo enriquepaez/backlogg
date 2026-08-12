@@ -187,6 +187,47 @@
     "similar": {
       "heading": "You might also like",
       "empty": "No similar titles yet."
+    },
+    "rating": {
+      "heading": "Your rating",
+      "aggregateLabel": "Backlogg rating: {value}",
+      "noRatings": "No ratings yet",
+      "loading": "Loading your rating…",
+      "loadError": "Couldn't load your rating. Please try again.",
+      "anonymousPrompt": "Log in to rate or review this title.",
+      "anonymousLoginLink": "Log in",
+      "scoreLabel": "Score",
+      "starAriaLabel": "Rate {value} out of 5 stars",
+      "reviewLabel": "Review (optional)",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleting": "Deleting…",
+      "createdOnLabel": "Reviewed on {date}",
+      "editedOnLabel": "Edited on {date}",
+      "saveSuccess": "Your rating has been saved.",
+      "deleteSuccess": "Your rating has been deleted.",
+      "deleteError": "Couldn't delete your rating. Please try again.",
+      "errors": {
+        "empty": "Pick a score or write a review before saving.",
+        "unauthorized": "Your session has expired. Please log in again.",
+        "validation": "Enter a score between 1 and 5.",
+        "save": "Couldn't save your rating. Please try again."
+      }
+    },
+    "report": {
+      "openDialog": "Report",
+      "reported": "Reported",
+      "heading": "Report this review",
+      "description": "Let us know why this review is problematic. A moderator will take a look.",
+      "reasonLabel": "Reason (optional)",
+      "submit": "Report",
+      "submitting": "Reporting…",
+      "cancel": "Cancel",
+      "error": "Couldn't report this review. Please try again.",
+      "success": "Thanks, this review has been reported."
     }
   },
   "Auth": {

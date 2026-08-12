@@ -187,6 +187,47 @@
     "similar": {
       "heading": "También te puede interesar",
       "empty": "Todavía no hay títulos similares."
+    },
+    "rating": {
+      "heading": "Tu puntuación",
+      "aggregateLabel": "Puntuación en backlogg: {value}",
+      "noRatings": "Todavía sin puntuaciones",
+      "loading": "Cargando tu puntuación…",
+      "loadError": "No se pudo cargar tu puntuación. Inténtalo de nuevo.",
+      "anonymousPrompt": "Inicia sesión para puntuar o reseñar este título.",
+      "anonymousLoginLink": "Iniciar sesión",
+      "scoreLabel": "Puntuación",
+      "starAriaLabel": "Puntuar con {value} de 5 estrellas",
+      "reviewLabel": "Reseña (opcional)",
+      "save": "Guardar",
+      "saving": "Guardando…",
+      "cancel": "Cancelar",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "deleting": "Eliminando…",
+      "createdOnLabel": "Reseñado el {date}",
+      "editedOnLabel": "Editado el {date}",
+      "saveSuccess": "Tu puntuación se ha guardado.",
+      "deleteSuccess": "Tu puntuación se ha eliminado.",
+      "deleteError": "No se pudo eliminar tu puntuación. Inténtalo de nuevo.",
+      "errors": {
+        "empty": "Elige una puntuación o escribe una reseña antes de guardar.",
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "validation": "Introduce una puntuación entre 1 y 5.",
+        "save": "No se pudo guardar tu puntuación. Inténtalo de nuevo."
+      }
+    },
+    "report": {
+      "openDialog": "Reportar",
+      "reported": "Reportada",
+      "heading": "Reportar esta reseña",
+      "description": "Cuéntanos por qué esta reseña es problemática. Un moderador la revisará.",
+      "reasonLabel": "Motivo (opcional)",
+      "submit": "Reportar",
+      "submitting": "Reportando…",
+      "cancel": "Cancelar",
+      "error": "No se pudo reportar esta reseña. Inténtalo de nuevo.",
+      "success": "Gracias, esta reseña ha sido reportada."
     }
   },
   "Auth": {

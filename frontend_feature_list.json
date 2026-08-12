@@ -375,7 +375,7 @@
         "Reportar review (POST /v1/reviews/{id}/report) con motivo; idempotente",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 20,
