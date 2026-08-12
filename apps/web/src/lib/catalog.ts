@@ -365,6 +365,31 @@ export type ItemDetailResult<T> =
 const ITEM_REVALIDATE_SECONDS = 60 * 60; // 1h
 
 /**
+ * Cache tag for a single item's {@link getItemDetail} fetch (bugfix: the
+ * item detail page's "Backlogg rating" — both `ItemHero`'s static chip and
+ * `RatingWidget`'s own `initialRatingInternal`/`initialRatingCountInternal`
+ * seed — otherwise stayed stuck at whatever `rating_internal`/
+ * `rating_count_internal` this fetch first cached for up to
+ * {@link ITEM_REVALIDATE_SECONDS}, even right after the viewer's own rating
+ * changed those aggregates server-side: reproduced live against the real
+ * backend — `GET /v1/{type}/{slug}` already returned the fresh
+ * `rating_internal` on the wire, but a full reload of the item detail page
+ * kept rendering "No ratings yet" until the ISR window rolled over).
+ *
+ * `PUT`/`DELETE /api/{type}/{slug}/rating` (`route.ts`) call
+ * `revalidateTag(itemDetailCacheTag(type, slug), { expire: 0 })` (immediate
+ * expiration — see that route's doc comment for why Next 16's recommended
+ * `"max"` profile isn't good enough here) after a successful backend
+ * mutation so the next request for this item's detail page re-fetches
+ * instead of serving the stale cached aggregate — locale-independent (same
+ * as the fetch itself, `getItemDetail` never varies by locale), so one tag
+ * covers both `/en/{type}/{slug}` and `/es/{type}/{slug}`.
+ */
+export function itemDetailCacheTag(type: CatalogType, slug: string): string {
+  return `item-detail:${type}:${slug}`;
+}
+
+/**
  * Fetch one item's full detail by type + slug (FE-10). Only ever reports a
  * `"not-found"` result for a real backend 404 — any other failure (network
  * error, non-200/404 status) reports `"error"` instead. See
@@ -374,7 +399,7 @@ export async function getItemDetail(
   type: CatalogType,
   slug: string,
 ): Promise<ItemDetailResult<ItemDetail>> {
-  const next = { revalidate: ITEM_REVALIDATE_SECONDS };
+  const next = { revalidate: ITEM_REVALIDATE_SECONDS, tags: [itemDetailCacheTag(type, slug)] };
 
   try {
     const client = getApiClient();

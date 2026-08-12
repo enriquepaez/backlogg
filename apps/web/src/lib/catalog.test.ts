@@ -47,6 +47,7 @@ const {
   getTrending,
   getTrendingPage,
   isCatalogType,
+  itemDetailCacheTag,
   listCatalog,
 } = await import("./catalog");
 
@@ -302,6 +303,27 @@ describe("getItemDetail", () => {
     );
 
     expect(await getItemDetail("movie", duneFixture.slug)).toEqual({ status: "error" });
+  });
+});
+
+describe("itemDetailCacheTag", () => {
+  // Bugfix (post-FE-18 QA): reproduced live against the real backend + `next
+  // dev` — the item detail page's "Backlogg rating" (both `ItemHero`'s chip
+  // and `RatingWidget`'s own `initialRatingInternal` seed, both sourced from
+  // this same `getItemDetail` fetch) stayed stuck at "No ratings yet" after a
+  // reload, even though `GET /v1/{type}/{slug}` already returned the fresh
+  // `rating_internal` on the wire — the fetch-level ISR cache
+  // (`ITEM_REVALIDATE_SECONDS`, 1h) never got invalidated by the caller's own
+  // rating change. `PUT`/`DELETE /api/{type}/{slug}/rating` now call
+  // `revalidateTag(itemDetailCacheTag(type, slug))` on success
+  // (`route.test.ts` asserts that call); this only pins down the tag's
+  // shape — one per (type, slug), locale-independent, matching the fetch it
+  // tags in `getItemDetail` above.
+  it("is stable and unique per (type, slug), independent of locale", () => {
+    expect(itemDetailCacheTag("movie", "dune-2021")).toBe("item-detail:movie:dune-2021");
+    expect(itemDetailCacheTag("movie", "dune-2021")).toBe(itemDetailCacheTag("movie", "dune-2021"));
+    expect(itemDetailCacheTag("series", "dune-2021")).not.toBe(itemDetailCacheTag("movie", "dune-2021"));
+    expect(itemDetailCacheTag("movie", "dune-1984")).not.toBe(itemDetailCacheTag("movie", "dune-2021"));
   });
 });
 
