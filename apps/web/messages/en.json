@@ -31,6 +31,10 @@
     "login": {
       "title": "Log in — backlogg",
       "description": "Log in to your backlogg account."
+    },
+    "verifyEmail": {
+      "title": "Verify your email — backlogg",
+      "description": "Confirm your backlogg account's email address."
     }
   },
   "Home": {
@@ -214,6 +218,17 @@
         "username": "Enter your username.",
         "password": "Enter your password."
       }
+    },
+    "verifyEmail": {
+      "heading": "Verify your email",
+      "description": "Confirming the link from your email.",
+      "verifying": "Verifying your email…",
+      "success": "Your email has been verified. You can now log in.",
+      "continueCta": "Log in",
+      "invalidToken": "This verification link is invalid, expired, or has already been used.",
+      "missingToken": "This verification link is missing its token. Please use the link from your email.",
+      "error": "Something went wrong. Please try again.",
+      "backHome": "Back to home"
     }
   },
   "LanguageSwitcher": {
@@ -232,7 +247,10 @@
     "login": "Log in",
     "accountMenu": "Account menu",
     "logout": "Log out",
-    "logoutError": "Couldn't log out. Please try again."
+    "logoutError": "Couldn't log out. Please try again.",
+    "resendVerification": "Resend verification email",
+    "resendVerificationSuccess": "Verification email sent. Check your inbox.",
+    "resendVerificationError": "Couldn't send the verification email. Please try again."
   },
   "Footer": {
     "rights": "© {year} backlogg. All rights reserved."
