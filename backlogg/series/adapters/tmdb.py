@@ -3,11 +3,14 @@ import unicodedata
 from datetime import UTC, date, datetime
 
 import httpx
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from backlogg.core.config import settings
 
 _TMDB_BASE = "https://api.themoviedb.org/3"
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
+_TMDB_TIMEOUT = 10.0
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _slugify(text: str) -> str:
@@ -17,6 +20,24 @@ def _slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", text).strip("-")
 
 
+def _is_retryable_error(exc: BaseException) -> bool:
+    """True for transient TMDB failures: 429/5xx, timeouts and transport errors.
+
+    Never retries 404 (a legitimate "not found") or other 4xx client errors.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE_STATUS_CODES
+    return isinstance(exc, httpx.TimeoutException | httpx.TransportError)
+
+
+_tmdb_retry = retry(
+    retry=retry_if_exception(_is_retryable_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True,
+)
+
+
 class TMDBSeriesClient:
     def __init__(self) -> None:
         self._headers = {
@@ -24,8 +45,9 @@ class TMDBSeriesClient:
             "Accept": "application/json",
         }
 
+    @_tmdb_retry
     async def search_series(self, query: str) -> dict | None:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/search/tv",
                 headers=self._headers,
@@ -36,8 +58,9 @@ class TMDBSeriesClient:
             results = data.get("results", [])
             return results[0] if results else None
 
+    @_tmdb_retry
     async def get_series_detail(self, tmdb_id: int) -> dict | None:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/tv/{tmdb_id}",
                 headers=self._headers,
@@ -47,9 +70,10 @@ class TMDBSeriesClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
     async def get_series_credits(self, tmdb_id: int) -> dict | None:
         """Return cast and crew dicts for a series, or None on 404."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/tv/{tmdb_id}/credits",
                 headers=self._headers,
@@ -59,9 +83,10 @@ class TMDBSeriesClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
     async def get_series_recommendations(self, tmdb_id: int) -> list[dict]:
         """Return page 1 of series recommendations from TMDB, or empty list on 404."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/tv/{tmdb_id}/recommendations",
                 headers=self._headers,
@@ -73,12 +98,13 @@ class TMDBSeriesClient:
             data = response.json()
             return data.get("results", [])
 
+    @_tmdb_retry
     async def get_trending_series(self, period: str = "week") -> list[dict]:
         """Fetch trending TV series from TMDB for the given time window (day or week).
 
         Returns the first page of results (up to 20 items).
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/trending/tv/{period}",
                 headers=self._headers,
@@ -86,6 +112,18 @@ class TMDBSeriesClient:
             response.raise_for_status()
             data = response.json()
         return data.get("results", [])
+
+    @_tmdb_retry
+    async def _get_popular_page(self, page: int) -> dict:
+        """Fetch a single page of /tv/popular. Retried as a unit per page."""
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/tv/popular",
+                headers=self._headers,
+                params={"page": page},
+            )
+            response.raise_for_status()
+            return response.json()
 
     async def get_top_series(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular TV series from TMDB for nightly sync.
@@ -104,14 +142,7 @@ class TMDBSeriesClient:
         while len(results) < limit:
             if page > 500:
                 break
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{_TMDB_BASE}/tv/popular",
-                    headers=self._headers,
-                    params={"page": page},
-                )
-                response.raise_for_status()
-                data = response.json()
+            data = await self._get_popular_page(page)
 
             batch = data.get("results", [])
             if not batch:

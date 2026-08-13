@@ -530,6 +530,8 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
     assert result["synced"] == 1
     # errors must NOT be incremented by people persistence failure
     assert result["errors"] == 0
+    # people_errors is the dedicated counter for this failure mode
+    assert result["people_errors"] == 1
 
 
 async def test_sync_series_calls_persist_series_people_and_creators():
@@ -609,3 +611,151 @@ async def test_sync_series_calls_persist_series_people_and_creators():
     mock_persist_creators.assert_called_once()
     assert result["synced"] == 1
     assert result["errors"] == 0
+
+
+async def test_sync_series_persist_people_failure_does_not_increment_errors():
+    """If _persist_series_people raises, errors stays 0 but people_errors increments."""
+    series_raw = {
+        "id": 77702,
+        "name": "Credits Failure Series",
+        "original_name": "Credits Failure Series",
+        "overview": "Testing graceful degradation.",
+        "first_air_date": "2018-01-01",
+        "last_air_date": "2020-01-01",
+        "number_of_seasons": 2,
+        "number_of_episodes": 20,
+        "status": "Ended",
+        "original_language": "en",
+        "poster_path": None,
+        "backdrop_path": None,
+        "vote_average": 6.5,
+        "vote_count": 40,
+        "genres": [],
+        "created_by": [],
+    }
+
+    get_cursor, set_cursor = _cursor_patches()
+    with (
+        get_cursor,
+        set_cursor,
+        patch.object(
+            sync_jobs._tmdb_series,
+            "get_top_series",
+            new_callable=AsyncMock,
+            return_value=[{"id": 77702}],
+        ),
+        patch.object(
+            sync_jobs._tmdb_series,
+            "get_series_detail",
+            new_callable=AsyncMock,
+            return_value=series_raw,
+        ),
+        patch(
+            "backlogg.scheduler.jobs._persist_series_people",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("credits API down"),
+        ),
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_session.expunge_all = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.series.repository.upsert_series",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_series = MagicMock()
+            mock_series.id = 21
+            mock_upsert.return_value = mock_series
+            result = await sync_jobs.sync_series()
+
+    assert result["synced"] == 1
+    assert result["errors"] == 0
+    assert result["people_errors"] == 1
+
+
+async def test_sync_books_persist_authors_failure_does_not_increment_errors():
+    """If _persist_book_authors raises, errors stays 0 but people_errors increments."""
+    popular_raw = [
+        {
+            "key": "/works/OL999W",
+            "title": "Credits Failure Book",
+            "first_publish_year": 2015,
+            "cover_i": 54321,
+            "subject": ["Fiction"],
+            "author_name": ["Test Author"],
+        }
+    ]
+    work_detail_data = {
+        "title": "Credits Failure Book",
+        "authors": [],
+    }
+
+    get_cursor, set_cursor = _cursor_patches()
+    with (
+        get_cursor,
+        set_cursor,
+        patch.object(
+            sync_jobs._ol_client,
+            "get_popular_books",
+            new_callable=AsyncMock,
+            return_value=popular_raw,
+        ),
+        patch.object(
+            sync_jobs._ol_client,
+            "get_work_detail",
+            new_callable=AsyncMock,
+            return_value=work_detail_data,
+        ),
+        patch(
+            "backlogg.scheduler.jobs._persist_book_authors",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("authors API down"),
+        ),
+        patch(
+            "backlogg.scheduler.jobs._refresh_catalog_search",
+            new_callable=AsyncMock,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_session.expunge_all = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        with (
+            patch(
+                "backlogg.books.repository.upsert_book",
+                new_callable=AsyncMock,
+            ) as mock_upsert,
+            patch(
+                "backlogg.scheduler.jobs.upsert_external_id",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_book = MagicMock()
+            mock_book.id = 2
+            mock_upsert.return_value = mock_book
+            result = await sync_jobs.sync_books()
+
+    assert result["synced"] == 1
+    assert result["errors"] == 0
+    assert result["people_errors"] == 1

@@ -18,32 +18,53 @@ jobs:
           curl -sf --retry 8 --retry-delay 15 --retry-all-errors --max-time 120 \
             "${{ secrets.RENDER_API_URL }}/health"
 
+      # people_errors counts items whose credits/cast persistence failed even
+      # though the item itself synced (see Issue 7) — surfaced as a warning
+      # annotation so it doesn't disappear silently, without failing the job:
+      # a degraded sync (item synced, credits missing) is still better than
+      # no sync, and the job must keep the "never abort the other syncs"
+      # contract (C19).
       - name: Sync movies
         if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
-            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/movie" \
-            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
+          response=$(curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/v1/admin/sync/movie" \
+            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}")
+          echo "$response" | jq .
+          people_errors=$(echo "$response" | jq -r '.people_errors // 0')
+          if [ "$people_errors" -gt 0 ]; then
+            echo "::warning::sync/movie: $people_errors item(s) failed to persist credits/people"
+          fi
 
       - name: Sync series
         if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
-            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/series" \
-            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
+          response=$(curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/v1/admin/sync/series" \
+            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}")
+          echo "$response" | jq .
+          people_errors=$(echo "$response" | jq -r '.people_errors // 0')
+          if [ "$people_errors" -gt 0 ]; then
+            echo "::warning::sync/series: $people_errors item(s) failed to persist credits/people"
+          fi
 
       - name: Sync books
         if: ${{ !cancelled() }}
         run: |
-          curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
-            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/book" \
-            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
+          response=$(curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
+            -X POST "${{ secrets.RENDER_API_URL }}/v1/admin/sync/book" \
+            -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}")
+          echo "$response" | jq .
+          people_errors=$(echo "$response" | jq -r '.people_errors // 0')
+          if [ "$people_errors" -gt 0 ]; then
+            echo "::warning::sync/book: $people_errors item(s) failed to persist authors"
+          fi
 
       - name: Sync games
         if: ${{ !cancelled() }}
         run: |
           curl -sf --max-time 1800 --retry 2 --retry-delay 60 --retry-all-errors \
-            -X POST "${{ secrets.RENDER_API_URL }}/admin/sync/game" \
+            -X POST "${{ secrets.RENDER_API_URL }}/v1/admin/sync/game" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}"
 
       # Fails if any content type has not synced in the last 2 hours, so a
@@ -52,7 +73,7 @@ jobs:
       - name: Verify stats freshness
         if: ${{ !cancelled() }}
         run: |
-          stats=$(curl -sf --max-time 60 "${{ secrets.RENDER_API_URL }}/admin/stats" \
+          stats=$(curl -sf --max-time 60 "${{ secrets.RENDER_API_URL }}/v1/admin/stats" \
             -H "X-API-Key: ${{ secrets.ADMIN_API_KEY }}")
           echo "$stats" | jq .
           cutoff=$(date -u -d '2 hours ago' +%s)
