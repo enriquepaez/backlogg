@@ -228,6 +228,22 @@
       "cancel": "Cancelar",
       "error": "No se pudo reportar esta reseña. Inténtalo de nuevo.",
       "success": "Gracias, esta reseña ha sido reportada."
+    },
+    "reviews": {
+      "heading": "Reseñas",
+      "loading": "Cargando reseñas…",
+      "loadError": "No se pudieron cargar las reseñas. Inténtalo de nuevo.",
+      "empty": "Todavía no hay reseñas.",
+      "dateLabel": "Reseñado el {date}",
+      "likeAriaLabel": "Me gusta esta reseña",
+      "unlikeAriaLabel": "Ya no me gusta esta reseña",
+      "likeCount": "{count} me gusta",
+      "pagination": {
+        "nav": "Paginación de reseñas",
+        "previous": "Anterior",
+        "next": "Siguiente",
+        "pageStatus": "Página {page} de {totalPages}"
+      }
     }
   },
   "Auth": {

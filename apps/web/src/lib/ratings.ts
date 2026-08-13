@@ -3,21 +3,25 @@ import type { ApiClient, components } from "@backlogg/api-client";
 import type { CatalogType } from "./catalog-types";
 
 /**
- * Server-side dispatch helpers for the ratings endpoints (FE-18), used only
- * from Route Handlers (`src/app/api/[type]/[slug]/rating/route.ts`) — never
- * imported by a Client Component. Same reasoning/shape as `./catalog.ts`'s
- * per-type switches (`getItemDetail`, `getFeatured`, ...): the generated
- * client exposes one operation per literal path (`/v1/movies/{slug}/rating`,
- * `/v1/series/{slug}/rating`, ...), so there is no single templated call to
- * make across all four catalog types.
+ * Server-side dispatch helpers for the ratings endpoints (FE-18/FE-19), used
+ * only from Route Handlers (`src/app/api/[type]/[slug]/rating/route.ts`,
+ * `src/app/api/[type]/[slug]/ratings/route.ts`, `src/app/api/reviews/[id]/like/route.ts`)
+ * — never imported by a Client Component. Same reasoning/shape as
+ * `./catalog.ts`'s per-type switches (`getItemDetail`, `getFeatured`, ...):
+ * the generated client exposes one operation per literal path
+ * (`/v1/movies/{slug}/rating`, `/v1/series/{slug}/rating`, ...), so there is
+ * no single templated call to make across all four catalog types. The
+ * like/unlike endpoints aren't per-type (`/v1/ratings/{rating_id}/like`
+ * takes the review's own numeric id, not a `{type, slug}` pair), so
+ * `likeReview`/`unlikeReview` below need no such switch.
  *
  * Each function returns the exact `{ data?, response }` shape `apiFetch`
  * (`src/lib/api-fetch.ts`) expects from the callback it wraps — `putRating`/
- * `deleteRating` are meant to be passed straight through to `apiFetch` so an
- * expired access token is transparently refreshed once, same as every other
- * authenticated BFF route. `listRatings` is public (no auth token, mirrors
- * `docs/api.md`: `GET /v1/{type}/{slug}/ratings` requires no bearer token)
- * so it takes a plain `ApiClient` instead.
+ * `deleteRating`/`likeReview`/`unlikeReview` are meant to be passed straight
+ * through to `apiFetch` so an expired access token is transparently
+ * refreshed once, same as every other authenticated BFF route. `listRatings`
+ * is public (no auth token, mirrors `docs/api.md`: `GET /v1/{type}/{slug}/ratings`
+ * requires no bearer token) so it takes a plain `ApiClient` instead.
  */
 
 export type Rating = components["schemas"]["RatingOut"];
@@ -71,7 +75,9 @@ export async function deleteRating(
  * `progress/current.md`): the `GET /api/{type}/{slug}/rating` Route Handler
  * calls this with the maximum page size and scans for the caller's own
  * username to recover their current score/review as this widget's initial
- * state.
+ * state. FE-19's `GET /api/{type}/{slug}/ratings` Route Handler
+ * (`app/api/[type]/[slug]/ratings/route.ts`) calls this too, for the actual
+ * paginated reviews listing on the item detail page.
  */
 export async function listRatings(
   client: ApiClient,
@@ -89,4 +95,36 @@ export async function listRatings(
     case "game":
       return client.GET("/v1/games/{slug}/ratings", { params: { path: { slug }, query } });
   }
+}
+
+/**
+ * `POST /v1/ratings/{rating_id}/like` — like a review (FE-19). Idempotent,
+ * auth required, 204 no body (`docs/api.md`). `{rating_id}` is the review's
+ * own numeric id (`user_ratings.id`, not a slug), same id `ReportReviewButton`
+ * already uses for `POST /v1/reviews/{rating_id}/report`.
+ */
+export async function likeReview(
+  client: ApiClient,
+  headers: Record<string, string>,
+  ratingId: number,
+): Promise<ApiResult<undefined>> {
+  return client.POST("/v1/ratings/{rating_id}/like", {
+    params: { path: { rating_id: ratingId } },
+    headers,
+  });
+}
+
+/**
+ * `DELETE /v1/ratings/{rating_id}/like` — remove the caller's own like from a
+ * review (FE-19). Idempotent, auth required, 204 no body (`docs/api.md`).
+ */
+export async function unlikeReview(
+  client: ApiClient,
+  headers: Record<string, string>,
+  ratingId: number,
+): Promise<ApiResult<undefined>> {
+  return client.DELETE("/v1/ratings/{rating_id}/like", {
+    params: { path: { rating_id: ratingId } },
+    headers,
+  });
 }

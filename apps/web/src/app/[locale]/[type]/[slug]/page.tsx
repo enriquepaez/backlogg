@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { ItemCredits, type ItemCredit } from "@/components/item-credits";
 import { ItemHero, type ItemMetadataField } from "@/components/item-hero";
+import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
 import {
@@ -251,6 +252,8 @@ export default async function ItemDetailPage({
         initialRatingInternal={item.rating_internal}
         initialRatingCountInternal={item.rating_count_internal}
       />
+
+      <ItemReviews type={type} slug={slug} />
 
       <ItemCredits
         credits={getCredits(item)}
