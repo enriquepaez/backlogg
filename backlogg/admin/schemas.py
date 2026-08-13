@@ -11,6 +11,9 @@ class SyncResponse(BaseModel):
     errors: int
     offset: int
     duration_s: float
+    # Default 0 because sync_games does not return this key — games have no
+    # separate people/credits persistence step to fail independently.
+    people_errors: int = 0
 
 
 class ContentStats(BaseModel):

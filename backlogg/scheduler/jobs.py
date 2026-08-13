@@ -21,8 +21,13 @@ After a successful upsert batch every job refreshes the catalog_search
 materialized view so search results stay current.
 
 Each job returns a dict with ``synced``, ``errors``, ``offset`` (the offset
-of the processed slice) and ``duration_s`` so the admin endpoint can expose
-the result synchronously.
+of the processed slice), ``duration_s`` and ``people_errors`` so the admin
+endpoint can expose the result synchronously. ``people_errors`` counts
+failures persisting people/credits (cast, crew, authors) for an otherwise
+successfully upserted item — those failures are logged and rolled back but
+intentionally do not increment ``errors`` (a missing credit must not abort
+the rest of the slice), so ``people_errors`` is the only way to see them in
+``POST /admin/sync/{type}``'s response.
 """
 
 import logging
@@ -119,13 +124,15 @@ async def sync_movies(slice_size: int | None = None) -> dict:
     """Fetch a slice of top popular movies from TMDB and upsert them locally.
 
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
+    ``offset`` and ``duration_s``.
     """
     logger.info("sync_movies: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "movie"})
     start = time.monotonic()
     synced = 0
     errors = 0
+    people_errors = 0
     target = settings.SEED_TOP_N_MOVIES
 
     try:
@@ -135,6 +142,7 @@ async def sync_movies(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -146,6 +154,7 @@ async def sync_movies(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": offset,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -176,6 +185,7 @@ async def sync_movies(slice_size: int | None = None) -> dict:
                     logger.exception(
                         "sync_movies: failed to persist people for tmdb_id=%s", tmdb_id
                     )
+                    people_errors += 1
                     await _rollback_quietly(session, "sync_movies")
             except Exception:
                 logger.exception("sync_movies: error upserting tmdb_id=%s", raw.get("id"))
@@ -192,11 +202,16 @@ async def sync_movies(slice_size: int | None = None) -> dict:
             logger.exception("sync_movies: failed to refresh catalog_search")
 
     logger.info(
-        "sync_movies: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+        "sync_movies: done — %d items upserted, %d errors, %d people_errors (offset %d)",
+        synced,
+        errors,
+        people_errors,
+        offset,
     )
     return {
         "synced": synced,
         "errors": errors,
+        "people_errors": people_errors,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
     }
@@ -206,13 +221,15 @@ async def sync_series(slice_size: int | None = None) -> dict:
     """Fetch a slice of popular TV series from TMDB and upsert them locally.
 
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
+    ``offset`` and ``duration_s``.
     """
     logger.info("sync_series: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "series"})
     start = time.monotonic()
     synced = 0
     errors = 0
+    people_errors = 0
     target = settings.SEED_TOP_N_SERIES
 
     try:
@@ -222,6 +239,7 @@ async def sync_series(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -233,6 +251,7 @@ async def sync_series(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": offset,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -266,6 +285,7 @@ async def sync_series(slice_size: int | None = None) -> dict:
                     logger.exception(
                         "sync_series: failed to persist people for tmdb_id=%s", tmdb_id
                     )
+                    people_errors += 1
                     await _rollback_quietly(session, "sync_series")
             except Exception:
                 logger.exception("sync_series: error upserting tmdb_id=%s", raw.get("id"))
@@ -285,11 +305,16 @@ async def sync_series(slice_size: int | None = None) -> dict:
             logger.exception("sync_series: failed to refresh catalog_search")
 
     logger.info(
-        "sync_series: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+        "sync_series: done — %d items upserted, %d errors, %d people_errors (offset %d)",
+        synced,
+        errors,
+        people_errors,
+        offset,
     )
     return {
         "synced": synced,
         "errors": errors,
+        "people_errors": people_errors,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
     }
@@ -299,13 +324,15 @@ async def sync_books(slice_size: int | None = None) -> dict:
     """Fetch a slice of popular books from Open Library and upsert them locally.
 
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE`` when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``offset`` and ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
+    ``offset`` and ``duration_s``.
     """
     logger.info("sync_books: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "book"})
     start = time.monotonic()
     synced = 0
     errors = 0
+    people_errors = 0
     target = settings.SEED_TOP_N_BOOKS
 
     try:
@@ -315,6 +342,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -326,6 +354,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "people_errors": 0,
             "offset": offset,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -367,6 +396,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
                         logger.exception(
                             "sync_books: failed to persist authors for work_id=%s", work_id
                         )
+                        people_errors += 1
                         await _rollback_quietly(session, "sync_books")
             except Exception:
                 logger.exception("sync_books: error upserting work_key=%s", raw.get("key"))
@@ -383,11 +413,16 @@ async def sync_books(slice_size: int | None = None) -> dict:
             logger.exception("sync_books: failed to refresh catalog_search")
 
     logger.info(
-        "sync_books: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+        "sync_books: done — %d items upserted, %d errors, %d people_errors (offset %d)",
+        synced,
+        errors,
+        people_errors,
+        offset,
     )
     return {
         "synced": synced,
         "errors": errors,
+        "people_errors": people_errors,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
     }
