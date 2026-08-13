@@ -312,9 +312,7 @@ function ReviewCard({
 
 /**
  * Avatar + name of a review's author, linked to their public profile
- * (`/u/{username}` — FE-21's own route, `frontend_feature_list.json`;
- * not shipped yet, so this link 404s until then, same as any other
- * forward-reference to a not-yet-built page).
+ * (`/u/{username}`, FE-21).
  *
  * Deliberately not reusing `RaterIdentity` from `rating-widget.tsx`: that
  * one renders the viewer's own identity with no link (FE-18's scope never

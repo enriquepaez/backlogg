@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, MailCheck, Settings } from "lucide-react";
+import { CircleUserRound, LogOut, MailCheck, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,9 @@ function initials(user: NavUser): string {
  * Session-aware header entry point (FE-14: "menú de cuenta con logout";
  * FE-15 adds the conditional "resend verification" entry; FE-17 adds the
  * "settings" entry linking to `/settings`, the only entry point into that
- * page's profile-edit/delete-account flows).
+ * page's profile-edit/delete-account flows; a post-QA follow-up on FE-21
+ * adds the "my profile" entry linking to `/u/{username}`, the public
+ * profile page that previously had no header entry point).
  *
  * A Radix `DropdownMenu` (shadcn/ui primitives, `src/components/ui/dropdown-
  * menu.tsx`) rather than the previous inline avatar+name+button: it is the
@@ -90,6 +92,12 @@ export function UserNav({ user }: { user: NavUser }) {
       <DropdownMenuContent align="end">
         <DropdownMenuLabel className="max-w-48 truncate">{name}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href={`/u/${user.username}`}>
+            <CircleUserRound aria-hidden="true" />
+            {t("profile")}
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/settings">
             <Settings aria-hidden="true" />

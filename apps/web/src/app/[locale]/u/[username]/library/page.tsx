@@ -160,9 +160,9 @@ function TypeTabs({
 
 /**
  * Public library/backlog page for one user (FE-20), `/u/{username}/library`.
- * Only this subroute exists today — `/u/{username}` (the full profile, FE-21)
- * is a forward reference not shipped yet, same as `item-reviews.tsx`'s link
- * to it.
+ * Sibling of `/u/{username}` (the full profile, FE-21), which links here for
+ * its own "view full library" summary section rather than duplicating this
+ * grid.
  *
  * Loads the profile (`getUserProfile`, for the heading + `library_counts`)
  * and the filtered/paginated library (`getUserLibrary`) — both public,
