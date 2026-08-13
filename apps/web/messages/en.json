@@ -158,6 +158,34 @@
       "pageStatus": "Page {page} of {totalPages}"
     }
   },
+  "Library": {
+    "heading": "{name}'s library",
+    "empty": "No titles match these filters.",
+    "error": "Something went wrong loading this library. Please try again.",
+    "statusTabs": {
+      "label": "Filter by status",
+      "all": "All",
+      "want": "Want",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "dropped": "Dropped",
+      "withCount": "{label} ({count})"
+    },
+    "typeTabs": {
+      "label": "Filter by type",
+      "all": "All types",
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    },
+    "pagination": {
+      "nav": "Library pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
   "ItemDetail": {
     "error": "Something went wrong loading this title. Please try again.",
     "originalTitleLabel": "Original title",
@@ -244,6 +272,20 @@
         "next": "Next",
         "pageStatus": "Page {page} of {totalPages}"
       }
+    },
+    "library": {
+      "heading": "Your status",
+      "loading": "Loading your status…",
+      "anonymousPrompt": "Log in to add this title to your library.",
+      "anonymousLoginLink": "Log in",
+      "status": {
+        "want": "Want",
+        "in_progress": "In progress",
+        "completed": "Completed",
+        "dropped": "Dropped"
+      },
+      "remove": "Remove from library",
+      "error": "Couldn't update your library. Please try again."
     }
   },
   "Auth": {

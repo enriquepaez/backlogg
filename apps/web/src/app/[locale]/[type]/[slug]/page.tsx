@@ -239,6 +239,8 @@ export default async function ItemDetailPage({
         genres={(item.genres ?? []).map((genre) => genre.name)}
         fields={buildFields(type, item, t)}
         viewerStatus={item.viewer_status}
+        type={type}
+        slug={slug}
         originalTitleLabel={t("originalTitleLabel")}
         genresLabel={t("genresLabel")}
         ratingExternalLabel={t("ratingExternalLabel")}

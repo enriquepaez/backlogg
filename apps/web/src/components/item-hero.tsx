@@ -2,6 +2,7 @@ import { ImageOff, Star } from "lucide-react";
 import Image from "next/image";
 
 import { ViewerStatusSlot } from "@/components/viewer-status-slot";
+import type { CatalogType } from "@/lib/catalog-types";
 
 export type ItemMetadataField = {
   label: string;
@@ -27,6 +28,9 @@ export type ItemHeroProps = {
   fields: ItemMetadataField[];
   /** `MovieOut.viewer_status` (etc) — see `ViewerStatusSlot`. */
   viewerStatus: string | null | undefined;
+  /** Forwarded to `ViewerStatusSlot`, which needs them for its own `GET/PUT/DELETE /api/{type}/{slug}/library` calls (FE-20). */
+  type: CatalogType;
+  slug: string;
   originalTitleLabel: string;
   genresLabel: string;
   ratingExternalLabel: string;
@@ -92,6 +96,8 @@ export function ItemHero({
   genres,
   fields,
   viewerStatus,
+  type,
+  slug,
   originalTitleLabel,
   genresLabel,
   ratingExternalLabel,
@@ -192,7 +198,7 @@ export function ItemHero({
             </dl>
           ) : null}
 
-          <ViewerStatusSlot status={viewerStatus} />
+          <ViewerStatusSlot status={viewerStatus} type={type} slug={slug} />
         </div>
       </div>
     </section>

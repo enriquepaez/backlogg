@@ -158,6 +158,34 @@
       "pageStatus": "Página {page} de {totalPages}"
     }
   },
+  "Library": {
+    "heading": "Biblioteca de {name}",
+    "empty": "Ningún título coincide con estos filtros.",
+    "error": "Algo salió mal al cargar esta biblioteca. Inténtalo de nuevo.",
+    "statusTabs": {
+      "label": "Filtrar por estado",
+      "all": "Todos",
+      "want": "Pendiente",
+      "in_progress": "En curso",
+      "completed": "Terminado",
+      "dropped": "Abandonado",
+      "withCount": "{label} ({count})"
+    },
+    "typeTabs": {
+      "label": "Filtrar por tipo",
+      "all": "Todos los tipos",
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Juegos"
+    },
+    "pagination": {
+      "nav": "Paginación de la biblioteca",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
   "ItemDetail": {
     "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",
     "originalTitleLabel": "Título original",
@@ -244,6 +272,20 @@
         "next": "Siguiente",
         "pageStatus": "Página {page} de {totalPages}"
       }
+    },
+    "library": {
+      "heading": "Tu estado",
+      "loading": "Cargando tu estado…",
+      "anonymousPrompt": "Inicia sesión para añadir este título a tu biblioteca.",
+      "anonymousLoginLink": "Iniciar sesión",
+      "status": {
+        "want": "Pendiente",
+        "in_progress": "En curso",
+        "completed": "Terminado",
+        "dropped": "Abandonado"
+      },
+      "remove": "Quitar de la biblioteca",
+      "error": "No se pudo actualizar tu biblioteca. Inténtalo de nuevo."
     }
   },
   "Auth": {

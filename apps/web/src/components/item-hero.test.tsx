@@ -1,7 +1,18 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ItemHero, type ItemHeroProps } from "./item-hero";
+
+// `ViewerStatusSlot` (FE-20) is a Client Component that fetches its own
+// state via `next-intl`'s `useTranslations` and `fetch` — neither works
+// under a plain render here, and it isn't what this file tests. Stubbed to a
+// marker that only asserts the `type`/`slug` `ItemHero` forwards to it (its
+// own behavior is covered by `viewer-status-slot.test.tsx`).
+vi.mock("@/components/viewer-status-slot", () => ({
+  ViewerStatusSlot: ({ type, slug }: { type: string; slug: string }) => (
+    <div data-testid="viewer-status-slot">{`${type}:${slug}`}</div>
+  ),
+}));
 
 const baseProps: ItemHeroProps = {
   title: "Dune",
@@ -16,6 +27,8 @@ const baseProps: ItemHeroProps = {
   genres: ["Science Fiction"],
   fields: [{ label: "Release date", value: "2021-10-22" }],
   viewerStatus: null,
+  type: "movie",
+  slug: "dune-2021",
   originalTitleLabel: "Original title",
   genresLabel: "Genres",
   ratingExternalLabel: "External rating",
@@ -99,5 +112,11 @@ describe("ItemHero", () => {
 
     expect(container.querySelector("img[alt='Dune']")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Dune" })).toBeInTheDocument();
+  });
+
+  it("forwards type/slug to ViewerStatusSlot", () => {
+    render(<ItemHero {...baseProps} type="series" slug="chernobyl" />);
+
+    expect(screen.getByTestId("viewer-status-slot")).toHaveTextContent("series:chernobyl");
   });
 });
