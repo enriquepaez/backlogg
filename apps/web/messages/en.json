@@ -186,6 +186,34 @@
       "pageStatus": "Page {page} of {totalPages}"
     }
   },
+  "Profile": {
+    "error": "Something went wrong loading this profile. Please try again.",
+    "editProfileLink": "Edit profile",
+    "followersCount": "{count} followers",
+    "followingCount": "{count} following",
+    "library": {
+      "heading": "Library",
+      "viewAll": "View full library"
+    },
+    "reviews": {
+      "heading": "Reviews",
+      "empty": "No reviews yet.",
+      "error": "Something went wrong loading these reviews. Please try again.",
+      "dateLabel": "Reviewed on {date}",
+      "pagination": {
+        "nav": "Reviews pagination",
+        "previous": "Previous",
+        "next": "Next",
+        "pageStatus": "Page {page} of {totalPages}"
+      }
+    },
+    "lists": {
+      "heading": "Lists",
+      "empty": "No public lists yet.",
+      "error": "Something went wrong loading these lists. Please try again.",
+      "itemCount": "{count} items"
+    }
+  },
   "ItemDetail": {
     "error": "Something went wrong loading this title. Please try again.",
     "originalTitleLabel": "Original title",
@@ -427,6 +455,7 @@
     "showcase": "Showcase",
     "login": "Log in",
     "accountMenu": "Account menu",
+    "profile": "My profile",
     "settings": "Settings",
     "logout": "Log out",
     "logoutError": "Couldn't log out. Please try again.",

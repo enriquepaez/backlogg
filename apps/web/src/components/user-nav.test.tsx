@@ -105,6 +105,15 @@ describe("UserNav", () => {
     expect(settingsItem).toHaveAttribute("href", "/settings");
   });
 
+  it("shows a my-profile entry that links to /u/{username}", async () => {
+    render(<UserNav user={testUser} />);
+
+    openMenu();
+
+    const profileItem = await screen.findByRole("menuitem", { name: /profile/i });
+    expect(profileItem).toHaveAttribute("href", "/u/alice");
+  });
+
   it("closes the menu on Escape", async () => {
     render(<UserNav user={testUser} />);
 
