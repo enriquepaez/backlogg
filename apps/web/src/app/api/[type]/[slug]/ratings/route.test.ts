@@ -1,0 +1,165 @@
+// @vitest-environment node
+//
+// Same rationale as `../rating/route.test.ts`: `getCurrentUser` depends on
+// `next/headers`' request-scoped `cookies()`, which only works inside a real
+// Next.js request, so it's mocked here. `listRatings` (`@/lib/ratings`) is
+// mocked too so this file only exercises the route's own branching (query
+// parsing, `authenticated` reporting, error passthrough), not the per-type
+// dispatch already covered by `ratings.test.ts`.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const getCurrentUserMock = vi.fn();
+vi.mock("@/lib/api-fetch", () => ({
+  getCurrentUser: (...args: unknown[]) => getCurrentUserMock(...args),
+}));
+
+vi.mock("@/lib/auth/session", () => ({
+  getApiClient: () => ({ name: "fake-api-client" }),
+}));
+
+const listRatingsMock = vi.fn();
+vi.mock("@/lib/ratings", () => ({
+  listRatings: (...args: unknown[]) => listRatingsMock(...args),
+}));
+
+const { GET } = await import("./route");
+
+function backendResponse(status: number): Response {
+  return new Response(null, { status });
+}
+
+function params(type: string, slug: string) {
+  return { params: Promise.resolve({ type, slug }) };
+}
+
+function request(query = ""): Request {
+  return new Request(`http://localhost:3000/api/movie/dune-2021/ratings${query}`);
+}
+
+const alice = { username: "alice", email: "a@example.com", display_name: null, bio: null, avatar_url: null, email_verified: true };
+const page = {
+  items: [
+    { id: 1, user: { username: "bob", display_name: "Bob", avatar_url: null }, score: 4, review_text: "Great", like_count: 2, created_at: "t", updated_at: "t" },
+  ],
+  total: 1,
+  page: 1,
+  limit: 10,
+};
+
+beforeEach(() => {
+  getCurrentUserMock.mockClear();
+  listRatingsMock.mockClear();
+});
+
+describe("GET /api/{type}/{slug}/ratings", () => {
+  it("returns 400 for an invalid type without touching the session or listRatings", async () => {
+    const response = await GET(request(), params("tv-show", "dune-2021"));
+
+    expect(response.status).toBe(400);
+    expect(getCurrentUserMock).not.toHaveBeenCalled();
+    expect(listRatingsMock).not.toHaveBeenCalled();
+  });
+
+  it("defaults to page=1, limit=10 with no query params", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+    await GET(request(), params("movie", "dune-2021"));
+
+    expect(listRatingsMock).toHaveBeenCalledWith(
+      { name: "fake-api-client" },
+      "movie",
+      "dune-2021",
+      { page: 1, limit: 10 },
+    );
+  });
+
+  it("forwards valid page/limit query params", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+    await GET(request("?page=3&limit=25"), params("movie", "dune-2021"));
+
+    expect(listRatingsMock).toHaveBeenCalledWith(
+      { name: "fake-api-client" },
+      "movie",
+      "dune-2021",
+      { page: 3, limit: 25 },
+    );
+  });
+
+  it.each(["0", "-1", "1.5", "abc"])(
+    "falls back to page=1 for an invalid page value %p",
+    async (rawPage) => {
+      getCurrentUserMock.mockResolvedValueOnce(null);
+      listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+      await GET(request(`?page=${rawPage}`), params("movie", "dune-2021"));
+
+      expect(listRatingsMock).toHaveBeenCalledWith(
+        { name: "fake-api-client" },
+        "movie",
+        "dune-2021",
+        { page: 1, limit: 10 },
+      );
+    },
+  );
+
+  it("caps limit at 100 even when a larger value is requested", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+    await GET(request("?limit=1000"), params("movie", "dune-2021"));
+
+    expect(listRatingsMock).toHaveBeenCalledWith(
+      { name: "fake-api-client" },
+      "movie",
+      "dune-2021",
+      { page: 1, limit: 100 },
+    );
+  });
+
+  it("reports authenticated:true and the page data when there is a valid session", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(alice);
+    listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+    const response = await GET(request(), params("movie", "dune-2021"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ authenticated: true, ...page });
+  });
+
+  it("reports authenticated:false when there is no session", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ data: page, response: backendResponse(200) });
+
+    const response = await GET(request(), params("movie", "dune-2021"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ authenticated: false, ...page });
+  });
+
+  it("returns 404 when the slug doesn't exist", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ response: backendResponse(404) });
+
+    const response = await GET(request(), params("movie", "unknown-slug"));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body).toEqual({ error: "list_ratings_failed" });
+  });
+
+  it("collapses any other backend failure to a generic error with the same status code", async () => {
+    getCurrentUserMock.mockResolvedValueOnce(null);
+    listRatingsMock.mockResolvedValueOnce({ response: backendResponse(500) });
+
+    const response = await GET(request(), params("movie", "dune-2021"));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({ error: "list_ratings_failed" });
+  });
+});

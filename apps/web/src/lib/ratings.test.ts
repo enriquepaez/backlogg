@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "@backlogg/api-client";
 
-import { deleteRating, listRatings, putRating } from "./ratings";
+import { deleteRating, likeReview, listRatings, putRating, unlikeReview } from "./ratings";
 
 /**
  * `putRating`/`deleteRating`/`listRatings` only dispatch to the right
@@ -16,6 +16,7 @@ import { deleteRating, listRatings, putRating } from "./ratings";
 function fakeClient(): ApiClient {
   return {
     PUT: vi.fn().mockResolvedValue({ data: { id: 1 }, response: new Response(null, { status: 200 }) }),
+    POST: vi.fn().mockResolvedValue({ response: new Response(null, { status: 204 }) }),
     DELETE: vi.fn().mockResolvedValue({ response: new Response(null, { status: 204 }) }),
     GET: vi.fn().mockResolvedValue({ data: { items: [] }, response: new Response(null, { status: 200 }) }),
   } as unknown as ApiClient;
@@ -74,6 +75,34 @@ describe("listRatings", () => {
 
     expect(client.GET).toHaveBeenCalledWith(path, {
       params: { path: { slug: "some-slug" }, query: { page: 1, limit: 100 } },
+    });
+  });
+});
+
+describe("likeReview", () => {
+  it("POSTs to /v1/ratings/{rating_id}/like with the rating id and headers", async () => {
+    const client = fakeClient();
+    const headers = { Authorization: "Bearer t" };
+
+    await likeReview(client, headers, 42);
+
+    expect(client.POST).toHaveBeenCalledWith("/v1/ratings/{rating_id}/like", {
+      params: { path: { rating_id: 42 } },
+      headers,
+    });
+  });
+});
+
+describe("unlikeReview", () => {
+  it("DELETEs /v1/ratings/{rating_id}/like with the rating id and headers", async () => {
+    const client = fakeClient();
+    const headers = { Authorization: "Bearer t" };
+
+    await unlikeReview(client, headers, 42);
+
+    expect(client.DELETE).toHaveBeenCalledWith("/v1/ratings/{rating_id}/like", {
+      params: { path: { rating_id: 42 } },
+      headers,
     });
   });
 });

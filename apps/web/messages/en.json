@@ -228,6 +228,22 @@
       "cancel": "Cancel",
       "error": "Couldn't report this review. Please try again.",
       "success": "Thanks, this review has been reported."
+    },
+    "reviews": {
+      "heading": "Reviews",
+      "loading": "Loading reviews…",
+      "loadError": "Couldn't load reviews. Please try again.",
+      "empty": "No reviews yet.",
+      "dateLabel": "Reviewed on {date}",
+      "likeAriaLabel": "Like this review",
+      "unlikeAriaLabel": "Unlike this review",
+      "likeCount": "{count} likes",
+      "pagination": {
+        "nav": "Reviews pagination",
+        "previous": "Previous",
+        "next": "Next",
+        "pageStatus": "Page {page} of {totalPages}"
+      }
     }
   },
   "Auth": {

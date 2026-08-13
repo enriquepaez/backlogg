@@ -394,7 +394,7 @@
         "Enlace al perfil del autor; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 21,
