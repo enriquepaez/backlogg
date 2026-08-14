@@ -15,6 +15,12 @@ Covers:
 - get_author retries on TimeoutException and returns None after 3 failures
 - get_author succeeds on a retry after an initial timeout
 - get_author returns None on 404
+- get_work_detail follows a 301 redirect from /works/{id}.json to
+  /books/{id}.json (Issue #10) instead of raising, and normalizes the
+  edition response into work shape (authors, first_publish_date)
+- get_work_detail returns a work response unmodified (no redirect involved)
+- get_work_detail returns None on 404
+- get_author follows a 301 redirect (defensive consistency fix, Issue #10)
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,6 +33,7 @@ from backlogg.books.adapters.open_library import (
     OpenLibraryClient,
     _is_clean_genre,
 )
+from backlogg.books.service import _persist_book_authors
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -494,6 +501,228 @@ def test_book_to_dict_filters_raw_subjects():
     assert "Long island (n.y.), fiction" not in genre_names
     assert "Fiction" in genre_names
     assert "Fantasy" in genre_names
+
+
+# ---------------------------------------------------------------------------
+# get_work_detail redirect tests (Issue #10)
+# ---------------------------------------------------------------------------
+
+# Real Open Library edition payload shape for OL8796283M (one of the 4 IDs
+# confirmed in production logs, Issue #10) — the work_id resolves to a
+# standalone edition record, not a work.
+_EDITION_PAYLOAD = {
+    "key": "/books/OL8796283M",
+    "title": "The Malleus Maleficarum of Heinrich Kramer and James Sprenger",
+    "type": {"key": "/type/edition"},
+    "authors": [{"key": "/authors/OL757974A"}, {"key": "/authors/OL4788297A"}],
+    "publish_date": "February 2000",
+    "subjects": ["History", "Religion"],
+}
+
+_WORK_PAYLOAD = {
+    "key": "/works/OL27482W",
+    "title": "The Hobbit",
+    "type": {"key": "/type/work"},
+    "authors": [{"author": {"key": "/authors/OL26320A"}, "type": {"key": "/type/author_role"}}],
+    "description": "A tale of high adventure.",
+}
+
+
+@pytest.mark.asyncio
+async def test_get_work_detail_enables_follow_redirects():
+    """get_work_detail's AsyncClient must be constructed with follow_redirects=True."""
+    captured_kwargs: dict = {}
+
+    class CapturingClient:
+        def __init__(self, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            return _mock_response(200, dict(_WORK_PAYLOAD))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", CapturingClient):
+        client = OpenLibraryClient()
+        await client.get_work_detail("OL27482W")
+
+    assert captured_kwargs.get("follow_redirects") is True
+
+
+@pytest.mark.asyncio
+async def test_get_work_detail_follows_redirect_and_normalizes_edition_authors():
+    """A work_id that OL redirects to /books/{id}.json (Issue #10) must not raise.
+
+    Reproduces the real production traceback: OL responds to
+    GET /works/OL8796283M.json with a 301 to /books/OL8796283M.json. With
+    follow_redirects=True the underlying httpx client transparently follows
+    it, so client.get() returns the final edition response directly — this
+    is what the fake client below simulates. The returned dict must be
+    normalized into work shape so authors are not lost.
+    """
+
+    class RedirectingClient:
+        def __init__(self, **kwargs):
+            self.follow_redirects = kwargs.get("follow_redirects", False)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            assert url.endswith("/works/OL8796283M.json")
+            assert self.follow_redirects is True  # the fix under test
+            # Simulates httpx transparently following the 301 to /books/...
+            return _mock_response(200, dict(_EDITION_PAYLOAD))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", RedirectingClient):
+        client = OpenLibraryClient()
+        result = await client.get_work_detail("OL8796283M")
+
+    assert result is not None
+    # Authors normalized from edition's flat shape to work's nested shape
+    assert result["authors"] == [
+        {"author": {"key": "/authors/OL757974A"}},
+        {"author": {"key": "/authors/OL4788297A"}},
+    ]
+    # publish_date backfilled into first_publish_date since the edition has none
+    assert result["first_publish_date"] == "February 2000"
+
+
+@pytest.mark.asyncio
+async def test_get_work_detail_returns_work_response_unmodified():
+    """A genuine work response (no redirect involved) must pass through untouched."""
+
+    class WorkClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            return _mock_response(200, dict(_WORK_PAYLOAD))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", WorkClient):
+        client = OpenLibraryClient()
+        result = await client.get_work_detail("OL27482W")
+
+    assert result["authors"] == _WORK_PAYLOAD["authors"]
+    assert result["description"] == _WORK_PAYLOAD["description"]
+    assert "first_publish_date" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_work_detail_returns_none_on_404():
+    """get_work_detail must return None when the API responds 404."""
+
+    class NotFoundClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", NotFoundClient):
+        client = OpenLibraryClient()
+        result = await client.get_work_detail("OL999999W")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_author_enables_follow_redirects():
+    """get_author's AsyncClient must also be constructed with follow_redirects=True."""
+    captured_kwargs: dict = {}
+
+    class CapturingClient:
+        def __init__(self, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            return _mock_response(200, {"key": "/authors/OL123A", "name": "Test Author"})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", CapturingClient):
+        client = OpenLibraryClient()
+        await client.get_author("OL123A")
+
+    assert captured_kwargs.get("follow_redirects") is True
+
+
+@pytest.mark.asyncio
+async def test_persist_book_authors_handles_normalized_edition_authors():
+    """The normalized edition detail from get_work_detail must persist without raising.
+
+    Exercises the full path from Issue #10: a work_detail dict shaped like
+    get_work_detail's normalized edition output flows into
+    _persist_book_authors (backlogg/books/service.py) — the code that was
+    silently losing authors (people_errors) before this fix — and must
+    reach upsert_credit for both authors without an exception escaping.
+    """
+    book = MagicMock()
+    book.id = 42
+    db = AsyncMock()
+
+    edition_shaped_work_detail = {
+        "authors": [
+            {"author": {"key": "/authors/OL757974A"}},
+            {"author": {"key": "/authors/OL4788297A"}},
+        ],
+    }
+
+    author_payloads = {
+        "OL757974A": {"key": "/authors/OL757974A", "name": "Heinrich Kramer"},
+        "OL4788297A": {"key": "/authors/OL4788297A", "name": "James Sprenger"},
+    }
+
+    with (
+        patch(
+            "backlogg.books.service._ol_client.get_author",
+            AsyncMock(side_effect=lambda author_id: author_payloads[author_id]),
+        ),
+        patch(
+            "backlogg.books.service.people_repo.get_person_id_by_external",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.books.service.people_repo.upsert_person",
+            AsyncMock(side_effect=lambda db, data: MagicMock(id=hash(data["slug"]) % 1000)),
+        ),
+        patch("backlogg.books.service.upsert_external_id", AsyncMock()),
+        patch(
+            "backlogg.books.service.people_repo.upsert_credit", AsyncMock()
+        ) as mock_upsert_credit,
+    ):
+        await _persist_book_authors(db, book, edition_shaped_work_detail)
+
+    assert mock_upsert_credit.await_count == 2
+    persisted_roles = {call.args[1]["role"] for call in mock_upsert_credit.await_args_list}
+    assert persisted_roles == {"AUTHOR"}
 
 
 def test_book_to_dict_caps_genres_at_five():

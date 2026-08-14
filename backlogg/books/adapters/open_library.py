@@ -124,9 +124,48 @@ def _slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", text).strip("-")
 
 
+def _normalize_edition_as_work(edition: dict) -> dict:
+    """Reshape an Open Library edition JSON into work-shaped fields.
+
+    Used by ``get_work_detail`` when the ``work_id`` it was given only
+    exists as a standalone edition (``/books/{id}.json``) — confirmed
+    against real Open Library responses for the Issue #10 IDs, editions
+    never carry ``description`` or ``first_publish_date``/nested-``author``
+    ``authors``, so those are reshaped/backfilled here:
+
+    - ``authors``: edition shape is a flat ``[{"key": "/authors/OL..A"}]``;
+      work shape (consumed by ``_persist_book_authors``) is
+      ``[{"author": {"key": "/authors/OL..A"}}]``.
+    - ``first_publish_date``: editions use ``publish_date`` instead; copied
+      over only when ``first_publish_date`` is absent, so a genuine work
+      value is never overwritten.
+    - ``description``: editions don't have one; left absent, which
+      ``book_to_dict`` already handles (``overview`` stays ``None``).
+    """
+    normalized = dict(edition)
+    authors = edition.get("authors")
+    if authors:
+        normalized["authors"] = [
+            {"author": {"key": entry["key"]}}
+            for entry in authors
+            if isinstance(entry, dict) and entry.get("key")
+        ]
+    if "first_publish_date" not in normalized and normalized.get("publish_date"):
+        normalized["first_publish_date"] = normalized["publish_date"]
+    return normalized
+
+
 class OpenLibraryClient:
     async def search_book(self, title: str) -> dict | None:
-        """Search Open Library by title and return the first result."""
+        """Search Open Library by title and return the first result.
+
+        Not affected by the Issue #10 redirect bug: this hits the
+        ``/search.json`` query endpoint (same as ``_fetch_popular_page``),
+        not a per-ID detail lookup like ``/works/{id}.json`` or
+        ``/authors/{id}.json`` — a search query has no OLID to be the wrong
+        record type for, so it never receives the routing-mismatch 301.
+        ``follow_redirects`` is deliberately left out.
+        """
         async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
             response = await client.get(
                 f"{_OL_BASE}/search.json",
@@ -209,23 +248,54 @@ class OpenLibraryClient:
         """Fetch full work detail from Open Library.
 
         ``work_id`` is the bare OLID like ``OL123W`` (without the /works/ prefix).
+
+        Some ``work_id`` values returned by ``search.json`` are actually
+        edition OLIDs (suffix ``M``, not ``W``) that only exist as a
+        standalone edition record with no work of their own — Open Library
+        answers ``GET /works/{id}.json`` for these with a ``301`` to
+        ``GET /books/{id}.json`` (confirmed in production, Issue #10).
+        ``follow_redirects=True`` follows it instead of letting
+        ``raise_for_status()`` turn the unfollowed redirect into an
+        exception. An edition response has a different shape than a work
+        response — ``authors`` is a flat ``[{"key": ...}]`` list instead of
+        the work's ``[{"author": {"key": ...}}]``, dates live in
+        ``publish_date`` instead of ``first_publish_date``, and editions
+        carry no ``description`` — so it's normalized into work shape by
+        ``_normalize_edition_as_work`` before being returned, so callers
+        (``_persist_book_authors``, ``book_to_dict``) don't need to
+        special-case it.
         """
-        async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            headers=_OL_HEADERS, timeout=_OL_TIMEOUT, follow_redirects=True
+        ) as client:
             response = await client.get(f"{_OL_BASE}/works/{work_id}.json")
             if response.status_code == 404:
                 return None
             response.raise_for_status()
-            return response.json()
+            detail = response.json()
+            if detail.get("type", {}).get("key") == "/type/edition":
+                detail = _normalize_edition_as_work(detail)
+            return detail
 
     async def get_author(self, author_id: str) -> dict | None:
         """Fetch author detail from Open Library.
 
         ``author_id`` is the bare OLID like ``OL123A`` (without the /authors/ prefix).
         Retries up to 3 times on timeout before returning None.
+
+        Follows redirects (``follow_redirects=True``) for consistency with
+        ``get_work_detail``: Open Library merges duplicate author records,
+        and this client shares the exact same "AsyncClient without
+        follow_redirects" pattern that caused Issue #10 for work details.
+        No production 301 has been observed here (spot-checked against
+        several live author IDs), but the fix is a no-op when unneeded and
+        closes the same class of bug defensively.
         """
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
+                async with httpx.AsyncClient(
+                    headers=_OL_HEADERS, timeout=_OL_TIMEOUT, follow_redirects=True
+                ) as client:
                     response = await client.get(f"{_OL_BASE}/authors/{author_id}.json")
                     if response.status_code == 404:
                         return None
