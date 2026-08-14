@@ -252,6 +252,65 @@ async def test_get_movie_ratings_slug_not_found_returns_404(client, db):
     assert response.status_code == 404
 
 
+async def test_get_movie_ratings_liked_by_viewer_true_for_caller_who_liked(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-liked-1"))
+    author_token = await _register_and_login(client, "route-rating-user-liked-1")
+    liker_token = await _register_and_login(client, "route-rating-user-liked-2")
+
+    put_response = await client.put(
+        "/v1/movies/route-rating-movie-liked-1/rating",
+        json={"score": 5, "review_text": "So good"},
+        headers=_auth_headers(author_token),
+    )
+    rating_id = put_response.json()["id"]
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+
+    response = await client.get(
+        "/v1/movies/route-rating-movie-liked-1/ratings", headers=_auth_headers(liker_token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["liked_by_viewer"] is True
+
+
+async def test_get_movie_ratings_liked_by_viewer_false_for_caller_who_did_not_like(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-liked-2"))
+    author_token = await _register_and_login(client, "route-rating-user-liked-3")
+    stranger_token = await _register_and_login(client, "route-rating-user-liked-4")
+
+    await client.put(
+        "/v1/movies/route-rating-movie-liked-2/rating",
+        json={"score": 5, "review_text": "So good"},
+        headers=_auth_headers(author_token),
+    )
+
+    response = await client.get(
+        "/v1/movies/route-rating-movie-liked-2/ratings", headers=_auth_headers(stranger_token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["liked_by_viewer"] is False
+
+
+async def test_get_movie_ratings_liked_by_viewer_false_for_anonymous_caller(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-liked-3"))
+    author_token = await _register_and_login(client, "route-rating-user-liked-5")
+    liker_token = await _register_and_login(client, "route-rating-user-liked-6")
+
+    put_response = await client.put(
+        "/v1/movies/route-rating-movie-liked-3/rating",
+        json={"score": 5, "review_text": "So good"},
+        headers=_auth_headers(author_token),
+    )
+    rating_id = put_response.json()["id"]
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+
+    response = await client.get("/v1/movies/route-rating-movie-liked-3/ratings")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["liked_by_viewer"] is False
+
+
 # ── POST/DELETE /ratings/{id}/like ───────────────────────────────────────
 
 

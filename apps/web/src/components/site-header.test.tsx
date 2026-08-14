@@ -35,6 +35,14 @@ vi.mock("@/components/mode-toggle", () => ({
   ModeToggle: () => <div data-testid="mode-toggle" />,
 }));
 
+// `NotificationBell` (FE-24) is a Client Component with its own `fetch`
+// calls (unread count on mount) — out of scope for this Server Component's
+// own tests (covered by `notification-bell.test.tsx`), same rationale as
+// mocking `LanguageSwitcher`/`ModeToggle` above.
+vi.mock("@/components/notification-bell", () => ({
+  NotificationBell: () => <div data-testid="notification-bell" />,
+}));
+
 const getCurrentUser = vi.fn();
 vi.mock("@/lib/api-fetch", () => ({
   getCurrentUser: () => getCurrentUser(),
@@ -50,6 +58,7 @@ describe("SiteHeader", () => {
 
     expect(screen.getByRole("link", { name: "login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "accountMenu" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("notification-bell")).not.toBeInTheDocument();
   });
 
   it("shows the account menu (name/avatar) and no login link when authenticated", async () => {
@@ -67,5 +76,6 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("button", { name: "accountMenu" })).toBeInTheDocument();
     expect(screen.getByText("Alice A.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "login" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
   });
 });

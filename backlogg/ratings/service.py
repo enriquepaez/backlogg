@@ -32,13 +32,14 @@ _ITEM_NOT_FOUND_DETAIL = {
 }
 
 
-def _rating_to_out(rating, user: User, like_count: int) -> RatingOut:
+def _rating_to_out(rating, user: User, like_count: int, liked_by_viewer: bool = False) -> RatingOut:
     return RatingOut(
         id=rating.id,
         user=RatingAuthorOut.model_validate(user),
         score=rating.score,
         review_text=rating.review_text,
         like_count=like_count,
+        liked_by_viewer=liked_by_viewer,
         created_at=rating.created_at,
         updated_at=rating.updated_at,
     )
@@ -86,13 +87,28 @@ async def delete_item_rating(db: AsyncSession, item_type: str, slug: str, user: 
 
 
 async def list_item_ratings(
-    db: AsyncSession, item_type: str, slug: str, page: int, limit: int
+    db: AsyncSession,
+    item_type: str,
+    slug: str,
+    page: int,
+    limit: int,
+    caller_id: int | None = None,
 ) -> RatingListOut:
-    """Public, paginated list of ratings/reviews for an item, newest first."""
+    """Public, paginated list of ratings/reviews for an item, newest first.
+
+    ``caller_id`` is the authenticated viewer's id, if any (``None`` for an
+    anonymous caller) — resolves each review's ``liked_by_viewer`` for that
+    specific caller. The endpoint itself stays public either way.
+    """
     item = await _get_item_or_404(db, item_type, slug)
 
-    rows, total = await repo.list_ratings_for_item(db, item_type, item.id, page, limit)
-    items = [_rating_to_out(rating, user, like_count) for rating, user, like_count in rows]
+    rows, total = await repo.list_ratings_for_item(
+        db, item_type, item.id, page, limit, caller_id=caller_id
+    )
+    items = [
+        _rating_to_out(rating, user, like_count, liked_by_viewer)
+        for rating, user, like_count, liked_by_viewer in rows
+    ]
     return RatingListOut(items=items, total=total, page=page, limit=limit)
 
 

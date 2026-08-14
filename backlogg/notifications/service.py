@@ -90,6 +90,8 @@ def _row_to_out(row) -> NotificationOut:
         target=NotificationTargetOut(
             target_type=row.target_type,
             target_id=row.target_id,
+            item_type=row.resolved_item_type,
+            slug=row.resolved_slug,
         ),
         is_read=row.is_read,
         created_at=row.created_at,
@@ -115,3 +117,11 @@ async def mark_read(db: AsyncSession, user: User, ids: list[int] | None) -> None
     """Mark the user's notifications as read — all, or only ``ids``. Idempotent."""
     await repo.mark_read(db, user.id, ids)
     await db.commit()
+
+
+async def delete_notification(db: AsyncSession, user: User, notification_id: int) -> bool:
+    """Delete one of the user's own notifications. Returns whether it was deleted."""
+    deleted = await repo.delete_notification(db, user.id, notification_id)
+    if deleted:
+        await db.commit()
+    return deleted

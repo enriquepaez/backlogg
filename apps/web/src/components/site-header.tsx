@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/api-fetch";
 import { Link } from "@/i18n/navigation";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ModeToggle } from "@/components/mode-toggle";
+import { NotificationBell } from "@/components/notification-bell";
 import { UserNav, type NavUser } from "@/components/user-nav";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -68,7 +69,13 @@ export async function SiteHeader() {
           <LanguageSwitcher />
           <ModeToggle />
           {navUser ? (
-            <UserNav user={navUser} />
+            <>
+              {/* Notifications (FE-24): auth-gated, same criterion as the
+                  `/feed` nav link above — a signed-out viewer has nothing to
+                  be notified about. */}
+              <NotificationBell />
+              <UserNav user={navUser} />
+            </>
           ) : (
             // FE-13 builds the real /login page; the link already points at
             // its intended route (a 404 until then is expected and

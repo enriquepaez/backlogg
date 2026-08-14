@@ -392,7 +392,7 @@ upsert se recalculan `rating_internal` (AVG) y `rating_count_internal`
 (COUNT) del item.
 
 Response: `id`, `user` (`username`, `display_name`, `avatar_url`), `score`,
-`review_text`, `like_count`, `created_at`, `updated_at`.
+`review_text`, `like_count`, `liked_by_viewer`, `created_at`, `updated_at`.
 
 ```
 DELETE /v1/{type}/{slug}/rating
@@ -409,7 +409,10 @@ GET /v1/{type}/{slug}/ratings?page=&limit=
 
 Response: `{"items": [...], "total": , "page": , "limit": }` — cada item
 tiene el mismo shape que la respuesta de `PUT .../rating`, incluyendo
-`like_count`.
+`like_count` y `liked_by_viewer`. `liked_by_viewer` es `true` si el caller
+autenticado ya dio like a esa review, `false` si no (o si el caller es
+anónimo — el endpoint sigue siendo público, sin auth requerida). Resuelto en
+una sola query por el backend (sin N+1).
 
 ```
 POST /v1/ratings/{id}/like
@@ -549,9 +552,18 @@ GET /v1/notifications?page=&limit=
 
 Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `id`, `type` (`new_follower` | `review_like`), `actor` (`username`,
-`display_name`, `avatar_url`), `target` (`target_type`, `target_id`; ambos
-`null` para `new_follower`, `review`/`user_ratings.id` para `review_like`),
-`is_read`, `created_at`.
+`display_name`, `avatar_url`), `target` (`target_type`, `target_id`, `item_type`,
+`slug`), `is_read`, `created_at`.
+
+`target` es polimórfico: para `new_follower` los cuatro campos son `null` (no
+hay target — se enlaza al perfil del actor). Para `review_like`,
+`target_type="review"` y `target_id` = id de `user_ratings`; además
+`item_type` (`MOVIE`/`SERIES`/`BOOK`/`GAME`, mayúscula — misma convención que
+`/v1/feed`) y `slug` resuelven el item puntuado por esa review, para poder
+enlazar directo a `/{item_type}/{slug}` sin una consulta adicional (no existe
+`GET /v1/ratings/{id}`). Si la review referenciada está oculta por moderación
+(`is_hidden`), el target sigue resolviéndose igual: el enlace es al item, no a
+la review, así que la moderación de la review no afecta la notificación.
 
 ```
 GET /v1/notifications/unread_count
@@ -568,6 +580,17 @@ POST /v1/notifications/read
 Body opcional: `{"ids": [int, ...]}`. Sin body (o `ids` omitido/`null`) marca
 **todas** las no leídas del caller; con `ids` marca solo esas. Siempre limitado
 a las notificaciones del propio caller.
+
+```
+DELETE /v1/notifications/{notification_id}
+→ 204  Notificación propia eliminada
+→ 401  Sin token
+→ 404  No existe o no pertenece al caller
+```
+
+`{notification_id}` es el id numérico de la notificación. Igual que
+`DELETE /v1/{type}/{slug}/rating`, no se distingue "no existe" de "es de
+otro usuario" — ambos casos devuelven 404, sin filtrar información.
 
 ### Recommendations (personalizadas)
 

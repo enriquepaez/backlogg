@@ -125,6 +125,34 @@ async def test_like_generates_review_like_notification(db):
     assert rows[0].username == "notif-svc-liker-1"
 
 
+async def test_like_notification_target_resolves_via_service(db):
+    """The service maps the resolved item_type/slug onto NotificationTargetOut."""
+    author = await _make_user(db, "notif-svc-author-6")
+    liker = await _make_user(db, "notif-svc-liker-6")
+    rating = await _make_review(db, "notif-svc-movie-6", author)
+
+    await ratings_service.like_review(db, rating_id=rating.id, user=liker)
+
+    result = await notif_service.list_notifications(db, author, page=1, limit=20)
+    entry = result.items[0]
+    assert entry.type == "review_like"
+    assert entry.target.item_type == "MOVIE"
+    assert entry.target.slug == "notif-svc-movie-6"
+
+
+async def test_new_follower_target_item_type_and_slug_are_null(db):
+    actor = await _make_user(db, "notif-svc-follower-6")
+    target = await _make_user(db, "notif-svc-target-6")
+
+    await follows_service.follow_user(db, username="notif-svc-target-6", user=actor)
+
+    result = await notif_service.list_notifications(db, target, page=1, limit=20)
+    entry = result.items[0]
+    assert entry.type == "new_follower"
+    assert entry.target.item_type is None
+    assert entry.target.slug is None
+
+
 async def test_self_like_does_not_notify(db):
     author = await _make_user(db, "notif-svc-author-2")
     rating = await _make_review(db, "notif-svc-movie-2", author)
@@ -168,3 +196,37 @@ async def test_mark_read_service_is_idempotent(db):
 
     result = await notif_service.unread_count(db, user=target)
     assert result.unread_count == 0
+
+
+# ── delete_notification ─────────────────────────────────────────────────
+
+
+async def test_delete_notification_own_returns_true(db):
+    actor = await _make_user(db, "notif-svc-follower-7")
+    target = await _make_user(db, "notif-svc-target-7")
+    await follows_service.follow_user(db, username="notif-svc-target-7", user=actor)
+
+    result = await notif_service.list_notifications(db, target, page=1, limit=20)
+    notification_id = result.items[0].id
+
+    deleted = await notif_service.delete_notification(db, target, notification_id)
+    assert deleted is True
+
+    result_after = await notif_service.list_notifications(db, target, page=1, limit=20)
+    assert result_after.total == 0
+
+
+async def test_delete_notification_of_another_user_returns_false(db):
+    actor = await _make_user(db, "notif-svc-follower-8")
+    target = await _make_user(db, "notif-svc-target-8")
+    other = await _make_user(db, "notif-svc-other-8")
+    await follows_service.follow_user(db, username="notif-svc-target-8", user=actor)
+
+    result = await notif_service.list_notifications(db, target, page=1, limit=20)
+    notification_id = result.items[0].id
+
+    deleted = await notif_service.delete_notification(db, other, notification_id)
+    assert deleted is False
+
+    result_after = await notif_service.list_notifications(db, target, page=1, limit=20)
+    assert result_after.total == 1

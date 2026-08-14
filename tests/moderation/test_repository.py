@@ -80,7 +80,7 @@ async def test_hidden_review_excluded_from_aggregate_and_listing(db):
 
     rows, total = await list_ratings_for_item(db, "MOVIE", movie.id, page=1, limit=20)
     assert total == 1
-    assert all(user.id == user_b.id for _, user, _ in rows)
+    assert all(user.id == user_b.id for _, user, _, _ in rows)
 
 
 async def test_banned_author_reviews_excluded_from_aggregate_and_listings(db):

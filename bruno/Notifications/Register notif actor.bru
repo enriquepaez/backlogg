@@ -1,0 +1,32 @@
+meta {
+  name: Register notif actor
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "bruno_notif_actor",
+    "email": "bruno_notif_actor@example.com",
+    "password": "testpass123"
+  }
+}
+
+tests {
+  test("status 201", function() {
+    expect(res.status).to.equal(201);
+  });
+}
+
+docs {
+  Sets up a second account whose sole purpose is to generate a real
+  new_follower notification for bruno_tester (see "Follow as notif actor"),
+  so the delete tests below have a deterministic, real notification id to
+  work with instead of guessing one.
+}

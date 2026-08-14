@@ -75,6 +75,19 @@ describe("listRatings", () => {
 
     expect(client.GET).toHaveBeenCalledWith(path, {
       params: { path: { slug: "some-slug" }, query: { page: 1, limit: 100 } },
+      headers: {},
+    });
+  });
+
+  it("forwards the caller's Authorization header when provided, so the backend can resolve liked_by_viewer", async () => {
+    const client = fakeClient();
+    const headers = { Authorization: "Bearer viewer-token" };
+
+    await listRatings(client, "movie", "some-slug", { page: 1, limit: 10 }, headers);
+
+    expect(client.GET).toHaveBeenCalledWith("/v1/movies/{slug}/ratings", {
+      params: { path: { slug: "some-slug" }, query: { page: 1, limit: 10 } },
+      headers,
     });
   });
 });

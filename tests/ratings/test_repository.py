@@ -225,14 +225,60 @@ async def test_list_ratings_for_item_pagination_and_like_count(db):
     assert total == 2
     assert len(rows) == 1
     # Most recent first — rating from user_b was written last.
-    rating, user, like_count = rows[0]
+    rating, user, like_count, liked_by_viewer = rows[0]
     assert user.id == user_b
     assert like_count == 0
+    assert liked_by_viewer is False
 
     rows_page2, _ = await list_ratings_for_item(db, "MOVIE", movie.id, page=2, limit=1)
-    rating2, user2, like_count2 = rows_page2[0]
+    rating2, user2, like_count2, liked_by_viewer2 = rows_page2[0]
     assert user2.id == user_a
     assert like_count2 == 1
+    assert liked_by_viewer2 is False
+
+
+async def test_list_ratings_for_item_liked_by_viewer_true_for_caller_who_liked(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-movie-13"))
+    author = await _make_user(db, "rating-repo-user-18")
+    liker = await _make_user(db, "rating-repo-user-19")
+
+    rating = await upsert_rating(
+        db, user_id=author, item_type="MOVIE", item_id=movie.id, score=5, review_text="Great"
+    )
+    await create_like_if_not_exists(db, user_id=liker, rating_id=rating.id)
+
+    rows, _ = await list_ratings_for_item(db, "MOVIE", movie.id, page=1, limit=20, caller_id=liker)
+    _, _, _, liked_by_viewer = rows[0]
+    assert liked_by_viewer is True
+
+
+async def test_list_ratings_for_item_liked_by_viewer_false_for_caller_who_did_not_like(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-movie-14"))
+    author = await _make_user(db, "rating-repo-user-20")
+    other = await _make_user(db, "rating-repo-user-21")
+
+    await upsert_rating(
+        db, user_id=author, item_type="MOVIE", item_id=movie.id, score=5, review_text="Great"
+    )
+
+    rows, _ = await list_ratings_for_item(db, "MOVIE", movie.id, page=1, limit=20, caller_id=other)
+    _, _, _, liked_by_viewer = rows[0]
+    assert liked_by_viewer is False
+
+
+async def test_list_ratings_for_item_liked_by_viewer_false_for_anonymous_caller(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-movie-15"))
+    author = await _make_user(db, "rating-repo-user-22")
+    liker = await _make_user(db, "rating-repo-user-23")
+
+    rating = await upsert_rating(
+        db, user_id=author, item_type="MOVIE", item_id=movie.id, score=5, review_text="Great"
+    )
+    await create_like_if_not_exists(db, user_id=liker, rating_id=rating.id)
+
+    rows, _ = await list_ratings_for_item(db, "MOVIE", movie.id, page=1, limit=20, caller_id=None)
+    _, _, _, liked_by_viewer = rows[0]
+    assert liked_by_viewer is False
 
 
 # ── list_user_reviews (cross-type UNION ALL) ─────────────────────────────

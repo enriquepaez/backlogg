@@ -2,15 +2,23 @@
 
 Only this file imports and uses SQLAlchemy for the notifications domain. The
 list query joins the actor (users) so the actor's public fields
-(username/display_name/avatar_url) are resolved in one round-trip, avoiding N+1.
+(username/display_name/avatar_url) are resolved in one round-trip, avoiding
+N+1. It also resolves the target item (for ``review_like``) in the same
+query: LEFT JOIN to ``user_ratings`` on the notification's polymorphic
+target, then one conditional LEFT JOIN per content model (reusing
+``ITEM_MODELS`` from ``backlogg.ratings.repository``) so the item's
+``slug``/type can be COALESCEd out — a single round-trip regardless of which
+item type the review targets.
 """
 
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.notifications.models import Notification
+from backlogg.ratings.models import UserRating
+from backlogg.ratings.repository import ITEM_MODELS
 from backlogg.users.models import User
 
 
@@ -58,9 +66,22 @@ async def list_notifications(
             User.username.label("username"),
             User.display_name.label("display_name"),
             User.avatar_url.label("avatar_url"),
+            UserRating.item_type.label("resolved_item_type"),
+            func.coalesce(*(model.slug for model in ITEM_MODELS.values())).label("resolved_slug"),
         )
         .join(User, Notification.actor_id == User.id)
-        .where(Notification.recipient_id == recipient_id)
+        .outerjoin(
+            UserRating,
+            (Notification.target_type == "review") & (Notification.target_id == UserRating.id),
+        )
+    )
+    for item_type, model in ITEM_MODELS.items():
+        paged_stmt = paged_stmt.outerjoin(
+            model,
+            (UserRating.item_type == item_type) & (UserRating.item_id == model.id),
+        )
+    paged_stmt = (
+        paged_stmt.where(Notification.recipient_id == recipient_id)
         .order_by(Notification.created_at.desc(), Notification.id.desc())
         .offset((page - 1) * limit)
         .limit(limit)
@@ -101,3 +122,20 @@ async def mark_read(db: AsyncSession, recipient_id: int, ids: list[int] | None =
         stmt = stmt.where(Notification.id.in_(ids))
     await db.execute(stmt)
     await db.flush()
+
+
+async def delete_notification(db: AsyncSession, recipient_id: int, notification_id: int) -> bool:
+    """Delete one notification, scoped to ``recipient_id``. Returns whether a row was deleted.
+
+    Scoping the WHERE clause to ``recipient_id`` means the caller can never
+    delete someone else's notification — a mismatched id simply deletes
+    nothing, and the service maps that to a 404 without distinguishing
+    "doesn't exist" from "isn't yours".
+    """
+    stmt = delete(Notification).where(
+        Notification.id == notification_id,
+        Notification.recipient_id == recipient_id,
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount > 0

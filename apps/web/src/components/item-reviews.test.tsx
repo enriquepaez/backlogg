@@ -38,6 +38,7 @@ const bob = {
   score: 4,
   review_text: "Loved it",
   like_count: 2,
+  liked_by_viewer: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -48,6 +49,7 @@ const alice = {
   score: null,
   review_text: null,
   like_count: 0,
+  liked_by_viewer: false,
   created_at: "2026-01-02T00:00:00Z",
   updated_at: "2026-01-02T00:00:00Z",
 };
@@ -125,6 +127,17 @@ describe("ItemReviews", () => {
 
     const likeButton = await screen.findByRole("button", { name: "likeAriaLabel" });
     expect(likeButton).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("starts a review already liked by the viewer with the heart in a liked state", async () => {
+    server.use(
+      reviewsHandler([{ ...bob, liked_by_viewer: true }], { authenticated: true }),
+    );
+
+    renderReviews();
+
+    const likeButton = await screen.findByRole("button", { name: "unlikeAriaLabel" });
+    expect(likeButton).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renders a login link (not a button) for an anonymous viewer", async () => {

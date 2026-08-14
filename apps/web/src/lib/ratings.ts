@@ -78,22 +78,31 @@ export async function deleteRating(
  * state. FE-19's `GET /api/{type}/{slug}/ratings` Route Handler
  * (`app/api/[type]/[slug]/ratings/route.ts`) calls this too, for the actual
  * paginated reviews listing on the item detail page.
+ *
+ * `headers` is optional (defaults to `{}`, i.e. no `Authorization` header) —
+ * the endpoint itself never requires auth. But since each item's
+ * `liked_by_viewer` (round-2 QA fix, `progress/current.md`) is resolved by
+ * the backend from the caller's bearer token when one is present, callers
+ * that know the viewer's identity should still forward it here so the
+ * response reflects that viewer's real like state instead of always
+ * resolving to an anonymous `false`.
  */
 export async function listRatings(
   client: ApiClient,
   type: CatalogType,
   slug: string,
   query: { page?: number; limit?: number } = {},
+  headers: Record<string, string> = {},
 ): Promise<ApiResult<RatingPage>> {
   switch (type) {
     case "movie":
-      return client.GET("/v1/movies/{slug}/ratings", { params: { path: { slug }, query } });
+      return client.GET("/v1/movies/{slug}/ratings", { params: { path: { slug }, query }, headers });
     case "series":
-      return client.GET("/v1/series/{slug}/ratings", { params: { path: { slug }, query } });
+      return client.GET("/v1/series/{slug}/ratings", { params: { path: { slug }, query }, headers });
     case "book":
-      return client.GET("/v1/books/{slug}/ratings", { params: { path: { slug }, query } });
+      return client.GET("/v1/books/{slug}/ratings", { params: { path: { slug }, query }, headers });
     case "game":
-      return client.GET("/v1/games/{slug}/ratings", { params: { path: { slug }, query } });
+      return client.GET("/v1/games/{slug}/ratings", { params: { path: { slug }, query }, headers });
   }
 }
 
