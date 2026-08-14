@@ -191,6 +191,12 @@
     "editProfileLink": "Edit profile",
     "followersCount": "{count} followers",
     "followingCount": "{count} following",
+    "follow": {
+      "follow": "Follow",
+      "unfollow": "Unfollow",
+      "loading": "Loading…",
+      "error": "Something went wrong. Please try again."
+    },
     "library": {
       "heading": "Library",
       "viewAll": "View full library"
@@ -212,6 +218,20 @@
       "empty": "No public lists yet.",
       "error": "Something went wrong loading these lists. Please try again.",
       "itemCount": "{count} items"
+    }
+  },
+  "Follows": {
+    "backToProfile": "Back to profile",
+    "followersHeading": "{name}'s followers",
+    "followingHeading": "{name}'s following",
+    "emptyFollowers": "No followers yet.",
+    "emptyFollowing": "Not following anyone yet.",
+    "error": "Something went wrong loading this list. Please try again.",
+    "pagination": {
+      "nav": "Pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page} of {totalPages}"
     }
   },
   "ItemDetail": {

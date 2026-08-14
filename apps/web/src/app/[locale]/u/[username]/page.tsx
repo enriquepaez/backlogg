@@ -3,6 +3,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
+import { FollowWidget } from "@/components/follow-widget";
 import { ProfileReviewsPagination } from "@/components/profile-reviews-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -203,9 +204,15 @@ function ProfileHeader({
 
       {profile.bio ? <p className="max-w-2xl text-sm leading-6 text-foreground">{profile.bio}</p> : null}
 
-      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-        <span>{t("followersCount", { count: profile.follower_count })}</span>
-        <span>{t("followingCount", { count: profile.following_count })}</span>
+      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+        <FollowWidget
+          username={profile.username}
+          initialFollowerCount={profile.follower_count}
+          isOwnProfile={isOwnProfile}
+        />
+        <Link href={`/u/${profile.username}/following`} className="hover:text-foreground hover:underline">
+          {t("followingCount", { count: profile.following_count })}
+        </Link>
       </div>
     </div>
   );
