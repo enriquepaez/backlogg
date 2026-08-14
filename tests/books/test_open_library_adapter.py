@@ -5,10 +5,11 @@ Covers:
 - get_popular_books queries /search.json with q=*:*, sort=readinglog and
   native offset/limit, requesting the field set book_to_dict consumes
 - get_popular_books raises immediately (no retry) when the API responds with 403
-- get_popular_books retries transient 5xx responses and succeeds on a later attempt
+- get_popular_books retries transient 5xx responses (via tenacity) and
+  succeeds on a later attempt
 - get_popular_books tolerates a long 5xx burst and still succeeds within the
-  widened retry window (recovers on the 5th attempt)
-- get_popular_books raises after exhausting the 5xx retries, including
+  widened tenacity retry window (recovers on the 8th attempt)
+- get_popular_books raises after exhausting the tenacity retries, including
   mid-pagination (accumulated pages are discarded, never returned as success)
 - get_popular_books correctly parses a response containing a non-empty "docs" list
 - get_author retries on TimeoutException and returns None after 3 failures
@@ -156,7 +157,7 @@ async def test_get_popular_books_raises_on_403_without_retry():
 
 @pytest.mark.asyncio
 async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
-    """A transient 5xx must be retried; the second attempt's 200 is returned."""
+    """A transient 5xx must be retried via tenacity; the 2nd attempt's 200 is returned."""
     fake_docs = [{"key": "/works/OL1W", "title": "Book One"}]
     call_count = 0
 
@@ -178,7 +179,7 @@ async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
             return _mock_response(200, _search_payload(fake_docs))
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakyClient):
-        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()) as mock_sleep:
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             client = OpenLibraryClient()
             result = await client.get_popular_books(limit=10)
 
@@ -189,7 +190,7 @@ async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
 
 @pytest.mark.asyncio
 async def test_get_popular_books_raises_after_persistent_5xx():
-    """A 5xx that survives all retry attempts must raise, never return []."""
+    """A 5xx that survives all tenacity retry attempts must raise, never return []."""
     call_count = 0
 
     class BrokenClient:
@@ -208,21 +209,21 @@ async def test_get_popular_books_raises_after_persistent_5xx():
             return _mock_response(500)
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", BrokenClient):
-        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             client = OpenLibraryClient()
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_popular_books(limit=10)
 
-    assert call_count == 5  # initial attempt + 4 retries
+    assert call_count == 8  # initial attempt + 7 retries (widened budget, Issue #9)
 
 
 @pytest.mark.asyncio
 async def test_get_popular_books_recovers_after_long_5xx_burst():
-    """A long 5xx burst that clears on the 5th attempt must still succeed.
+    """A long 5xx burst that clears on the 7th attempt must still succeed.
 
-    The retry window was widened (5 attempts) precisely to absorb longer OL
-    Solr 5xx bursts: four consecutive 500s followed by a 200 must return the
-    docs, not raise.
+    The retry window was widened from 5 to 8 attempts (Issue #9) precisely
+    to absorb longer OL Solr 5xx bursts than the old budget survived: six
+    consecutive 500s followed by a 200 must return the docs, not raise.
     """
     fake_docs = [{"key": "/works/OL1W", "title": "Book One"}]
     call_count = 0
@@ -240,18 +241,18 @@ async def test_get_popular_books_recovers_after_long_5xx_burst():
         async def get(self, url, params=None):
             nonlocal call_count
             call_count += 1
-            if call_count < 5:
+            if call_count < 7:
                 return _mock_response(500)
             return _mock_response(200, _search_payload(fake_docs))
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", LongBurstClient):
-        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()) as mock_sleep:
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             client = OpenLibraryClient()
             result = await client.get_popular_books(limit=10)
 
     assert result == fake_docs
-    assert call_count == 5  # four 500s absorbed, 200 on the fifth attempt
-    assert mock_sleep.await_count == 4  # one backoff between each of the 5 attempts
+    assert call_count == 7  # six 500s absorbed, 200 on the seventh attempt
+    assert mock_sleep.await_count == 6  # one backoff between each of the 7 attempts
 
 
 @pytest.mark.asyncio
@@ -283,12 +284,12 @@ async def test_get_popular_books_mid_pagination_error_discards_and_raises():
             return _mock_response(500)
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakySecondPageClient):
-        with patch("backlogg.books.adapters.open_library.asyncio.sleep", AsyncMock()):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             client = OpenLibraryClient()
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_popular_books(limit=200, offset=0)
 
-    assert call_count == 6  # page 1 OK + 5 failed attempts on page 2
+    assert call_count == 9  # page 1 OK + 8 failed attempts on page 2 (Issue #9 budget)
 
 
 @pytest.mark.asyncio

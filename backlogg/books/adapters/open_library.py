@@ -5,6 +5,7 @@ import unicodedata
 from datetime import UTC, date, datetime
 
 import httpx
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 _OL_BASE = "https://openlibrary.org"
 _OL_COVER_BASE = "https://covers.openlibrary.org/b/id"
@@ -14,12 +15,35 @@ _OL_HEADERS = {
 _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 # Retry policy for the popular-books search: OL's Solr backend answers the
-# readinglog-sorted match-all query with intermittent 500s, but an immediate
-# retry of the same request consistently succeeds.
-_SEARCH_RETRY_ATTEMPTS = 5
-_SEARCH_RETRY_BACKOFF_S = 2.0
+# readinglog-sorted match-all query with intermittent 500s, and Issue #9
+# showed those windows of degradation can last well over the ~30s a short
+# retry budget covers (an offset that 500'd through 5 attempts in ~30s
+# returned 200 again minutes later, unchanged). 8 attempts with exponential
+# backoff (2/4/8/16/30/30/30s, capped at 30s/attempt) give ~120s of total
+# retry budget instead.
+_SEARCH_RETRY_ATTEMPTS = 8
+_OL_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 logger = logging.getLogger(__name__)
+
+
+def _is_ol_retryable_error(exc: BaseException) -> bool:
+    """True for transient Open Library failures: 429/5xx, timeouts and transport errors.
+
+    Never retries a 4xx (e.g. a malformed query or rate-limit block that
+    isn't a 429) — retrying would not fix a client error.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _OL_RETRYABLE_STATUS_CODES
+    return isinstance(exc, httpx.TimeoutException | httpx.TransportError)
+
+
+_ol_search_retry = retry(
+    retry=retry_if_exception(_is_ol_retryable_error),
+    stop=stop_after_attempt(_SEARCH_RETRY_ATTEMPTS),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    reraise=True,
+)
 
 _GENRE_ALLOWLIST: frozenset[str] = frozenset(
     {
@@ -117,15 +141,18 @@ class OpenLibraryClient:
             docs = data.get("docs", [])
             return docs[0] if docs else None
 
+    @_ol_search_retry
     async def _fetch_popular_page(self, per_page: int, offset: int) -> dict:
-        """Fetch one page of the popular-books search, retrying transient 5xx.
+        """Fetch one page of the popular-books search, retrying transient failures.
 
-        5xx responses are retried up to ``_SEARCH_RETRY_ATTEMPTS`` times with
-        a short linear backoff (OL's Solr is flaky on this query; an
-        immediate retry consistently succeeds).  A 5xx that survives the
-        retries — and any 4xx (e.g. a 403 rate-limit), which a retry would
-        not fix — raises ``httpx.HTTPStatusError``: callers must never
-        mistake a failed fetch for an exhausted listing.
+        429/5xx responses, timeouts and transport errors are retried up to
+        ``_SEARCH_RETRY_ATTEMPTS`` times with exponential backoff via
+        ``tenacity`` (OL's Solr is flaky on this query; a retry after a
+        short wait consistently succeeds — see Issue #9 for a case where the
+        degradation window outlasted a smaller retry budget). A failure that
+        survives every retry — and any other 4xx (e.g. a 403 rate-limit),
+        which a retry would not fix — raises ``httpx.HTTPStatusError``:
+        callers must never mistake a failed fetch for an exhausted listing.
         """
         params = {
             "q": "*:*",
@@ -134,22 +161,10 @@ class OpenLibraryClient:
             "limit": per_page,
             "offset": offset,
         }
-        for attempt in range(_SEARCH_RETRY_ATTEMPTS):
-            async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
-                response = await client.get(f"{_OL_BASE}/search.json", params=params)
-            if response.status_code >= 500 and attempt < _SEARCH_RETRY_ATTEMPTS - 1:
-                logger.warning(
-                    "get_popular_books: HTTP %d at offset %d (attempt %d/%d), retrying",
-                    response.status_code,
-                    offset,
-                    attempt + 1,
-                    _SEARCH_RETRY_ATTEMPTS,
-                )
-                await asyncio.sleep(_SEARCH_RETRY_BACKOFF_S * (attempt + 1))
-                continue
-            response.raise_for_status()
-            return response.json()
-        raise AssertionError("unreachable")  # last attempt always returns or raises
+        async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
+            response = await client.get(f"{_OL_BASE}/search.json", params=params)
+        response.raise_for_status()
+        return response.json()
 
     async def get_popular_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular books from Open Library for nightly sync.
@@ -166,13 +181,13 @@ class OpenLibraryClient:
         which is the shape ``book_to_dict`` consumes.
 
         Raises ``httpx.HTTPStatusError`` when a page request keeps failing
-        after the 5xx retries (or fails with a 4xx), even mid-pagination:
-        the pages accumulated so far are discarded so a returned list always
-        means a fully successful fetch — a 200 response with fewer docs than
-        requested is the only legitimate end-of-results signal.  Discarding
-        is safe because nothing has been persisted yet, upserts are
-        idempotent and the sync cursor is not advanced on error, so the next
-        run refetches the same slice.
+        after exhausting the retries (or fails with a non-retryable 4xx),
+        even mid-pagination: the pages accumulated so far are discarded so a
+        returned list always means a fully successful fetch — a 200 response
+        with fewer docs than requested is the only legitimate end-of-results
+        signal.  Discarding is safe because nothing has been persisted yet,
+        upserts are idempotent and the sync cursor is not advanced on error,
+        so the next run refetches the same slice.
         """
         results: list[dict] = []
         per_page = min(limit, 100)  # OL search.json default page size
