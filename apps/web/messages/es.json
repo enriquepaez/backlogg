@@ -191,6 +191,12 @@
     "editProfileLink": "Editar perfil",
     "followersCount": "{count} seguidores",
     "followingCount": "{count} siguiendo",
+    "follow": {
+      "follow": "Seguir",
+      "unfollow": "Dejar de seguir",
+      "loading": "Cargando…",
+      "error": "Algo salió mal. Inténtalo de nuevo."
+    },
     "library": {
       "heading": "Biblioteca",
       "viewAll": "Ver biblioteca completa"
@@ -212,6 +218,20 @@
       "empty": "Todavía no hay listas públicas.",
       "error": "Algo salió mal al cargar estas listas. Inténtalo de nuevo.",
       "itemCount": "{count} elementos"
+    }
+  },
+  "Follows": {
+    "backToProfile": "Volver al perfil",
+    "followersHeading": "Seguidores de {name}",
+    "followingHeading": "{name} sigue a",
+    "emptyFollowers": "Todavía no tiene seguidores.",
+    "emptyFollowing": "Todavía no sigue a nadie.",
+    "error": "Algo salió mal al cargar esta lista. Inténtalo de nuevo.",
+    "pagination": {
+      "nav": "Paginación",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page} de {totalPages}"
     }
   },
   "ItemDetail": {
