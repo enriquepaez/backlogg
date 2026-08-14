@@ -259,6 +259,19 @@
       "pageStatus": "Page {page} of {totalPages}"
     }
   },
+  "Notifications": {
+    "bellLabel": "Notifications",
+    "bellLabelUnread": "Notifications ({count} unread)",
+    "heading": "Notifications",
+    "markAllRead": "Mark all as read",
+    "loading": "Loading notifications…",
+    "error": "Something went wrong loading your notifications. Please try again.",
+    "empty": "No notifications yet.",
+    "newFollower": "{name} started following you.",
+    "reviewLike": "{name} liked your review.",
+    "generic": "{name} interacted with you.",
+    "deleteAriaLabel": "Delete notification"
+  },
   "ItemDetail": {
     "error": "Something went wrong loading this title. Please try again.",
     "originalTitleLabel": "Original title",

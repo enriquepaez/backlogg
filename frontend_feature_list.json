@@ -487,7 +487,7 @@
         "Tipos new_follower/review_like enlazan al destino correcto; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 26,

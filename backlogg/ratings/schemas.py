@@ -24,6 +24,7 @@ class RatingOut(BaseModel):
     score: int | None
     review_text: str | None
     like_count: int
+    liked_by_viewer: bool
     created_at: datetime
     updated_at: datetime
 

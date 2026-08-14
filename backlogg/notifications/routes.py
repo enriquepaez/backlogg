@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
@@ -55,3 +55,24 @@ async def mark_read(
 ):
     ids = payload.ids if payload is not None else None
     await service.mark_read(db, user=current_user, ids=ids)
+
+
+@notifications_router.delete(
+    "/{notification_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a notification",
+    description=(
+        "Delete one of the caller's own notifications. Requires auth. "
+        "404 if it doesn't exist or doesn't belong to the caller."
+    ),
+)
+async def delete_notification(
+    notification_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = await service.delete_notification(
+        db, user=current_user, notification_id=notification_id
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Notification not found")

@@ -12,10 +12,20 @@ class NotificationActorOut(BaseModel):
 
 
 class NotificationTargetOut(BaseModel):
-    """Polymorphic target of the notification (null for new_follower)."""
+    """Polymorphic target of the notification (null for new_follower).
+
+    ``item_type``/``slug`` resolve the review's target item (movie/series/
+    book/game) so a client can link directly to it without a separate
+    ``GET /v1/ratings/{id}`` lookup — there is none. Populated only when
+    ``target_type == "review"``; ``null`` otherwise (including
+    ``new_follower``). ``item_type`` is uppercase (``"MOVIE"``, ``"SERIES"``,
+    ``"BOOK"``, ``"GAME"``) — same convention as the feed endpoints.
+    """
 
     target_type: str | None
     target_id: int | None
+    item_type: str | None
+    slug: str | None
 
 
 class NotificationOut(BaseModel):
@@ -45,7 +55,12 @@ class NotificationListOut(BaseModel):
                             "display_name": "Bob",
                             "avatar_url": "https://cdn.example.com/a/bob.png",
                         },
-                        "target": {"target_type": "review", "target_id": 512},
+                        "target": {
+                            "target_type": "review",
+                            "target_id": 512,
+                            "item_type": "MOVIE",
+                            "slug": "the-matrix-1999",
+                        },
                         "is_read": False,
                         "created_at": "2026-05-25T18:04:11Z",
                     }

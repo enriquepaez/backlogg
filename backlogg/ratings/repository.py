@@ -8,7 +8,7 @@ precedent as ``backlogg/admin/repository.py``.
 
 from typing import Any
 
-from sqlalchemy import String, func, literal, select, union_all
+from sqlalchemy import String, exists, func, literal, select, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -174,9 +174,24 @@ async def recalculate_item_aggregates(db: AsyncSession, item_type: str, item_id:
 
 
 async def list_ratings_for_item(
-    db: AsyncSession, item_type: str, item_id: int, page: int, limit: int
+    db: AsyncSession,
+    item_type: str,
+    item_id: int,
+    page: int,
+    limit: int,
+    caller_id: int | None = None,
 ) -> tuple[list[Any], int]:
-    """Return paginated (UserRating, User, like_count) rows for an item, newest first."""
+    """Return paginated (UserRating, User, like_count, liked_by_viewer) rows for an item.
+
+    Newest first.
+
+    ``caller_id`` is the authenticated viewer's id (``None`` for an anonymous
+    caller). When present, ``liked_by_viewer`` is a correlated ``EXISTS`` over
+    ``ReviewLike`` scoped to that user — same single-query, no-N+1 pattern as
+    ``like_count_subq``. When ``caller_id is None`` there is no DB round trip
+    needed to know an anonymous caller never liked anything, so the column is
+    a plain ``literal(False)`` instead.
+    """
     like_count_subq = (
         select(func.count())
         .select_from(ReviewLike)
@@ -184,6 +199,16 @@ async def list_ratings_for_item(
         .correlate(UserRating)
         .scalar_subquery()
     )
+
+    if caller_id is not None:
+        liked_by_viewer_expr = exists(
+            select(1)
+            .select_from(ReviewLike)
+            .where(ReviewLike.rating_id == UserRating.id, ReviewLike.user_id == caller_id)
+            .correlate(UserRating)
+        )
+    else:
+        liked_by_viewer_expr = literal(False)
 
     count_result = await db.execute(
         select(func.count())
@@ -198,7 +223,12 @@ async def list_ratings_for_item(
     total = count_result.scalar_one()
 
     paged_stmt = (
-        select(UserRating, User, like_count_subq.label("like_count"))
+        select(
+            UserRating,
+            User,
+            like_count_subq.label("like_count"),
+            liked_by_viewer_expr.label("liked_by_viewer"),
+        )
         .join(User, UserRating.user_id == User.id)
         .where(
             UserRating.item_type == item_type,

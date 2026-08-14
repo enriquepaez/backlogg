@@ -191,6 +191,42 @@ async def test_list_item_ratings_includes_like_count(db):
     assert liked_entry.like_count == 1
 
 
+async def test_list_item_ratings_liked_by_viewer_reflects_caller(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-10"))
+    author = await _make_user(db, "svc-rating-user-17")
+    liker = await _make_user(db, "svc-rating-user-18")
+    stranger = await _make_user(db, "svc-rating-user-19")
+
+    rating = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-10",
+        payload=RatingIn(score=5, review_text="Loved it"),
+        user=author,
+    )
+    await service.like_review(db, rating_id=rating.id, user=liker)
+
+    liker_view = await service.list_item_ratings(
+        db, item_type="MOVIE", slug="service-rating-movie-10", page=1, limit=20, caller_id=liker.id
+    )
+    assert next(r for r in liker_view.items if r.id == rating.id).liked_by_viewer is True
+
+    stranger_view = await service.list_item_ratings(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-10",
+        page=1,
+        limit=20,
+        caller_id=stranger.id,
+    )
+    assert next(r for r in stranger_view.items if r.id == rating.id).liked_by_viewer is False
+
+    anonymous_view = await service.list_item_ratings(
+        db, item_type="MOVIE", slug="service-rating-movie-10", page=1, limit=20
+    )
+    assert next(r for r in anonymous_view.items if r.id == rating.id).liked_by_viewer is False
+
+
 async def test_list_item_ratings_slug_not_found_raises_404(db):
     with pytest.raises(HTTPException) as exc_info:
         await service.list_item_ratings(

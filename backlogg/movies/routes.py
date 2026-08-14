@@ -50,10 +50,16 @@ async def list_movie_ratings(
     slug: str,
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     return await ratings_service.list_item_ratings(
-        db, item_type="MOVIE", slug=slug, page=page, limit=limit
+        db,
+        item_type="MOVIE",
+        slug=slug,
+        page=page,
+        limit=limit,
+        caller_id=current_user.id if current_user else None,
     )
 
 

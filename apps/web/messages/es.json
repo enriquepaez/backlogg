@@ -259,6 +259,19 @@
       "pageStatus": "Página {page} de {totalPages}"
     }
   },
+  "Notifications": {
+    "bellLabel": "Notificaciones",
+    "bellLabelUnread": "Notificaciones ({count} sin leer)",
+    "heading": "Notificaciones",
+    "markAllRead": "Marcar todas como leídas",
+    "loading": "Cargando notificaciones…",
+    "error": "Algo salió mal al cargar tus notificaciones. Inténtalo de nuevo.",
+    "empty": "Todavía no tienes notificaciones.",
+    "newFollower": "{name} ha empezado a seguirte.",
+    "reviewLike": "A {name} le ha gustado tu reseña.",
+    "generic": "{name} ha interactuado contigo.",
+    "deleteAriaLabel": "Eliminar notificación"
+  },
   "ItemDetail": {
     "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",
     "originalTitleLabel": "Título original",

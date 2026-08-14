@@ -1,0 +1,27 @@
+meta {
+  name: Follow as notif actor
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/users/bruno_tester/follow
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{notifActorToken}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  bruno_notif_actor follows bruno_tester. This generates a new_follower
+  notification for bruno_tester (the {{authToken}} identity used by every
+  other request in this folder), which "List notifications" below picks up.
+}

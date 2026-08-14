@@ -1,0 +1,28 @@
+meta {
+  name: Delete notification — not found (404)
+  type: http
+  seq: 8
+}
+
+delete {
+  url: {{baseUrl}}/v1/notifications/999999999
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
+
+docs {
+  999999999 is a deliberately unreachable id (same value used in
+  tests/notifications/test_routes.py::test_delete_nonexistent_notification_returns_404).
+  Same criterion as DELETE /v1/{type}/{slug}/rating — no distinction between
+  "not found" and "not yours".
+}

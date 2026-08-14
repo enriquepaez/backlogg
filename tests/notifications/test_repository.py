@@ -3,12 +3,20 @@
 Runs against the real Postgres test DB (no mocks) per docs/conventions.md.
 """
 
+from datetime import UTC, datetime
+
+from backlogg.books.repository import upsert_book
+from backlogg.games.repository import upsert_game
+from backlogg.movies.repository import upsert_movie
 from backlogg.notifications.repository import (
     count_unread,
     create_notification,
+    delete_notification,
     list_notifications,
     mark_read,
 )
+from backlogg.ratings.repository import upsert_rating
+from backlogg.series.repository import upsert_series
 from backlogg.users.repository import create_user
 
 
@@ -24,6 +32,92 @@ async def _make_user(db, username: str) -> int:
         },
     )
     return user.id
+
+
+def _movie_data(slug: str) -> dict:
+    return {
+        "title": "Notif Target Movie",
+        "original_title": "Notif Target Movie",
+        "slug": slug,
+        "overview": "overview",
+        "release_date": None,
+        "runtime": 100,
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "budget": None,
+        "revenue": None,
+        "status": "Released",
+        "rating_external": None,
+        "rating_count_external": None,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+
+
+def _series_data(slug: str) -> dict:
+    return {
+        "title": "Notif Target Series",
+        "original_title": "Notif Target Series",
+        "slug": slug,
+        "overview": "overview",
+        "first_air_date": None,
+        "last_air_date": None,
+        "number_of_seasons": 1,
+        "number_of_episodes": 10,
+        "status": "Ended",
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": None,
+        "rating_count_external": None,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+
+
+def _book_data(slug: str) -> dict:
+    return {
+        "title": "Notif Target Book",
+        "original_title": None,
+        "slug": slug,
+        "overview": "overview",
+        "first_publish_date": None,
+        "original_language": "en",
+        "poster_url": None,
+        "rating_external": None,
+        "rating_count_external": None,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+
+
+def _game_data(slug: str) -> dict:
+    return {
+        "title": "Notif Target Game",
+        "original_title": None,
+        "slug": slug,
+        "overview": "overview",
+        "release_date": None,
+        "game_type": "MAIN_GAME",
+        "original_language": None,
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": None,
+        "rating_count_external": None,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+        "platforms": [],
+        "companies": [],
+    }
 
 
 # ── create_notification ──────────────────────────────────────────────────
@@ -211,3 +305,213 @@ async def test_mark_read_cannot_touch_other_users_notifications(db):
     # recipient tries to mark other's notification id — no-op.
     await mark_read(db, recipient, ids=[n.id])
     assert await count_unread(db, other) == 1
+
+
+# ── target resolution (item_type/slug) ───────────────────────────────────
+
+
+async def test_list_notifications_new_follower_has_null_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-9")
+    actor = await _make_user(db, "notif-repo-actor-9")
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="new_follower",
+        target_type=None,
+        target_id=None,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type is None
+    assert rows[0].resolved_slug is None
+
+
+async def test_list_notifications_review_like_resolves_movie_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-10")
+    actor = await _make_user(db, "notif-repo-actor-10")
+    movie = await upsert_movie(db, _movie_data("notif-repo-target-movie-1"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="MOVIE",
+        item_id=movie.id,
+        score=5,
+        review_text="great",
+    )
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "MOVIE"
+    assert rows[0].resolved_slug == "notif-repo-target-movie-1"
+
+
+async def test_list_notifications_review_like_resolves_series_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-11")
+    actor = await _make_user(db, "notif-repo-actor-11")
+    series = await upsert_series(db, _series_data("notif-repo-target-series-1"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="SERIES",
+        item_id=series.id,
+        score=4,
+        review_text="good",
+    )
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "SERIES"
+    assert rows[0].resolved_slug == "notif-repo-target-series-1"
+
+
+async def test_list_notifications_review_like_resolves_book_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-12")
+    actor = await _make_user(db, "notif-repo-actor-12")
+    book = await upsert_book(db, _book_data("notif-repo-target-book-1"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="BOOK",
+        item_id=book.id,
+        score=3,
+        review_text="ok",
+    )
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "BOOK"
+    assert rows[0].resolved_slug == "notif-repo-target-book-1"
+
+
+async def test_list_notifications_review_like_resolves_game_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-13")
+    actor = await _make_user(db, "notif-repo-actor-13")
+    game = await upsert_game(db, _game_data("notif-repo-target-game-1"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="GAME",
+        item_id=game.id,
+        score=2,
+        review_text="meh",
+    )
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "GAME"
+    assert rows[0].resolved_slug == "notif-repo-target-game-1"
+
+
+# ── delete_notification ──────────────────────────────────────────────────
+
+
+async def test_delete_notification_own_returns_true_and_removes_it(db):
+    recipient = await _make_user(db, "notif-repo-recip-15")
+    actor = await _make_user(db, "notif-repo-actor-15")
+    n = await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="new_follower",
+        target_type=None,
+        target_id=None,
+    )
+
+    deleted = await delete_notification(db, recipient, n.id)
+    assert deleted is True
+
+    rows, total = await list_notifications(db, recipient, page=1, limit=20)
+    assert total == 0
+    assert rows == []
+
+
+async def test_delete_notification_of_another_user_returns_false_and_keeps_it(db):
+    recipient = await _make_user(db, "notif-repo-recip-16")
+    other = await _make_user(db, "notif-repo-other-16")
+    actor = await _make_user(db, "notif-repo-actor-16")
+    n = await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="new_follower",
+        target_type=None,
+        target_id=None,
+    )
+
+    deleted = await delete_notification(db, other, n.id)
+    assert deleted is False
+
+    rows, total = await list_notifications(db, recipient, page=1, limit=20)
+    assert total == 1
+    assert rows[0].id == n.id
+
+
+async def test_delete_notification_nonexistent_id_returns_false(db):
+    recipient = await _make_user(db, "notif-repo-recip-17")
+
+    deleted = await delete_notification(db, recipient, 999_999_999)
+    assert deleted is False
+
+
+async def test_list_notifications_review_like_target_resolved_even_when_hidden(db):
+    """A hidden review still resolves its item target — the link is to the
+    item's page, not to the review itself, so moderation doesn't affect it."""
+    recipient = await _make_user(db, "notif-repo-recip-14")
+    actor = await _make_user(db, "notif-repo-actor-14")
+    movie = await upsert_movie(db, _movie_data("notif-repo-target-movie-2"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="MOVIE",
+        item_id=movie.id,
+        score=5,
+        review_text="great",
+    )
+    rating.is_hidden = True
+    await db.flush()
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "MOVIE"
+    assert rows[0].resolved_slug == "notif-repo-target-movie-2"

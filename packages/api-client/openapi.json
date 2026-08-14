@@ -163,6 +163,11 @@
         "summary": "List movie ratings",
         "description": "Public, paginated ratings & reviews for a movie, newest first.",
         "operationId": "list_movie_ratings_v1_movies__slug__ratings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "slug",
@@ -608,6 +613,11 @@
         "summary": "List series ratings",
         "description": "Public, paginated ratings & reviews for a series, newest first.",
         "operationId": "list_series_ratings_v1_series__slug__ratings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "slug",
@@ -1010,6 +1020,11 @@
         "summary": "List book ratings",
         "description": "Public, paginated ratings & reviews for a book, newest first.",
         "operationId": "list_book_ratings_v1_books__slug__ratings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "slug",
@@ -1412,6 +1427,11 @@
         "summary": "List game ratings",
         "description": "Public, paginated ratings & reviews for a game, newest first.",
         "operationId": "list_game_ratings_v1_games__slug__ratings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "slug",
@@ -3620,6 +3640,47 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/v1/notifications/{notification_id}": {
+      "delete": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Delete a notification",
+        "description": "Delete one of the caller's own notifications. Requires auth. 404 if it doesn't exist or doesn't belong to the caller.",
+        "operationId": "delete_notification_v1_notifications__notification_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/recommendations": {
@@ -6092,6 +6153,8 @@
               "id": 91,
               "is_read": false,
               "target": {
+                "item_type": "MOVIE",
+                "slug": "the-matrix-1999",
                 "target_id": 512,
                 "target_type": "review"
               },
@@ -6163,15 +6226,39 @@
               }
             ],
             "title": "Target Id"
+          },
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
           }
         },
         "type": "object",
         "required": [
           "target_type",
-          "target_id"
+          "target_id",
+          "item_type",
+          "slug"
         ],
         "title": "NotificationTargetOut",
-        "description": "Polymorphic target of the notification (null for new_follower)."
+        "description": "Polymorphic target of the notification (null for new_follower).\n\n``item_type``/``slug`` resolve the review's target item (movie/series/\nbook/game) so a client can link directly to it without a separate\n``GET /v1/ratings/{id}`` lookup \u2014 there is none. Populated only when\n``target_type == \"review\"``; ``null`` otherwise (including\n``new_follower``). ``item_type`` is uppercase (``\"MOVIE\"``, ``\"SERIES\"``,\n``\"BOOK\"``, ``\"GAME\"``) \u2014 same convention as the feed endpoints."
       },
       "PeriodEnum": {
         "type": "string",
@@ -6359,6 +6446,10 @@
             "type": "integer",
             "title": "Like Count"
           },
+          "liked_by_viewer": {
+            "type": "boolean",
+            "title": "Liked By Viewer"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -6377,6 +6468,7 @@
           "score",
           "review_text",
           "like_count",
+          "liked_by_viewer",
           "created_at",
           "updated_at"
         ],
@@ -7335,6 +7427,11 @@
           "duration_s": {
             "type": "number",
             "title": "Duration S"
+          },
+          "people_errors": {
+            "type": "integer",
+            "title": "People Errors",
+            "default": 0
           }
         },
         "type": "object",

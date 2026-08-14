@@ -58,19 +58,14 @@ export type ItemReviewsProps = {
  * local `page` state rather than the URL, so it never has to make that page
  * dynamic per request.
  *
- * Known limitation: `RatingOut` carries `like_count` but not "did the caller
- * already like this review" (no such field exists on the backend response,
- * `docs/api.md`) — same class of gap as the "no dedicated my-rating
- * endpoint" limitation documented in `GET /api/{type}/{slug}/rating`
- * (`app/api/[type]/[slug]/rating/route.ts`). Every review therefore starts
- * in a "not liked by me" visual state on load regardless of the viewer's
- * true prior like, and only reflects reality once toggled in this session.
- * The backend call itself is idempotent either way (liking an
- * already-liked review is a no-op, `docs/api.md`), so this never corrupts
- * server state — only this component's own optimistic count can drift by
- * one from the server's until the next full page load. Flagged for a future
- * feature to reconsider if/when the backend exposes a per-viewer "liked"
- * flag.
+ * `RatingOut.liked_by_viewer` (resolved server-side for the authenticated
+ * caller, always `false` for an anonymous one — see `docs/api.md`) seeds
+ * each review's initial `liked` state, so the heart reflects the viewer's
+ * real prior like on load instead of always starting unliked. Previously
+ * every review started "not liked by me" regardless of the viewer's true
+ * prior like, since `RatingOut` didn't expose that — see
+ * `progress/current.md`'s "Refinamiento fuera de backlog" (ronda 2) for the
+ * QA report and root-cause diagnosis.
  */
 export function ItemReviews({ type, slug }: ItemReviewsProps) {
   const t = useTranslations("ItemDetail.reviews");
@@ -103,7 +98,10 @@ export function ItemReviews({ type, slug }: ItemReviewsProps) {
         setTotal(data.total);
         setLikeState(
           Object.fromEntries(
-            data.items.map((item) => [item.id, { liked: false, count: item.like_count, pending: false }]),
+            data.items.map((item) => [
+              item.id,
+              { liked: item.liked_by_viewer, count: item.like_count, pending: false },
+            ]),
           ),
         );
         setPhase("ready");

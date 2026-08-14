@@ -1,0 +1,32 @@
+meta {
+  name: Login notif actor
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "bruno_notif_actor",
+    "password": "testpass123"
+  }
+}
+
+vars:post-response {
+  notifActorToken: res.body.access_token
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("access_token present", function() {
+    expect(res.body.access_token).to.be.a("string");
+  });
+}

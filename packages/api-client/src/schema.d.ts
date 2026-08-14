@@ -1141,6 +1141,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/notifications/{notification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a notification
+         * @description Delete one of the caller's own notifications. Requires auth. 404 if it doesn't exist or doesn't belong to the caller.
+         */
+        delete: operations["delete_notification_v1_notifications__notification_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/recommendations": {
         parameters: {
             query?: never;
@@ -2049,6 +2069,8 @@ export interface components {
          *           "id": 91,
          *           "is_read": false,
          *           "target": {
+         *             "item_type": "MOVIE",
+         *             "slug": "the-matrix-1999",
          *             "target_id": 512,
          *             "target_type": "review"
          *           },
@@ -2089,12 +2111,23 @@ export interface components {
         /**
          * NotificationTargetOut
          * @description Polymorphic target of the notification (null for new_follower).
+         *
+         *     ``item_type``/``slug`` resolve the review's target item (movie/series/
+         *     book/game) so a client can link directly to it without a separate
+         *     ``GET /v1/ratings/{id}`` lookup — there is none. Populated only when
+         *     ``target_type == "review"``; ``null`` otherwise (including
+         *     ``new_follower``). ``item_type`` is uppercase (``"MOVIE"``, ``"SERIES"``,
+         *     ``"BOOK"``, ``"GAME"``) — same convention as the feed endpoints.
          */
         NotificationTargetOut: {
             /** Target Type */
             target_type: string | null;
             /** Target Id */
             target_id: number | null;
+            /** Item Type */
+            item_type: string | null;
+            /** Slug */
+            slug: string | null;
         };
         /**
          * PeriodEnum
@@ -2155,6 +2188,8 @@ export interface components {
             review_text: string | null;
             /** Like Count */
             like_count: number;
+            /** Liked By Viewer */
+            liked_by_viewer: boolean;
             /**
              * Created At
              * Format: date-time
@@ -2480,6 +2515,11 @@ export interface components {
             offset: number;
             /** Duration S */
             duration_s: number;
+            /**
+             * People Errors
+             * @default 0
+             */
+            people_errors: number;
         };
         /**
          * TokenPairOut
@@ -5011,6 +5051,35 @@ export interface operations {
                 "application/json": components["schemas"]["MarkReadIn"] | null;
             };
         };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_notification_v1_notifications__notification_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {

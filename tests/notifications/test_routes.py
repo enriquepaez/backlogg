@@ -6,10 +6,36 @@ Covers:
 - POST /notifications/read (auth, marks all or specific ids, idempotent).
 """
 
+from datetime import UTC, date, datetime
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from backlogg.main import app
+from backlogg.movies import repository as movies_repo
+
+
+def _movie_data(slug: str) -> dict:
+    return {
+        "title": "Route Notif Movie",
+        "original_title": "Route Notif Movie",
+        "slug": slug,
+        "overview": "overview",
+        "release_date": date(2020, 1, 1),
+        "runtime": 100,
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "budget": None,
+        "revenue": None,
+        "status": "Released",
+        "rating_external": None,
+        "rating_count_external": None,
+        "rating_internal": None,
+        "rating_count_internal": 0,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
 
 
 @pytest_asyncio.fixture
@@ -56,6 +82,11 @@ async def test_unread_count_without_token_returns_401(client):
 
 async def test_mark_read_without_token_returns_401(client):
     response = await client.post("/v1/notifications/read")
+    assert response.status_code == 401
+
+
+async def test_delete_notification_without_token_returns_401(client):
+    response = await client.delete("/v1/notifications/1")
     assert response.status_code == 401
 
 
@@ -133,3 +164,90 @@ async def test_mark_read_specific_ids(client):
 
     resp = await client.get("/v1/notifications/unread_count", headers=_auth_headers(target_token))
     assert resp.json()["unread_count"] == 1
+
+
+# ── target resolution (item_type/slug) ────────────────────────────────────
+
+
+async def test_new_follower_target_fields_are_null(client):
+    actor_token = await _register_and_login(client, "route-notif-actor-5")
+    target_token = await _register_and_login(client, "route-notif-target-5")
+
+    await client.post("/v1/users/route-notif-target-5/follow", headers=_auth_headers(actor_token))
+
+    response = await client.get("/v1/notifications", headers=_auth_headers(target_token))
+    target = response.json()["items"][0]["target"]
+    assert target["target_type"] is None
+    assert target["target_id"] is None
+    assert target["item_type"] is None
+    assert target["slug"] is None
+
+
+async def test_review_like_target_resolves_item_type_and_slug(client, db):
+    author_token = await _register_and_login(client, "route-notif-author-1")
+    liker_token = await _register_and_login(client, "route-notif-liker-1")
+    await movies_repo.upsert_movie(db, _movie_data("route-notif-movie-1"))
+
+    rating_resp = await client.put(
+        "/v1/movies/route-notif-movie-1/rating",
+        json={"score": 5, "review_text": "Masterpiece"},
+        headers=_auth_headers(author_token),
+    )
+    rating_id = rating_resp.json()["id"]
+
+    await client.post(f"/v1/ratings/{rating_id}/like", headers=_auth_headers(liker_token))
+
+    response = await client.get("/v1/notifications", headers=_auth_headers(author_token))
+    body = response.json()
+    entry = body["items"][0]
+    assert entry["type"] == "review_like"
+    target = entry["target"]
+    assert target["target_type"] == "review"
+    assert target["target_id"] == rating_id
+    assert target["item_type"] == "MOVIE"
+    assert target["slug"] == "route-notif-movie-1"
+
+
+# ── DELETE /notifications/{id} ────────────────────────────────────────────
+
+
+async def test_delete_own_notification_returns_204_and_removes_it(client):
+    actor_token = await _register_and_login(client, "route-notif-actor-6")
+    target_token = await _register_and_login(client, "route-notif-target-6")
+    await client.post("/v1/users/route-notif-target-6/follow", headers=_auth_headers(actor_token))
+
+    listing = await client.get("/v1/notifications", headers=_auth_headers(target_token))
+    notification_id = listing.json()["items"][0]["id"]
+
+    delete_resp = await client.delete(
+        f"/v1/notifications/{notification_id}", headers=_auth_headers(target_token)
+    )
+    assert delete_resp.status_code == 204
+
+    after = await client.get("/v1/notifications", headers=_auth_headers(target_token))
+    assert after.json()["total"] == 0
+
+
+async def test_delete_another_users_notification_returns_404_and_keeps_it(client):
+    actor_token = await _register_and_login(client, "route-notif-actor-7")
+    target_token = await _register_and_login(client, "route-notif-target-7")
+    other_token = await _register_and_login(client, "route-notif-other-7")
+    await client.post("/v1/users/route-notif-target-7/follow", headers=_auth_headers(actor_token))
+
+    listing = await client.get("/v1/notifications", headers=_auth_headers(target_token))
+    notification_id = listing.json()["items"][0]["id"]
+
+    delete_resp = await client.delete(
+        f"/v1/notifications/{notification_id}", headers=_auth_headers(other_token)
+    )
+    assert delete_resp.status_code == 404
+
+    after = await client.get("/v1/notifications", headers=_auth_headers(target_token))
+    assert after.json()["total"] == 1
+
+
+async def test_delete_nonexistent_notification_returns_404(client):
+    token = await _register_and_login(client, "route-notif-nonexistent-8")
+
+    response = await client.delete("/v1/notifications/999999999", headers=_auth_headers(token))
+    assert response.status_code == 404
