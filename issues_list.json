@@ -133,6 +133,21 @@
       "solution": "Prefijadas con `/v1` las 5 URLs de `/admin/*` en `.github/workflows/nightly-sync.yml` (`sync/movie`, `sync/series`, `sync/book`, `sync/game`, `stats`). `/health` se deja sin tocar (correcto, no versionado). Se revisó que `.github/workflows/backfill-sync.yml` no está afectado (corre `scripts/backfill_sync.py` directo contra la DB, sin pasar por HTTP/rutas versionadas).",
       "verification": "Pendiente, por decisión explícita del usuario: no se disparó `workflow_dispatch` manual contra producción en esta sesión (acción con impacto en prod). Se verificará con la corrida programada normal (cron 2am) tras el merge a main — confirmar que los 4 pasos de sync devuelven 200 con `synced`>0 y que 'Verify stats freshness' pasa.",
       "notes": "Reportado por el usuario en la misma sesión que Issue 7 ('lleva unos días fallando el nightly sync'), causa raíz completamente distinta (routing, no rate-limiting/credits) — confirmada con logs reales de GitHub Actions, no es la misma causa que Issue 7. Ambos fixes van en la misma rama/PR por coincidir en la sesión, pero son cambios independientes."
+    },
+    {
+      "id": 9,
+      "title": "Nightly sync sigue fallando por 500s intermitentes de Open Library en sync_books",
+      "area": "backend",
+      "severity": "medium",
+      "status": "resolved",
+      "discovered": "2026-08-14",
+      "resolved": "2026-08-14",
+      "resolution_ref": "rama fix/issue-9-book-sync-ol-5xx",
+      "symptom": "El run del 2026-08-14 04:00 UTC (`gh run view 31768514112`) muestra movies, series y games con `errors:0` (confirmando que el fix de Issue #8 sigue sosteniéndose), pero el paso 'Sync books' devolvió `{\"synced\":0,\"errors\":1,\"offset\":3100,\"duration_s\":30.8}`. El job abortó igual: 'Verify stats freshness' (ventana de 2h) marcó `books` como stale y salió con exit 1.",
+      "cause": "`OpenLibraryClient._fetch_popular_page` (backlogg/books/adapters/open_library.py) agotó sus 5 reintentos manuales (backoff lineal 2/4/6/8s, ~30s de presupuesto total, coincide con los 30.8s observados) porque Open Library devolvió 5xx en los 5 intentos seguidos en offset 3100. Confirmado en vivo: el mismo offset volvía a responder 200 minutos después sin ningún cambio de código — fue una ventana de degradación de OL más larga que el presupuesto de reintento, no un bug de lógica de paginación. El cursor de sync (sync_cursors) no avanza en error, así que no hubo pérdida de datos, pero un solo tipo de contenido con flakiness transitoria tiraba todo el job nocturno a rojo.",
+      "solution": "1) Migrado el retry manual de `_fetch_popular_page` a `tenacity` (mismo patrón que TMDBClient, Issue #7): reintenta 429/5xx/timeouts/transport errors, nunca 4xx, con backoff exponencial (2/4/8/16/30/30/30s, tope 30s/intento) y 8 intentos en vez de 5 — presupuesto total ~120s en vez de ~30s, para sobrevivir ventanas de degradación de OL más largas. El contrato de `get_popular_books` se mantiene: nunca se devuelven páginas parciales tras agotar reintentos, un 4xx no se reintenta. 2) `.github/workflows/nightly-sync.yml`: cada paso de sync (movies/series/books/games) ahora reintenta una vez la llamada completa si el JSON de respuesta trae `errors>0`, antes de pasar al check de 'Verify stats freshness' — los upserts son idempotentes y el cursor no avanza en error (backlogg/scheduler/jobs.py), así que repetir el mismo slice es seguro. La ventana de 2h del freshness check no se tocó: sigue siendo la señal de que algo está realmente roto.",
+      "verification": "tests/books/test_open_library_adapter.py cubre: reintento con tenacity ante 5xx repetidos y éxito en un intento posterior, tolerancia a una racha larga de 6 500s consecutivos (recupera en el 7º intento, dentro del nuevo presupuesto de 8), fallo tras agotar los 8 intentos (nunca devuelve []), un 403 no se reintenta, y el contrato de 'todo o nada' en paginación (una página fallida a mitad de camino descarta las páginas ya acumuladas y lanza, nunca las devuelve como éxito parcial). `bash init.sh` en verde.",
+      "notes": "El fix de Issue #7 (people_errors/retry TMDB) y de Issue #8 (URLs /v1) no se tocaron — ya estaban mergeados y verificados antes de esta sesión."
     }
   ]
 }
