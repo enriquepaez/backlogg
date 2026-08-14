@@ -51,6 +51,16 @@ export async function SiteHeader() {
             <Link href="/showcase" className="hover:text-foreground">
               {t("showcase")}
             </Link>
+            {navUser ? (
+              // `/feed` (FE-23) requires a session — only surfaced in the
+              // primary nav once one exists, same "auth-gated entry" idea as
+              // `UserNav`'s own entries (profile/settings), just placed here
+              // instead since it is a full nav destination, not an account
+              // action.
+              <Link href="/feed" className="hover:text-foreground">
+                {t("feed")}
+              </Link>
+            ) : null}
           </nav>
         </div>
 
