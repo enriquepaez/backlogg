@@ -47,6 +47,10 @@
     "settings": {
       "title": "Ajustes de cuenta — backlogg",
       "description": "Gestiona tu perfil de backlogg, la verificación de email y tu cuenta."
+    },
+    "feed": {
+      "title": "Feed de actividad — backlogg",
+      "description": "Descubre qué están viendo, leyendo y jugando las personas que sigues, o qué es popular ahora mismo."
     }
   },
   "Home": {
@@ -229,6 +233,27 @@
     "error": "Algo salió mal al cargar esta lista. Inténtalo de nuevo.",
     "pagination": {
       "nav": "Paginación",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
+  "Feed": {
+    "heading": "Feed de actividad",
+    "error": "Algo salió mal al cargar el feed. Inténtalo de nuevo.",
+    "emptyFollowing": "Sigue a gente para ver aquí su actividad.",
+    "emptyPopular": "Todavía no hay actividad reciente.",
+    "tabs": {
+      "label": "Filtrar feed",
+      "following": "Siguiendo",
+      "popular": "Popular"
+    },
+    "entry": {
+      "dateLabel": "Reseñado el {date}",
+      "likeCount": "{count} me gusta"
+    },
+    "pagination": {
+      "nav": "Paginación del feed",
       "previous": "Anterior",
       "next": "Siguiente",
       "pageStatus": "Página {page} de {totalPages}"
@@ -473,6 +498,7 @@
     "trending": "Tendencias",
     "genres": "Géneros",
     "showcase": "Muestra",
+    "feed": "Feed",
     "login": "Iniciar sesión",
     "accountMenu": "Menú de cuenta",
     "profile": "Mi perfil",

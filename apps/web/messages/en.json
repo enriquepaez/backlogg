@@ -47,6 +47,10 @@
     "settings": {
       "title": "Account settings — backlogg",
       "description": "Manage your backlogg profile, email verification and account."
+    },
+    "feed": {
+      "title": "Activity feed — backlogg",
+      "description": "See what people you follow are watching, reading and playing — or what's popular right now."
     }
   },
   "Home": {
@@ -229,6 +233,27 @@
     "error": "Something went wrong loading this list. Please try again.",
     "pagination": {
       "nav": "Pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
+  "Feed": {
+    "heading": "Activity feed",
+    "error": "Something went wrong loading the feed. Please try again.",
+    "emptyFollowing": "Follow people to see their activity here.",
+    "emptyPopular": "No recent activity to show.",
+    "tabs": {
+      "label": "Filter by feed",
+      "following": "Following",
+      "popular": "Popular"
+    },
+    "entry": {
+      "dateLabel": "Reviewed on {date}",
+      "likeCount": "{count} likes"
+    },
+    "pagination": {
+      "nav": "Feed pagination",
       "previous": "Previous",
       "next": "Next",
       "pageStatus": "Page {page} of {totalPages}"
@@ -473,6 +498,7 @@
     "trending": "Trending",
     "genres": "Genres",
     "showcase": "Showcase",
+    "feed": "Feed",
     "login": "Log in",
     "accountMenu": "Account menu",
     "profile": "My profile",
