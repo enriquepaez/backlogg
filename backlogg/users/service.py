@@ -198,7 +198,7 @@ async def delete_current_user(db: AsyncSession, user: User) -> None:
     """Permanently delete the authenticated user's account (GDPR erasure).
 
     All rows referencing ``users.id`` (ratings, review_likes, follows, library,
-    lists, notifications, refresh/account tokens) are removed by DB-level
+    notifications, refresh/account tokens) are removed by DB-level
     ``ON DELETE CASCADE``. The cascade does not, however, recompute the catalog
     aggregates of items the user had rated, so we first capture those items,
     delete the user (flushing the cascade), and only then recalculate

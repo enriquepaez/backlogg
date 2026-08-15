@@ -35,7 +35,7 @@ class Notification(Base):
     receives the notification. Both FK to users with ON DELETE CASCADE, so a
     deleted account leaves no dangling notifications. There is no real FK to the
     polymorphic target (``target_type`` / ``target_id``) — same convention as
-    ratings/library/lists — integrity is the application's responsibility.
+    ratings/library — integrity is the application's responsibility.
     """
 
     __tablename__ = "notifications"

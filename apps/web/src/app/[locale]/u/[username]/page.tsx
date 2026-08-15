@@ -1,23 +1,18 @@
-import { cookies } from "next/headers";
 import { Star } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
-import { CreateListDialog } from "@/components/create-list-dialog";
 import { FollowWidget } from "@/components/follow-widget";
 import { ProfileReviewsPagination } from "@/components/profile-reviews-pagination";
-import { UserListCard } from "@/components/user-list-card";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
-import { readAccessToken } from "@/lib/auth/cookies";
-import { authHeader } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format-date";
 import { getUserLibrary, getUserProfile, LIBRARY_STATUSES, type LibraryEntry, type UserProfile } from "@/lib/library";
 import { toCatalogType } from "@/lib/search";
-import { getUserLists, getUserReviews, type UserReview } from "@/lib/user-content";
+import { getUserReviews, type UserReview } from "@/lib/user-content";
 import { cn } from "@/lib/utils";
 
 /** Page size for the reviews section — matches `PAGE_LIMIT` in `item-reviews.tsx`. */
@@ -53,14 +48,13 @@ type BrowseTranslator = Awaited<ReturnType<typeof getTranslations<"Browse">>>;
  * profile that `/u/{username}/library` (FE-20) and `item-reviews.tsx`'s
  * author link both already reference. Loads the profile (`getUserProfile`),
  * this page's own reviews (`getUserReviews`, paginated via the `page` query
- * param), public lists (`getUserLists`) and a small library preview
- * (`getUserLibrary`, capped at `LIBRARY_PREVIEW_SIZE`) in parallel, plus the
- * caller's own session (`getCurrentUser`) to tell own vs. someone else's
- * profile apart.
+ * param) and a small library preview (`getUserLibrary`, capped at
+ * `LIBRARY_PREVIEW_SIZE`) in parallel, plus the caller's own session
+ * (`getCurrentUser`) to tell own vs. someone else's profile apart.
  *
  * Only a backend-confirmed 404 username goes through `notFound()` — same
  * `not-found`/`error` split as `getItemDetail`'s doc comment
- * (`src/lib/catalog.ts`) and the sibling library page. Reviews/lists/library
+ * (`src/lib/catalog.ts`) and the sibling library page. Reviews/library
  * failures degrade to their own inline error states (or, for the library
  * preview, silently fall back to the counts-only summary) instead of failing
  * the whole page, since the profile header itself is still valid and worth
@@ -103,18 +97,6 @@ export default async function UserProfilePage({
 
   const profile = profileResult.profile;
   const isOwnProfile = currentUser?.username === username;
-
-  // Fetched after the `Promise.all` above (not inside it) so that if
-  // `getCurrentUser()`'s own `apiFetch` call had to refresh an expired access
-  // token, the rewritten cookie is already in place before it's read here —
-  // same sequencing rationale as `GET /api/{type}/{slug}/ratings`'s doc
-  // comment (`app/api/[type]/[slug]/ratings/route.ts`). The token is
-  // forwarded unconditionally (not just when `isOwnProfile`): the backend
-  // only ever adds *that same viewer's own* private lists to the response
-  // (`getUserLists`'s doc comment, `src/lib/user-content.ts`), so this is
-  // safe even when viewing someone else's profile.
-  const viewerHeaders = authHeader(readAccessToken(await cookies()));
-  const listsResult = await getUserLists(username, viewerHeaders);
   const totalReviewPages = reviewsResult.ok
     ? Math.max(1, Math.ceil(reviewsResult.total / reviewsResult.limit))
     : 1;
@@ -149,26 +131,6 @@ export default async function UserProfilePage({
             </div>
             <ProfileReviewsPagination username={username} page={page} totalPages={totalReviewPages} />
           </>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xl font-medium">{t("lists.heading")}</h2>
-          {isOwnProfile ? <CreateListDialog /> : null}
-        </div>
-        {!listsResult.ok ? (
-          <p role="alert" className="text-sm text-destructive">
-            {t("lists.error")}
-          </p>
-        ) : listsResult.lists.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("lists.empty")}</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {listsResult.lists.map((list) => (
-              <UserListCard key={list.slug} list={list} isOwner={isOwnProfile} />
-            ))}
-          </div>
         )}
       </section>
     </div>

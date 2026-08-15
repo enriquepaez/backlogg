@@ -163,7 +163,7 @@ async def update_me(
     summary="Delete own account",
     description=(
         "Permanently delete the authenticated user's account and all associated "
-        "data (ratings, likes, follows, library, lists, notifications, tokens). "
+        "data (ratings, likes, follows, library, notifications, tokens). "
         "Frees the username/email for re-registration. Requires auth."
     ),
 )

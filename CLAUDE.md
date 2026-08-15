@@ -43,10 +43,10 @@ solo la referencia. Nunca aceptes bloques de código en el chat.
 
 **Scope:** catalog modeling, external API integration, search, sync, cuentas
 de usuario (auth con refresh tokens + recuperación de cuenta), ratings/reviews,
-biblioteca/backlog por usuario, listas curadas, recomendaciones personalizadas
-y una capa social (follows + feed + notificaciones). Capa de plataforma: rate
-limiting, observabilidad, métricas y caché. Mensajería directa entre usuarios
-está **fuera de scope**.
+biblioteca/backlog por usuario, recomendaciones personalizadas y una capa
+social (follows + feed + notificaciones). Capa de plataforma: rate limiting,
+observabilidad, métricas y caché. Mensajería directa entre usuarios está
+**fuera de scope**.
 
 ## Docs de referencia
 

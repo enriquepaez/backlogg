@@ -1,8 +1,8 @@
 // @vitest-environment node
 //
 // Same MSW-backed pattern as `library.test.ts`'s `getUserLibrary`/
-// `getUserProfile` tests: both helpers here own their `getApiClient()` call
-// and status interpretation, so they're exercised end-to-end against the MSW
+// `getUserProfile` tests: this helper owns its `getApiClient()` call
+// and status interpretation, so it's exercised end-to-end against the MSW
 // mock server rather than a fake `ApiClient`.
 import { createApiClient } from "@backlogg/api-client";
 import { HttpResponse, http } from "msw";
@@ -15,7 +15,7 @@ vi.mock("@/lib/auth/session", () => ({
   getApiClient: () => createApiClient(MOCK_API_BASE_URL),
 }));
 
-const { getUserLists, getUserReviews } = await import("./user-content");
+const { getUserReviews } = await import("./user-content");
 
 const aliceReviewsPage = {
   items: [
@@ -75,76 +75,5 @@ describe("getUserReviews", () => {
     );
 
     expect(await getUserReviews("alice")).toEqual({ ok: false });
-  });
-});
-
-const aliceLists = {
-  lists: [
-    {
-      slug: "best-sci-fi",
-      title: "Best sci-fi",
-      description: "My favorite science fiction across media.",
-      is_public: true,
-      item_count: 12,
-      created_at: "2026-05-20T10:00:00Z",
-      updated_at: "2026-05-25T18:04:11Z",
-    },
-  ],
-  total: 1,
-};
-
-describe("getUserLists", () => {
-  it("returns ok with the lists on a 200", async () => {
-    server.use(
-      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, () => HttpResponse.json(aliceLists)),
-    );
-
-    expect(await getUserLists("alice")).toEqual({ ok: true, ...aliceLists });
-  });
-
-  it("forwards the given headers so the backend can resolve private lists for their owner", async () => {
-    let forwardedAuth: string | null = null;
-    server.use(
-      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, ({ request }) => {
-        forwardedAuth = request.headers.get("Authorization");
-        return HttpResponse.json(aliceLists);
-      }),
-    );
-
-    await getUserLists("alice", { Authorization: "Bearer the-token" });
-
-    expect(forwardedAuth).toBe("Bearer the-token");
-  });
-
-  it("sends no Authorization header when called with no headers (default)", async () => {
-    let forwardedAuth: string | null = "unset";
-    server.use(
-      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, ({ request }) => {
-        forwardedAuth = request.headers.get("Authorization");
-        return HttpResponse.json(aliceLists);
-      }),
-    );
-
-    await getUserLists("alice");
-
-    expect(forwardedAuth).toBeNull();
-  });
-
-  it("returns ok: false on a 404 (unknown username)", async () => {
-    server.use(
-      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, () =>
-        HttpResponse.json({ detail: "Username not found" }, { status: 404 }),
-      ),
-    );
-
-    expect(await getUserLists("ghost")).toEqual({ ok: false });
-  });
-
-  it("returns ok: false when the network fails", async () => {
-    server.use(
-      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, () => HttpResponse.error()),
-    );
-
-    expect(await getUserLists("alice")).toEqual({ ok: false });
   });
 });
