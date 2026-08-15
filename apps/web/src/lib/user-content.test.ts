@@ -102,6 +102,34 @@ describe("getUserLists", () => {
     expect(await getUserLists("alice")).toEqual({ ok: true, ...aliceLists });
   });
 
+  it("forwards the given headers so the backend can resolve private lists for their owner", async () => {
+    let forwardedAuth: string | null = null;
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, ({ request }) => {
+        forwardedAuth = request.headers.get("Authorization");
+        return HttpResponse.json(aliceLists);
+      }),
+    );
+
+    await getUserLists("alice", { Authorization: "Bearer the-token" });
+
+    expect(forwardedAuth).toBe("Bearer the-token");
+  });
+
+  it("sends no Authorization header when called with no headers (default)", async () => {
+    let forwardedAuth: string | null = "unset";
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, ({ request }) => {
+        forwardedAuth = request.headers.get("Authorization");
+        return HttpResponse.json(aliceLists);
+      }),
+    );
+
+    await getUserLists("alice");
+
+    expect(forwardedAuth).toBeNull();
+  });
+
   it("returns ok: false on a 404 (unknown username)", async () => {
     server.use(
       http.get(`${MOCK_API_BASE_URL}/v1/users/:username/lists`, () =>

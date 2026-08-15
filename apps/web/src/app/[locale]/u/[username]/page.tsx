@@ -1,18 +1,23 @@
+import { cookies } from "next/headers";
 import { Star } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
+import { CreateListDialog } from "@/components/create-list-dialog";
 import { FollowWidget } from "@/components/follow-widget";
 import { ProfileReviewsPagination } from "@/components/profile-reviews-pagination";
+import { UserListCard } from "@/components/user-list-card";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
+import { readAccessToken } from "@/lib/auth/cookies";
+import { authHeader } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format-date";
 import { getUserLibrary, getUserProfile, LIBRARY_STATUSES, type LibraryEntry, type UserProfile } from "@/lib/library";
 import { toCatalogType } from "@/lib/search";
-import { getUserLists, getUserReviews, type UserListSummary, type UserReview } from "@/lib/user-content";
+import { getUserLists, getUserReviews, type UserReview } from "@/lib/user-content";
 import { cn } from "@/lib/utils";
 
 /** Page size for the reviews section — matches `PAGE_LIMIT` in `item-reviews.tsx`. */
@@ -71,14 +76,13 @@ export default async function UserProfilePage({
   const query = await searchParams;
   const page = parsePage(query.page);
 
-  const [t, tLibraryStatus, tType, profileResult, reviewsResult, listsResult, libraryResult, currentUser] =
+  const [t, tLibraryStatus, tType, profileResult, reviewsResult, libraryResult, currentUser] =
     await Promise.all([
       getTranslations("Profile"),
       getTranslations("Library.statusTabs"),
       getTranslations("Browse"),
       getUserProfile(username),
       getUserReviews(username, { page, limit: REVIEWS_PAGE_SIZE }),
-      getUserLists(username),
       getUserLibrary(username, { limit: LIBRARY_PREVIEW_SIZE }),
       getCurrentUser(),
     ]);
@@ -99,6 +103,18 @@ export default async function UserProfilePage({
 
   const profile = profileResult.profile;
   const isOwnProfile = currentUser?.username === username;
+
+  // Fetched after the `Promise.all` above (not inside it) so that if
+  // `getCurrentUser()`'s own `apiFetch` call had to refresh an expired access
+  // token, the rewritten cookie is already in place before it's read here —
+  // same sequencing rationale as `GET /api/{type}/{slug}/ratings`'s doc
+  // comment (`app/api/[type]/[slug]/ratings/route.ts`). The token is
+  // forwarded unconditionally (not just when `isOwnProfile`): the backend
+  // only ever adds *that same viewer's own* private lists to the response
+  // (`getUserLists`'s doc comment, `src/lib/user-content.ts`), so this is
+  // safe even when viewing someone else's profile.
+  const viewerHeaders = authHeader(readAccessToken(await cookies()));
+  const listsResult = await getUserLists(username, viewerHeaders);
   const totalReviewPages = reviewsResult.ok
     ? Math.max(1, Math.ceil(reviewsResult.total / reviewsResult.limit))
     : 1;
@@ -137,7 +153,10 @@ export default async function UserProfilePage({
       </section>
 
       <section className="flex flex-col gap-4">
-        <h2 className="text-xl font-medium">{t("lists.heading")}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xl font-medium">{t("lists.heading")}</h2>
+          {isOwnProfile ? <CreateListDialog /> : null}
+        </div>
         {!listsResult.ok ? (
           <p role="alert" className="text-sm text-destructive">
             {t("lists.error")}
@@ -147,7 +166,7 @@ export default async function UserProfilePage({
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {listsResult.lists.map((list) => (
-              <ProfileListCard key={list.slug} list={list} t={t} />
+              <UserListCard key={list.slug} list={list} isOwner={isOwnProfile} />
             ))}
           </div>
         )}
@@ -334,21 +353,5 @@ function ReviewStars({ score }: { score: number | null }) {
         />
       ))}
     </div>
-  );
-}
-
-function ProfileListCard({ list, t }: { list: UserListSummary; t: ProfileTranslator }) {
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-2">
-        <p className="text-sm font-medium">{list.title}</p>
-        {list.description ? (
-          <p className="line-clamp-2 text-sm text-muted-foreground">{list.description}</p>
-        ) : null}
-        <p className="text-xs text-muted-foreground">
-          {t("lists.itemCount", { count: list.item_count })}
-        </p>
-      </CardContent>
-    </Card>
   );
 }

@@ -221,7 +221,59 @@
       "heading": "Lists",
       "empty": "No public lists yet.",
       "error": "Something went wrong loading these lists. Please try again.",
-      "itemCount": "{count} items"
+      "itemCount": "{count} items",
+      "visibilityPublic": "Public",
+      "visibilityPrivate": "Private",
+      "create": {
+        "openDialog": "Create list",
+        "heading": "Create a list",
+        "description": "Give your list a title, an optional description, and choose who can see it.",
+        "titleLabel": "Title",
+        "descriptionLabel": "Description",
+        "isPublicLabel": "Public list",
+        "submit": "Create list",
+        "submitting": "Creating…",
+        "cancel": "Cancel",
+        "success": "List created.",
+        "unauthorized": "Your session has expired. Please log in again.",
+        "unknown": "Something went wrong. Please try again.",
+        "errors": {
+          "title": "1-200 characters.",
+          "description": "2000 characters max."
+        }
+      },
+      "edit": {
+        "openDialog": "Edit list: {title}",
+        "heading": "Edit list",
+        "titleLabel": "Title",
+        "descriptionLabel": "Description",
+        "isPublicLabel": "Public list",
+        "submit": "Save changes",
+        "submitting": "Saving…",
+        "cancel": "Cancel",
+        "success": "List updated.",
+        "unauthorized": "Your session has expired. Please log in again.",
+        "forbidden": "You can only edit your own lists.",
+        "notFound": "This list no longer exists.",
+        "unknown": "Something went wrong. Please try again.",
+        "errors": {
+          "title": "1-200 characters.",
+          "description": "2000 characters max."
+        }
+      },
+      "delete": {
+        "openDialog": "Delete list: {title}",
+        "heading": "Delete this list?",
+        "description": "This will permanently delete the list and remove all its items. This action cannot be undone.",
+        "cancel": "Cancel",
+        "confirmButton": "Delete list",
+        "confirming": "Deleting…",
+        "success": "List deleted.",
+        "unauthorized": "Your session has expired. Please log in again.",
+        "forbidden": "You can only delete your own lists.",
+        "notFound": "This list no longer exists.",
+        "unknown": "Something went wrong. Please try again."
+      }
     }
   },
   "Follows": {
