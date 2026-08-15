@@ -53,20 +53,34 @@ export type UserListsResult =
 
 /**
  * `GET /v1/users/{username}/lists` — auth-optional (`docs/api.md`: public
- * lists always visible, private ones only to their owner), but called here
- * without a bearer token, same as every other fetch in this public profile
- * page (`getUserProfile`, `getUserLibrary`) — none of them attach the
- * viewer's own session, matching `getItemDetail`'s established pattern of
- * never personalizing a plain server-rendered page fetch (`./catalog.ts`).
- * The practical effect: this always returns only `{username}`'s *public*
- * lists, even when the viewer is the owner — acceptable for FE-21's scope
- * ("listas públicas visibles"), private-list visibility for the owner is
- * FE-25/26 territory once list detail pages exist to link to.
+ * lists always visible, private ones only to their owner).
+ *
+ * `headers` is optional (defaults to `{}`, i.e. no `Authorization` header),
+ * same shape as `./ratings.ts`'s `listRatings`: the endpoint never requires
+ * auth, but the backend resolves "is the caller the owner" from the bearer
+ * token when one is present (`get_current_user_optional`,
+ * `backlogg/users/auth.py` — an absent/invalid/expired token is treated as
+ * anonymous, never a 401), so a caller that knows the viewer's session must
+ * forward it here for private lists to surface when the viewer IS the owner.
+ * `/u/{username}/page.tsx` (FE-21/FE-25) does this after resolving
+ * `getCurrentUser()`, forwarding the (possibly just-refreshed) access token
+ * unconditionally — safe even for a viewer who isn't `{username}`, since the
+ * backend only ever adds *that same viewer's own* private lists to the
+ * response, never anyone else's.
+ *
+ * Previously called with no headers at all (FE-21 original scope: "listas
+ * públicas visibles"), which meant the owner never saw their own private
+ * lists on their own profile — closed by FE-25 now that create/edit/delete
+ * controls exist and need private lists to actually appear for their owner.
  */
-export async function getUserLists(username: string): Promise<UserListsResult> {
+export async function getUserLists(
+  username: string,
+  headers: Record<string, string> = {},
+): Promise<UserListsResult> {
   try {
     const { data, response } = await getApiClient().GET("/v1/users/{username}/lists", {
       params: { path: { username } },
+      headers,
     });
     return response.status === 200 && data ? { ok: true, ...data } : { ok: false };
   } catch (error) {

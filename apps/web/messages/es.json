@@ -221,7 +221,59 @@
       "heading": "Listas",
       "empty": "Todavía no hay listas públicas.",
       "error": "Algo salió mal al cargar estas listas. Inténtalo de nuevo.",
-      "itemCount": "{count} elementos"
+      "itemCount": "{count} elementos",
+      "visibilityPublic": "Pública",
+      "visibilityPrivate": "Privada",
+      "create": {
+        "openDialog": "Crear lista",
+        "heading": "Crear una lista",
+        "description": "Ponle un título a tu lista, una descripción opcional y elige quién puede verla.",
+        "titleLabel": "Título",
+        "descriptionLabel": "Descripción",
+        "isPublicLabel": "Lista pública",
+        "submit": "Crear lista",
+        "submitting": "Creando…",
+        "cancel": "Cancelar",
+        "success": "Lista creada.",
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "unknown": "Algo salió mal. Inténtalo de nuevo.",
+        "errors": {
+          "title": "Entre 1 y 200 caracteres.",
+          "description": "2000 caracteres como máximo."
+        }
+      },
+      "edit": {
+        "openDialog": "Editar lista: {title}",
+        "heading": "Editar lista",
+        "titleLabel": "Título",
+        "descriptionLabel": "Descripción",
+        "isPublicLabel": "Lista pública",
+        "submit": "Guardar cambios",
+        "submitting": "Guardando…",
+        "cancel": "Cancelar",
+        "success": "Lista actualizada.",
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "forbidden": "Solo puedes editar tus propias listas.",
+        "notFound": "Esta lista ya no existe.",
+        "unknown": "Algo salió mal. Inténtalo de nuevo.",
+        "errors": {
+          "title": "Entre 1 y 200 caracteres.",
+          "description": "2000 caracteres como máximo."
+        }
+      },
+      "delete": {
+        "openDialog": "Eliminar lista: {title}",
+        "heading": "¿Eliminar esta lista?",
+        "description": "Esto eliminará la lista de forma permanente y quitará todos sus elementos. Esta acción no se puede deshacer.",
+        "cancel": "Cancelar",
+        "confirmButton": "Eliminar lista",
+        "confirming": "Eliminando…",
+        "success": "Lista eliminada.",
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "forbidden": "Solo puedes eliminar tus propias listas.",
+        "notFound": "Esta lista ya no existe.",
+        "unknown": "Algo salió mal. Inténtalo de nuevo."
+      }
     }
   },
   "Follows": {
