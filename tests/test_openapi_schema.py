@@ -67,7 +67,6 @@ def test_domain_tags_present_with_descriptions():
         "follows",
         "feed",
         "library",
-        "lists",
         "notifications",
         "recommendations",
         "metrics",
@@ -89,7 +88,7 @@ def test_key_operations_have_summary():
         ("/v1/feed", "get"),
         ("/v1/search", "get"),
         ("/v1/recommendations", "get"),
-        ("/v1/lists", "post"),
+        ("/v1/notifications", "get"),
     ]
     for path, method in checks:
         assert path in paths, f"missing path: {path}"
@@ -114,7 +113,6 @@ def test_response_schemas_expose_examples():
         "TrendingOut",
         "FeedListOut",
         "LibraryListOut",
-        "UserListOut",
         "NotificationListOut",
         "RecommendationsOut",
     ]

@@ -21,7 +21,7 @@
     "M2": "Auth y cuenta: registro/login, sesión, verificación email, reset password, ajustes/borrado",
     "M3": "Personal: puntuar/reseñar, reviews+likes, biblioteca/backlog, perfil de usuario",
     "M4": "Social: follows, feed de actividad, notificaciones",
-    "M5": "Listas y recomendaciones",
+    "M5": "Recomendaciones",
     "M6": "Admin de moderación (gated): auth admin, cola de reportes, acciones de moderación"
   },
   "features": [
@@ -421,13 +421,13 @@
       "milestone": "M3",
       "name": "user_profile",
       "title": "Perfil público de usuario",
-      "description": "Página /u/{username}: reviews, biblioteca, counts de followers/following, listas públicas.",
+      "description": "Página /u/{username}: reviews, biblioteca, counts de followers/following.",
       "depends_on": [
         15
       ],
       "acceptance": [
         "GET /v1/users/{username} (perfil sin email) + secciones de reviews (GET /v1/users/{username}/reviews) y biblioteca",
-        "Counts de followers/following y listas públicas visibles",
+        "Counts de followers/following visibles",
         "Distingue perfil propio vs ajeno; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],
@@ -491,43 +491,6 @@
     },
     {
       "id": 26,
-      "code": "FE-25",
-      "milestone": "M5",
-      "name": "lists_crud",
-      "title": "CRUD de listas",
-      "description": "Crear/editar/borrar listas (título, descripción, pública/privada).",
-      "depends_on": [
-        15
-      ],
-      "acceptance": [
-        "POST /v1/lists (slug derivado), PATCH/DELETE /v1/lists/{slug} (owner 403/404)",
-        "GET /v1/users/{username}/lists (públicas siempre; privadas solo owner)",
-        "Toggle público/privado; validación y feedback; i18n",
-        "typecheck+lint+build en verde; QA en navegador"
-      ],
-      "status": "done"
-    },
-    {
-      "id": 27,
-      "code": "FE-26",
-      "milestone": "M5",
-      "name": "list_items",
-      "title": "Items de lista (+ reorder)",
-      "description": "Añadir/quitar items y reordenar (drag-and-drop); página pública de lista con items resueltos en orden.",
-      "depends_on": [
-        26,
-        11
-      ],
-      "acceptance": [
-        "POST/DELETE /v1/lists/{slug}/items ({item_type, slug}) idempotente",
-        "PUT /v1/lists/{slug}/items/order con drag-and-drop; validación del set exacto (422)",
-        "GET /v1/lists/{slug} (pública auth-opcional; privada 404 no-owner) con items en orden",
-        "typecheck+lint+build en verde; QA en navegador"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": 28,
       "code": "FE-27",
       "milestone": "M5",
       "name": "recommendations",
@@ -546,7 +509,7 @@
       "status": "pending"
     },
     {
-      "id": 29,
+      "id": 27,
       "code": "FE-28",
       "milestone": "M6",
       "name": "admin_auth",
@@ -565,14 +528,14 @@
       "status": "pending"
     },
     {
-      "id": 30,
+      "id": 28,
       "code": "FE-29",
       "milestone": "M6",
       "name": "report_queue",
       "title": "Cola de reportes",
       "description": "Cola de reportes de reviews con filtro por estado y acción de resolver.",
       "depends_on": [
-        29,
+        27,
         20
       ],
       "acceptance": [
@@ -584,14 +547,14 @@
       "status": "pending"
     },
     {
-      "id": 31,
+      "id": 29,
       "code": "FE-30",
       "milestone": "M6",
       "name": "moderation_actions",
       "title": "Acciones de moderación",
       "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin.",
       "depends_on": [
-        29
+        27
       ],
       "acceptance": [
         "POST /v1/admin/reviews/{id}/{hide,unhide} con feedback de estado",
@@ -602,7 +565,7 @@
       "status": "pending"
     },
     {
-      "id": 32,
+      "id": 30,
       "code": "FE-31",
       "milestone": "M2",
       "name": "avatar_upload",

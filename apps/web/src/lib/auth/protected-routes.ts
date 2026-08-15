@@ -13,7 +13,6 @@ export const PROTECTED_PREFIXES = [
   "/settings",
   "/library",
   "/notifications",
-  "/lists",
   "/feed",
   "/recommendations",
 ] as const;

@@ -661,34 +661,6 @@
     },
     {
       "id": 32,
-      "name": "user_lists",
-      "title": "User lists — colecciones curadas públicas/privadas con items ordenados",
-      "description": "Nuevo dominio backlogg/lists/: listas nombradas creadas por usuarios (p.ej. 'Mejor sci-fi') con items cross-type ordenados y visibilidad público/privado. Un slug por (owner, lista).",
-      "depends_on": [
-        27,
-        2,
-        3,
-        4,
-        5
-      ],
-      "acceptance": [
-        "Modelo UserList (id, user_id, slug, title, description nullable, is_public bool, created_at, updated_at) con UniqueConstraint(user_id, slug)",
-        "Modelo ListItem (list_id, item_type, item_id, position, added_at) con UniqueConstraint(list_id, item_type, item_id)",
-        "Migración Alembic 0013_user_lists.py crea las tablas user_lists y list_items",
-        "POST /lists — auth, crea la lista (slug derivado del título, único por usuario), 201",
-        "PATCH /lists/{slug} y DELETE /lists/{slug} — auth, solo el owner (403 si no lo es); 404 si no existe",
-        "POST /lists/{slug}/items y DELETE /lists/{slug}/items — auth owner, añade/quita item (item_type + slug); idempotente; al añadir, position va al final",
-        "PUT /lists/{slug}/items/order — auth owner, reordena los items de la lista",
-        "GET /lists/{slug} — accesible si is_public; si es privada, solo el owner la ve (404 para el resto); incluye los items resueltos cross-type en orden",
-        "GET /users/{username}/lists — devuelve las listas públicas de cualquiera; incluye las privadas solo si el caller es el owner",
-        "docs/schema.md y docs/api.md actualizados",
-        "Tests de repositorio, servicio y endpoint (ownership 403, visibilidad privada 404, idempotencia de items, reordenación)",
-        "bash init.sh termina en verde"
-      ],
-      "status": "done"
-    },
-    {
-      "id": 33,
       "name": "notifications",
       "title": "Notifications — nuevo follower y likes en tus reviews",
       "description": "Nuevo dominio backlogg/notifications/: tabla notifications generada por eventos sociales (nuevo follower, like en una review propia). Sin mensajería directa (fuera de scope). Feed de notificaciones del usuario autenticado con marca de leído.",
@@ -712,7 +684,7 @@
       "status": "done"
     },
     {
-      "id": 34,
+      "id": 33,
       "name": "personalized_recommendations",
       "title": "Personalized recommendations — GET /recommendations desde library + ratings",
       "description": "Endpoint GET /recommendations que genera sugerencias personalizadas para el usuario autenticado a partir de sus items mejor valorados y de su library (want/completed), haciendo fan-out a las recomendaciones de TMDB (feature 16) y a solapamiento por género, excluyendo lo que ya ha visto o tiene.",
@@ -734,7 +706,7 @@
       "status": "done"
     },
     {
-      "id": 35,
+      "id": 34,
       "name": "auth_refresh_tokens",
       "title": "Refresh tokens — access corto + refresh rotatorio con revocación",
       "description": "Sustituir el JWT de larga duración por un access token corto más un refresh token persistido y rotatorio. El login devuelve ambos; /auth/refresh emite un par nuevo e invalida el anterior; /auth/logout revoca el refresh. Detección de reuse.",
@@ -757,7 +729,7 @@
       "status": "done"
     },
     {
-      "id": 36,
+      "id": 35,
       "name": "account_recovery",
       "title": "Account recovery — verificación de email y reset de password (token-based)",
       "description": "Verificación de email y restablecimiento de contraseña mediante tokens de un solo uso con expiración. El correo se envía por SMTP a través de una interfaz de EmailSender: implementación real (SMTP vía smtplib de la stdlib; para pruebas se apunta a Gmail con una App Password, y a futuro a un dominio propio cambiando solo variables de entorno) cuando SMTP_HOST está configurado, y fallback que loguea el enlace en dev cuando no lo está. El flujo, la seguridad del token y el envío desacoplado son el entregable.",
@@ -782,7 +754,7 @@
       "status": "done"
     },
     {
-      "id": 37,
+      "id": 36,
       "name": "rate_limiting",
       "title": "Rate limiting — límites por IP/usuario en auth y fallback externo",
       "description": "Rate limiting para proteger endpoints sensibles (/auth/*, búsqueda con fallback externo, escrituras). Configurable por env; devuelve 429 con Retry-After. Almacenamiento in-process (suficiente para una instancia) tras una interfaz que permita mover a Redis después.",
@@ -802,7 +774,7 @@
       "status": "done"
     },
     {
-      "id": 38,
+      "id": 37,
       "name": "observability",
       "title": "Observability — logging estructurado con request IDs + Sentry opcional",
       "description": "Logging estructurado (JSON) con correlación por request ID e integración opcional de Sentry activada por env (SENTRY_DSN). Sin proveedor configurado, la app funciona igual y sin overhead.",
@@ -821,12 +793,12 @@
       "status": "done"
     },
     {
-      "id": 39,
+      "id": 38,
       "name": "metrics_endpoint",
       "title": "Metrics — endpoint /metrics estilo Prometheus",
       "description": "Exponer métricas operativas en formato de exposición Prometheus: contadores de requests por endpoint/status, latencias y contadores de negocio (syncs, fan-outs externos). Sin datos sensibles ni PII.",
       "depends_on": [
-        38
+        37
       ],
       "acceptance": [
         "GET /metrics devuelve 200 en formato de exposición Prometheus",
@@ -840,7 +812,7 @@
       "status": "done"
     },
     {
-      "id": 40,
+      "id": 39,
       "name": "response_caching",
       "title": "Response caching — Cache-Control/ETag + caché in-process para lecturas calientes",
       "description": "Cabeceras Cache-Control/ETag en lecturas idempotentes (detalle, listados, géneros, trending) y una caché in-process con TTL para las respuestas más costosas (trending, genres). Interfaz reemplazable para mover a Redis después.",
@@ -860,7 +832,7 @@
       "status": "done"
     },
     {
-      "id": 41,
+      "id": 40,
       "name": "openapi_polish",
       "title": "OpenAPI polish — tags, descripciones y ejemplos para consumo por frontend",
       "description": "Enriquecer el esquema OpenAPI generado: tags por dominio, summaries/descripciones por operación, ejemplos de request/response y metadatos de la app. Facilita generar clientes y una UI a partir de /openapi.json.",
@@ -879,16 +851,16 @@
       "status": "done"
     },
     {
-      "id": 42,
+      "id": 41,
       "name": "account_deletion",
       "title": "Account deletion — DELETE /users/me con borrado en cascada y recomputo de agregados",
-      "description": "Borrado de la cuenta del usuario autenticado (higiene GDPR). Elimina la fila del usuario (cascada DB a ratings/follows/library/lists/notifications/tokens) y recomputa rating_internal/rating_count_internal de los items que había puntuado. Path raíz durante desarrollo; se versionará a /v1 en la feature 45.",
+      "description": "Borrado de la cuenta del usuario autenticado (higiene GDPR). Elimina la fila del usuario (cascada DB a ratings/follows/library/notifications/tokens) y recomputa rating_internal/rating_count_internal de los items que había puntuado. Path raíz durante desarrollo; se versionará a /v1 en la feature 45.",
       "depends_on": [
         27
       ],
       "acceptance": [
         "DELETE /users/me requiere auth (401 sin token) y borra la cuenta del usuario autenticado (204)",
-        "El borrado elimina en cascada ratings, review_likes, follows, library, listas, notificaciones y tokens (refresh/account)",
+        "El borrado elimina en cascada ratings, review_likes, follows, library, notificaciones y tokens (refresh/account)",
         "Tras el borrado se recomputan rating_internal/rating_count_internal de los items que el usuario había puntuado",
         "Los refresh tokens del usuario quedan invalidados (no se puede refrescar tras el borrado)",
         "El username/email quedan libres para re-registro",
@@ -898,7 +870,7 @@
       "status": "done"
     },
     {
-      "id": 43,
+      "id": 42,
       "name": "review_reports",
       "title": "Review reports — usuarios reportan reviews y cola de moderación admin",
       "description": "Pipeline de reportes: un usuario marca una review como problemática; el admin la revisa desde una cola. Nueva tabla review_reports. Endpoint de usuario + endpoints admin protegidos por X-API-Key. Paths raíz durante desarrollo; se versionarán en la feature 45.",
@@ -917,12 +889,12 @@
       "status": "done"
     },
     {
-      "id": 44,
+      "id": 43,
       "name": "content_moderation",
       "title": "Content moderation — ocultar reviews y banear usuarios (admin)",
       "description": "Acciones de moderación del admin: ocultar/mostrar reviews (excluidas de listados, feed y agregados) y banear/desbanear usuarios (bloqueados en login/refresh, su contenido oculto). Migración añade UserRating.is_hidden y users.is_banned. Paths raíz durante desarrollo; se versionarán en la feature 45.",
       "depends_on": [
-        43,
+        42,
         28
       ],
       "acceptance": [
@@ -937,14 +909,14 @@
       "status": "done"
     },
     {
-      "id": 45,
+      "id": 44,
       "name": "api_versioning",
       "title": "API versioning — prefijo /v1 para todo el backend inicial (paso final)",
       "description": "Paso final tras completar el backend inicial (features 1–44): servir TODOS los endpoints de negocio bajo /v1 en un único barrido mecánico, sellando la superficie como v1. /health y /metrics quedan sin versionar (ops). Corte limpio sin alias en la raíz (no hay clientes en producción). El frontend Next.js consumirá /v1.",
       "depends_on": [
+        41,
         42,
-        43,
-        44
+        43
       ],
       "acceptance": [
         "Todos los routers de negocio se sirven bajo /v1, incluidos los añadidos en 42–44 (borrado de cuenta, reportes, moderación)",

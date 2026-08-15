@@ -23,7 +23,6 @@ from backlogg.follows.routes import follows_router
 from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
-from backlogg.lists.routes import lists_router, user_lists_router
 from backlogg.metrics.routes import router as metrics_router
 from backlogg.moderation.routes import admin_moderation_router
 from backlogg.movies.routes import router as movies_router
@@ -54,9 +53,8 @@ plus a social layer on top of that catalog.
 and similar-item recommendations.
 
 **Social layer:** account management with refresh tokens and account recovery
-(`/auth`, `/users`), ratings & reviews, per-user library/backlog, curated
-`/lists`, `/follows`, an activity `/feed`, `/notifications` and personalized
-`/recommendations`.
+(`/auth`, `/users`), ratings & reviews, per-user library/backlog, `/follows`,
+an activity `/feed`, `/notifications` and personalized `/recommendations`.
 
 **Platform:** rate limiting, structured observability, Prometheus `/metrics`
 and response caching.
@@ -130,10 +128,6 @@ OPENAPI_TAGS = [
     {
         "name": "library",
         "description": "Per-user backlog: want / in_progress / completed / dropped, cross-type.",
-    },
-    {
-        "name": "lists",
-        "description": "Curated cross-type lists with ordering and public/private visibility.",
     },
     {
         "name": "notifications",
@@ -245,8 +239,6 @@ app.include_router(user_reviews_router, prefix=_V1)
 app.include_router(follows_router, prefix=_V1)
 app.include_router(feed_router, prefix=_V1)
 app.include_router(user_library_router, prefix=_V1)
-app.include_router(lists_router, prefix=_V1)
-app.include_router(user_lists_router, prefix=_V1)
 app.include_router(notifications_router, prefix=_V1)
 app.include_router(recommendations_router, prefix=_V1)
 app.include_router(reports_router, prefix=_V1)

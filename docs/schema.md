@@ -578,53 +578,6 @@ CREATE INDEX idx_library_entries_user ON library_entries (user_id);
 derives `library_counts` (`COUNT` grouped by `status`, zero-filled) from this
 table, and `GET /{type}/{slug}` derives the caller's `viewer_status` from it.
 
-## Lists
-
-### `user_lists` / `list_items`
-
-User-curated collections (e.g. "Best sci-fi") with ordered, cross-type items
-and public/private visibility. `user_lists.slug` is derived from the title at
-creation and never changes. The DB guarantees uniqueness per `(user_id, slug)`;
-the application additionally resolves slug collisions *globally* (numeric suffix
-`-2`, `-3`, …) so `/lists/{slug}` always routes to exactly one list. `list_items`
-uses the polymorphic `item_type` + `item_id` pattern (same as `library_entries`),
-with `position` a 0-based ordering index kept contiguous on add/remove/reorder.
-
-```sql
-CREATE TABLE user_lists (
-    id          BIGSERIAL PRIMARY KEY,
-    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    slug        VARCHAR(255) NOT NULL,
-    title       VARCHAR(200) NOT NULL,
-    description TEXT,
-    is_public   BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT uq_user_list_slug UNIQUE (user_id, slug)
-);
-
-CREATE INDEX idx_user_lists_user ON user_lists (user_id);
-CREATE INDEX idx_user_lists_slug ON user_lists (slug);
-
-CREATE TABLE list_items (
-    id          BIGSERIAL PRIMARY KEY,
-    list_id     BIGINT NOT NULL REFERENCES user_lists(id) ON DELETE CASCADE,
-    item_type   VARCHAR(20) NOT NULL,   -- 'MOVIE' | 'SERIES' | 'BOOK' | 'GAME'
-    item_id     BIGINT NOT NULL,
-    position    INTEGER NOT NULL,
-    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT uq_list_item UNIQUE (list_id, item_type, item_id)
-);
-
-CREATE INDEX idx_list_items_list ON list_items (list_id);
-```
-
-`user_lists.updated_at` is refreshed by the shared `trigger_set_updated_at()`
-trigger (defined in migration 0001). `GET /lists/{slug}` resolves `list_items`
-against the four content tables (UNION ALL, ordered by `position`).
-
 ## Notifications
 
 ### `notifications`
@@ -663,7 +616,7 @@ CREATE INDEX idx_notifications_recipient_created
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`,
-`list_items`, `notifications` (target_type/target_id) use polymorphic references
+`notifications` (target_type/target_id) use polymorphic references
 (`item_type`/`target_type` + `item_id`/`target_id`) with no real FK. Referential
 integrity is enforced at the application layer, typically in the use case that
 persists the item.

@@ -54,7 +54,7 @@ async def delete_user(db: AsyncSession, user: User) -> None:
     """Delete a user row and flush.
 
     Every table referencing ``users.id`` (ratings, review_likes, follows,
-    library_entries, user_lists, notifications, refresh_tokens, account_tokens)
+    library_entries, notifications, refresh_tokens, account_tokens)
     declares ``ON DELETE CASCADE``, so the flush removes all associated rows at
     the DB level in the same transaction. The flush is what makes the cascade
     visible to a subsequent aggregate recompute in the same session.

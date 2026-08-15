@@ -15,7 +15,6 @@ from sqlalchemy import func, select
 
 from backlogg.follows.models import Follow
 from backlogg.library.models import LibraryEntry
-from backlogg.lists.models import UserList
 from backlogg.main import app
 from backlogg.movies.models import Movie
 from backlogg.movies.repository import upsert_movie
@@ -178,9 +177,8 @@ async def test_delete_user_cascades_all_related_rows(db):
     # Follows in both directions.
     db.add(Follow(follower_id=victim.id, followed_id=other.id))
     db.add(Follow(follower_id=other.id, followed_id=victim.id))
-    # Library entry, list, notifications (recipient + actor), tokens.
+    # Library entry, notifications (recipient + actor), tokens.
     db.add(LibraryEntry(user_id=victim.id, item_type="MOVIE", item_id=movie.id, status="want"))
-    db.add(UserList(user_id=victim.id, slug="my-list", title="My List"))
     db.add(Notification(recipient_id=victim.id, actor_id=other.id, type="new_follower"))
     db.add(Notification(recipient_id=other.id, actor_id=victim.id, type="new_follower"))
     db.add(
@@ -217,7 +215,6 @@ async def test_delete_user_cascades_all_related_rows(db):
     assert await count(Follow, follower_id=victim_id) == 0
     assert await count(Follow, followed_id=victim_id) == 0
     assert await count(LibraryEntry, user_id=victim_id) == 0
-    assert await count(UserList, user_id=victim_id) == 0
     assert await count(Notification, recipient_id=victim_id) == 0
     assert await count(Notification, actor_id=victim_id) == 0
     assert await count(RefreshToken, user_id=victim_id) == 0
