@@ -53,14 +53,22 @@ export async function SiteHeader() {
               {t("showcase")}
             </Link>
             {navUser ? (
-              // `/feed` (FE-23) requires a session — only surfaced in the
-              // primary nav once one exists, same "auth-gated entry" idea as
-              // `UserNav`'s own entries (profile/settings), just placed here
-              // instead since it is a full nav destination, not an account
-              // action.
-              <Link href="/feed" className="hover:text-foreground">
-                {t("feed")}
-              </Link>
+              <>
+                {/* `/feed` (FE-23) requires a session — only surfaced in the
+                    primary nav once one exists, same "auth-gated entry" idea as
+                    `UserNav`'s own entries (profile/settings), just placed here
+                    instead since it is a full nav destination, not an account
+                    action. */}
+                <Link href="/feed" className="hover:text-foreground">
+                  {t("feed")}
+                </Link>
+                {/* `/recommendations` (FE-27) is the same shape of auth-gated
+                    nav destination as `/feed` right above it — a signed-out
+                    viewer has no ratings/library to base recommendations on. */}
+                <Link href="/recommendations" className="hover:text-foreground">
+                  {t("recommendations")}
+                </Link>
+              </>
             ) : null}
           </nav>
         </div>

@@ -1,5 +1,6 @@
 import { ImageOff, Star } from "lucide-react";
 import Image from "next/image";
+import type { ReactNode } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
@@ -22,6 +23,14 @@ export type CatalogCardProps = {
    * anywhere to send the click.
    */
   href?: string;
+  /**
+   * Optional extra content rendered below the title, inside the card (and,
+   * when `href` is set, inside the same link). Used by the `/recommendations`
+   * grid (FE-27) to surface each result's `reason` (e.g. "Because you rated
+   * Dune") without duplicating the poster/title/rating markup in a parallel
+   * component.
+   */
+  footer?: ReactNode;
 };
 
 /**
@@ -36,6 +45,7 @@ export function CatalogCard({
   ratingExternal,
   typeLabel,
   href,
+  footer,
 }: CatalogCardProps) {
   const card = (
     <Card size="sm" className="w-full">
@@ -73,6 +83,7 @@ export function CatalogCard({
         <p className="line-clamp-2 text-sm font-medium" title={title}>
           {title}
         </p>
+        {footer}
       </CardContent>
     </Card>
   );

@@ -51,6 +51,10 @@
     "feed": {
       "title": "Feed de actividad — backlogg",
       "description": "Descubre qué están viendo, leyendo y jugando las personas que sigues, o qué es popular ahora mismo."
+    },
+    "recommendations": {
+      "title": "Recomendaciones — backlogg",
+      "description": "Sugerencias personalizadas a partir de lo que has puntuado y añadido a tu biblioteca."
     }
   },
   "Home": {
@@ -251,6 +255,26 @@
       "previous": "Anterior",
       "next": "Siguiente",
       "pageStatus": "Página {page} de {totalPages}"
+    }
+  },
+  "Recommendations": {
+    "heading": "Recomendaciones",
+    "error": "Algo salió mal al cargar tus recomendaciones. Inténtalo de nuevo.",
+    "empty": "Todavía no hay recomendaciones. Puntúa algunos títulos o añádelos a tu biblioteca para recibir sugerencias personalizadas.",
+    "fallback": "Todavía no tenemos suficientes datos sobre ti — aquí tienes algunas recomendaciones populares para empezar.",
+    "filters": {
+      "typeLabel": "Tipo",
+      "all": "Todos los tipos",
+      "movie": "Películas",
+      "series": "Series",
+      "book": "Libros",
+      "game": "Videojuegos"
+    },
+    "pagination": {
+      "nav": "Paginación de recomendaciones",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "pageStatus": "Página {page}"
     }
   },
   "Notifications": {
@@ -506,6 +530,7 @@
     "genres": "Géneros",
     "showcase": "Muestra",
     "feed": "Feed",
+    "recommendations": "Para ti",
     "login": "Iniciar sesión",
     "accountMenu": "Menú de cuenta",
     "profile": "Mi perfil",

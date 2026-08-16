@@ -96,4 +96,25 @@ describe("CatalogCard", () => {
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
+
+  it("renders the optional footer below the title when provided", () => {
+    render(
+      <CatalogCard
+        title="Dune"
+        posterUrl={null}
+        ratingExternal={null}
+        footer={<p>Because you rated Blade Runner 2049</p>}
+      />,
+    );
+
+    expect(screen.getByText("Because you rated Blade Runner 2049")).toBeInTheDocument();
+  });
+
+  it("omits the footer entirely when not provided", () => {
+    const { container } = render(
+      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+    );
+
+    expect(container.querySelector('[data-slot="card-content"]')?.children).toHaveLength(1);
+  });
 });
