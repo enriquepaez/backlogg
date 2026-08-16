@@ -310,6 +310,40 @@
       "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
       "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
       "unknown": "Something went wrong loading admin stats. Please try again."
+    },
+    "reports": {
+      "heading": "Reported reviews",
+      "loading": "Loading reports…",
+      "empty": "No reports match this filter.",
+      "filters": {
+        "label": "Filter by status",
+        "all": "All",
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "status": {
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "reviewLabel": "Reported review #{ratingId}",
+      "createdAtLabel": "Reported {date}",
+      "resolvedAtLabel": "Resolved {date}",
+      "noReason": "No reason given",
+      "resolveAction": "Resolve",
+      "resolving": "Resolving…",
+      "resolveSuccess": "Report resolved.",
+      "resolveError": "Couldn't resolve the report. Please try again.",
+      "pagination": {
+        "nav": "Reports pagination",
+        "previous": "Previous",
+        "next": "Next",
+        "pageStatus": "Page {page} of {totalPages}"
+      },
+      "errors": {
+        "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+        "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+        "unknown": "Something went wrong loading reports. Please try again."
+      }
     }
   },
   "ItemDetail": {

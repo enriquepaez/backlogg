@@ -310,6 +310,40 @@
       "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
       "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
       "unknown": "Algo salió mal al cargar las estadísticas de administración. Inténtalo de nuevo."
+    },
+    "reports": {
+      "heading": "Reviews reportadas",
+      "loading": "Cargando reportes…",
+      "empty": "No hay reportes que coincidan con este filtro.",
+      "filters": {
+        "label": "Filtrar por estado",
+        "all": "Todos",
+        "open": "Abiertos",
+        "resolved": "Resueltos"
+      },
+      "status": {
+        "open": "Abierto",
+        "resolved": "Resuelto"
+      },
+      "reviewLabel": "Review reportada #{ratingId}",
+      "createdAtLabel": "Reportado {date}",
+      "resolvedAtLabel": "Resuelto {date}",
+      "noReason": "Sin motivo indicado",
+      "resolveAction": "Resolver",
+      "resolving": "Resolviendo…",
+      "resolveSuccess": "Reporte resuelto.",
+      "resolveError": "No se pudo resolver el reporte. Inténtalo de nuevo.",
+      "pagination": {
+        "nav": "Paginación de reportes",
+        "previous": "Anterior",
+        "next": "Siguiente",
+        "pageStatus": "Página {page} de {totalPages}"
+      },
+      "errors": {
+        "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
+        "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+        "unknown": "Algo salió mal al cargar los reportes. Inténtalo de nuevo."
+      }
     }
   },
   "ItemDetail": {

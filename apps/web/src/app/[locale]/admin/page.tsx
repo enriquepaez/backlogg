@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
+import { AdminReportsPanel } from "@/components/admin-reports-panel";
 import { AdminStatsPanel } from "@/components/admin-stats-panel";
 import { redirect } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
@@ -50,7 +51,11 @@ export async function generateMetadata({
  * The actual data fetch happens client-side in `AdminStatsPanel`
  * (`@/components/admin-stats-panel.tsx`) against `GET /api/admin/stats`
  * (`@/app/api/admin/stats/route.ts`), the Route Handler that injects the key
- * server-side.
+ * server-side. `AdminReportsPanel` (FE-29, `@/components/admin-reports-panel.tsx`)
+ * follows the exact same client-fetch-against-a-BFF-route pattern for the
+ * report queue, mounted below it on this same page — no changes needed here
+ * beyond rendering it, since the auth guard above already covers everything
+ * under `/admin`.
  */
 export default async function AdminPage({ params }: PageProps<"/[locale]/admin">) {
   const { locale } = await params;
@@ -76,6 +81,7 @@ export default async function AdminPage({ params }: PageProps<"/[locale]/admin">
       </div>
 
       <AdminStatsPanel />
+      <AdminReportsPanel />
     </div>
   );
 }
