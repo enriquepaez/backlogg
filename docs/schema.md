@@ -350,6 +350,7 @@ CREATE TABLE users (
     avatar_url      VARCHAR(1000),
     email_verified  BOOLEAN NOT NULL DEFAULT false, -- set true via /auth/verify/confirm
     is_banned       BOOLEAN NOT NULL DEFAULT false, -- content moderation (admin)
+    is_admin        BOOLEAN NOT NULL DEFAULT false, -- admin role flag
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -367,6 +368,31 @@ and flips to `true` when the user confirms an email-verification token
 refresh (both `401`), and **all** of their reviews become invisible on the same
 surfaces as a hidden review (see `user_ratings.is_hidden` below): they are
 excluded from listings, the feed and the rating aggregates.
+
+`is_admin` is an admin-role flag. There is **no API endpoint** to set it —
+it is flipped by hand in the database by an operator, deliberately, to avoid
+creating a privilege-escalation surface. It is exposed only on `UserMeOut`
+(`GET /v1/users/me`, own profile), never on the public `UserOut`. It is
+consumed by the frontend (`apps/web`, `/admin` section) to decide which
+authenticated users are allowed to see the admin section — a plain session
+is not enough.
+
+To grant it locally (dev DB, Docker container `backlogg-db`): make sure
+migration `0020` has been applied first (the dev DB does not migrate itself —
+`ERROR: column "is_admin" of relation "users" does not exist` means this step
+was skipped), then run the `UPDATE`:
+
+```bash
+uv run alembic upgrade head
+docker exec -it backlogg-db psql -U postgres -d backlogg \
+  -c "UPDATE users SET is_admin = true WHERE username = '<username>';"
+```
+
+In production, run the equivalent `UPDATE` directly against the Neon
+database (e.g. via its SQL console or `psql <connection-string>`) — there is
+no CLI script for this, on purpose. After granting it, the affected user
+must log out and back in (or wait for their access token to rotate) for
+`GET /v1/users/me` to reflect the new value.
 
 ### `refresh_tokens`
 

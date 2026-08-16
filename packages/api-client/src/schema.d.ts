@@ -297,6 +297,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/books/{slug}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Similar books
+         * @description Up to 10 similar books computed locally: same-author matches (feature 19) take priority over genre overlap. No external API calls.
+         */
+        get: operations["get_similar_books_v1_books__slug__similar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/books/{slug}/ratings": {
         parameters: {
             query?: never;
@@ -397,6 +417,26 @@ export interface paths {
          * @description Paginated list of catalogued games (no external fallback); genre filter + sort.
          */
         get: operations["list_games_v1_games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/games/{slug}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Similar games
+         * @description Up to 10 similar games (IGDB similar_games). New items are persisted locally.
+         */
+        get: operations["get_similar_games_v1_games__slug__similar_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2278,6 +2318,42 @@ export interface components {
          * @enum {string}
          */
         SeriesSortEnum: "rating_desc" | "rating_asc" | "date_desc" | "date_asc" | "title_asc";
+        /** SimilarBookOut */
+        SimilarBookOut: {
+            /** Title */
+            title: string;
+            /** Slug */
+            slug: string;
+            /** Poster Url */
+            poster_url: string | null;
+            /** Release Date */
+            release_date: string | null;
+            /** Rating External */
+            rating_external: number | null;
+        };
+        /** SimilarBooksOut */
+        SimilarBooksOut: {
+            /** Results */
+            results: components["schemas"]["SimilarBookOut"][];
+        };
+        /** SimilarGameListOut */
+        SimilarGameListOut: {
+            /** Results */
+            results: components["schemas"]["SimilarGameOut"][];
+        };
+        /** SimilarGameOut */
+        SimilarGameOut: {
+            /** Title */
+            title: string;
+            /** Slug */
+            slug: string;
+            /** Poster Url */
+            poster_url: string | null;
+            /** Release Date */
+            release_date: string | null;
+            /** Rating External */
+            rating_external: number | null;
+        };
         /** SimilarMovieOut */
         SimilarMovieOut: {
             /** Title */
@@ -2434,6 +2510,11 @@ export interface components {
              * @default false
              */
             email_verified: boolean;
+            /**
+             * Is Admin
+             * @default false
+             */
+            is_admin: boolean;
         };
         /**
          * UserModerationOut
@@ -3170,6 +3251,37 @@ export interface operations {
             };
         };
     };
+    get_similar_books_v1_books__slug__similar_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarBooksOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_book_ratings_v1_books__slug__ratings_get: {
         parameters: {
             query?: {
@@ -3390,6 +3502,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GameListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_similar_games_v1_games__slug__similar_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarGameListOut"];
                 };
             };
             /** @description Validation Error */

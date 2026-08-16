@@ -119,6 +119,7 @@ async def test_get_me_with_valid_token_returns_200(client):
     body = response.json()
     assert body["username"] == "route-me-user"
     assert body["email"] == "route-me@example.com"
+    assert body["is_admin"] is False
 
 
 async def test_get_me_with_invalid_token_returns_401(client):

@@ -970,6 +970,24 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 47,
+      "name": "admin_role_management",
+      "title": "Admin role management — superadmin otorga/revoca rol admin",
+      "description": "Nueva columna users.is_superadmin (mismo patrón que is_admin del fix admin_role_gate: BOOLEAN NOT NULL DEFAULT false, sin ningún endpoint API para activarla — se activa a mano en la DB por un operador, igual que se hizo con is_admin). Un superadmin es el único que puede otorgar o revocar el rol is_admin (no is_superadmin) a otros usuarios, vía /v1/admin/users/{username}/grant-admin y /revoke-admin. Desviación deliberada del patrón del resto de /v1/admin/* (protegidos solo por el secreto compartido X-API-Key, sin identidad de usuario): estos dos endpoints, al ser la acción de mayor privilegio del sistema, además de X-API-Key requieren el Bearer token del propio caller y comprueban get_current_user(token).is_superadmin server-side — no basta con que el frontend oculte el botón. Consumido desde la sección admin del frontend (ver FE-30 en frontend_feature_list.json), visible solo si is_superadmin es true (is_admin normal no basta).",
+      "depends_on": [],
+      "acceptance": [
+        "Migración: users.is_superadmin BOOLEAN NOT NULL DEFAULT false, sin endpoint para activarla (solo a mano en DB, documentado en docs/schema.md igual que is_admin)",
+        "is_superadmin expuesto solo en UserMeOut (perfil propio), nunca en UserOut público",
+        "POST /v1/admin/users/{username}/grant-admin y /revoke-admin: requieren X-API-Key Y Authorization: Bearer <token> del caller; 403 si el caller autenticado no es is_superadmin (aunque la X-API-Key sea correcta)",
+        "Idempotente: otorgar a un admin ya admin, o revocar a un no-admin, no falla (204/200 sin efecto)",
+        "Devuelve 404 si el username objetivo no existe",
+        "Decisión explícita a tomar en implementación: si un superadmin puede revocarse is_admin a sí mismo o a otro superadmin (riesgo de bloqueo) — documentar el criterio elegido",
+        "Tests: grant/revoke por superadmin (200), intento por admin normal (403), intento sin Bearer token válido (401/403), idempotencia, 404, UserMeOut del usuario afectado refleja el cambio tras revalidar sesión",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

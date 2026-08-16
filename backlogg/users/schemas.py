@@ -44,6 +44,7 @@ class UserMeOut(BaseModel):
     bio: str | None
     avatar_url: str | None
     email_verified: bool = False
+    is_admin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
