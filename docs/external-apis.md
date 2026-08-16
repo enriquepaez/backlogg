@@ -43,6 +43,14 @@
 - **Coverage note**: strong on classics and public domain; modern titles may have
   incomplete metadata (missing cover, publication date).
 - **external_ids source value**: `OPEN_LIBRARY`
+- **"Similar books" investigation (2026-08-16)**: no free/no-auth external API
+  covers a "similar books" use case at the volume this project needs. Open
+  Library exposes no related-works/recommendations endpoint. Google Books
+  caps free usage at 100 requests/day (unworkable for on-demand fallback at
+  catalog scale). Dedicated "find similar books" services require a paid API
+  key. Conclusion: `GET /books/{slug}/similar` (feature 46) is computed
+  entirely from local data (same author via `credits`, then genre overlap,
+  then `rating_external`) instead of a new external dependency.
 
 ## IGDB (Games)
 
