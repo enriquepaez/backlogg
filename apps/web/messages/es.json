@@ -55,6 +55,10 @@
     "recommendations": {
       "title": "Recomendaciones — backlogg",
       "description": "Sugerencias personalizadas a partir de lo que has puntuado y añadido a tu biblioteca."
+    },
+    "admin": {
+      "title": "Admin — backlogg",
+      "description": "Estadísticas del catálogo y herramientas de moderación para operadores de backlogg."
     }
   },
   "Home": {
@@ -289,6 +293,24 @@
     "reviewLike": "A {name} le ha gustado tu reseña.",
     "generic": "{name} ha interactuado contigo.",
     "deleteAriaLabel": "Eliminar notificación"
+  },
+  "Admin": {
+    "heading": "Admin",
+    "description": "Estadísticas del catálogo de contenido sincronizado por backlogg.",
+    "loading": "Cargando estadísticas…",
+    "types": {
+      "movies": "Películas",
+      "series": "Series",
+      "books": "Libros",
+      "games": "Videojuegos"
+    },
+    "lastSyncedAt": "Última sincronización: {date}",
+    "lastSyncedNever": "Nunca sincronizado",
+    "errors": {
+      "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
+      "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+      "unknown": "Algo salió mal al cargar las estadísticas de administración. Inténtalo de nuevo."
+    }
   },
   "ItemDetail": {
     "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",

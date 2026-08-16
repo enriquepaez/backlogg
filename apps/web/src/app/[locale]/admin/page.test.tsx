@@ -1,0 +1,98 @@
+import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// `AdminPage` is an async Server Component (`getTranslations`/
+// `setRequestLocale` from `next-intl/server`, `getCurrentUser` from
+// `@/lib/api-fetch`, `redirect` from `@/i18n/navigation`, all server-only),
+// same mocking approach `site-header.test.tsx` uses for its Server Component.
+//
+// This test exists specifically for the `admin_role_gate` fix: unlike every
+// other protected page in this repo (`/settings`, `/recommendations`, ...),
+// this one has a SECOND authorization check beyond "is there a session" —
+// `user.is_admin` — and that check is exactly what was missing before this
+// fix (any authenticated user could reach `/admin`). It is worth a real test
+// despite there being no other precedent for testing a `[locale]` page.tsx
+// Server Component in this repo, because a regression here silently reopens
+// the vulnerability this fix closes.
+vi.mock("next-intl/server", () => ({
+  getTranslations: async () => (key: string) => key,
+  setRequestLocale: vi.fn(),
+}));
+
+const redirect = vi.fn();
+vi.mock("@/i18n/navigation", () => ({
+  redirect: (...args: unknown[]) => redirect(...args),
+}));
+
+const getCurrentUser = vi.fn();
+vi.mock("@/lib/api-fetch", () => ({
+  getCurrentUser: () => getCurrentUser(),
+}));
+
+// `AdminStatsPanel` is a Client Component with its own `fetch` call against
+// `/api/admin/stats` — out of scope here (covered by its own test), same
+// rationale `site-header.test.tsx` uses for mocking `NotificationBell`.
+vi.mock("@/components/admin-stats-panel", () => ({
+  AdminStatsPanel: () => <div data-testid="admin-stats-panel" />,
+}));
+
+const { default: AdminPage } = await import("./page");
+
+const buildProps = (locale: string) => ({
+  params: Promise.resolve({ locale }),
+  searchParams: Promise.resolve({}),
+});
+
+describe("AdminPage", () => {
+  // `redirect`/`getCurrentUser` are shared `vi.fn()` mocks across every test
+  // in this file (declared once at module scope so `vi.mock` factories can
+  // close over them) — reset between tests so one test's calls/return values
+  // never leak into the next, same rationale `mockResolvedValueOnce` already
+  // covers for `getCurrentUser` alone but `redirect`'s call history needs
+  // clearing too since several assertions check it was NOT called.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("redirects to /login when there is no session", async () => {
+    getCurrentUser.mockResolvedValueOnce(null);
+
+    await AdminPage(buildProps("en"));
+
+    expect(redirect).toHaveBeenCalledWith({ href: "/login", locale: "en" });
+  });
+
+  it("redirects to / (not /login) when the user is signed in but not an admin", async () => {
+    getCurrentUser.mockResolvedValueOnce({
+      username: "alice",
+      display_name: "Alice A.",
+      avatar_url: null,
+      email: "alice@example.com",
+      email_verified: true,
+      bio: null,
+      is_admin: false,
+    });
+
+    await AdminPage(buildProps("en"));
+
+    expect(redirect).toHaveBeenCalledWith({ href: "/", locale: "en" });
+    expect(redirect).not.toHaveBeenCalledWith(expect.objectContaining({ href: "/login" }));
+  });
+
+  it("renders the stats panel for a signed-in admin user, without redirecting", async () => {
+    getCurrentUser.mockResolvedValueOnce({
+      username: "alice",
+      display_name: "Alice A.",
+      avatar_url: null,
+      email: "alice@example.com",
+      email_verified: true,
+      bio: null,
+      is_admin: true,
+    });
+
+    render(await AdminPage(buildProps("en")));
+
+    expect(screen.getByTestId("admin-stats-panel")).toBeInTheDocument();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+});

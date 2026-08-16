@@ -525,7 +525,7 @@
         "Manejo de 401/503 (clave ausente) con UI clara",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 28,
@@ -552,13 +552,14 @@
       "milestone": "M6",
       "name": "moderation_actions",
       "title": "Acciones de moderación",
-      "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin.",
+      "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin. Incluye otorgar/revocar el rol admin (users.is_admin) a otro usuario — acción visible y accionable únicamente si el usuario actual es superadmin (users.is_superadmin, activable solo a mano en DB, nunca vía API), no basta con ser admin normal. Requiere el backend nuevo de la feature 47 (admin_role_management) en feature_list.json.",
       "depends_on": [
         27
       ],
       "acceptance": [
         "POST /v1/admin/reviews/{id}/{hide,unhide} con feedback de estado",
         "POST /v1/admin/users/{username}/{ban,unban} con confirmación",
+        "Otorgar/revocar rol admin a otro usuario, solo visible/accionable si el usuario actual es superadmin (feature 47 backend); confirmación antes de revocar; un admin normal (no superadmin) no ve esta acción",
         "Refresco de la vista tras cada acción; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],

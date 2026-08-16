@@ -37,6 +37,10 @@ class User(Base):
     # Per-user moderation flag. A banned user cannot log in or refresh, and all
     # of their reviews become invisible on the same surfaces as a hidden review.
     is_banned: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Admin role flag. No API endpoint flips this — it is set by hand in the DB
+    # by an operator, to avoid a privilege-escalation surface. Consumed by the
+    # frontend (apps/web `/admin`) to gate the admin section.
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

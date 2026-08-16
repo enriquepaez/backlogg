@@ -65,6 +65,21 @@ docker compose exec db psql -U postgres -d backlogg   # inspección manual
 > distintas — pytest trunca la de test en cada run. La plantilla ya las
 > configura bien (`backlogg` vs `backlogg_test`).
 
+### Dar acceso admin a un usuario (dev)
+
+`is_admin` no tiene endpoint API (evita escalado de privilegios) — se activa
+a mano en la DB. Si el `UPDATE` falla con `column "is_admin" does not exist`,
+faltan migraciones por aplicar:
+
+```bash
+uv run alembic upgrade head
+docker exec -it backlogg-db psql -U postgres -d backlogg \
+  -c "UPDATE users SET is_admin = true WHERE username = '<username>';"
+```
+
+Cierra sesión y vuelve a iniciarla en el frontend para que `/v1/users/me`
+refleje el cambio. Detalle completo en [`docs/schema.md`](docs/schema.md).
+
 ## API
 
 | Endpoint | Descripción |

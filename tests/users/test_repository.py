@@ -27,6 +27,7 @@ async def test_create_user(db):
     assert user.display_name == "Test User"
     assert user.bio is None
     assert user.avatar_url is None
+    assert user.is_admin is False
 
 
 async def test_get_user_by_username_found(db):

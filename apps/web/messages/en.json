@@ -55,6 +55,10 @@
     "recommendations": {
       "title": "Recommendations — backlogg",
       "description": "Personalized picks based on what you've rated and added to your library."
+    },
+    "admin": {
+      "title": "Admin — backlogg",
+      "description": "Catalog stats and moderation tools for backlogg operators."
     }
   },
   "Home": {
@@ -289,6 +293,24 @@
     "reviewLike": "{name} liked your review.",
     "generic": "{name} interacted with you.",
     "deleteAriaLabel": "Delete notification"
+  },
+  "Admin": {
+    "heading": "Admin",
+    "description": "Catalog stats for backlogg's synced content.",
+    "loading": "Loading stats…",
+    "types": {
+      "movies": "Movies",
+      "series": "Series",
+      "books": "Books",
+      "games": "Games"
+    },
+    "lastSyncedAt": "Last synced {date}",
+    "lastSyncedNever": "Never synced",
+    "errors": {
+      "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+      "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+      "unknown": "Something went wrong loading admin stats. Please try again."
+    }
   },
   "ItemDetail": {
     "error": "Something went wrong loading this title. Please try again.",

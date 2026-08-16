@@ -15,6 +15,12 @@ export const PROTECTED_PREFIXES = [
   "/notifications",
   "/feed",
   "/recommendations",
+  // Not admin-specific authorization (the backend has no admin/staff user
+  // role, `docs/schema.md`) — just the same signed-in baseline every other
+  // private route gets. The real protection for `/v1/admin/*` calls is the
+  // server-only `X-API-Key` injected by the Route Handlers under
+  // `src/app/api/admin/**` (FE-28, see that route's doc comment).
+  "/admin",
 ] as const;
 
 /**

@@ -1012,6 +1012,49 @@
         }
       }
     },
+    "/v1/books/{slug}/similar": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Similar books",
+        "description": "Up to 10 similar books computed locally: same-author matches (feature 19) take priority over genre overlap. No external API calls.",
+        "operationId": "get_similar_books_v1_books__slug__similar_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarBooksOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/books/{slug}/ratings": {
       "get": {
         "tags": [
@@ -1402,6 +1445,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GameListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/games/{slug}/similar": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "summary": "Similar games",
+        "description": "Up to 10 similar games (IGDB similar_games). New items are persisted locally.",
+        "operationId": "get_similar_games_v1_games__slug__similar_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarGameListOut"
                 }
               }
             }
@@ -6645,6 +6731,148 @@
         ],
         "title": "SeriesSortEnum"
       },
+      "SimilarBookOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "rating_external": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating External"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "slug",
+          "poster_url",
+          "release_date",
+          "rating_external"
+        ],
+        "title": "SimilarBookOut"
+      },
+      "SimilarBooksOut": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarBookOut"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "SimilarBooksOut"
+      },
+      "SimilarGameListOut": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarGameOut"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "SimilarGameListOut"
+      },
+      "SimilarGameOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "rating_external": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating External"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "slug",
+          "poster_url",
+          "release_date",
+          "rating_external"
+        ],
+        "title": "SimilarGameOut"
+      },
       "SimilarMovieOut": {
         "properties": {
           "title": {
@@ -7084,6 +7312,11 @@
           "email_verified": {
             "type": "boolean",
             "title": "Email Verified",
+            "default": false
+          },
+          "is_admin": {
+            "type": "boolean",
+            "title": "Is Admin",
             "default": false
           }
         },

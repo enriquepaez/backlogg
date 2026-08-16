@@ -234,7 +234,8 @@ Body: `{"username": string, "email": string, "password": string (min 8),
 no hay slug ni id numérico expuestos.
 
 Response (`UserMeOut`, incluye email — solo se devuelve así en register/login/me):
-`username`, `email`, `display_name`, `bio`, `avatar_url`, `email_verified`.
+`username`, `email`, `display_name`, `bio`, `avatar_url`, `email_verified`,
+`is_admin`.
 
 ```
 POST /v1/auth/login
@@ -330,6 +331,10 @@ GET /v1/users/me
 → 200  Perfil propio (incluye email)
 → 401  Sin token / token inválido o expirado
 ```
+
+Response (`UserMeOut`): `username`, `email`, `display_name`, `bio`,
+`avatar_url`, `email_verified`, `is_admin`. `is_admin` no tiene endpoint para
+activarlo — se pone a mano en la DB por un operador; ver `docs/schema.md`.
 
 ```
 PATCH /v1/users/me
