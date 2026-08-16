@@ -50,6 +50,18 @@ async def set_user_banned(db: AsyncSession, user: User, banned: bool) -> User:
     return user
 
 
+async def set_user_admin(db: AsyncSession, user: User, is_admin: bool) -> User:
+    """Set a user's admin-role flag. Idempotent — no-op if already in that state.
+
+    Unlike ``set_user_banned``, flipping ``is_admin`` has no effect on ratings
+    or aggregates, so no recompute is needed here.
+    """
+    if user.is_admin != is_admin:
+        user.is_admin = is_admin
+        await db.flush()
+    return user
+
+
 async def delete_user(db: AsyncSession, user: User) -> None:
     """Delete a user row and flush.
 

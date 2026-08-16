@@ -235,7 +235,7 @@ no hay slug ni id numérico expuestos.
 
 Response (`UserMeOut`, incluye email — solo se devuelve así en register/login/me):
 `username`, `email`, `display_name`, `bio`, `avatar_url`, `email_verified`,
-`is_admin`.
+`is_admin`, `is_superadmin`.
 
 ```
 POST /v1/auth/login
@@ -333,8 +333,11 @@ GET /v1/users/me
 ```
 
 Response (`UserMeOut`): `username`, `email`, `display_name`, `bio`,
-`avatar_url`, `email_verified`, `is_admin`. `is_admin` no tiene endpoint para
-activarlo — se pone a mano en la DB por un operador; ver `docs/schema.md`.
+`avatar_url`, `email_verified`, `is_admin`, `is_superadmin`. Ninguno de los dos
+tiene endpoint para activarse — se ponen a mano en la DB por un operador; ver
+`docs/schema.md`. `is_admin` sí puede ser otorgado/revocado por un superadmin
+vía `POST /v1/admin/users/{username}/grant-admin` / `/revoke-admin` (ver
+sección "Admin role management" más abajo).
 
 ```
 PATCH /v1/users/me
@@ -551,6 +554,34 @@ de no-enumeración) y **todas sus reviews quedan ocultas** (excluidas de las mis
 superficies que una review oculta). Al banear/desbanear se recomputan los agregados
 de **todos** los items que el usuario había puntuado. Response:
 `{"username": , "is_banned": bool}`.
+
+### Admin role management
+
+Concede o revoca el rol `is_admin` de otro usuario. Desviación deliberada del
+resto de `/v1/admin/*`: además de `X-API-Key`, ambos endpoints requieren
+`Authorization: Bearer <access_token>` del propio caller y comprueban
+`is_superadmin` sobre ese caller autenticado — la `X-API-Key` sola no basta
+para la acción de mayor privilegio del sistema.
+
+```
+POST /v1/admin/users/{username}/grant-admin
+POST /v1/admin/users/{username}/revoke-admin
+→ 200  is_admin del target actualizado (idempotente)
+→ 401  X-API-Key ausente/incorrecta, o Bearer ausente/inválido/expirado
+→ 403  el caller autenticado no es is_superadmin (aunque la X-API-Key sea correcta)
+→ 404  usuario objetivo no encontrado
+```
+
+Marca `users.is_admin` del usuario `{username}`. Idempotente: conceder a un
+usuario ya admin, o revocar a un usuario que no lo es, devuelve `200` sin
+efecto. Un superadmin puede otorgarse/revocarse `is_admin` a sí mismo o a otro
+superadmin (self-revocation permitida a propósito — ver `docs/schema.md`,
+sección `is_superadmin`, para el razonamiento completo: estos endpoints nunca
+tocan `is_superadmin`, que sigue siendo 100% manual en DB). `GET /v1/users/me`
+del usuario afectado refleja el nuevo valor de inmediato en la siguiente
+petición (el access token solo codifica el id de usuario, `is_admin` se lee en
+vivo de la DB en cada request — no hace falta volver a hacer login). Response
+(`RoleGrantOut`): `{"username": , "is_admin": bool}`.
 
 ### Feed (activity feed)
 

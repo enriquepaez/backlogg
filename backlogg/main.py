@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from backlogg.admin.roles import admin_roles_router
 from backlogg.admin.router import router as admin_router
 from backlogg.books.routes import router as books_router
 from backlogg.core.config import settings
@@ -244,6 +245,7 @@ app.include_router(recommendations_router, prefix=_V1)
 app.include_router(reports_router, prefix=_V1)
 app.include_router(admin_reports_router, prefix=_V1)
 app.include_router(admin_moderation_router, prefix=_V1)
+app.include_router(admin_roles_router, prefix=_V1)
 
 # Operational endpoints remain unversioned.
 app.include_router(metrics_router)

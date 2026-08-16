@@ -1,0 +1,33 @@
+meta {
+  name: Grant admin
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/v1/admin/users/someuser/grant-admin
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 200, 403 or 404", function() {
+    expect([200, 403, 404]).to.include(res.status);
+  });
+}
+
+docs {
+  Grant is_admin to the target user. Requires X-API-Key AND a Bearer token
+  belonging to a superadmin caller (is_superadmin) — 403 if the authenticated
+  caller is not a superadmin, even with a correct X-API-Key. Idempotent.
+  404 if the target user does not exist. Set {username} to a real user and
+  {{authToken}} to a superadmin's access token to get 200.
+}

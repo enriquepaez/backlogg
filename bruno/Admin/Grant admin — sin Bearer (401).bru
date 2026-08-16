@@ -1,0 +1,27 @@
+meta {
+  name: Grant admin — sin Bearer (401)
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{baseUrl}}/v1/admin/users/someuser/grant-admin
+  body: none
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}
+
+docs {
+  These two role-management endpoints require both X-API-Key AND a valid
+  Bearer token for the caller. Without the Bearer token the request is
+  rejected with 401 even though the X-API-Key is correct.
+}

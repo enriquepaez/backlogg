@@ -41,6 +41,11 @@ class User(Base):
     # by an operator, to avoid a privilege-escalation surface. Consumed by the
     # frontend (apps/web `/admin`) to gate the admin section.
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Superadmin role flag. Same rules as is_admin: no API endpoint flips it —
+    # set by hand in the DB by an operator. The only privilege it grants is the
+    # ability to call POST /v1/admin/users/{username}/grant-admin and
+    # /revoke-admin, which flip *other* users' is_admin (never is_superadmin).
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

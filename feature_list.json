@@ -987,7 +987,7 @@
         "Tests: grant/revoke por superadmin (200), intento por admin normal (403), intento sin Bearer token válido (401/403), idempotencia, 404, UserMeOut del usuario afectado refleja el cambio tras revalidar sesión",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
