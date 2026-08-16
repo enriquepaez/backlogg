@@ -1,0 +1,31 @@
+meta {
+  name: Edit movie — slug inexistente (404)
+  type: http
+  seq: 21
+}
+
+patch {
+  url: {{baseUrl}}/v1/admin/movie/slug-que-no-existe-9999
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+body:json {
+  {
+    "title": "Does not matter"
+  }
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
+
+docs {
+  Unknown slug for the given {type} -> 404.
+}

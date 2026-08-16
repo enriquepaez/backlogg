@@ -1,0 +1,35 @@
+meta {
+  name: Edit series
+  type: http
+  seq: 23
+}
+
+patch {
+  url: {{baseUrl}}/v1/admin/series/some-series-slug
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+body:json {
+  {
+    "title": "Manually Corrected Title",
+    "first_air_date": "2016-07-15"
+  }
+}
+
+tests {
+  test("status 200 or 404", function() {
+    expect([200, 404]).to.include(res.status);
+  });
+}
+
+docs {
+  Manually edit a subset of a series' fields. Every field sent here is
+  persisted AND added to the item's locked_fields, so the next nightly sync
+  leaves it untouched. Editable fields for series: title, poster_url,
+  first_air_date, genres. Set {slug} to a real series slug to get 200.
+}

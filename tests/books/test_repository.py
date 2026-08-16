@@ -78,3 +78,50 @@ async def test_upsert_book_with_publish_date(db):
     assert len(book.genres) == 2
     genre_names = {g.name for g in book.genres}
     assert genre_names == {"Literary Fiction", "Modernism"}
+
+
+# ── locked_fields (feature 49 — catalog_manual_edit) ─────────────────────────
+
+
+async def test_upsert_book_skips_locked_scalar_field(db):
+    """A column listed in locked_fields survives a sync upsert untouched."""
+    data1 = _book_data("test-book-locked-title", title="Original Title")
+    book1 = await upsert_book(db, data1)
+    book1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = _book_data("test-book-locked-title", title="Synced Title")
+    book2 = await upsert_book(db, data2)
+
+    assert book2.id == book1.id
+    assert book2.title == "Original Title"
+
+
+async def test_upsert_book_updates_unlocked_field(db):
+    """A column NOT in locked_fields still syncs normally, even if others are locked."""
+    data1 = _book_data("test-book-unlocked-language", title="Original Title")
+    book1 = await upsert_book(db, data1)
+    book1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = dict(_book_data("test-book-unlocked-language", title="Synced Title"))
+    data2["original_language"] = "fr"
+    book2 = await upsert_book(db, data2)
+
+    assert book2.title == "Original Title"
+    assert book2.original_language == "fr"
+
+
+async def test_upsert_book_skips_locked_genres(db):
+    """genres in locked_fields skips the genre re-sync block entirely."""
+    data1 = _book_data("test-book-locked-genres")
+    book1 = await upsert_book(db, data1)
+    assert {g.name for g in book1.genres} == {"Fiction"}
+    book1.locked_fields = ["genres"]
+    await db.flush()
+
+    data2 = _book_data("test-book-locked-genres")
+    data2["genres"] = [{"name": "Poetry", "slug": "poetry"}]
+    book2 = await upsert_book(db, data2)
+
+    assert {g.name for g in book2.genres} == {"Fiction"}

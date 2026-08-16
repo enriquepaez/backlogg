@@ -1,0 +1,28 @@
+meta {
+  name: Edit movie — sin API key (401)
+  type: http
+  seq: 22
+}
+
+patch {
+  url: {{baseUrl}}/v1/admin/movie/some-movie-slug
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "title": "Does not matter"
+  }
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}
+
+docs {
+  Same X-API-Key protection as the rest of /v1/admin/* — missing/incorrect
+  header -> 401.
+}

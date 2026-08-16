@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -69,25 +69,33 @@ async def upsert_series(db: AsyncSession, data: dict) -> Series:
 
     The ``data`` dict must contain all series fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
+
+    Per-field admin locks (feature 49 — catalog_manual_edit): any column
+    listed in the existing row's ``locked_fields`` is excluded from the
+    UPDATE, via a CASE per column inside the ON CONFLICT DO UPDATE statement
+    that keeps the target row's own value when it is locked instead of the
+    proposed (``excluded``) value. ``genres`` is not a plain column, so it is
+    checked separately after the reload below, skipping the genre re-sync
+    block when locked.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     genres_data: list[dict] = data.pop("genres", [])
 
     # Build INSERT ... ON CONFLICT (slug) DO UPDATE
-    stmt = (
-        pg_insert(Series)
-        .values(**data)
-        .on_conflict_do_update(
-            index_elements=["slug"],
-            set_={
-                k: v
-                for k, v in data.items()
-                if k not in ("id", "slug", "created_at", "rating_count_internal")
-            },
+    insert_stmt = pg_insert(Series).values(**data)
+    set_ = {
+        k: case(
+            (Series.locked_fields.contains([k]), getattr(Series, k)),
+            else_=getattr(insert_stmt.excluded, k),
         )
-        .returning(Series.id)
-    )
+        for k in data
+        if k not in ("id", "slug", "created_at", "rating_count_internal")
+    }
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=["slug"],
+        set_=set_,
+    ).returning(Series.id)
     result = await db.execute(stmt)
     series_id = result.scalar_one()
     await db.flush()
@@ -106,7 +114,7 @@ async def upsert_series(db: AsyncSession, data: dict) -> Series:
     series = series_result.scalar_one()
 
     # Handle genres: get-or-create each genre and assign to series
-    if genres_data:
+    if genres_data and "genres" not in series.locked_fields:
         genre_objects = []
         for g in genres_data:
             genre = await _get_or_create_genre(db, g["name"], g["slug"])
@@ -125,4 +133,39 @@ async def upsert_series(db: AsyncSession, data: dict) -> Series:
         # Expire and reload to get fresh genres
         await db.refresh(series, ["genres"])
 
+    return series
+
+
+async def admin_update_series(db: AsyncSession, series: Series, updates: dict) -> Series:
+    """Apply an admin backoffice edit (feature 49) to ``series`` in place.
+
+    ``updates`` keys are a subset of the editable scalar columns (``title``,
+    ``poster_url``, ``first_air_date``) plus an optional ``genres`` key
+    holding a list of ``{"name", "slug"}`` dicts already resolved by the
+    caller — same shape as ``upsert_series``'s ``genres_data``, so it reuses
+    the same get-or-create + re-sync logic. Locked-fields bookkeeping is the
+    caller's responsibility (backlogg/admin/service.py), not this function's.
+    """
+    genres_data = updates.pop("genres", None)
+
+    for key, value in updates.items():
+        setattr(series, key, value)
+
+    if genres_data is not None:
+        genre_objects = []
+        for g in genres_data:
+            genre = await _get_or_create_genre(db, g["name"], g["slug"])
+            genre_objects.append(genre)
+
+        await db.execute(
+            series_genres_join.delete().where(series_genres_join.c.series_id == series.id)
+        )
+        for genre in genre_objects:
+            await db.execute(
+                series_genres_join.insert().values(series_id=series.id, genre_id=genre.id)
+            )
+        await db.flush()
+        await db.refresh(series, ["genres"])
+
+    await db.flush()
     return series

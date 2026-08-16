@@ -1012,7 +1012,7 @@
         "Tests: repositorio (upsert respeta locked_fields), servicio/endpoint PATCH (incluye 404/422), tests de los sync jobs verificando que un campo bloqueado sobrevive intacto al siguiente sync",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

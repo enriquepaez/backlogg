@@ -93,3 +93,51 @@ async def test_upsert_movie_multiple_genres(db):
     assert len(movie.genres) == 2
     genre_names = {g.name for g in movie.genres}
     assert genre_names == {"Drama", "Comedy"}
+
+
+# ── locked_fields (feature 49 — catalog_manual_edit) ─────────────────────────
+
+
+async def test_upsert_movie_skips_locked_scalar_field(db):
+    """A column listed in locked_fields survives a sync upsert untouched."""
+    data1 = _movie_data("test-movie-locked-title", title="Original Title")
+    movie1 = await upsert_movie(db, data1)
+    movie1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = _movie_data("test-movie-locked-title", title="Synced Title")
+    movie2 = await upsert_movie(db, data2)
+
+    assert movie2.id == movie1.id
+    assert movie2.title == "Original Title"
+
+
+async def test_upsert_movie_updates_unlocked_field(db):
+    """A column NOT in locked_fields still syncs normally, even if others are locked."""
+    data1 = _movie_data("test-movie-unlocked-runtime", title="Original Title")
+    movie1 = await upsert_movie(db, data1)
+    movie1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = dict(_movie_data("test-movie-unlocked-runtime", title="Synced Title"))
+    data2["runtime"] = 999
+    movie2 = await upsert_movie(db, data2)
+
+    # title is locked -> unchanged; runtime is not locked -> synced normally
+    assert movie2.title == "Original Title"
+    assert movie2.runtime == 999
+
+
+async def test_upsert_movie_skips_locked_genres(db):
+    """genres in locked_fields skips the genre re-sync block entirely."""
+    data1 = _movie_data("test-movie-locked-genres")
+    movie1 = await upsert_movie(db, data1)
+    assert {g.name for g in movie1.genres} == {"Action"}
+    movie1.locked_fields = ["genres"]
+    await db.flush()
+
+    data2 = _movie_data("test-movie-locked-genres")
+    data2["genres"] = [{"name": "Horror", "slug": "horror"}]
+    movie2 = await upsert_movie(db, data2)
+
+    assert {g.name for g in movie2.genres} == {"Action"}

@@ -1,0 +1,35 @@
+meta {
+  name: Edit movie — unlock field
+  type: http
+  seq: 26
+}
+
+patch {
+  url: {{baseUrl}}/v1/admin/movie/some-movie-slug
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+body:json {
+  {
+    "unlock_fields": ["poster_url"]
+  }
+}
+
+tests {
+  test("status 200 or 404", function() {
+    expect([200, 404]).to.include(res.status);
+  });
+}
+
+docs {
+  Releases poster_url back to sync control without editing anything else —
+  the next nightly sync will overwrite it again from TMDB. Run "Edit movie"
+  first to lock a field, then this request to unlock it. unlock_fields is
+  applied after this same request's edits, so editing and unlocking the same
+  field in one call leaves it unlocked.
+}

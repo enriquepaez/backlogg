@@ -806,6 +806,87 @@ Response:
 `ADMIN_API_KEY`. Header ausente o incorrecto → `401`; `ADMIN_API_KEY` sin
 configurar → `503`.
 
+### Admin — manual catalog edit (backoffice)
+
+```
+PATCH /v1/admin/{type}/{slug}   type ∈ {movie, series, book, game}
+→ 200  Edit applied
+```
+
+Movies/series/books/games son de solo lectura salvo por esta vía: el sync
+nocturno (`POST /v1/admin/sync/{type}`) es la única otra escritura. Este
+endpoint permite corregir manualmente un subconjunto de campos por ítem y
+**bloquea cada campo tocado frente al sync** — no bloquea el ítem entero,
+solo los campos editados.
+
+**Campos editables por tipo** (cualquier otra clave del body → `422`, igual
+que una clave desconocida por completo — el schema usa `extra="forbid"`):
+
+| type     | campos editables                                          |
+|----------|------------------------------------------------------------|
+| `movie`  | `title`, `poster_url`, `release_date`, `genres`             |
+| `series` | `title`, `poster_url`, `first_air_date`, `genres`            |
+| `book`   | `title`, `poster_url`, `first_publish_date`, `genres`        |
+| `game`   | `title`, `poster_url`, `release_date`, `genres`              |
+
+`genres` es una lista de **nombres** (`list[str]`, no slugs) — el servicio
+genera el slug y hace get-or-create igual que el sync (mismo criterio de
+deduplicación por slug). Enviar `"genres": []` o `"genres": null` limpia
+todos los géneros del ítem.
+
+Request body (`CatalogEditIn`), ejemplo para `movie`:
+```json
+{
+  "title": "Correct Title",
+  "poster_url": "https://example.com/poster.jpg",
+  "genres": ["Science Fiction", "Adventure"]
+}
+```
+
+Cada campo presente en el body (excepto `unlock_fields`) se persiste **y**
+se añade a `locked_fields` del ítem (acumulativo, sin duplicar) — el
+siguiente sync nocturno deja ese campo intacto (ver `docs/schema.md`,
+sección `locked_fields`).
+
+**Mecanismo de desbloqueo elegido**: parámetro `unlock_fields` (lista de
+nombres de campo) en el mismo body del PATCH — no un endpoint separado, para
+evitar otra ruta con la misma superficie de auth/validación. Se aplica
+**después** de los edits del mismo request: si un campo aparece a la vez en
+el payload de edición y en `unlock_fields`, el resultado es que queda
+**desbloqueado** (el valor editado se persiste, pero no se añade al lock).
+Para desbloquear sin editar nada más, enviar solo `unlock_fields` (los demás
+campos del body pueden omitirse):
+```json
+{ "unlock_fields": ["poster_url"] }
+```
+Un nombre en `unlock_fields` que no sea un campo editable de `type` → `422`
+(misma validación que los campos de edición).
+
+Response (`CatalogEditOut`) — estado actual completo de los campos
+editables, no solo los tocados en este request; solo el campo de fecha
+correspondiente al `type` viene poblado (los otros dos vienen `null`):
+```json
+{
+  "type": "movie",
+  "slug": "dune-2021",
+  "title": "Correct Title",
+  "poster_url": "https://example.com/poster.jpg",
+  "release_date": "2021-10-22",
+  "first_air_date": null,
+  "first_publish_date": null,
+  "genres": ["Science Fiction", "Adventure"],
+  "locked_fields": ["title", "poster_url", "genres"]
+}
+```
+
+Errores:
+- `title` presente y vacío/solo-espacios → `422`.
+- Campo no editable para `type` (edición o `unlock_fields`) → `422`.
+- `slug` inexistente para `type` → `404`.
+
+**Auth**: misma protección `X-API-Key` que el resto de `/v1/admin/*`
+(`401`/`503`).
+
 ### Admin stats
 
 ```

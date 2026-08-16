@@ -58,3 +58,50 @@ async def test_get_series_by_slug_not_found(db):
     """Querying a non-existent slug returns None."""
     result = await get_series_by_slug(db, "slug-that-does-not-exist-9999")
     assert result is None
+
+
+# ── locked_fields (feature 49 — catalog_manual_edit) ─────────────────────────
+
+
+async def test_upsert_series_skips_locked_scalar_field(db):
+    """A column listed in locked_fields survives a sync upsert untouched."""
+    data1 = _series_data("test-series-locked-title", title="Original Title")
+    series1 = await upsert_series(db, data1)
+    series1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = _series_data("test-series-locked-title", title="Synced Title")
+    series2 = await upsert_series(db, data2)
+
+    assert series2.id == series1.id
+    assert series2.title == "Original Title"
+
+
+async def test_upsert_series_updates_unlocked_field(db):
+    """A column NOT in locked_fields still syncs normally, even if others are locked."""
+    data1 = _series_data("test-series-unlocked-status", title="Original Title")
+    series1 = await upsert_series(db, data1)
+    series1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = dict(_series_data("test-series-unlocked-status", title="Synced Title"))
+    data2["status"] = "Canceled"
+    series2 = await upsert_series(db, data2)
+
+    assert series2.title == "Original Title"
+    assert series2.status == "Canceled"
+
+
+async def test_upsert_series_skips_locked_genres(db):
+    """genres in locked_fields skips the genre re-sync block entirely."""
+    data1 = _series_data("test-series-locked-genres")
+    series1 = await upsert_series(db, data1)
+    assert {g.name for g in series1.genres} == {"Drama"}
+    series1.locked_fields = ["genres"]
+    await db.flush()
+
+    data2 = _series_data("test-series-locked-genres")
+    data2["genres"] = [{"name": "Comedy", "slug": "comedy"}]
+    series2 = await upsert_series(db, data2)
+
+    assert {g.name for g in series2.genres} == {"Drama"}
