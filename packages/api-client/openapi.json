@@ -3862,6 +3862,122 @@
         }
       }
     },
+    "/v1/admin/users/{username}/grant-admin": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Grant the admin role",
+        "description": "Grant `is_admin` to the target user. Requires `X-API-Key` AND a valid Bearer token for a superadmin caller (`is_superadmin`); 403 otherwise. Idempotent. 404 if the target user does not exist.",
+        "operationId": "grant_admin_v1_admin_users__username__grant_admin_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleGrantOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/users/{username}/revoke-admin": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Revoke the admin role",
+        "description": "Revoke `is_admin` from the target user. Requires `X-API-Key` AND a valid Bearer token for a superadmin caller (`is_superadmin`); 403 otherwise. Idempotent. 404 if the target user does not exist. Self-revocation and revoking another superadmin are both allowed \u2014 see service docstring.",
+        "operationId": "revoke_admin_v1_admin_users__username__revoke_admin_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleGrantOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -6253,6 +6369,25 @@
         "title": "ReviewModerationOut",
         "description": "Result of a hide/unhide action on a review (a ``user_ratings`` row)."
       },
+      "RoleGrantOut": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "title": "Is Admin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "is_admin"
+        ],
+        "title": "RoleGrantOut",
+        "description": "Result of a grant-admin/revoke-admin action on a user."
+      },
       "SearchResponse": {
         "properties": {
           "results": {
@@ -7317,6 +7452,11 @@
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin",
+            "default": false
+          },
+          "is_superadmin": {
+            "type": "boolean",
+            "title": "Is Superadmin",
             "default": false
           }
         },

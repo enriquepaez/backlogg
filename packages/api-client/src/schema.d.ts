@@ -1249,6 +1249,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users/{username}/grant-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant the admin role
+         * @description Grant `is_admin` to the target user. Requires `X-API-Key` AND a valid Bearer token for a superadmin caller (`is_superadmin`); 403 otherwise. Idempotent. 404 if the target user does not exist.
+         */
+        post: operations["grant_admin_v1_admin_users__username__grant_admin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{username}/revoke-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the admin role
+         * @description Revoke `is_admin` from the target user. Requires `X-API-Key` AND a valid Bearer token for a superadmin caller (`is_superadmin`); 403 otherwise. Idempotent. 404 if the target user does not exist. Self-revocation and revoking another superadmin are both allowed — see service docstring.
+         */
+        post: operations["revoke_admin_v1_admin_users__username__revoke_admin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -2182,6 +2222,16 @@ export interface components {
             is_hidden: boolean;
         };
         /**
+         * RoleGrantOut
+         * @description Result of a grant-admin/revoke-admin action on a user.
+         */
+        RoleGrantOut: {
+            /** Username */
+            username: string;
+            /** Is Admin */
+            is_admin: boolean;
+        };
+        /**
          * SearchResponse
          * @example {
          *       "limit": 20,
@@ -2515,6 +2565,11 @@ export interface components {
              * @default false
              */
             is_admin: boolean;
+            /**
+             * Is Superadmin
+             * @default false
+             */
+            is_superadmin: boolean;
         };
         /**
          * UserModerationOut
@@ -4960,6 +5015,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserModerationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_admin_v1_admin_users__username__grant_admin_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string;
+            };
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleGrantOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_admin_v1_admin_users__username__revoke_admin_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string;
+            };
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleGrantOut"];
                 };
             };
             /** @description Validation Error */

@@ -333,6 +333,15 @@
       "resolving": "Resolviendo…",
       "resolveSuccess": "Reporte resuelto.",
       "resolveError": "No se pudo resolver el reporte. Inténtalo de nuevo.",
+      "hideAction": "Ocultar review",
+      "unhideAction": "Mostrar review",
+      "togglingHide": "Actualizando…",
+      "hideSuccess": "Review ocultada.",
+      "unhideSuccess": "Review restaurada.",
+      "hideError": "No se pudo ocultar la review. Inténtalo de nuevo.",
+      "unhideError": "No se pudo restaurar la review. Inténtalo de nuevo.",
+      "reviewHidden": "Oculta",
+      "reviewVisible": "Visible",
       "pagination": {
         "nav": "Paginación de reportes",
         "previous": "Anterior",
@@ -343,6 +352,65 @@
         "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
         "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
         "unknown": "Algo salió mal al cargar los reportes. Inténtalo de nuevo."
+      }
+    },
+    "moderation": {
+      "users": {
+        "heading": "Moderación de usuarios",
+        "description": "Banea o desbanea una cuenta por su nombre de usuario. Un usuario baneado no puede iniciar sesión y todas sus reviews quedan ocultas.",
+        "usernameLabel": "Nombre de usuario",
+        "usernamePlaceholder": "nombre_de_usuario",
+        "banAction": "Banear",
+        "unbanAction": "Desbanear",
+        "submitting": "Procesando…",
+        "banDialog": {
+          "heading": "¿Banear a este usuario?",
+          "description": "{username} no podrá iniciar sesión y todas sus reviews quedarán ocultas hasta que se le desbanee.",
+          "cancel": "Cancelar",
+          "confirm": "Banear"
+        },
+        "statusBanned": "{username} está baneado.",
+        "statusNotBanned": "{username} no está baneado.",
+        "success": {
+          "banned": "Usuario baneado.",
+          "unbanned": "Usuario desbaneado."
+        },
+        "errors": {
+          "missingUsername": "Introduce un nombre de usuario.",
+          "not_found": "No existe ningún usuario con ese nombre.",
+          "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
+          "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+          "unknown": "Algo salió mal. Inténtalo de nuevo."
+        }
+      },
+      "roles": {
+        "heading": "Rol de administrador",
+        "description": "Otorga o revoca el rol de administrador a otro usuario. Solo visible para superadmins.",
+        "usernameLabel": "Nombre de usuario",
+        "usernamePlaceholder": "nombre_de_usuario",
+        "grantAction": "Otorgar admin",
+        "revokeAction": "Revocar admin",
+        "submitting": "Procesando…",
+        "revokeDialog": {
+          "heading": "¿Revocar el rol de administrador?",
+          "description": "{username} perderá acceso inmediato a las secciones de administración.",
+          "cancel": "Cancelar",
+          "confirm": "Revocar"
+        },
+        "statusAdmin": "{username} es administrador.",
+        "statusNotAdmin": "{username} no es administrador.",
+        "success": {
+          "granted": "Rol de administrador otorgado.",
+          "revoked": "Rol de administrador revocado."
+        },
+        "errors": {
+          "missingUsername": "Introduce un nombre de usuario.",
+          "not_found": "No existe ningún usuario con ese nombre.",
+          "forbidden": "Solo un superadmin puede otorgar o revocar el rol de administrador.",
+          "unauthorized": "Tu sesión expiró o la clave de administrador fue rechazada. Vuelve a iniciar sesión.",
+          "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+          "unknown": "Algo salió mal. Inténtalo de nuevo."
+        }
       }
     }
   },

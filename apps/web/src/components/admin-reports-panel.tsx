@@ -56,6 +56,19 @@ type ReportsTranslator = ReturnType<typeof useTranslations<"Admin.reports">>;
  * backend queue is newest-first and un-filtered pages can shrink once an
  * `open` report leaves that bucket, so a full refetch is the only way to
  * keep `total`/pagination consistent with the `status` filter in view.
+ *
+ * Hide/unhide (FE-30, `POST /api/admin/reviews/{ratingId}/hide` /
+ * `/unhide`) is the exception: it acts on the *reviewed rating*
+ * (`report.rating_id`), not the report itself, so it never changes which
+ * page/filter bucket a report belongs to — no refetch needed. Instead this
+ * component tracks the known `is_hidden` state per rating id
+ * (`hiddenByRatingId`) in local state, seeded from each hide/unhide
+ * response (`ReviewModerationOut`, `docs/api.md`) — `ReportOut` itself
+ * carries no `is_hidden` field, so this state starts unknown per rating id
+ * until the admin acts on it at least once, at which point the card's
+ * "Hide"/"Unhide" toggle and status badge switch to reflect the response,
+ * which is the "refresh after each action" requirement for this specific
+ * action.
  */
 export function AdminReportsPanel() {
   const t = useTranslations("Admin.reports");
@@ -66,6 +79,8 @@ export function AdminReportsPanel() {
   const [reloadKey, setReloadKey] = useState(0);
   const [state, setState] = useState<PanelState>({ status: "loading" });
   const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const [hiddenByRatingId, setHiddenByRatingId] = useState<Record<number, boolean>>({});
+  const [togglingRatingId, setTogglingRatingId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +149,29 @@ export function AdminReportsPanel() {
     }
   }
 
+  async function handleToggleHide(ratingId: number, nextHidden: boolean) {
+    if (togglingRatingId !== null) return;
+    setTogglingRatingId(ratingId);
+
+    try {
+      const response = await fetch(
+        `/api/admin/reviews/${ratingId}/${nextHidden ? "hide" : "unhide"}`,
+        { method: "POST" },
+      );
+      if (response.status === 200) {
+        const data = (await response.json()) as { id: number; is_hidden: boolean };
+        setHiddenByRatingId((current) => ({ ...current, [ratingId]: data.is_hidden }));
+        toast.success(nextHidden ? t("hideSuccess") : t("unhideSuccess"));
+      } else {
+        toast.error(nextHidden ? t("hideError") : t("unhideError"));
+      }
+    } catch {
+      toast.error(nextHidden ? t("hideError") : t("unhideError"));
+    } finally {
+      setTogglingRatingId(null);
+    }
+  }
+
   const totalPages = state.status === "loaded" ? Math.max(1, Math.ceil(state.total / PAGE_LIMIT)) : 1;
 
   return (
@@ -183,6 +221,9 @@ export function AdminReportsPanel() {
                 locale={locale}
                 resolving={resolvingId === report.id}
                 onResolve={() => handleResolve(report.id)}
+                isHidden={hiddenByRatingId[report.rating_id]}
+                togglingHide={togglingRatingId === report.rating_id}
+                onToggleHide={(nextHidden) => handleToggleHide(report.rating_id, nextHidden)}
                 t={t}
               />
             ))}
@@ -227,15 +268,23 @@ function ReportCard({
   locale,
   resolving,
   onResolve,
+  isHidden,
+  togglingHide,
+  onToggleHide,
   t,
 }: {
   report: ReportOut;
   locale: string;
   resolving: boolean;
   onResolve: () => void;
+  isHidden: boolean | undefined;
+  togglingHide: boolean;
+  onToggleHide: (nextHidden: boolean) => void;
   t: ReportsTranslator;
 }) {
   const isOpen = report.status === "open";
+  /** Unknown until the admin acts on it at least once — see this component's own doc comment. */
+  const hideActionLabel = isHidden ? t("unhideAction") : t("hideAction");
 
   return (
     <Card>
@@ -245,16 +294,30 @@ function ReportCard({
             <p className="text-sm font-medium text-foreground">
               {t("reviewLabel", { ratingId: report.rating_id })}
             </p>
-            <span
-              className={cn(
-                "w-fit rounded-full px-2.5 py-0.5 text-xs font-medium",
-                isOpen
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-green-500/10 text-green-600",
-              )}
-            >
-              {t(isOpen ? "status.open" : "status.resolved")}
-            </span>
+            <div className="flex flex-wrap gap-1.5">
+              <span
+                className={cn(
+                  "w-fit rounded-full px-2.5 py-0.5 text-xs font-medium",
+                  isOpen
+                    ? "bg-amber-500/10 text-amber-600"
+                    : "bg-green-500/10 text-green-600",
+                )}
+              >
+                {t(isOpen ? "status.open" : "status.resolved")}
+              </span>
+              {isHidden !== undefined ? (
+                <span
+                  className={cn(
+                    "w-fit rounded-full px-2.5 py-0.5 text-xs font-medium",
+                    isHidden
+                      ? "bg-destructive/10 text-destructive"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {t(isHidden ? "reviewHidden" : "reviewVisible")}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
             <p>{t("createdAtLabel", { date: formatDate(report.created_at, locale) })}</p>
@@ -270,13 +333,22 @@ function ReportCard({
           <p className="text-sm text-muted-foreground">{t("noReason")}</p>
         )}
 
-        {isOpen ? (
-          <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={togglingHide}
+            onClick={() => onToggleHide(!isHidden)}
+          >
+            {togglingHide ? t("togglingHide") : hideActionLabel}
+          </Button>
+          {isOpen ? (
             <Button type="button" variant="outline" size="sm" disabled={resolving} onClick={onResolve}>
               {resolving ? t("resolving") : t("resolveAction")}
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );
