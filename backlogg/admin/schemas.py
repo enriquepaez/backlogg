@@ -26,3 +26,10 @@ class StatsResponse(BaseModel):
     series: ContentStats
     books: ContentStats
     games: ContentStats
+
+
+class RoleGrantOut(BaseModel):
+    """Result of a grant-admin/revoke-admin action on a user."""
+
+    username: str
+    is_admin: bool

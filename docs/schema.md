@@ -351,6 +351,7 @@ CREATE TABLE users (
     email_verified  BOOLEAN NOT NULL DEFAULT false, -- set true via /auth/verify/confirm
     is_banned       BOOLEAN NOT NULL DEFAULT false, -- content moderation (admin)
     is_admin        BOOLEAN NOT NULL DEFAULT false, -- admin role flag
+    is_superadmin   BOOLEAN NOT NULL DEFAULT false, -- superadmin role flag
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -393,6 +394,28 @@ database (e.g. via its SQL console or `psql <connection-string>`) — there is
 no CLI script for this, on purpose. After granting it, the affected user
 must log out and back in (or wait for their access token to rotate) for
 `GET /v1/users/me` to reflect the new value.
+
+`is_superadmin` is a second, higher-privilege role flag, same rules as
+`is_admin`: **no API endpoint** sets it either — it is flipped by hand in the
+DB by an operator, the same way as above (`UPDATE users SET is_superadmin =
+true WHERE username = '<username>';`). It is exposed only on `UserMeOut`,
+never on the public `UserOut`. A superadmin is the only role allowed to grant
+or revoke **other users'** `is_admin` flag, via
+`POST /v1/admin/users/{username}/grant-admin` and `/revoke-admin`. These two
+endpoints are a deliberate deviation from the rest of `/v1/admin/*`: on top
+of the shared `X-API-Key` header they also require the caller's own
+`Authorization: Bearer` token and check `is_superadmin` on that authenticated
+caller server-side — `403` if the caller is not a superadmin, even with a
+correct `X-API-Key` and even if the caller is a regular `is_admin`. Both
+endpoints are idempotent and `404` if the target username does not exist.
+
+**Self-revocation is allowed on purpose.** A superadmin can grant/revoke
+`is_admin` on themselves or on another superadmin. This is safe because these
+endpoints only ever flip `is_admin`, never `is_superadmin` — which stays
+100% DB-only, with zero API surface — so a superadmin can never lose their
+superadmin status through this API. The only possible side effect is losing
+access to the frontend `/admin` dashboard (gated by `is_admin`), which is
+recoverable the same way it was granted: by hand in the DB.
 
 ### `refresh_tokens`
 
