@@ -29,15 +29,23 @@ vi.mock("@/lib/api-fetch", () => ({
   getCurrentUser: () => getCurrentUser(),
 }));
 
-// `AdminStatsPanel`/`AdminReportsPanel` are Client Components with their own
-// `fetch` calls against `/api/admin/stats`/`/api/admin/reports` — out of
+// `AdminStatsPanel`/`AdminReportsPanel`/`AdminModerationPanel` are Client
+// Components with their own `fetch` calls against `/api/admin/*` — out of
 // scope here (each covered by its own test), same rationale
 // `site-header.test.tsx` uses for mocking `NotificationBell`.
+// `AdminModerationPanel`'s mock echoes its `isSuperadmin` prop into the DOM
+// so this file can assert `AdminPage` forwards `user.is_superadmin`
+// correctly (FE-30) — the one prop this page passes down at all.
 vi.mock("@/components/admin-stats-panel", () => ({
   AdminStatsPanel: () => <div data-testid="admin-stats-panel" />,
 }));
 vi.mock("@/components/admin-reports-panel", () => ({
   AdminReportsPanel: () => <div data-testid="admin-reports-panel" />,
+}));
+vi.mock("@/components/admin-moderation-panel", () => ({
+  AdminModerationPanel: ({ isSuperadmin }: { isSuperadmin: boolean }) => (
+    <div data-testid="admin-moderation-panel" data-is-superadmin={String(isSuperadmin)} />
+  ),
 }));
 
 const { default: AdminPage } = await import("./page");
@@ -92,12 +100,54 @@ describe("AdminPage", () => {
       email_verified: true,
       bio: null,
       is_admin: true,
+      is_superadmin: false,
     });
 
     render(await AdminPage(buildProps("en")));
 
     expect(screen.getByTestId("admin-stats-panel")).toBeInTheDocument();
     expect(screen.getByTestId("admin-reports-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-moderation-panel")).toBeInTheDocument();
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("forwards is_superadmin=false to AdminModerationPanel for a regular admin", async () => {
+    getCurrentUser.mockResolvedValueOnce({
+      username: "alice",
+      display_name: "Alice A.",
+      avatar_url: null,
+      email: "alice@example.com",
+      email_verified: true,
+      bio: null,
+      is_admin: true,
+      is_superadmin: false,
+    });
+
+    render(await AdminPage(buildProps("en")));
+
+    expect(screen.getByTestId("admin-moderation-panel")).toHaveAttribute(
+      "data-is-superadmin",
+      "false",
+    );
+  });
+
+  it("forwards is_superadmin=true to AdminModerationPanel for a superadmin", async () => {
+    getCurrentUser.mockResolvedValueOnce({
+      username: "root",
+      display_name: "Root",
+      avatar_url: null,
+      email: "root@example.com",
+      email_verified: true,
+      bio: null,
+      is_admin: true,
+      is_superadmin: true,
+    });
+
+    render(await AdminPage(buildProps("en")));
+
+    expect(screen.getByTestId("admin-moderation-panel")).toHaveAttribute(
+      "data-is-superadmin",
+      "true",
+    );
   });
 });
