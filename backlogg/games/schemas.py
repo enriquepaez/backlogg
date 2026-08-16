@@ -70,3 +70,17 @@ class GameListOut(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class SimilarGameOut(BaseModel):
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarGameListOut(BaseModel):
+    results: list[SimilarGameOut]

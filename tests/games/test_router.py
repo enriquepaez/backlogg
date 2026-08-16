@@ -8,6 +8,7 @@ from backlogg.games import repository as repo
 from backlogg.games import service
 from backlogg.main import app
 from backlogg.people import repository as people_repo
+from backlogg.shared.external_ids import upsert_external_id
 
 
 def _make_game_dict(slug: str = "doom-1993") -> dict:
@@ -115,6 +116,37 @@ async def test_get_game_credits_empty(client, db):
     body = response.json()
     assert "credits" in body
     assert body["credits"] == []
+
+
+async def test_get_similar_games_returns_200(client, db):
+    """GET /games/{slug}/similar returns 200 with results[] for a seeded game."""
+    game = await repo.upsert_game(db, _make_game_dict("similar-router-source-1993"))
+    await upsert_external_id(db, "GAME", game.id, "IGDB", "8888801")
+
+    raw_with_similar = {
+        "id": 8888801,
+        "name": "DOOM",
+        "slug": "similar-router-source-1993",
+        "similar_games": [],
+    }
+
+    with patch.object(
+        service._igdb_client,
+        "get_game_by_slug",
+        new_callable=AsyncMock,
+        return_value=raw_with_similar,
+    ):
+        response = await client.get("/v1/games/similar-router-source-1993/similar")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == []
+
+
+async def test_get_similar_games_returns_404(client, db):
+    """GET /games/{slug}/similar returns 404 when the source game is unknown."""
+    response = await client.get("/v1/games/similar-router-unknown-slug-404/similar")
+    assert response.status_code == 404
 
 
 async def test_get_game_credits_present_and_ordered(client, db):

@@ -67,7 +67,11 @@
   ```
 - **Rate limits**: 4 requests/second on free tier. Use batching.
 - **Key endpoints used**:
-  - `POST /games` — seed and on-demand fallback
+  - `POST /games` — seed and on-demand fallback. The single-game detail query
+    (`get_game_by_slug`) also requests `similar_games.*` — IGDB's own curated
+    "similar games" relation (id, name, slug, ...), used by
+    `GET /games/{slug}/similar` (feature 45) instead of a local genre-overlap
+    heuristic.
   - `POST /covers` — cover art
   - `POST /companies` — developer/publisher for company_credits
   - `POST /involved_companies` — join between games and companies

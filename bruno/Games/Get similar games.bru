@@ -1,0 +1,21 @@
+meta {
+  name: Get similar games
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/v1/games/baldurs-gate-iii/similar
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("results field is an array", function() {
+    expect(res.body.results).to.be.an("array");
+  });
+}

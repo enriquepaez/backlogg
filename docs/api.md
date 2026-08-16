@@ -183,6 +183,17 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_d
 `rating_count_external`, `rating_internal`, `rating_count_internal`, `genres[]`,
 `platforms[]`, `credits[]`, `viewer_status` (ver Movies)
 
+```
+GET /v1/games/{slug}/similar
+→ 200  Hasta 10 juegos similares (campo similar_games de IGDB — relaciones
+       curadas, no solapamiento de género)
+→ 404  Slug no encontrado
+```
+
+Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`
+y `/v1/series/{slug}/similar`: cada item incluye `title`, `slug`, `poster_url`,
+`release_date`, `rating_external`. Los juegos nuevos se persisten en la DB local.
+
 **`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
 `billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
