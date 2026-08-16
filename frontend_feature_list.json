@@ -581,6 +581,26 @@
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
       "status": "pending"
+    },
+    {
+      "id": 31,
+      "code": "FE-32",
+      "milestone": "M1",
+      "name": "books_games_similar_ui",
+      "title": "Sección 'similar' en el detalle de libros y juegos",
+      "description": "FE-10 (item_detail) ya renderiza una sección 'similar' en el detalle, pero solo para movies/series porque book/game no tenían backend de similares (getSimilarItems corta a [] sin red para esos dos tipos). Backend: features 45 (games_similar_igdb) y 46 (books_similar_local) añaden GET /games/{slug}/similar y GET /books/{slug}/similar. Extender el frontend para consumirlos y mostrar la misma sección también en book/game.",
+      "depends_on": [
+        11
+      ],
+      "acceptance": [
+        "getSimilarItems(type, slug) llama a GET /v1/{type}/{slug}/similar para los 4 tipos (ya no corta a [] sin red para book/game)",
+        "La sección 'similar' se renderiza en el detalle de libros y juegos cuando el endpoint devuelve resultados",
+        "Sin resultados, la sección se omite silenciosamente (mismo comportamiento que hoy para movies/series sin similares)",
+        "Reutiliza el componente item-similar.tsx existente, sin duplicar markup",
+        "i18n: reutiliza el namespace ItemDetail existente, sin claves nuevas necesarias",
+        "typecheck+lint+build en verde; QA en navegador (book y game con y sin similares)"
+      ],
+      "status": "pending"
     }
   ]
 }

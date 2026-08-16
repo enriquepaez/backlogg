@@ -927,6 +927,49 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 45,
+      "name": "games_similar_igdb",
+      "title": "Similar games — GET /games/{slug}/similar vía campo similar_games de IGDB",
+      "description": "Endpoint análogo a la feature 16 (similar_items de movies/series) pero para games, usando el campo nativo similar_games de IGDB (relaciones curadas por IGDB, no una heurística local) en vez del solapamiento de género que hoy usa personalized_recommendations para este tipo. Los items nuevos encontrados se persisten en la DB local, igual que en la feature 16. Hasta 10 resultados.",
+      "depends_on": [
+        5
+      ],
+      "acceptance": [
+        "La query POST /games del IGDBClient solicita el campo similar_games.* (junto a los campos ya usados) cuando se pide el detalle de un juego",
+        "GET /games/{slug}/similar devuelve hasta 10 juegos similares usando similar_games de IGDB",
+        "GET /games/slug-inexistente/similar devuelve 404",
+        "Los juegos similares no presentes en DB local se persisten automáticamente (mismo patrón de upsert que la feature 16)",
+        "Cada resultado incluye: title, slug, poster_url, release_date, rating_external",
+        "La respuesta incluye el campo results[] (array), mismo contrato que /movies/{slug}/similar y /series/{slug}/similar",
+        "docs/api.md documenta el endpoint; docs/external-apis.md documenta similar_games entre los campos usados de IGDB",
+        "Tests de servicio con IGDBClient mockeado (incluye el caso sin similares → results vacío, no error)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 46,
+      "name": "books_similar_local",
+      "title": "Similar books — GET /books/{slug}/similar por autor + género (sin API externa)",
+      "description": "Endpoint análogo a la feature 16/45 pero para books. Investigado y descartado el uso de una API externa para esto (ver docs/external-apis.md, investigación 2026-08-16: ninguna API de 'libros similares' gratuita/sin auth cubre el volumen que necesita este proyecto — Google Books limita a 100 req/día, Open Library no expone un endpoint de obras relacionadas, los servicios dedicados de 'similar books' requieren clave de pago). El ranking se calcula 100% desde datos ya persistidos localmente: mismo autor (vía credits role=AUTHOR, feature 19) tiene prioridad sobre solapamiento de género, sin llamar a ninguna API externa ni crear external_ids nuevos.",
+      "depends_on": [
+        4,
+        19
+      ],
+      "acceptance": [
+        "GET /books/{slug}/similar devuelve hasta 10 libros calculados localmente: prioriza libros que comparten autor (vía people/credits) sobre el resto, luego solapamiento de género, con rating_external desc como desempate",
+        "GET /books/slug-inexistente/similar devuelve 404",
+        "El propio libro nunca aparece en sus resultados",
+        "Cada resultado incluye: title, slug, poster_url, release_date (first_publish_date), rating_external",
+        "La respuesta incluye el campo results[] (array), mismo contrato que /movies/{slug}/similar",
+        "Sin llamadas a APIs externas ni nuevos external_ids — solo queries contra la DB local",
+        "docs/api.md documenta el endpoint y aclara que, a diferencia de /recommendations, no incluye un campo reason",
+        "Tests de repositorio/servicio: prioridad por mismo autor, fallback a género cuando no hay coincidencia de autor, exclusión del propio libro, desempate por rating, libro sin género/autor no rompe (results vacío)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
