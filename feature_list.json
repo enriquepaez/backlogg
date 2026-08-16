@@ -947,7 +947,7 @@
         "Tests de servicio con IGDBClient mockeado (incluye el caso sin similares → results vacío, no error)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 46,

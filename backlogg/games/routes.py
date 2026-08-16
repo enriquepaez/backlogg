@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
 from backlogg.games import service
-from backlogg.games.schemas import GameListOut, GameOut, GameSortEnum
+from backlogg.games.schemas import GameListOut, GameOut, GameSortEnum, SimilarGameListOut
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.ratings import service as ratings_service
@@ -28,6 +28,16 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_games(db, genre=genre, sort=sort, page=page, limit=limit)
+
+
+@router.get(
+    "/{slug}/similar",
+    response_model=SimilarGameListOut,
+    summary="Similar games",
+    description="Up to 10 similar games (IGDB similar_games). New items are persisted locally.",
+)
+async def get_similar_games(slug: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_similar_games(db, slug)
 
 
 @router.get(

@@ -89,12 +89,17 @@ class IGDBClient:
             return response.json()
 
     async def get_game_by_slug(self, slug: str) -> dict | None:
-        """Fetch a single game from IGDB by slug."""
+        """Fetch a single game from IGDB by slug.
+
+        Requests ``similar_games.*`` alongside the usual detail fields so the
+        response carries IGDB's own curated relations (id, name, slug, ...)
+        for use by the similar-games endpoint, without an extra round trip.
+        """
         query = (
             "fields name,slug,summary,cover.*,first_release_date,rating,rating_count,"
             "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
             "involved_companies.company.name,involved_companies.company.slug,"
-            "involved_companies.developer,involved_companies.publisher;"
+            "involved_companies.developer,involved_companies.publisher,similar_games.*;"
             f' where slug = "{slug}";'
             " limit 1;"
         )

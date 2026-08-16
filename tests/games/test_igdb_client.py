@@ -55,6 +55,30 @@ async def test_ensure_token_skips_when_valid(client):
     assert client._access_token == "valid-token"
 
 
+async def test_get_game_by_slug_requests_similar_games_field(client):
+    """The POST /games detail query includes similar_games.* alongside the usual fields."""
+    import time
+
+    client._access_token = "valid-token"
+    client._token_expires_at = time.time() + 3600  # skip token renewal
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = [{"id": 1, "name": "Fake Game", "slug": "fake-game"}]
+    mock_response.raise_for_status = MagicMock()
+
+    with patch(
+        "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_response
+    ) as mock_post:
+        await client.get_game_by_slug("fake-game")
+
+    _, kwargs = mock_post.call_args
+    body = kwargs["content"]
+    assert "similar_games.*" in body
+    # Existing fields are still requested alongside it
+    assert "cover.*" in body
+    assert "genres.name,genres.slug" in body
+
+
 def test_game_to_dict_main_game(client):
     """game_to_dict converts a IGDB raw dict correctly."""
     raw = {

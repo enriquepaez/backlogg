@@ -12,10 +12,12 @@ from backlogg.games.schemas import (
     GameOut,
     GamePlatformOut,
     GameSortEnum,
+    SimilarGameListOut,
+    SimilarGameOut,
 )
 from backlogg.library import service as library_service
 from backlogg.shared.credits import get_credits_for_item
-from backlogg.shared.external_ids import upsert_external_id
+from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
 _igdb_client = IGDBClient()
 
@@ -99,3 +101,64 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
         credits=credits,
         viewer_status=viewer_status,
     )
+
+
+async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
+    # 1. Look up the source game — 404 if it doesn't exist
+    game = await repo.get_game_by_slug(db, slug)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    # 2. Confirm the source game has an IGDB ID (needed to trust similar_games)
+    ext_id = await get_external_id(db, "GAME", game.id, "IGDB")
+    if ext_id is None:
+        # Game exists locally but has no IGDB ID — return empty results
+        return SimilarGameListOut(results=[])
+
+    # 3. Re-fetch the source game from IGDB by slug to get similar_games.*
+    # (IGDB relations, not a local genre-overlap heuristic)
+    raw = await _igdb_client.get_game_by_slug(game.slug)
+    if raw is None:
+        return SimilarGameListOut(results=[])
+
+    similar_raw = raw.get("similar_games") or []
+
+    # 4. Persist any new games and collect up to 10 results
+    results: list[SimilarGameOut] = []
+    for sim in similar_raw[:10]:
+        if not isinstance(sim, dict):
+            continue
+
+        sim_slug = sim.get("slug")
+        if not sim_slug:
+            continue
+
+        # Try local DB first
+        sim_game = await repo.get_game_by_slug(db, sim_slug)
+        if sim_game is None:
+            # Fetch full detail and persist
+            detail = await _igdb_client.get_game_by_slug(sim_slug)
+            if detail is None:
+                continue
+            game_data = _igdb_client.game_to_dict(detail)
+            sim_game = await repo.upsert_game(db, game_data)
+            sim_igdb_id = str(detail.get("id", ""))
+            if sim_igdb_id:
+                await upsert_external_id(db, "GAME", sim_game.id, "IGDB", sim_igdb_id)
+            await db.commit()
+
+        results.append(
+            SimilarGameOut(
+                title=sim_game.title,
+                slug=sim_game.slug,
+                poster_url=sim_game.poster_url,
+                release_date=sim_game.release_date,
+                rating_external=(
+                    float(sim_game.rating_external)
+                    if sim_game.rating_external is not None
+                    else None
+                ),
+            )
+        )
+
+    return SimilarGameListOut(results=results)
