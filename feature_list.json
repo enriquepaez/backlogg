@@ -988,6 +988,31 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 49,
+      "name": "catalog_manual_edit",
+      "title": "Catalog manual edit — PATCH admin para movies/series/books/games con locking de sync por campo",
+      "description": "Backend del backoffice de edición de catálogo (frontend: FE-34 en frontend_feature_list.json). Hoy movies/series/books/games son de solo lectura: los puebla el sync nocturno/backfill (features 8, 24, 25, 26) desde TMDB/Open Library/IGDB, sin ningún endpoint de escritura para el admin. Decisión de diseño (confirmada con el usuario): los campos editados manualmente quedan bloqueados a nivel de campo frente al sync — no a nivel de item completo — vía una columna locked_fields (array de nombres de campo) en cada tabla de contenido. PATCH /v1/admin/{type}/{slug} actualiza un subconjunto de campos editables (a documentar explícitamente por tipo en docs/api.md, p.ej. title, poster_url, release_date/first_air_date/first_publish_date, genres) y añade cada campo tocado a locked_fields del item. Los sync jobs deben respetar locked_fields en su upsert: cualquier campo presente ahí no se sobrescribe en la siguiente sincronización, el resto de campos del item sigue actualizándose con normalidad.",
+      "depends_on": [
+        2,
+        3,
+        4,
+        5,
+        18,
+        24
+      ],
+      "acceptance": [
+        "Migración Alembic añade locked_fields (array de strings, default []) a movies, series, books, games",
+        "PATCH /v1/admin/movies/{slug} (y equivalente en series/books/games) — protegido por X-API-Key igual que el resto de /v1/admin/*; actualiza los campos editables enviados y los añade a locked_fields del item",
+        "Payload con un campo no editable/desconocido → 422; slug inexistente → 404",
+        "El upsert de cada sync job (movies/series/books/games) NO sobrescribe ningún campo presente en locked_fields del item existente; el resto de campos del item se sincroniza con normalidad",
+        "Mecanismo para desbloquear un campo y devolverlo al control del sync (p.ej. endpoint o parámetro dedicado) — decisión de implementación a documentar en docs/api.md",
+        "docs/schema.md documenta locked_fields; docs/api.md documenta el/los endpoint(s) y los campos editables por tipo",
+        "Tests: repositorio (upsert respeta locked_fields), servicio/endpoint PATCH (incluye 404/422), tests de los sync jobs verificando que un campo bloqueado sobrevive intacto al siguiente sync",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

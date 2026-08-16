@@ -333,6 +333,15 @@
       "resolving": "Resolving…",
       "resolveSuccess": "Report resolved.",
       "resolveError": "Couldn't resolve the report. Please try again.",
+      "hideAction": "Hide review",
+      "unhideAction": "Unhide review",
+      "togglingHide": "Updating…",
+      "hideSuccess": "Review hidden.",
+      "unhideSuccess": "Review restored.",
+      "hideError": "Couldn't hide the review. Please try again.",
+      "unhideError": "Couldn't restore the review. Please try again.",
+      "reviewHidden": "Hidden",
+      "reviewVisible": "Visible",
       "pagination": {
         "nav": "Reports pagination",
         "previous": "Previous",
@@ -343,6 +352,65 @@
         "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
         "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
         "unknown": "Something went wrong loading reports. Please try again."
+      }
+    },
+    "moderation": {
+      "users": {
+        "heading": "User moderation",
+        "description": "Ban or unban an account by username. A banned user can no longer log in and all of their reviews are hidden.",
+        "usernameLabel": "Username",
+        "usernamePlaceholder": "username",
+        "banAction": "Ban",
+        "unbanAction": "Unban",
+        "submitting": "Working…",
+        "banDialog": {
+          "heading": "Ban this user?",
+          "description": "{username} will no longer be able to log in and all of their reviews will be hidden until unbanned.",
+          "cancel": "Cancel",
+          "confirm": "Ban"
+        },
+        "statusBanned": "{username} is banned.",
+        "statusNotBanned": "{username} is not banned.",
+        "success": {
+          "banned": "User banned.",
+          "unbanned": "User unbanned."
+        },
+        "errors": {
+          "missingUsername": "Enter a username.",
+          "not_found": "No user exists with that username.",
+          "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+          "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+          "unknown": "Something went wrong. Please try again."
+        }
+      },
+      "roles": {
+        "heading": "Admin role",
+        "description": "Grant or revoke the admin role for another user. Only visible to superadmins.",
+        "usernameLabel": "Username",
+        "usernamePlaceholder": "username",
+        "grantAction": "Grant admin",
+        "revokeAction": "Revoke admin",
+        "submitting": "Working…",
+        "revokeDialog": {
+          "heading": "Revoke the admin role?",
+          "description": "{username} will immediately lose access to the admin sections.",
+          "cancel": "Cancel",
+          "confirm": "Revoke"
+        },
+        "statusAdmin": "{username} is an admin.",
+        "statusNotAdmin": "{username} is not an admin.",
+        "success": {
+          "granted": "Admin role granted.",
+          "revoked": "Admin role revoked."
+        },
+        "errors": {
+          "missingUsername": "Enter a username.",
+          "not_found": "No user exists with that username.",
+          "forbidden": "Only a superadmin can grant or revoke the admin role.",
+          "unauthorized": "Your session expired or the admin key was rejected. Please sign in again.",
+          "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+          "unknown": "Something went wrong. Please try again."
+        }
       }
     }
   },

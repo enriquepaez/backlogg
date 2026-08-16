@@ -206,6 +206,74 @@ describe("AdminReportsPanel", () => {
     expect(screen.getByRole("button", { name: "resolveAction" })).toBeInTheDocument();
   });
 
+  it("hides a review: posts to /api/admin/reviews/{ratingId}/hide and shows the hidden badge", async () => {
+    server.use(reportsHandler([openReport]));
+    let hiddenRatingId: string | undefined;
+    server.use(
+      http.post("/api/admin/reviews/:id/hide", ({ params }) => {
+        hiddenRatingId = params.id as string;
+        return HttpResponse.json({ id: 42, is_hidden: true });
+      }),
+    );
+
+    render(<AdminReportsPanel />);
+    const hideButton = await screen.findByRole("button", { name: "hideAction" });
+
+    await act(async () => {
+      fireEvent.click(hideButton);
+    });
+
+    expect(hiddenRatingId).toBe("42");
+    expect(toastSuccess).toHaveBeenCalledWith("hideSuccess");
+    expect(await screen.findByText("reviewHidden")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "unhideAction" })).toBeInTheDocument();
+  });
+
+  it("unhides a review after it was hidden: posts to /api/admin/reviews/{ratingId}/unhide", async () => {
+    server.use(reportsHandler([openReport]));
+    server.use(
+      http.post("/api/admin/reviews/:id/hide", () => HttpResponse.json({ id: 42, is_hidden: true })),
+    );
+    let unhiddenRatingId: string | undefined;
+    server.use(
+      http.post("/api/admin/reviews/:id/unhide", ({ params }) => {
+        unhiddenRatingId = params.id as string;
+        return HttpResponse.json({ id: 42, is_hidden: false });
+      }),
+    );
+
+    render(<AdminReportsPanel />);
+    const hideButton = await screen.findByRole("button", { name: "hideAction" });
+    await act(async () => {
+      fireEvent.click(hideButton);
+    });
+    const unhideButton = await screen.findByRole("button", { name: "unhideAction" });
+
+    await act(async () => {
+      fireEvent.click(unhideButton);
+    });
+
+    expect(unhiddenRatingId).toBe("42");
+    expect(toastSuccess).toHaveBeenCalledWith("unhideSuccess");
+    expect(await screen.findByText("reviewVisible")).toBeInTheDocument();
+  });
+
+  it("shows an error toast and keeps the previous hide/unhide label when the toggle fails", async () => {
+    server.use(reportsHandler([openReport]));
+    server.use(http.post("/api/admin/reviews/:id/hide", () => new HttpResponse(null, { status: 500 })));
+
+    render(<AdminReportsPanel />);
+    const hideButton = await screen.findByRole("button", { name: "hideAction" });
+
+    await act(async () => {
+      fireEvent.click(hideButton);
+    });
+
+    expect(toastError).toHaveBeenCalledWith("hideError");
+    expect(screen.getByRole("button", { name: "hideAction" })).toBeInTheDocument();
+    expect(screen.queryByText("reviewHidden")).not.toBeInTheDocument();
+  });
+
   it("paginates: next/previous forward the right ?page= to the BFF route", async () => {
     let forwardedPage: string | null = null;
     server.use(

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
+import { AdminModerationPanel } from "@/components/admin-moderation-panel";
 import { AdminReportsPanel } from "@/components/admin-reports-panel";
 import { AdminStatsPanel } from "@/components/admin-stats-panel";
 import { redirect } from "@/i18n/navigation";
@@ -56,6 +57,14 @@ export async function generateMetadata({
  * report queue, mounted below it on this same page — no changes needed here
  * beyond rendering it, since the auth guard above already covers everything
  * under `/admin`.
+ *
+ * `AdminModerationPanel` (FE-30, `@/components/admin-moderation-panel.tsx`)
+ * bundles the remaining moderation actions (ban/unban, grant/revoke admin).
+ * It receives `isSuperadmin={user.is_superadmin}` straight from this page's
+ * own `getCurrentUser()` call above — `UserMeOut.is_superadmin` (`docs/api.md`,
+ * never present on the public `UserOut`) is the ONLY source of truth this app
+ * has for whether the signed-in caller may see the grant/revoke-admin section
+ * at all, same as `user.is_admin` already gating this entire page.
  */
 export default async function AdminPage({ params }: PageProps<"/[locale]/admin">) {
   const { locale } = await params;
@@ -82,6 +91,7 @@ export default async function AdminPage({ params }: PageProps<"/[locale]/admin">
 
       <AdminStatsPanel />
       <AdminReportsPanel />
+      <AdminModerationPanel isSuperadmin={user.is_superadmin} />
     </div>
   );
 }
