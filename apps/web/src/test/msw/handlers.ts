@@ -14,6 +14,8 @@ type TrendingOut = components["schemas"]["TrendingOut"];
 type GenreListOut = components["schemas"]["GenreListOut"];
 type SimilarMoviesOut = components["schemas"]["SimilarMoviesOut"];
 type SimilarSeriesListOut = components["schemas"]["SimilarSeriesListOut"];
+type SimilarBooksOut = components["schemas"]["SimilarBooksOut"];
+type SimilarGameListOut = components["schemas"]["SimilarGameListOut"];
 type SearchResponse = components["schemas"]["SearchResponse"];
 
 /**
@@ -255,6 +257,32 @@ export const similarSeriesFixture: SimilarSeriesListOut = {
   ],
 };
 
+/** `GET /v1/books/{slug}/similar` (FE-32). */
+export const similarBooksFixture: SimilarBooksOut = {
+  results: [
+    {
+      title: "Dune Messiah",
+      slug: "OL893416W",
+      poster_url: "https://covers.openlibrary.org/b/id/13-L.jpg",
+      release_date: "1969-10-01",
+      rating_external: 4.1,
+    },
+  ],
+};
+
+/** `GET /v1/games/{slug}/similar` (FE-32). */
+export const similarGamesFixture: SimilarGameListOut = {
+  results: [
+    {
+      title: "Bastion",
+      slug: "bastion",
+      poster_url: "https://images.igdb.com/igdb/image/upload/t_cover_big/bastion.jpg",
+      release_date: "2011-07-20",
+      rating_external: 8.7,
+    },
+  ],
+};
+
 /**
  * Second page of the movies list (FE-9 browse: pagination). `total: 30` with
  * `limit: 24` (the browse page's fixed page size, see `BROWSE_PAGE_SIZE` in
@@ -452,6 +480,14 @@ export const handlers = [
     return HttpResponse.json({ detail: "Book not found" }, { status: 404 });
   }),
 
+  // FE-32 item detail: similar books.
+  http.get(`${MOCK_API_BASE_URL}/v1/books/:slug/similar`, ({ params }) => {
+    if (params.slug === duneBookFixture.slug) {
+      return HttpResponse.json(similarBooksFixture);
+    }
+    return HttpResponse.json({ detail: "Book not found" }, { status: 404 });
+  }),
+
   http.get(`${MOCK_API_BASE_URL}/v1/games`, () => {
     return HttpResponse.json(gameListFixture);
   }),
@@ -459,6 +495,14 @@ export const handlers = [
   http.get(`${MOCK_API_BASE_URL}/v1/games/:slug`, ({ params }) => {
     if (params.slug === hadesFixture.slug) {
       return HttpResponse.json(hadesFixture);
+    }
+    return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
+  }),
+
+  // FE-32 item detail: similar games.
+  http.get(`${MOCK_API_BASE_URL}/v1/games/:slug/similar`, ({ params }) => {
+    if (params.slug === hadesFixture.slug) {
+      return HttpResponse.json(similarGamesFixture);
     }
     return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
   }),
