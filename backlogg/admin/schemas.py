@@ -1,6 +1,6 @@
 """Admin domain — Pydantic v2 schemas."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -59,3 +59,48 @@ class AdminUserListOut(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class CatalogEditIn(BaseModel):
+    """Admin edit payload for ``PATCH /v1/admin/{type}/{slug}`` (feature 49).
+
+    Only the fields relevant to the request's ``{type}`` may be set — see
+    docs/api.md for the per-type editable field table. A field that exists on
+    this schema but is not editable for the given ``type`` raises 422 at the
+    service layer; a key that is not part of this schema at all is rejected
+    by Pydantic itself (``extra="forbid"``) before it ever reaches the
+    service.
+
+    Every field explicitly set here (``exclude_unset`` — a field left at its
+    default is treated as "not provided") is persisted AND added to the
+    item's ``locked_fields``, so the next nightly sync leaves it untouched.
+
+    ``unlock_fields`` is the chosen desync mechanism (see ADR in docs/api.md):
+    a list of field names to release back to sync control, applied *after*
+    the edits above within the same request — so a field present in both the
+    edit payload and ``unlock_fields`` ends up unlocked, not locked.
+    """
+
+    title: str | None = None
+    poster_url: str | None = None
+    release_date: date | None = None
+    first_air_date: date | None = None
+    first_publish_date: date | None = None
+    genres: list[str] | None = None
+    unlock_fields: list[str] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CatalogEditOut(BaseModel):
+    """Result of a catalog manual edit — the item's current editable state."""
+
+    type: str
+    slug: str
+    title: str
+    poster_url: str | None
+    release_date: date | None = None
+    first_air_date: date | None = None
+    first_publish_date: date | None = None
+    genres: list[str]
+    locked_fields: list[str]

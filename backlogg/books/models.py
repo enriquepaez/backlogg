@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backlogg.core.database import Base
@@ -71,6 +72,13 @@ class Book(Base):
     rating_count_external: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rating_internal: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     rating_count_internal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Feature 49 (catalog_manual_edit): column names manually edited via the
+    # admin backoffice (PATCH /v1/admin/book/{slug}). The nightly sync skips
+    # any column listed here instead of overwriting the admin's edit — see
+    # upsert_book below.
+    locked_fields: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, server_default="{}"
+    )
     last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

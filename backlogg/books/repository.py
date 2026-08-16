@@ -1,4 +1,4 @@
-from sqlalchemy import func, literal, select
+from sqlalchemy import case, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -92,23 +92,31 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
 
     The ``data`` dict must contain all book fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
+
+    Per-field admin locks (feature 49 — catalog_manual_edit): any column
+    listed in the existing row's ``locked_fields`` is excluded from the
+    UPDATE, via a CASE per column inside the ON CONFLICT DO UPDATE statement
+    that keeps the target row's own value when it is locked instead of the
+    proposed (``excluded``) value. ``genres`` is not a plain column, so it is
+    checked separately after the reload below, skipping the genre re-sync
+    block when locked.
     """
     genres_data: list[dict] = data.pop("genres", [])
 
     # Build INSERT ... ON CONFLICT (slug) DO UPDATE
-    stmt = (
-        pg_insert(Book)
-        .values(**data)
-        .on_conflict_do_update(
-            index_elements=["slug"],
-            set_={
-                k: v
-                for k, v in data.items()
-                if k not in ("id", "slug", "created_at", "rating_count_internal")
-            },
+    insert_stmt = pg_insert(Book).values(**data)
+    set_ = {
+        k: case(
+            (Book.locked_fields.contains([k]), getattr(Book, k)),
+            else_=getattr(insert_stmt.excluded, k),
         )
-        .returning(Book.id)
-    )
+        for k in data
+        if k not in ("id", "slug", "created_at", "rating_count_internal")
+    }
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=["slug"],
+        set_=set_,
+    ).returning(Book.id)
     result = await db.execute(stmt)
     book_id = result.scalar_one()
     await db.flush()
@@ -129,7 +137,7 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
     # Handle genres: get-or-create each genre and assign to book.
     # Deduplicate by slug first — two subjects of the same book that slugify
     # to the same value must map to a single genre row and a single join row.
-    if genres_data:
+    if genres_data and "genres" not in book.locked_fields:
         genre_objects = []
         seen_slugs: set[str] = set()
         for g in genres_data:
@@ -148,6 +156,42 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
         # Expire and reload to get fresh genres
         await db.refresh(book, ["genres"])
 
+    return book
+
+
+async def admin_update_book(db: AsyncSession, book: Book, updates: dict) -> Book:
+    """Apply an admin backoffice edit (feature 49) to ``book`` in place.
+
+    ``updates`` keys are a subset of the editable scalar columns (``title``,
+    ``poster_url``, ``first_publish_date``) plus an optional ``genres`` key
+    holding a list of ``{"name", "slug"}`` dicts already resolved by the
+    caller — same shape as ``upsert_book``'s ``genres_data``, so it reuses
+    the same get-or-create + re-sync logic (deduplicated by slug). Locked-
+    fields bookkeeping is the caller's responsibility
+    (backlogg/admin/service.py), not this function's.
+    """
+    genres_data = updates.pop("genres", None)
+
+    for key, value in updates.items():
+        setattr(book, key, value)
+
+    if genres_data is not None:
+        genre_objects = []
+        seen_slugs: set[str] = set()
+        for g in genres_data:
+            if g["slug"] in seen_slugs:
+                continue
+            seen_slugs.add(g["slug"])
+            genre = await _get_or_create_genre(db, g["name"], g["slug"])
+            genre_objects.append(genre)
+
+        await db.execute(book_genres_join.delete().where(book_genres_join.c.book_id == book.id))
+        for genre in genre_objects:
+            await db.execute(book_genres_join.insert().values(book_id=book.id, genre_id=genre.id))
+        await db.flush()
+        await db.refresh(book, ["genres"])
+
+    await db.flush()
     return book
 
 

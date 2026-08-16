@@ -1,0 +1,33 @@
+meta {
+  name: Edit movie — campo no editable (422)
+  type: http
+  seq: 20
+}
+
+patch {
+  url: {{baseUrl}}/v1/admin/movie/some-movie-slug
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+body:json {
+  {
+    "first_air_date": "2020-01-01"
+  }
+}
+
+tests {
+  test("status 422", function() {
+    expect(res.status).to.equal(422);
+  });
+}
+
+docs {
+  first_air_date is a series-only field, not editable for a movie -> 422.
+  Same 422 applies to any JSON key not present at all in the CatalogEditIn
+  schema (rejected by Pydantic's extra="forbid" before reaching the service).
+}

@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.admin import service as admin_service
 from backlogg.admin.auth import verify_api_key
-from backlogg.admin.schemas import AdminUserListOut, StatsResponse, SyncResponse
+from backlogg.admin.schemas import (
+    AdminUserListOut,
+    CatalogEditIn,
+    CatalogEditOut,
+    StatsResponse,
+    SyncResponse,
+)
 from backlogg.core.database import get_db
 from backlogg.scheduler.jobs import sync_books, sync_games, sync_movies, sync_series
 
@@ -86,3 +92,26 @@ async def list_users(
     return await admin_service.list_users(
         db, is_banned=is_banned, is_admin=is_admin, page=page, limit=limit
     )
+
+
+@router.patch(
+    "/{type}/{slug}",
+    response_model=CatalogEditOut,
+    summary="Manually edit a catalog item",
+    description=(
+        "Update a subset of editable fields on a movie/series/book/game and lock "
+        "them against the next nightly sync. Editable fields per type: movie/game -> "
+        "title, poster_url, release_date, genres; series -> title, poster_url, "
+        "first_air_date, genres; book -> title, poster_url, first_publish_date, "
+        "genres. Set `unlock_fields` (list of field names) to release fields back to "
+        "sync control — applied after the edits in the same request. Unknown or "
+        "non-editable field -> 422. Unknown slug -> 404. Requires `X-API-Key`."
+    ),
+)
+async def edit_catalog_item(
+    type: SyncType,
+    slug: str,
+    payload: CatalogEditIn,
+    db: AsyncSession = Depends(get_db),
+) -> CatalogEditOut:
+    return await admin_service.edit_catalog_item(db, type, slug, payload)

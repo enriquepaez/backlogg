@@ -97,3 +97,50 @@ async def test_upsert_game_multiple_genres_and_platforms(db):
     platform_slugs = {p.slug for p in game.platforms}
     assert "win" in platform_slugs
     assert "ps4" in platform_slugs
+
+
+# ── locked_fields (feature 49 — catalog_manual_edit) ─────────────────────────
+
+
+async def test_upsert_game_skips_locked_scalar_field(db):
+    """A column listed in locked_fields survives a sync upsert untouched."""
+    data1 = _game_data("test-game-locked-title", title="Original Title")
+    game1 = await upsert_game(db, data1)
+    game1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = _game_data("test-game-locked-title", title="Synced Title")
+    game2 = await upsert_game(db, data2)
+
+    assert game2.id == game1.id
+    assert game2.title == "Original Title"
+
+
+async def test_upsert_game_updates_unlocked_field(db):
+    """A column NOT in locked_fields still syncs normally, even if others are locked."""
+    data1 = _game_data("test-game-unlocked-rating", title="Original Title")
+    game1 = await upsert_game(db, data1)
+    game1.locked_fields = ["title"]
+    await db.flush()
+
+    data2 = dict(_game_data("test-game-unlocked-rating", title="Synced Title"))
+    data2["rating_external"] = 5.0
+    game2 = await upsert_game(db, data2)
+
+    assert game2.title == "Original Title"
+    assert float(game2.rating_external) == 5.0
+
+
+async def test_upsert_game_skips_locked_genres(db):
+    """genres in locked_fields skips the genre re-sync block entirely."""
+    data1 = _game_data("test-game-locked-genres")
+    game1 = await upsert_game(db, data1)
+    assert {g.name for g in game1.genres} == {"Action"}
+    game1.locked_fields = ["genres"]
+    await db.flush()
+
+    data2 = _game_data("test-game-locked-genres")
+    data2["genres"] = [{"name": "Puzzle", "slug": "puzzle"}]
+    game2 = await upsert_game(db, data2)
+
+    assert {g.name for g in game2.genres} == {"Action"}

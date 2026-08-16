@@ -25,6 +25,7 @@ CREATE TABLE movies (
     rating_count_external   INTEGER,
     rating_internal         NUMERIC(3,2),             -- v2: aggregated from user_ratings
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
+    locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -55,6 +56,7 @@ CREATE TABLE series (
     rating_count_external   INTEGER,
     rating_internal         NUMERIC(3,2),
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
+    locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -83,6 +85,7 @@ CREATE TABLE books (
     rating_count_external   INTEGER,
     rating_internal         NUMERIC(3,2),
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
+    locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -110,6 +113,7 @@ CREATE TABLE games (
     rating_count_external   INTEGER,
     rating_internal         NUMERIC(3,2),
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
+    locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -119,6 +123,28 @@ CREATE INDEX idx_games_release_date ON games (release_date);
 CREATE INDEX idx_games_game_type ON games (game_type);
 CREATE INDEX idx_games_last_synced_at ON games (last_synced_at);
 ```
+
+### `locked_fields` (feature 49 — catalog_manual_edit)
+
+Present on all four item tables above (`movies`, `series`, `books`, `games`).
+Movies/series/books/games are read-only by default — only the nightly sync
+(`backlogg/scheduler/jobs.py`) writes to them. `locked_fields` is a
+per-**column** lock, not a per-**item** lock: it holds the names of the
+columns an admin has manually corrected via
+`PATCH /v1/admin/{type}/{slug}` (see `docs/api.md`).
+
+- Written to only by the admin edit endpoint (`backlogg/admin/service.py` ->
+  `<domain>.repository.admin_update_*`), which appends every field touched
+  in the request and removes any field named in `unlock_fields`.
+- Read by `upsert_movie`/`upsert_series`/`upsert_book`/`upsert_game` (each
+  domain's `repository.py`) on every sync run: a column listed here is
+  excluded from the `INSERT ... ON CONFLICT DO UPDATE` `SET` clause via a
+  `CASE` expression that keeps the target row's own value instead of the
+  proposed sync value. `"genres"` is a valid entry even though it is not a
+  real column (it is a many-to-many relation) — when present, the genre
+  re-sync block is skipped entirely for that item.
+- Never touched by anything else: a fresh row from the sync always starts
+  with `'{}'` (the column default).
 
 ## External IDs
 

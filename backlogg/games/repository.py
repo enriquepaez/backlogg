@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -134,25 +134,35 @@ async def upsert_game(db: AsyncSession, data: dict) -> Game:
     - ``genres``: list of dicts with ``name`` and ``slug``
     - ``platforms``: list of dicts with ``name`` and ``slug``
     - ``companies``: list of dicts with ``name``, ``slug``, and ``role``
+
+    Per-field admin locks (feature 49 — catalog_manual_edit): any column
+    listed in the existing row's ``locked_fields`` is excluded from the
+    UPDATE, via a CASE per column inside the ON CONFLICT DO UPDATE statement
+    that keeps the target row's own value when it is locked instead of the
+    proposed (``excluded``) value. ``genres`` is not a plain column, so it is
+    checked separately after the reload below, skipping the genre re-sync
+    block when locked. ``platforms``/``companies`` are not admin-editable
+    (see backlogg/admin/service.py's editable-field table) so they are never
+    lockable and always sync normally.
     """
     genres_data: list[dict] = data.pop("genres", [])
     platforms_data: list[dict] = data.pop("platforms", [])
     companies_data: list[dict] = data.pop("companies", [])
 
     # Build INSERT ... ON CONFLICT (slug) DO UPDATE
-    stmt = (
-        pg_insert(Game)
-        .values(**data)
-        .on_conflict_do_update(
-            index_elements=["slug"],
-            set_={
-                k: v
-                for k, v in data.items()
-                if k not in ("id", "slug", "created_at", "rating_count_internal")
-            },
+    insert_stmt = pg_insert(Game).values(**data)
+    set_ = {
+        k: case(
+            (Game.locked_fields.contains([k]), getattr(Game, k)),
+            else_=getattr(insert_stmt.excluded, k),
         )
-        .returning(Game.id)
-    )
+        for k in data
+        if k not in ("id", "slug", "created_at", "rating_count_internal")
+    }
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=["slug"],
+        set_=set_,
+    ).returning(Game.id)
     result = await db.execute(stmt)
     game_id = result.scalar_one()
     await db.flush()
@@ -172,7 +182,7 @@ async def upsert_game(db: AsyncSession, data: dict) -> Game:
     game = game_result.scalar_one()
 
     # ── Genres ──────────────────────────────────────────────────────────────
-    if genres_data:
+    if genres_data and "genres" not in game.locked_fields:
         genre_objects = []
         for g in genres_data:
             genre = await _get_or_create_genre(db, g["name"], g["slug"])
@@ -221,4 +231,37 @@ async def upsert_game(db: AsyncSession, data: dict) -> Game:
             await db.execute(credit_stmt)
         await db.flush()
 
+    return game
+
+
+async def admin_update_game(db: AsyncSession, game: Game, updates: dict) -> Game:
+    """Apply an admin backoffice edit (feature 49) to ``game`` in place.
+
+    ``updates`` keys are a subset of the editable scalar columns (``title``,
+    ``poster_url``, ``release_date``) plus an optional ``genres`` key holding
+    a list of ``{"name", "slug"}`` dicts already resolved by the caller —
+    same shape as ``upsert_game``'s ``genres_data``, so it reuses the same
+    get-or-create + re-sync logic. ``platforms``/``companies`` are not
+    admin-editable and are never touched here. Locked-fields bookkeeping is
+    the caller's responsibility (backlogg/admin/service.py), not this
+    function's.
+    """
+    genres_data = updates.pop("genres", None)
+
+    for key, value in updates.items():
+        setattr(game, key, value)
+
+    if genres_data is not None:
+        genre_objects = []
+        for g in genres_data:
+            genre = await _get_or_create_genre(db, g["name"], g["slug"])
+            genre_objects.append(genre)
+
+        await db.execute(game_genres_join.delete().where(game_genres_join.c.game_id == game.id))
+        for genre in genre_objects:
+            await db.execute(game_genres_join.insert().values(game_id=game.id, genre_id=genre.id))
+        await db.flush()
+        await db.refresh(game, ["genres"])
+
+    await db.flush()
     return game
