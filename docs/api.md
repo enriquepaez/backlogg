@@ -170,6 +170,26 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_pub
 `rating_internal`, `rating_count_internal`, `genres[]`, `credits[]`, `viewer_status`
 (ver Movies). El autor se expone como credit con `role: "AUTHOR"`.
 
+```
+GET /v1/books/{slug}/similar
+→ 200  Hasta 10 libros similares, calculados 100% en local (sin API externa)
+→ 404  Slug no encontrado
+```
+
+Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`:
+cada item incluye `title`, `slug`, `poster_url`, `release_date`
+(`first_publish_date` del libro), `rating_external`. **A diferencia de
+`GET /v1/recommendations`, no incluye un campo `reason`.**
+
+Ranking: prioriza libros que comparten autor con el libro base (vía
+`people`/`credits` con `role: "AUTHOR"`, feature 19) sobre el resto; para
+completar hasta 10 resultados (o si no hay coincidencia de autor) usa
+solapamiento de género, con `rating_external` descendente como desempate
+en ambos niveles. El propio libro nunca aparece en sus resultados. No se
+hace ninguna llamada a Open Library ni se crean `external_ids` nuevos — el
+ranking se calcula enteramente desde datos ya persistidos localmente (ver
+investigación en `feature_list.json`, feature 46).
+
 ### Games
 
 ```

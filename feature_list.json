@@ -969,7 +969,7 @@
         "Tests de repositorio/servicio: prioridad por mismo autor, fallback a género cuando no hay coincidencia de autor, exclusión del propio libro, desempate por rating, libro sin género/autor no rompe (results vacío)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
