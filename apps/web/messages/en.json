@@ -51,6 +51,10 @@
     "feed": {
       "title": "Activity feed — backlogg",
       "description": "See what people you follow are watching, reading and playing — or what's popular right now."
+    },
+    "recommendations": {
+      "title": "Recommendations — backlogg",
+      "description": "Personalized picks based on what you've rated and added to your library."
     }
   },
   "Home": {
@@ -251,6 +255,26 @@
       "previous": "Previous",
       "next": "Next",
       "pageStatus": "Page {page} of {totalPages}"
+    }
+  },
+  "Recommendations": {
+    "heading": "Recommendations",
+    "error": "Something went wrong loading your recommendations. Please try again.",
+    "empty": "No recommendations yet. Rate a few titles or add them to your library to get personalized picks.",
+    "fallback": "We don't have enough data about you yet — here are some popular picks to get you started.",
+    "filters": {
+      "typeLabel": "Type",
+      "all": "All types",
+      "movie": "Movies",
+      "series": "Series",
+      "book": "Books",
+      "game": "Games"
+    },
+    "pagination": {
+      "nav": "Recommendations pagination",
+      "previous": "Previous",
+      "next": "Next",
+      "pageStatus": "Page {page}"
     }
   },
   "Notifications": {
@@ -506,6 +530,7 @@
     "genres": "Genres",
     "showcase": "Showcase",
     "feed": "Feed",
+    "recommendations": "For you",
     "login": "Log in",
     "accountMenu": "Account menu",
     "profile": "My profile",

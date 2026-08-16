@@ -506,7 +506,7 @@
         "Enlaces al detalle; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 27,

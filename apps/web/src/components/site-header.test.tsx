@@ -59,6 +59,9 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("link", { name: "login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "accountMenu" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("notification-bell")).not.toBeInTheDocument();
+    // `/recommendations` (FE-27), like `/feed` (FE-23), is only surfaced in
+    // the primary nav once a session exists.
+    expect(screen.queryByRole("link", { name: "recommendations" })).not.toBeInTheDocument();
   });
 
   it("shows the account menu (name/avatar) and no login link when authenticated", async () => {
@@ -77,5 +80,9 @@ describe("SiteHeader", () => {
     expect(screen.getByText("Alice A.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "login" })).not.toBeInTheDocument();
     expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "recommendations" })).toHaveAttribute(
+      "href",
+      "/recommendations",
+    );
   });
 });
