@@ -80,6 +80,25 @@ docker exec -it backlogg-db psql -U postgres -d backlogg \
 Cierra sesión y vuelve a iniciarla en el frontend para que `/v1/users/me`
 refleje el cambio. Detalle completo en [`docs/schema.md`](docs/schema.md).
 
+### Dar acceso superadmin a un usuario (dev)
+
+`is_superadmin` sigue las mismas reglas que `is_admin`: tampoco tiene endpoint
+API, se activa a mano en la DB por un operador. Es el único rol que puede
+otorgar/revocar `is_admin` a **otros** usuarios, vía
+`POST /v1/admin/users/{username}/grant-admin` y `/revoke-admin`.
+
+```bash
+uv run alembic upgrade head
+docker exec -it backlogg-db psql -U postgres -d backlogg \
+  -c "UPDATE users SET is_superadmin = true WHERE username = '<username>';"
+```
+
+En producción, el `UPDATE` equivalente se ejecuta directamente contra Neon
+(consola SQL o `psql <connection-string>`) — no hay script ni endpoint para
+esto, a propósito. Cierra sesión y vuelve a iniciarla para que
+`/v1/users/me` refleje el cambio. Detalle completo (incluida la política de
+auto-revocación) en [`docs/schema.md`](docs/schema.md).
+
 ## API
 
 | Endpoint | Descripción |

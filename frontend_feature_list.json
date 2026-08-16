@@ -544,7 +544,7 @@
         "Enlace a la review reportada; i18n",
         "typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 29,

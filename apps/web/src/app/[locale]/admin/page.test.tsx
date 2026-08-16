@@ -29,11 +29,15 @@ vi.mock("@/lib/api-fetch", () => ({
   getCurrentUser: () => getCurrentUser(),
 }));
 
-// `AdminStatsPanel` is a Client Component with its own `fetch` call against
-// `/api/admin/stats` — out of scope here (covered by its own test), same
-// rationale `site-header.test.tsx` uses for mocking `NotificationBell`.
+// `AdminStatsPanel`/`AdminReportsPanel` are Client Components with their own
+// `fetch` calls against `/api/admin/stats`/`/api/admin/reports` — out of
+// scope here (each covered by its own test), same rationale
+// `site-header.test.tsx` uses for mocking `NotificationBell`.
 vi.mock("@/components/admin-stats-panel", () => ({
   AdminStatsPanel: () => <div data-testid="admin-stats-panel" />,
+}));
+vi.mock("@/components/admin-reports-panel", () => ({
+  AdminReportsPanel: () => <div data-testid="admin-reports-panel" />,
 }));
 
 const { default: AdminPage } = await import("./page");
@@ -93,6 +97,7 @@ describe("AdminPage", () => {
     render(await AdminPage(buildProps("en")));
 
     expect(screen.getByTestId("admin-stats-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-reports-panel")).toBeInTheDocument();
     expect(redirect).not.toHaveBeenCalled();
   });
 });
