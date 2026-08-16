@@ -1,0 +1,17 @@
+meta {
+  name: List users — sin API key (401)
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/users
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

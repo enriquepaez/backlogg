@@ -828,6 +828,50 @@ Response:
 
 **Auth**: misma protección `X-API-Key` que el sync trigger (`401`/`503`).
 
+### Admin users list
+
+```
+GET /v1/admin/users?is_banned=&is_admin=&page=&limit=
+→ 200
+```
+
+Listado paginado de usuarios para el backoffice admin. Hoy es la única forma
+de descubrir usernames desde el admin: ban/unban (moderación) y
+grant/revoke-admin (roles) exigen conocer el username de antemano.
+
+- `is_banned` / `is_admin` — filtros booleanos opcionales, combinables e
+  independientes. Sin filtros devuelve todos los usuarios.
+- `page` / `limit` — paginación estándar (ver "Conventions" arriba).
+- Orden: `username` ascendente, estable entre páginas.
+
+Response (`AdminUserListOut`):
+```json
+{
+  "items": [
+    {
+      "username": "alice",
+      "display_name": "Alice",
+      "avatar_url": null,
+      "is_admin": false,
+      "is_superadmin": false,
+      "is_banned": false,
+      "created_at": "2026-05-25T02:03:12Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20
+}
+```
+
+Cada entrada **nunca incluye `email`** — decisión deliberada de minimización
+de PII, mismo criterio que `UserOut` público (el email solo se devuelve en
+register/login/`GET /v1/users/me`, nunca en un listado).
+
+**Auth**: misma protección `X-API-Key` que el resto de `/v1/admin/*` de solo
+lectura (`401` sin header o con uno incorrecto; `503` si `ADMIN_API_KEY` no
+está configurada). Sin Bearer — a diferencia de grant-admin/revoke-admin.
+
 ## Metrics
 
 ```

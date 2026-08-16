@@ -4,7 +4,13 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.admin import repository as admin_repo
-from backlogg.admin.schemas import ContentStats, RoleGrantOut, StatsResponse
+from backlogg.admin.schemas import (
+    AdminUserListOut,
+    AdminUserOut,
+    ContentStats,
+    RoleGrantOut,
+    StatsResponse,
+)
 from backlogg.users import repository as users_repo
 from backlogg.users.models import User
 
@@ -55,3 +61,23 @@ async def set_user_admin_role(
     await users_repo.set_user_admin(db, target, is_admin)
     await db.commit()
     return RoleGrantOut(username=target.username, is_admin=is_admin)
+
+
+async def list_users(
+    db: AsyncSession,
+    is_banned: bool | None,
+    is_admin: bool | None,
+    page: int,
+    limit: int,
+) -> AdminUserListOut:
+    """Admin backoffice: paginated users, ordered by ``username`` asc.
+
+    ``is_banned``/``is_admin`` are optional and combinable. Delegates the
+    query to the repository and maps the rows to ``AdminUserOut``, which
+    never includes ``email``.
+    """
+    users, total = await admin_repo.list_users(
+        db, is_banned=is_banned, is_admin=is_admin, page=page, limit=limit
+    )
+    items = [AdminUserOut.model_validate(u) for u in users]
+    return AdminUserListOut(items=items, total=total, page=page, limit=limit)
