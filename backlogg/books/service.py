@@ -14,6 +14,8 @@ from backlogg.books.schemas import (
     BookListOut,
     BookOut,
     BookSortEnum,
+    SimilarBookOut,
+    SimilarBooksOut,
 )
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
@@ -187,3 +189,63 @@ async def get_book(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
     credits = await get_credits_for_item(db, "BOOK", book.id)
     viewer_status = await library_service.get_viewer_status(db, "BOOK", book.id, viewer_id)
     return _book_to_out(book, credits, viewer_status)
+
+
+_MAX_SIMILAR_RESULTS = 10
+
+
+def _book_to_similar_out(book: Book) -> SimilarBookOut:
+    return SimilarBookOut(
+        title=book.title,
+        slug=book.slug,
+        poster_url=book.poster_url,
+        release_date=book.first_publish_date,
+        rating_external=float(book.rating_external) if book.rating_external is not None else None,
+    )
+
+
+async def get_similar_books(db: AsyncSession, slug: str) -> SimilarBooksOut:
+    """Up to 10 similar books, computed 100% locally (no external API calls).
+
+    Priority tiers (feature 46):
+    1. Books sharing an author with the source book (via people/credits,
+       role=AUTHOR — feature 19), ordered by rating_external descending.
+    2. Books sharing a genre with the source book, ordered by number of
+       shared genres descending, then rating_external descending.
+    The source book never appears in its own results.
+    """
+    book = await repo.get_book_by_slug(db, slug)
+    if book is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    results: list[SimilarBookOut] = []
+    excluded_ids: set[int] = {book.id}
+
+    author_ids = await repo.get_author_person_ids(db, book.id)
+    if author_ids:
+        author_books = await repo.get_books_by_same_authors(
+            db, author_ids, book.id, limit=_MAX_SIMILAR_RESULTS
+        )
+        for candidate in author_books:
+            if candidate.id in excluded_ids:
+                continue
+            excluded_ids.add(candidate.id)
+            results.append(_book_to_similar_out(candidate))
+
+    if len(results) < _MAX_SIMILAR_RESULTS:
+        genre_ids = [g.id for g in book.genres]
+        if genre_ids:
+            genre_books = await repo.get_books_by_genre_overlap(
+                db,
+                book.id,
+                genre_ids,
+                excluded_ids,
+                limit=_MAX_SIMILAR_RESULTS - len(results),
+            )
+            for candidate in genre_books:
+                if candidate.id in excluded_ids:
+                    continue
+                excluded_ids.add(candidate.id)
+                results.append(_book_to_similar_out(candidate))
+
+    return SimilarBooksOut(results=results[:_MAX_SIMILAR_RESULTS])

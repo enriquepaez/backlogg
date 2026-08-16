@@ -14,6 +14,20 @@ class BookGenreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SimilarBookOut(BaseModel):
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarBooksOut(BaseModel):
+    results: list[SimilarBookOut]
+
+
 class BookOut(BaseModel):
     id: int
     title: str

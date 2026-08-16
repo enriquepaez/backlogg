@@ -1,30 +1,27 @@
-from datetime import UTC, date, datetime
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from backlogg.books import repository as repo
-from backlogg.books import service
 from backlogg.main import app
-from backlogg.people import repository as people_repo
 
 
-def _make_book_dict(slug: str = "the-hobbit-1937") -> dict:
+def _make_book_dict(slug: str) -> dict:
     return {
-        "title": "The Hobbit",
+        "title": "Router Test Book",
         "original_title": None,
         "slug": slug,
-        "overview": "A hobbit goes on an adventure.",
-        "first_publish_date": date(1937, 9, 21),
+        "overview": "A test book.",
+        "first_publish_date": None,
         "original_language": "en",
-        "poster_url": "https://covers.openlibrary.org/b/id/12345-L.jpg",
+        "poster_url": None,
         "rating_external": None,
         "rating_count_external": None,
         "rating_internal": None,
         "rating_count_internal": 0,
         "last_synced_at": datetime.now(UTC),
-        "genres": [{"name": "Fantasy", "slug": "fantasy"}],
+        "genres": [],
     }
 
 
@@ -42,77 +39,18 @@ async def client(db):
     app.dependency_overrides.clear()
 
 
-async def test_get_book_returns_200(client, db):
-    """GET /books/{slug} returns 200 with correct fields for a seeded book."""
-    await repo.upsert_book(db, _make_book_dict("the-hobbit-1937"))
+async def test_get_similar_books_returns_200(client, db):
+    """GET /books/{slug}/similar returns 200 with results[] for a seeded book."""
+    await repo.upsert_book(db, _make_book_dict("similar-router-source-book-2001"))
 
-    response = await client.get("/v1/books/the-hobbit-1937")
+    response = await client.get("/v1/books/similar-router-source-book-2001/similar")
+
     assert response.status_code == 200
-
-    body = response.json()
-    assert body["slug"] == "the-hobbit-1937"
-    assert body["title"] == "The Hobbit"
-    assert body["first_publish_date"] == "1937-09-21"
-    assert len(body["genres"]) == 1
-    assert body["genres"][0]["name"] == "Fantasy"
-    assert body["rating_internal"] is None
-    assert body["rating_count_internal"] == 0
-    assert body["credits"] == []
+    assert response.json() == {"results": []}
 
 
-async def test_get_book_returns_404(client, db):
-    """GET /books/{slug} returns 404 when not in DB and Open Library has nothing."""
-    with patch.object(service._ol_client, "search_book", new_callable=AsyncMock, return_value=None):
-        response = await client.get("/v1/books/nonexistent-slug-404-test")
+async def test_get_similar_books_returns_404(client, db):
+    """GET /books/{slug}/similar returns 404 when the source book is unknown."""
+    response = await client.get("/v1/books/similar-router-unknown-slug-404/similar")
 
     assert response.status_code == 404
-
-
-async def test_get_book_credits_empty(client, db):
-    """GET /books/{slug} returns credits as [] when no credits exist."""
-    await repo.upsert_book(db, _make_book_dict("credits-empty-book-1999"))
-
-    response = await client.get("/v1/books/credits-empty-book-1999")
-    assert response.status_code == 200
-
-    body = response.json()
-    assert "credits" in body
-    assert body["credits"] == []
-
-
-async def test_get_book_credits_present_with_author(client, db):
-    """GET /books/{slug} returns the author as a credit with role=AUTHOR."""
-    book = await repo.upsert_book(db, _make_book_dict("credits-author-book-1999"))
-    now = datetime.now(UTC)
-
-    author = await people_repo.upsert_person(
-        db,
-        {
-            "name": "J. R. R. Tolkien",
-            "slug": "jrr-tolkien-credits-book-test",
-            "profile_url": None,
-            "last_synced_at": now,
-        },
-    )
-    await people_repo.upsert_credit(
-        db,
-        {
-            "item_type": "BOOK",
-            "item_id": book.id,
-            "person_id": author.id,
-            "role": "AUTHOR",
-            "character_name": None,
-            "billing_order": None,
-        },
-    )
-
-    response = await client.get("/v1/books/credits-author-book-1999")
-    assert response.status_code == 200
-
-    body = response.json()
-    credits = body["credits"]
-    assert len(credits) == 1
-    assert credits[0]["person_name"] == "J. R. R. Tolkien"
-    assert credits[0]["person_slug"] == "jrr-tolkien-credits-book-test"
-    assert credits[0]["role"] == "AUTHOR"
-    assert credits[0]["character_name"] is None

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books import service
-from backlogg.books.schemas import BookListOut, BookOut, BookSortEnum
+from backlogg.books.schemas import BookListOut, BookOut, BookSortEnum, SimilarBooksOut
 from backlogg.core.database import get_db
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
@@ -28,6 +28,19 @@ async def list_books(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_books(db, genre=genre, sort=sort, page=page, limit=limit)
+
+
+@router.get(
+    "/{slug}/similar",
+    response_model=SimilarBooksOut,
+    summary="Similar books",
+    description=(
+        "Up to 10 similar books computed locally: same-author matches (feature 19) "
+        "take priority over genre overlap. No external API calls."
+    ),
+)
+async def get_similar_books(slug: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_similar_books(db, slug)
 
 
 @router.get(

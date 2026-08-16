@@ -1,10 +1,11 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backlogg.books.models import Book, BookGenre, book_genres_join
 from backlogg.books.schemas import BookSortEnum
+from backlogg.shared.models import Credit
 
 
 async def list_books(
@@ -148,3 +149,79 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
         await db.refresh(book, ["genres"])
 
     return book
+
+
+async def get_author_person_ids(db: AsyncSession, book_id: int) -> list[int]:
+    """Return the person IDs credited as AUTHOR for a given book (feature 19)."""
+    result = await db.execute(
+        select(Credit.person_id).where(
+            Credit.item_type == "BOOK",
+            Credit.item_id == book_id,
+            Credit.role == "AUTHOR",
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
+async def get_books_by_same_authors(
+    db: AsyncSession,
+    person_ids: list[int],
+    exclude_book_id: int,
+    limit: int,
+) -> list[Book]:
+    """Return other books credited to any of ``person_ids`` as AUTHOR.
+
+    Excludes the source book itself. Ordered by ``rating_external`` descending
+    (the tie-break used across all "similar" priority tiers).
+    """
+    if not person_ids:
+        return []
+
+    stmt = (
+        select(Book)
+        .join(Credit, (Credit.item_id == Book.id) & (Credit.item_type == "BOOK"))
+        .where(
+            Credit.role == "AUTHOR",
+            Credit.person_id.in_(person_ids),
+            Book.id != exclude_book_id,
+        )
+        .options(selectinload(Book.genres))
+        .distinct()
+        .order_by(Book.rating_external.desc().nulls_last())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def get_books_by_genre_overlap(
+    db: AsyncSession,
+    book_id: int,
+    genre_ids: list[int],
+    exclude_book_ids: set[int],
+    limit: int,
+) -> list[Book]:
+    """Return books sharing at least one genre with ``genre_ids``.
+
+    Excludes the source book and anything already picked by the caller
+    (e.g. author matches). Ordered by number of shared genres descending,
+    then ``rating_external`` descending.
+    """
+    if not genre_ids:
+        return []
+
+    excluded = set(exclude_book_ids) | {book_id}
+    overlap = func.count(book_genres_join.c.genre_id).label("overlap")
+
+    stmt = (
+        select(Book, overlap)
+        .join(book_genres_join, book_genres_join.c.book_id == Book.id)
+        .where(book_genres_join.c.genre_id.in_(genre_ids))
+        .where(Book.id.notin_(excluded) if excluded else literal(True))
+        .options(selectinload(Book.genres))
+        .group_by(Book.id)
+        .order_by(overlap.desc(), Book.rating_external.desc().nulls_last())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all()]
