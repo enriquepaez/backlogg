@@ -601,7 +601,7 @@
         "i18n: reutiliza el namespace ItemDetail existente, sin claves nuevas necesarias",
         "typecheck+lint+build en verde; QA en navegador (book y game con y sin similares)"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 32,

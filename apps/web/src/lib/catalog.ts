@@ -444,16 +444,22 @@ export async function getItemDetail(
   }
 }
 
-/** A `similar` result item — identical shape for movies (`SimilarMovieOut`) and series (`SimilarSeriesOut`). */
+/**
+ * A `similar` result item — identical shape across all four catalog types
+ * (`SimilarMovieOut`/`SimilarSeriesOut`/`SimilarBookOut`/`SimilarGameOut`).
+ */
 export type SimilarItem = components["schemas"]["SimilarMovieOut"];
 
 /**
- * "Similar" items for the item detail page's similar section (FE-10) — only
- * defined for movies and series (`GET /v1/{movies,series}/{slug}/similar`,
- * TMDB recommendations, `docs/api.md`). Books and games have no equivalent
- * endpoint, so this degrades to an empty array for those types without
- * attempting a request. Also degrades to an empty array on any failure
- * (network error or non-200 response) — same spirit as
+ * "Similar" items for the item detail page's similar section (FE-10/FE-32) —
+ * `GET /v1/{type}/{slug}/similar` for all four catalog types: TMDB
+ * recommendations for movies/series, IGDB `similar_games` for games (feature
+ * 45), and a local same-author/genre-overlap computation for books (feature
+ * 46, `docs/api.md`) — same response shape (`{results: [...]}`) either way,
+ * modulo the generated client's per-type wrapper name (`SimilarMoviesOut`,
+ * `SimilarSeriesListOut`, `SimilarBooksOut`, `SimilarGameListOut` — not
+ * symmetric, see `packages/api-client/src/schema.d.ts`). Degrades to an empty
+ * array on any failure (network error or non-200 response) — same spirit as
  * {@link getTrending}/{@link getFeatured}: this is a secondary section, not
  * the point of the page (unlike {@link getItemDetail}, whose failure IS the
  * page).
@@ -462,27 +468,40 @@ export async function getSimilarItems(
   type: CatalogType,
   slug: string,
 ): Promise<SimilarItem[]> {
-  if (type !== "movie" && type !== "series") {
-    return [];
-  }
-
   try {
     const client = getApiClient();
     const next = { revalidate: ITEM_REVALIDATE_SECONDS };
 
-    if (type === "movie") {
-      const { data, response } = await client.GET("/v1/movies/{slug}/similar", {
-        params: { path: { slug } },
-        next,
-      });
-      return response.status === 200 && data ? data.results : [];
+    switch (type) {
+      case "movie": {
+        const { data, response } = await client.GET("/v1/movies/{slug}/similar", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? data.results : [];
+      }
+      case "series": {
+        const { data, response } = await client.GET("/v1/series/{slug}/similar", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? data.results : [];
+      }
+      case "book": {
+        const { data, response } = await client.GET("/v1/books/{slug}/similar", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? data.results : [];
+      }
+      case "game": {
+        const { data, response } = await client.GET("/v1/games/{slug}/similar", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? data.results : [];
+      }
     }
-
-    const { data, response } = await client.GET("/v1/series/{slug}/similar", {
-      params: { path: { slug } },
-      next,
-    });
-    return response.status === 200 && data ? data.results : [];
   } catch (error) {
     console.error(`getSimilarItems(${type}, ${slug}): failed to reach the API`, error);
     return [];

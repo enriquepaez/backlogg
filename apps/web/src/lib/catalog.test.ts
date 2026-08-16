@@ -26,6 +26,8 @@ import {
   movieListPage2Fixture,
   seriesGenresFixture,
   seriesListFixture,
+  similarBooksFixture,
+  similarGamesFixture,
   similarMoviesFixture,
   similarSeriesFixture,
   trendingFixture,
@@ -340,12 +342,16 @@ describe("getSimilarItems", () => {
     );
   });
 
-  it("returns an empty array for books without attempting a request (no similar endpoint)", async () => {
-    expect(await getSimilarItems("book", duneBookFixture.slug)).toEqual([]);
+  it("returns similar books on success", async () => {
+    expect(await getSimilarItems("book", duneBookFixture.slug)).toEqual(
+      similarBooksFixture.results,
+    );
   });
 
-  it("returns an empty array for games without attempting a request (no similar endpoint)", async () => {
-    expect(await getSimilarItems("game", hadesFixture.slug)).toEqual([]);
+  it("returns similar games on success", async () => {
+    expect(await getSimilarItems("game", hadesFixture.slug)).toEqual(
+      similarGamesFixture.results,
+    );
   });
 
   it("degrades to an empty array on a non-200 response", async () => {
@@ -364,6 +370,24 @@ describe("getSimilarItems", () => {
     );
 
     expect(await getSimilarItems("series", chernobylFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array on a non-200 response for books", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/books/:slug/similar`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getSimilarItems("book", duneBookFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array when the network fails for games", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/games/:slug/similar`, () => HttpResponse.error()),
+    );
+
+    expect(await getSimilarItems("game", hadesFixture.slug)).toEqual([]);
   });
 });
 

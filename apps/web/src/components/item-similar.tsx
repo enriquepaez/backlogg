@@ -10,8 +10,11 @@ export type ItemSimilarItem = {
 };
 
 export type ItemSimilarProps = {
-  /** `"movie"` or `"series"` — the only two types with a `similar` endpoint (`docs/api.md`). */
-  type: Extract<CatalogType, "movie" | "series">;
+  /**
+   * All four catalog types now have a `similar` endpoint (`docs/api.md`,
+   * FE-32) — only used here to build each card's `href` (`/${type}/${slug}`).
+   */
+  type: CatalogType;
   items: ItemSimilarItem[];
   heading: string;
   emptyMessage: string;
@@ -19,11 +22,11 @@ export type ItemSimilarProps = {
 
 /**
  * "Similar" section for the item detail page (FE-10 acceptance: "Sección
- * 'similar' ... para movies/series"). Reuses `CatalogCard` (FE-8/FE-9) with
- * an `href` to each similar item's own detail page, so this doubles as a
- * primary discovery path into other item detail pages. Purely
- * presentational, like `CatalogCard`/`CatalogSection` — `heading`/
- * `emptyMessage` come pre-translated from the page.
+ * 'similar' ... para movies/series"; extended to book/game by FE-32). Reuses
+ * `CatalogCard` (FE-8/FE-9) with an `href` to each similar item's own detail
+ * page, so this doubles as a primary discovery path into other item detail
+ * pages. Purely presentational, like `CatalogCard`/`CatalogSection` —
+ * `heading`/`emptyMessage` come pre-translated from the page.
  */
 export function ItemSimilar({ type, items, heading, emptyMessage }: ItemSimilarProps) {
   return (

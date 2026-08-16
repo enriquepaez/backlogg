@@ -84,4 +84,46 @@ describe("ItemSimilar", () => {
 
     expect(screen.getByRole("link")).toHaveAttribute("href", "/series/the-last-of-us");
   });
+
+  it("builds book hrefs under /book/{slug}", () => {
+    render(
+      <ItemSimilar
+        type="book"
+        items={[
+          {
+            title: "Dune Messiah",
+            slug: "OL893416W",
+            poster_url: null,
+            release_date: "1969-10-01",
+            rating_external: 4.1,
+          },
+        ]}
+        heading="You might also like"
+        emptyMessage="No similar titles yet."
+      />,
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/book/OL893416W");
+  });
+
+  it("builds game hrefs under /game/{slug}", () => {
+    render(
+      <ItemSimilar
+        type="game"
+        items={[
+          {
+            title: "Bastion",
+            slug: "bastion",
+            poster_url: null,
+            release_date: "2011-07-20",
+            rating_external: 8.7,
+          },
+        ]}
+        heading="You might also like"
+        emptyMessage="No similar titles yet."
+      />,
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/game/bastion");
+  });
 });

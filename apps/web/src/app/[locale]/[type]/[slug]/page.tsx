@@ -263,14 +263,12 @@ export default async function ItemDetailPage({
         emptyMessage={t("credits.empty")}
       />
 
-      {type === "movie" || type === "series" ? (
-        <ItemSimilar
-          type={type}
-          items={similar}
-          heading={t("similar.heading")}
-          emptyMessage={t("similar.empty")}
-        />
-      ) : null}
+      <ItemSimilar
+        type={type}
+        items={similar}
+        heading={t("similar.heading")}
+        emptyMessage={t("similar.empty")}
+      />
     </div>
   );
 }
