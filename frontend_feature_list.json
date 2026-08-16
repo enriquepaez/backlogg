@@ -602,6 +602,47 @@
         "typecheck+lint+build en verde; QA en navegador (book y game con y sin similares)"
       ],
       "status": "pending"
+    },
+    {
+      "id": 32,
+      "code": "FE-33",
+      "milestone": "M6",
+      "name": "admin_users_directory",
+      "title": "Admin users directory — listado de usuarios con filtros de ban/admin",
+      "description": "Backoffice: tabla de usuarios en el admin, paginada y filtrable por baneados/admins, en vez de tener que escribir el username a ciegas como hoy (FE-30). Cablea las acciones ban/unban y grant/revoke-admin ya construidas en FE-30 a filas concretas del listado, reusando esos route handlers/lógica sin reimplementarlos. Requiere el backend nuevo de la feature 48 (admin_users_list) en feature_list.json.",
+      "depends_on": [
+        29
+      ],
+      "acceptance": [
+        "Nuevo route handler BFF que proxea GET /v1/admin/users?is_banned=&is_admin=&page=&limit= (mismo patrón X-API-Key que admin/stats y admin/reports)",
+        "Tabla paginada de usuarios con badges Admin/Superadmin/Banned por fila",
+        "Filtros por is_banned e is_admin que refrescan el listado (combinables e independientes)",
+        "Cada fila expone ban/unban inline; grant/revoke-admin inline solo si el caller es superadmin (mismo gate que AdminRolesSection de FE-30) — reusa la lógica/confirmación ya construida, no la reimplementa",
+        "La fila afectada refleja el nuevo estado (is_banned/is_admin) tras cada acción, sin recargar toda la página",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 33,
+      "code": "FE-34",
+      "milestone": "M6",
+      "name": "admin_catalog_backoffice",
+      "title": "Admin catalog backoffice — listado y edición de movies/series/books/games",
+      "description": "Backoffice: por cada tipo de contenido, listado filtrable/paginado (mismo patrón que FE-9 browse_by_type) con acción de editar por item. El formulario de edición llama al PATCH admin del backend (feature 49, catalog_manual_edit) y muestra qué campos quedan bloqueados frente al sync tras guardarlos. Requiere el backend nuevo de la feature 49 en feature_list.json.",
+      "depends_on": [
+        10,
+        29
+      ],
+      "acceptance": [
+        "Sección admin con selector de tipo (movies/series/books/games); listado paginado con filtros de género/sort reusando el patrón de FE-9",
+        "Acción 'editar' por item abre un formulario con los campos editables que documenta el backend para ese tipo, precargados con los valores actuales",
+        "Guardar hace PATCH vía un nuevo route handler BFF (mismo patrón X-API-Key que el resto de rutas admin) y refresca la fila/el item con la respuesta",
+        "Los campos en locked_fields se muestran con indicador visual ('editado manualmente, no se sincroniza') y opción de desbloquearlos si el backend lo soporta",
+        "Validación cliente espejo de la del backend; 422 manejado con feedback claro por campo",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
     }
   ]
 }
