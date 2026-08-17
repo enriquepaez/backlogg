@@ -18,6 +18,7 @@ from backlogg.movies.schemas import (
     SimilarMoviesOut,
 )
 from backlogg.people import repository as people_repo
+from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
@@ -153,8 +154,11 @@ async def list_movies(
     sort: MovieSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters,
 ) -> MovieListOut:
-    items, total = await repo.list_movies(db, genre=genre, sort=sort, page=page, limit=limit)
+    items, total = await repo.list_movies(
+        db, genre=genre, sort=sort, page=page, limit=limit, filters=filters
+    )
     list_items = [
         MovieListItemOut(
             id=m.id,

@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.series.models import Series, SeriesGenre, series_genres_join
 from backlogg.series.schemas import SeriesSortEnum
+from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
 async def list_series(
@@ -12,16 +13,31 @@ async def list_series(
     sort: SeriesSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters | None = None,
 ) -> tuple[list[Series], int]:
-    """Return a paginated list of series with optional genre filter and sorting.
+    """Return a paginated list of series with optional genre/search/date/rating filters and sorting.
 
-    Sort by first_air_date for date_desc / date_asc (not release_date).
-    Returns a tuple of (items, total_count).
+    Sort by first_air_date for date_desc / date_asc (not release_date). ``filters``
+    (feature 50) holds ``search``/``date_from``/``date_to``/``rating_internal_min``/
+    ``rating_internal_max``/``rating_external_min``/``rating_external_max`` — all
+    independently optional and AND-combined with ``genre``. Returns a tuple of
+    (items, total_count).
     """
     base_query = select(Series).options(selectinload(Series.genres))
 
     if genre is not None:
         base_query = base_query.join(Series.genres).where(SeriesGenre.slug == genre)
+
+    if filters is not None:
+        clauses = build_catalog_filter_clauses(
+            filters,
+            title_col=Series.title,
+            date_col=Series.first_air_date,
+            rating_internal_col=Series.rating_internal,
+            rating_external_col=Series.rating_external,
+        )
+        if clauses:
+            base_query = base_query.where(*clauses)
 
     # Count query (without pagination)
     count_query = select(func.count()).select_from(base_query.subquery())

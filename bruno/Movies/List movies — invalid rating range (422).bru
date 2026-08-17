@@ -1,0 +1,15 @@
+meta {
+  name: List movies — invalid rating range (422)
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/v1/movies?rating_internal_min=9&rating_internal_max=3
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 422
+}

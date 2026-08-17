@@ -18,6 +18,7 @@ from backlogg.series.schemas import (
     SimilarSeriesListOut,
     SimilarSeriesOut,
 )
+from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
@@ -155,8 +156,11 @@ async def list_series(
     sort: SeriesSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters,
 ) -> SeriesListOut:
-    items, total = await repo.list_series(db, genre=genre, sort=sort, page=page, limit=limit)
+    items, total = await repo.list_series(
+        db, genre=genre, sort=sort, page=page, limit=limit, filters=filters
+    )
     list_items = [
         SeriesListItemOut(
             id=s.id,

@@ -1,8 +1,10 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books import service
-from backlogg.books.schemas import BookListOut, BookOut, BookSortEnum, SimilarBooksOut
+from backlogg.books.schemas import BookListOut, BookListParams, BookOut, SimilarBooksOut
 from backlogg.core.database import get_db
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
@@ -18,16 +20,23 @@ router = APIRouter(prefix="/books", tags=["books"])
     "",
     response_model=BookListOut,
     summary="List books",
-    description="Paginated list of catalogued books (no external fallback); genre filter + sort.",
+    description=(
+        "Paginated list of catalogued books (no external fallback); genre filter + sort, "
+        "plus search/date-range/rating-range filters (feature 50)."
+    ),
 )
 async def list_books(
-    genre: str | None = Query(default=None, description="Filter by genre slug"),
-    sort: BookSortEnum = Query(default=BookSortEnum.rating_desc, description="Sort order"),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    params: Annotated[BookListParams, Query()],
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_books(db, genre=genre, sort=sort, page=page, limit=limit)
+    return await service.list_books(
+        db,
+        genre=params.genre,
+        sort=params.sort,
+        page=params.page,
+        limit=params.limit,
+        filters=params,
+    )
 
 
 @router.get(

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,7 +9,7 @@ from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
 from backlogg.series import service
-from backlogg.series.schemas import SeriesListOut, SeriesOut, SeriesSortEnum, SimilarSeriesListOut
+from backlogg.series.schemas import SeriesListOut, SeriesListParams, SeriesOut, SimilarSeriesListOut
 from backlogg.users.auth import get_current_user, get_current_user_optional
 from backlogg.users.models import User
 
@@ -18,16 +20,23 @@ router = APIRouter(prefix="/series", tags=["series"])
     "",
     response_model=SeriesListOut,
     summary="List series",
-    description="Paginated list of catalogued series (no external fallback); genre filter + sort.",
+    description=(
+        "Paginated list of catalogued series (no external fallback); genre filter + sort, "
+        "plus search/date-range/rating-range filters (feature 50)."
+    ),
 )
 async def list_series(
-    genre: str | None = Query(default=None, description="Filter by genre slug"),
-    sort: SeriesSortEnum = Query(default=SeriesSortEnum.rating_desc, description="Sort order"),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    params: Annotated[SeriesListParams, Query()],
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_series(db, genre=genre, sort=sort, page=page, limit=limit)
+    return await service.list_series(
+        db,
+        genre=params.genre,
+        sort=params.sort,
+        page=params.page,
+        limit=params.limit,
+        filters=params,
+    )
 
 
 @router.get(

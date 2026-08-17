@@ -1,0 +1,25 @@
+meta {
+  name: List movies — search and date-rating filters
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/v1/movies
+  body: none
+  auth: none
+}
+
+params:query {
+  search: dune
+  date_from: 2020-01-01
+  date_to: 2021-12-31
+  rating_internal_min: 3
+  rating_internal_max: 5
+  rating_external_min: 6
+  rating_external_max: 10
+}
+
+assert {
+  res.status: eq 200
+}

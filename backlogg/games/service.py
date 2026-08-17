@@ -16,6 +16,7 @@ from backlogg.games.schemas import (
     SimilarGameOut,
 )
 from backlogg.library import service as library_service
+from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 
@@ -37,8 +38,11 @@ async def list_games(
     sort: GameSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters,
 ) -> GameListOut:
-    items, total = await repo.list_games(db, genre=genre, sort=sort, page=page, limit=limit)
+    items, total = await repo.list_games(
+        db, genre=genre, sort=sort, page=page, limit=limit, filters=filters
+    )
     list_items = [
         GameListItemOut(
             id=g.id,
