@@ -1081,7 +1081,7 @@
         "Tests de repositorio, servicio y endpoint (múltiples logs del mismo item, 401/404/422, no interferencia con user_ratings)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 53,

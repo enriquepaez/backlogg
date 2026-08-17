@@ -801,6 +801,59 @@ Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `rating_external`) y `status`, `created_at`, `updated_at`. `release_date` usa
 `first_air_date` para series y `first_publish_date` para libros.
 
+### Activity log (feature 52)
+
+Historial de sesiones fechadas (rewatch/replay/reread), desacoplado de
+`user_ratings`: un log **no** tiene `score` ni `review_text` propios — la
+puntuación/reseña sigue viviendo solo en `user_ratings`. Mismo contrato en
+los 4 tipos — sustituir `{type}` por `movies`, `series`, `books` o `games`.
+A diferencia de `.../rating` y `.../library`, crear un log **nunca** es un
+upsert: un usuario puede tener múltiples logs del mismo item.
+
+```
+POST /v1/{type}/{slug}/log
+→ 201  Nuevo log entry creado
+→ 401  Sin token
+→ 404  Slug no encontrado
+→ 422  logged_on en el futuro
+```
+
+Body: `{"logged_on": date | null, "rewatch": bool, "note": string | null}` —
+todos opcionales; `logged_on` por defecto es la fecha actual si se omite,
+`rewatch` por defecto `false`. `note` máx. 10000 caracteres.
+
+Response (`LogOut`): `id`, `item_type`, `slug`, `logged_on`, `rewatch`,
+`note`, `created_at`.
+
+```
+GET /v1/{type}/{slug}/log?page=&limit=
+→ 200  Lista paginada, pública, logs del item por logged_on desc
+→ 404  Slug no encontrado
+```
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada item con
+el mismo shape que la respuesta de `POST .../log`.
+
+```
+DELETE /v1/log/{id}
+→ 204  Log propio eliminado
+→ 401  Sin token
+→ 404  No existe o pertenece a otro usuario
+```
+
+`{id}` es el id numérico del log (no tiene slug propio; ruta en raíz, no bajo
+`{type}`).
+
+```
+GET /v1/users/{username}/log?page=&limit=
+→ 200  Público, paginado, cross-type (UNION ALL de movies/series/books/games)
+→ 404  Username no encontrado
+```
+
+Response: `{"items": [...], "total": , "page": , "limit": }` — cada item:
+`id`, `item` (`item_type`, `title`, `slug`, `poster_url`), `logged_on`,
+`rewatch`, `note`, `created_at`. Orden por `logged_on desc`.
+
 ### People
 
 ```

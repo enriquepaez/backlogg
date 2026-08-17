@@ -1,0 +1,29 @@
+meta {
+  name: Get user log
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/v1/users/bruno_tester/log
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated cross-type shape", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+  });
+
+  test("each entry has item and logged_on", function() {
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0]).to.have.property("logged_on");
+      expect(res.body.items[0].item).to.have.property("item_type");
+    }
+  });
+}

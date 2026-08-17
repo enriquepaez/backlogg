@@ -1,0 +1,21 @@
+meta {
+  name: Delete log — not found (404)
+  type: http
+  seq: 9
+}
+
+delete {
+  url: {{baseUrl}}/v1/log/999999999
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
