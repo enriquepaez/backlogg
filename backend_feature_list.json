@@ -236,7 +236,7 @@
       "id": 12,
       "name": "nightly_sync_parallel",
       "title": "Nightly sync paralelo — jobs concurrentes + verificación post-sync",
-      "description": "Refactorizar nightly-sync.yml para ejecutar los 4 syncs como jobs independientes en paralelo (reduciendo el tiempo total al máximo de los 4 en lugar de la suma). Añadir job 'verify' que depende de los 4 y llama a GET /admin/stats para confirmar que el contenido creció. Actualizar referencias a Fly.io → Render en feature_list.json.",
+      "description": "Refactorizar nightly-sync.yml para ejecutar los 4 syncs como jobs independientes en paralelo (reduciendo el tiempo total al máximo de los 4 en lugar de la suma). Añadir job 'verify' que depende de los 4 y llama a GET /admin/stats para confirmar que el contenido creció. Actualizar referencias a Fly.io → Render en backend_feature_list.json.",
       "depends_on": [
         10,
         11
@@ -246,7 +246,7 @@
         "El job 'verify' declara needs: [sync-movies, sync-series, sync-books, sync-games] y solo corre si todos pasan",
         "El job 'verify' llama a GET /admin/stats y falla si el endpoint no devuelve 200",
         "La URL base sigue leyéndose de secrets.RENDER_API_URL",
-        "Las referencias a Fly.io en feature_list.json (id:9) se actualizan a Render",
+        "Las referencias a Fly.io en backend_feature_list.json (id:9) se actualizan a Render",
         "bash init.sh termina en verde"
       ],
       "status": "done"
@@ -1058,6 +1058,90 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 52,
+      "name": "activity_log_entries",
+      "title": "Activity log entries — historial de sesiones fechadas (rewatch/replay/reread) separado de la review",
+      "description": "Motivado por el audit de diseño (progress/audit_ux_2026-08-18.md): user_ratings es una sola fila por (user, item) con upsert full-replace — no hay forma de registrar una segunda sesión (rewatch de una película, otra partida, una relectura) con su propia fecha, a diferencia del diario de Letterboxd o los múltiples logs de Backloggd. Nueva tabla library_logs, desacoplada de user_ratings (feature 28) para no tocar el scoring/agregados existentes: un log es un evento ligero (fecha, rewatch bool, nota opcional), sin score ni review_text propios — la puntuación/reseña sigue viviendo exclusivamente en user_ratings. Mismo patrón polimórfico item_type/item_id que library_entries (feature 31), pero SIN unique constraint por (user, item): un usuario puede tener múltiples logs del mismo item.",
+      "depends_on": [
+        27,
+        28,
+        31
+      ],
+      "acceptance": [
+        "Modelo LibraryLog (id, user_id, item_type, item_id, logged_on date, rewatch bool default false, note text nullable, created_at) sin UniqueConstraint(user_id, item_type, item_id) — múltiples logs del mismo item están permitidos",
+        "Migración Alembic crea la tabla library_logs",
+        "POST /{type}/{slug}/log (auth) crea un log entry nuevo; logged_on por defecto es la fecha actual si no se envía; logged_on en el futuro → 422",
+        "GET /{type}/{slug}/log — público, paginado, logs del item ordenados por logged_on desc",
+        "GET /users/{username}/log — público, paginado, cross-type vía UNION ALL (mismo estilo que feed/library), historial de logs del usuario",
+        "DELETE /log/{id} (auth) borra un log propio; 404 si no existe o pertenece a otro usuario",
+        "No modifica el modelo UserRating ni su UniqueConstraint(user_id, item_type, item_id) existente — un log no reemplaza ni requiere una review",
+        "docs/schema.md documenta library_logs; docs/api.md documenta los endpoints nuevos",
+        "Tests de repositorio, servicio y endpoint (múltiples logs del mismo item, 401/404/422, no interferencia con user_ratings)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 53,
+      "name": "rating_score_granularity",
+      "title": "Rating half-star granularity — score de enteros 1-5 a pasos de 0.5",
+      "description": "Motivado por el audit de diseño: user_ratings.score es Integer con CHECK 1-5 (un entero completo por voto), mientras Letterboxd permite medias estrellas y Backloggd granularidad más fina — la puntuación de backlogg es notablemente menos expresiva. Ampliar score a pasos de 0.5 entre 1.0 y 5.0. Los valores enteros existentes (1-5) siguen siendo válidos bajo la nueva restricción (son un subconjunto de los pasos de 0.5), así que no hace falta backfill de datos.",
+      "depends_on": [
+        28
+      ],
+      "acceptance": [
+        "Migración Alembic altera user_ratings.score de Integer a Numeric(2,1) con CHECK (score >= 1 AND score <= 5 AND score * 2 = FLOOR(score * 2)) — fuerza pasos de 0.5; los valores enteros ya existentes pasan la nueva CHECK sin modificación",
+        "RatingIn/RatingOut aceptan score como valor decimal en pasos de 0.5; un valor que no sea múltiplo de 0.5, o fuera de 1-5, devuelve 422",
+        "El recálculo de rating_internal (AVG, feature 28) sigue funcionando correctamente con los nuevos valores decimales; si rating_internal en movies/series/books/games no soporta ya decimales, se ajusta su tipo en la misma migración",
+        "docs/schema.md y docs/api.md actualizados con el nuevo rango/paso de score",
+        "Tests de servicio y endpoint: score=3.5 aceptado, score=3.3 rechazado (422), score=1 y score=5 siguen aceptados, recálculo de rating_internal con valores decimales mixtos",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 54,
+      "name": "feed_event_types_expansion",
+      "title": "Feed events table — ampliar el feed más allá de reviews (status changes)",
+      "description": "Motivado por el audit de diseño: hoy backlogg/feed/repository.py hace UNION ALL directamente sobre user_ratings — lo único que puede aparecer en el feed es 'alguien puntuó/reseñó algo'. Introduce una tabla activity_events genérica, poblada al crear/actualizar una rating (mismo hecho que hoy alimenta el feed) y al cambiar el status de una library_entry a completed (feature 31) — la transición más narrativamente útil ('X terminó Y'). Desacopla el feed de leer user_ratings directamente, para que añadir tipos de evento futuros no requiera tocar el modelo de feed otra vez. Scope explícito: solo status_completed genera evento, no el resto de transiciones (want/in_progress/dropped) — para no saturar el feed de ruido de bajo valor.",
+      "depends_on": [
+        30,
+        31
+      ],
+      "acceptance": [
+        "Nueva tabla activity_events (id, user_id, event_type enum [rating_created, status_completed], item_type, item_id, rating_id nullable FK a user_ratings, created_at)",
+        "Al crear/actualizar una rating con score o review_text (feature 28) se inserta/actualiza un evento rating_created para esa rating (sin duplicar eventos en updates sucesivos de la misma rating)",
+        "Al hacer PUT library con status=completed (feature 31) se inserta un evento status_completed; otras transiciones de estado no generan evento",
+        "GET /feed (feature 30) lee de activity_events en vez de UNION directo sobre user_ratings; el contrato de respuesta existente (autor, item, score, review_text, like_count, created_at) se mantiene para rating_created; status_completed usa una forma mínima (autor, item, created_at, sin score/review_text/like_count)",
+        "tab=popular sigue rankeando solo por like_count — status_completed (sin likes) no participa en ese ranking",
+        "Migración de backfill: al desplegar, se generan eventos rating_created a partir de las filas existentes de user_ratings, para no vaciar el feed following de la noche a la mañana",
+        "docs/schema.md y docs/api.md actualizados",
+        "Tests de repositorio y endpoint cubriendo ambos tipos de evento, el backfill y ambas pestañas del feed",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 55,
+      "name": "notifications_event_types_expansion",
+      "title": "Notification types — actividad de status_completed de tus seguidos",
+      "description": "Motivado por el audit de diseño: NOTIFICATION_TYPES solo cubre new_follower y review_like — nada avisa cuando alguien a quien sigues termina algo. Añade el tipo user_completed, generado a partir de los eventos status_completed de la feature 54. Scope explícito: solo notifica a followers directos (no fan-out a followers de followers) y solo en la transición a completed, alineado 1:1 con el evento de feed nuevo — no se añade notificación por cada rating nueva, para no saturar (decisión de scope explícita, mismo criterio que la 54).",
+      "depends_on": [
+        32,
+        54
+      ],
+      "acceptance": [
+        "NOTIFICATION_TYPES se amplía con user_completed sin romper el CHECK constraint existente de la tabla notifications",
+        "Al insertarse un evento status_completed (feature 54) para un usuario, se genera una notificación user_completed para cada follower directo de ese usuario",
+        "Si el usuario vuelve a completar el mismo item tras cambiar de estado y volver a completed, se genera una nueva notificación por cada ocurrencia (mismo comportamiento que review_like, que notifica cada like sin deduplicar histórico)",
+        "GET /notifications devuelve el nuevo tipo con un contrato compatible con el resto de notificaciones (actor, target, created_at)",
+        "docs/schema.md y docs/api.md actualizados",
+        "Tests: generación en status_completed, notificación solo a followers directos, contrato de GET /notifications con el nuevo tipo",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

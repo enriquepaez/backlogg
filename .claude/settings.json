@@ -32,7 +32,7 @@
       "Bash(git checkout*)",
       "Bash(git branch*)",
       "Bash(gh pr create*)",
-      "Edit(feature_list.json)",
+      "Edit(backend_feature_list.json)",
       "Edit(progress/*)",
       "Write(progress/*)",
       "Edit(backlogg/*)",

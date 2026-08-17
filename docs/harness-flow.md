@@ -40,7 +40,7 @@ Leader (Claude principal)
   ├─ [Si CHANGES_REQUESTED] → vuelve al paso 3 con feedback
   │
   ├─ 5. Finaliza (APPROVED)
-  │     ├─ Marca done en feature_list.json
+  │     ├─ Marca done en backend_feature_list.json
   │     ├─ Escribe línea en progress/history.md
   │     └─ Limpia archivos temporales de progress/
   │
@@ -58,7 +58,7 @@ Leader (Claude principal)
 **Acción:** Dice algo como _"empieza la feature 1"_, _"arranca"_ o _"siguiente feature"_.
 
 El leader entra en acción. No espera instrucciones más detalladas — tiene toda
-la información necesaria en `feature_list.json` y `progress/current.md`.
+la información necesaria en `backend_feature_list.json` y `progress/current.md`.
 
 ---
 
@@ -70,7 +70,7 @@ la información necesaria en `feature_list.json` y `progress/current.md`.
 
 1. **Lee `AGENTS.md`** — para orientarse en la estructura del repo.
 
-2. **Lee `feature_list.json`** — identifica qué feature corresponde:
+2. **Lee `backend_feature_list.json`** — identifica qué feature corresponde:
    - Si el usuario nombró una feature concreta → la usa.
    - Si no → elige la de menor `id` cuyo `status == "pending"` y cuyos
      `depends_on` están todos en `"done"`.
@@ -88,7 +88,7 @@ la información necesaria en `feature_list.json` y `progress/current.md`.
    ```
 
 ### Archivos leídos en esta fase
-- `AGENTS.md`, `feature_list.json`, `progress/current.md`
+- `AGENTS.md`, `backend_feature_list.json`, `progress/current.md`
 
 ### Archivos modificados en esta fase
 - Ninguno todavía.
@@ -154,7 +154,7 @@ El leader lanza el implementer con una instrucción concisa que incluye:
 - `progress/current.md` (el plan escrito por el leader)
 
 **Paso 2 — Marca la feature `in_progress`**  
-Edita `feature_list.json`:
+Edita `backend_feature_list.json`:
 ```json
 "status": "in_progress"
 ```
@@ -211,7 +211,7 @@ Crea `progress/impl_1.md` con exactamente:
 - backlogg/core/config.py (creado)
 - tests/conftest.py (creado)
 - tests/test_shared_models.py (creado)
-- feature_list.json (modificado: status → in_progress)
+- backend_feature_list.json (modificado: status → in_progress)
 
 ## Resumen
 [descripción de decisiones de diseño]
@@ -236,7 +236,7 @@ blocked -> ver progress/current.md
 
 ### Archivos escritos por el implementer
 - Código fuente en `backlogg/`, tests en `tests/`, migraciones en `alembic/`
-- `feature_list.json` (status → in_progress)
+- `backend_feature_list.json` (status → in_progress)
 - `progress/impl_<id>.md`
 
 ### Posibles bloqueos
@@ -355,7 +355,7 @@ Este ciclo se repite hasta obtener `APPROVED`.
 
 **Actor:** Leader
 
-1. **Marca la feature como `done`** en `feature_list.json`:
+1. **Marca la feature como `done`** en `backend_feature_list.json`:
    ```json
    "status": "done"
    ```
@@ -371,7 +371,7 @@ Este ciclo se repite hasta obtener `APPROVED`.
    - Elimina `progress/review_1.md`
 
 ### Archivos modificados en esta fase
-- `feature_list.json` (status → done)
+- `backend_feature_list.json` (status → done)
 - `progress/history.md` (append de una línea)
 - `progress/current.md` (vaciado)
 - `progress/impl_<id>.md` (eliminado)
@@ -496,12 +496,12 @@ como advertencia antes de que la sesión se cierre.
 
 | Fase | Archivos leídos | Archivos escritos |
 |---|---|---|
-| 1 — Arranque | AGENTS.md, feature_list.json, progress/current.md | — |
-| 2 — Plan | docs/*, feature_list.json | progress/current.md |
-| 3 — Implementación | AGENTS.md, docs/architecture.md, docs/conventions.md, progress/current.md, alembic/versions/* | backlogg/**, tests/**, alembic/**, feature_list.json (in_progress), progress/impl_N.md |
+| 1 — Arranque | AGENTS.md, backend_feature_list.json, progress/current.md | — |
+| 2 — Plan | docs/*, backend_feature_list.json | progress/current.md |
+| 3 — Implementación | AGENTS.md, docs/architecture.md, docs/conventions.md, progress/current.md, alembic/versions/* | backlogg/**, tests/**, alembic/**, backend_feature_list.json (in_progress), progress/impl_N.md |
 | 4 — Revisión | progress/impl_N.md, backlogg/**, docs/architecture.md, docs/conventions.md, CHECKPOINTS.md | progress/review_N.md |
 | 5 — Correcciones | progress/review_N.md | backlogg/**, progress/current.md, progress/impl_N.md |
-| 6 — Finalización | progress/review_N.md | feature_list.json (done), progress/history.md, ~~progress/impl_N.md~~, ~~progress/review_N.md~~ |
+| 6 — Finalización | progress/review_N.md | backend_feature_list.json (done), progress/history.md, ~~progress/impl_N.md~~, ~~progress/review_N.md~~ |
 | 7 — QA | — | — (checklist al usuario) |
 | 8 — Ship | — | git commit + push + PR |
 | 9 — Hook cierre | — | /tmp/backlogg_init.log |

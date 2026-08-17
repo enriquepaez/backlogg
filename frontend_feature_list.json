@@ -552,7 +552,7 @@
       "milestone": "M6",
       "name": "moderation_actions",
       "title": "Acciones de moderación",
-      "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin. Incluye otorgar/revocar el rol admin (users.is_admin) a otro usuario — acción visible y accionable únicamente si el usuario actual es superadmin (users.is_superadmin, activable solo a mano en DB, nunca vía API), no basta con ser admin normal. Requiere el backend nuevo de la feature 47 (admin_role_management) en feature_list.json.",
+      "description": "Ocultar/mostrar reviews y banear/desbanear usuarios desde el admin. Incluye otorgar/revocar el rol admin (users.is_admin) a otro usuario — acción visible y accionable únicamente si el usuario actual es superadmin (users.is_superadmin, activable solo a mano en DB, nunca vía API), no basta con ser admin normal. Requiere el backend nuevo de la feature 47 (admin_role_management) en backend_feature_list.json.",
       "depends_on": [
         27
       ],
@@ -571,7 +571,7 @@
       "milestone": "M2",
       "name": "avatar_upload",
       "title": "Subida de avatar (imagen) en vez de solo URL",
-      "description": "Permitir subir una imagen de perfil desde /settings en vez de pegar solo una URL externa. Requiere prerrequisito de backend no existente hoy: no hay endpoint de subida ni capa de almacenamiento de archivos (avatar_url es hoy un VARCHAR(1000) de solo texto, docs/schema.md:350). Bloqueada hasta que exista una feature de backend equivalente (storage/upload) en feature_list.json.",
+      "description": "Permitir subir una imagen de perfil desde /settings en vez de pegar solo una URL externa. Requiere prerrequisito de backend no existente hoy: no hay endpoint de subida ni capa de almacenamiento de archivos (avatar_url es hoy un VARCHAR(1000) de solo texto, docs/schema.md:350). Bloqueada hasta que exista una feature de backend equivalente (storage/upload) en backend_feature_list.json.",
       "depends_on": [
         18
       ],
@@ -609,7 +609,7 @@
       "milestone": "M6",
       "name": "admin_users_directory",
       "title": "Admin users directory — listado de usuarios con filtros de ban/admin",
-      "description": "Backoffice: shell de admin con sidebar persistente (Users/Movies/Series/Books/Games — solo Users funcional en esta pasada, el resto stub 'coming soon' para FE-34). Sección Users: tabla real (no cards) paginada y filtrable por baneados/admins, de solo lectura — cada fila navega a una página de detalle del usuario (perfil completo: bio, avatar, follower/following counts, library_counts, rol/estado admin, y sus reviews) donde viven las acciones ban/unban y grant/revoke-admin (ya construidas en FE-30, reusadas sin reimplementar su lógica/confirmación). Requiere un endpoint backend nuevo GET /v1/admin/users/{username} (no existía forma de consultar un único usuario por username en el admin; añadido como parte de esta feature, mismo patrón X-API-Key que el resto de /v1/admin/*, reusa users_repo.get_user_by_username ya usado por grant/revoke-admin) — tratado como ampliación de backend fuera de feature_list.json, mismo criterio que otras features frontend que revelaron un gap de backend menor (p.ej. FE-24 notifications). Reemplaza el diseño previo en cards con acciones inline por fila (versión anterior de esta misma feature, ya revertida).",
+      "description": "Backoffice: shell de admin con sidebar persistente (Users/Movies/Series/Books/Games — solo Users funcional en esta pasada, el resto stub 'coming soon' para FE-34). Sección Users: tabla real (no cards) paginada y filtrable por baneados/admins, de solo lectura — cada fila navega a una página de detalle del usuario (perfil completo: bio, avatar, follower/following counts, library_counts, rol/estado admin, y sus reviews) donde viven las acciones ban/unban y grant/revoke-admin (ya construidas en FE-30, reusadas sin reimplementar su lógica/confirmación). Requiere un endpoint backend nuevo GET /v1/admin/users/{username} (no existía forma de consultar un único usuario por username en el admin; añadido como parte de esta feature, mismo patrón X-API-Key que el resto de /v1/admin/*, reusa users_repo.get_user_by_username ya usado por grant/revoke-admin) — tratado como ampliación de backend fuera de backend_feature_list.json, mismo criterio que otras features frontend que revelaron un gap de backend menor (p.ej. FE-24 notifications). Reemplaza el diseño previo en cards con acciones inline por fila (versión anterior de esta misma feature, ya revertida).",
       "depends_on": [
         29
       ],
@@ -634,7 +634,7 @@
       "milestone": "M6",
       "name": "admin_catalog_backoffice",
       "title": "Admin catalog backoffice — listado y edición de movies/series/books/games",
-      "description": "Backoffice: por cada tipo de contenido, listado filtrable/paginado (mismo patrón que FE-9 browse_by_type) con acción de editar por item. El formulario de edición llama al PATCH admin del backend (feature 49, catalog_manual_edit) y muestra qué campos quedan bloqueados frente al sync tras guardarlos. Requiere el backend nuevo de la feature 49 en feature_list.json. FE-33 (admin_users_directory) ya construye el shell de /admin con sidebar (Users/Movies/Series/Books/Games) y deja /admin/movies, /admin/series, /admin/books, /admin/games como stubs 'coming soon' — esta feature rellena esas 4 rutas dentro del shell existente, sin crear un layout/sidebar nuevo. UX de referencia a replicar (confirmada con el usuario tras QA de FE-33, ver /admin/users): tabla real (no cards) con filtros como <Select> con etiqueta de texto VISIBLE por campo (no solo aria-label, para que no se confundan entre sí como pasó en la primera versión de FE-33), campo de búsqueda con debounce, y un indicador de 'mostrando N de TOTAL' junto a la tabla/filtros — mismo patrón para movies/series/books/games que el que ya tiene /admin/users.",
+      "description": "Backoffice: por cada tipo de contenido, listado filtrable/paginado (mismo patrón que FE-9 browse_by_type) con acción de editar por item. El formulario de edición llama al PATCH admin del backend (feature 49, catalog_manual_edit) y muestra qué campos quedan bloqueados frente al sync tras guardarlos. Requiere el backend nuevo de la feature 49 en backend_feature_list.json. FE-33 (admin_users_directory) ya construye el shell de /admin con sidebar (Users/Movies/Series/Books/Games) y deja /admin/movies, /admin/series, /admin/books, /admin/games como stubs 'coming soon' — esta feature rellena esas 4 rutas dentro del shell existente, sin crear un layout/sidebar nuevo. UX de referencia a replicar (confirmada con el usuario tras QA de FE-33, ver /admin/users): tabla real (no cards) con filtros como <Select> con etiqueta de texto VISIBLE por campo (no solo aria-label, para que no se confundan entre sí como pasó en la primera versión de FE-33), campo de búsqueda con debounce, y un indicador de 'mostrando N de TOTAL' junto a la tabla/filtros — mismo patrón para movies/series/books/games que el que ya tiene /admin/users.",
       "depends_on": [
         10,
         29,
@@ -647,7 +647,7 @@
         "Los campos en locked_fields se muestran con indicador visual ('editado manualmente, no se sincroniza') y opción de desbloquearlos si el backend lo soporta",
         "Validación cliente espejo de la del backend; 422 manejado con feedback claro por campo",
         "i18n; typecheck+lint+build en verde; QA en navegador",
-        "Filtros de búsqueda por nombre (search, substring), rango de fecha (date_from/date_to) y rango de rating (rating_internal_min/max, rating_external_min/max), consumiendo el backend de la feature 50 (catalog_search_filters, feature_list.json, ya done) — añadido tras QA manual de la primera pasada de esta feature"
+        "Filtros de búsqueda por nombre (search, substring), rango de fecha (date_from/date_to) y rango de rating (rating_internal_min/max, rating_external_min/max), consumiendo el backend de la feature 50 (catalog_search_filters, backend_feature_list.json, ya done) — añadido tras QA manual de la primera pasada de esta feature"
       ],
       "status": "done"
     },
@@ -672,6 +672,183 @@
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
       "status": "done"
+    },
+    {
+      "id": 35,
+      "code": "FE-36",
+      "milestone": "M3",
+      "name": "library_nav_entry",
+      "title": "Library nav entry — enlace a tu biblioteca en el header y el menú de cuenta",
+      "description": "Del audit de diseño (progress/audit_ux_2026-08-18.md): la página de biblioteca (FE-20/21, /u/[username]/library) no tiene ningún punto de entrada en la navegación — ni el header (site-header.tsx) ni el dropdown de cuenta (user-nav.tsx) enlazan a ella; hoy solo se llega desde el perfil propio, a dos clics. Añadir un enlace directo en el header (visible solo autenticado, junto a Feed/For you) y en el dropdown de cuenta, apuntando a /u/{username}/library del usuario autenticado.",
+      "depends_on": [
+        21
+      ],
+      "acceptance": [
+        "El header (site-header.tsx) muestra un enlace a la biblioteca cuando el usuario está autenticado, en la misma posición/estilo que Feed y For you",
+        "El dropdown de cuenta (user-nav.tsx) incluye la misma entrada, apuntando a /u/{username}/library del usuario actual",
+        "El enlace no aparece si no hay sesión iniciada",
+        "i18n: sin strings hardcodeados (clave next-intl es/en)",
+        "typecheck+lint+build en verde; QA en navegador confirma el enlace en ambas ubicaciones"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 36,
+      "code": "FE-37",
+      "milestone": "M3",
+      "name": "library_status_colors",
+      "title": "Library status colors — un color por estado, reutilizado en toda la app",
+      "description": "Del audit de diseño: los 4 estados de biblioteca (want/in_progress/completed/dropped) se renderizan como botones/pills idénticos, sin ninguna distinción visual — ni en el selector de estado del detalle de item (viewer-status-slot.tsx) ni en las tabs de la página de biblioteca. Definir 4 tokens de color (uno por estado) en el design system y aplicarlos de forma consistente en: el selector de estado del item, las tabs de /u/[username]/library, y un badge pequeño superpuesto en CatalogCard cuando el item ya está en la biblioteca del usuario autenticado.",
+      "depends_on": [
+        3,
+        21
+      ],
+      "acceptance": [
+        "4 tokens de color nuevos (uno por estado) definidos junto al resto de tokens del design system, para light y dark",
+        "El selector de estado en el item detail usa el color del estado activo, distinguible de un vistazo entre los 4",
+        "Las tabs de la página de biblioteca usan los mismos colores para su estado activo",
+        "CatalogCard muestra un badge con el color de estado cuando el item está en la biblioteca del usuario autenticado (usa el viewer_status ya presente en el detalle; en grids sin viewer_status por item, el badge se omite en esta iteración)",
+        "Contraste AA en ambos temas para los 4 colores sobre su fondo",
+        "typecheck+lint+build en verde; QA visual: los 4 estados se distinguen sin leer el texto"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 37,
+      "code": "FE-38",
+      "milestone": "M3",
+      "name": "library_sort",
+      "title": "Library sort — ordenar tu biblioteca por fecha, rating o título",
+      "description": "Del audit de diseño: /u/[username]/library no tiene ningún control de orden, solo filtros de estado/tipo. Añadir un selector de orden (actualizado recientemente, tu puntuación, título, fecha de estreno/publicación) consistente con el patrón ya usado en browse (?sort= de FE-9).",
+      "depends_on": [
+        21
+      ],
+      "acceptance": [
+        "Selector de orden visible en /u/[username]/library con las opciones: actualizado recientemente (default), tu puntuación, título (A-Z), fecha de estreno/publicación",
+        "El orden seleccionado se refleja en la query string (compartible/recargable)",
+        "Combinable con los filtros de estado y tipo ya existentes",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 38,
+      "code": "FE-39",
+      "milestone": "M3",
+      "name": "library_counts_profile",
+      "title": "Library counts on profile — conteos por estado visibles en el perfil, no solo en las tabs",
+      "description": "Del audit de diseño: los conteos por estado (library_counts, ya expuestos por el backend en el perfil, feature 31) hoy solo aparecen como números pequeños dentro de las etiquetas de las tabs de la página de biblioteca. Añadir un resumen visible directamente en la página de perfil (/u/[username]) — los 4 conteos con el color de estado de FE-37, enlazando a la vista filtrada correspondiente de la biblioteca.",
+      "depends_on": [
+        21,
+        22,
+        36
+      ],
+      "acceptance": [
+        "La página de perfil muestra los 4 conteos (want/in_progress/completed/dropped) de forma prominente, con los colores de estado de FE-37",
+        "Cada conteo enlaza a /u/{username}/library?status={status} ya filtrado",
+        "Visible tanto en el perfil propio como en el de otros usuarios (los conteos ya son públicos, feature 31)",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 39,
+      "code": "FE-40",
+      "milestone": "M0",
+      "name": "design_system_accent_pass",
+      "title": "Design system accent pass — color de marca y tipografía de titulares",
+      "description": "Del audit de diseño: todos los tokens semánticos de globals.css (background, primary, secondary, muted, accent, border) son oklch con croma cero, en ambos temas — no hay ningún color de marca en la app; --font-heading está aliasado a --font-sans, así que titulares y cuerpo de texto usan la misma tipografía en todos los pesos. Introducir un acento de marca real para acciones primarias/enlaces/foco (separado de los colores de estado de FE-37, que son semánticos, no de marca) y una tipografía de titulares distinta de Geist Sans.",
+      "depends_on": [
+        3
+      ],
+      "acceptance": [
+        "Nuevo token --accent (y variante hover/focus) con croma real, definido para light y dark, usado en botones primarios, enlaces y estados de foco visibles",
+        "--font-heading deja de ser un alias de --font-sans; se define una tipografía de titulares propia, cargada sin depender de un CDN externo bloqueado por CSP",
+        "Los componentes shadcn existentes (button, input, etc.) consumen los tokens actualizados sin overrides ad-hoc dispersos por el código",
+        "Contraste AA verificado para el nuevo acento sobre ambos fondos (light/dark)",
+        "typecheck+lint+build en verde; QA visual: home, item detail y library muestran el nuevo acento y titular de forma consistente"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 40,
+      "code": "FE-41",
+      "milestone": "M3",
+      "name": "activity_log_ui",
+      "title": "Activity log UI — registrar y ver tus sesiones (rewatch/replay/reread) en el item",
+      "description": "Consume el backend nuevo de la feature 52 (activity_log_entries, backend_feature_list.json) — hoy solo existe un rating/review único por item; el audit señala que no hay forma de loggear una segunda sesión con su propia fecha (rewatch, replay, relectura). Añadir en el item detail un control para registrar una nueva entrada de log (fecha, checkbox de rewatch, nota opcional), separado del widget de rating existente (FE-18/19), y una lista del historial de logs propios para ese item.",
+      "depends_on": [
+        19,
+        21
+      ],
+      "acceptance": [
+        "Control para registrar un log en el item detail, independiente del rating widget existente, que llama a POST /{type}/{slug}/log (feature 52)",
+        "Muestra el historial de logs propios para ese item (fecha, rewatch sí/no, nota) con opción de borrar una entrada",
+        "No sustituye ni requiere el rating/review existente — ambos coexisten en el item detail",
+        "i18n; typecheck+lint+build en verde; QA en navegador"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 41,
+      "code": "FE-42",
+      "milestone": "M4",
+      "name": "feed_notifications_richer_ui",
+      "title": "Feed & notifications richer UI — renderizar los nuevos tipos de evento",
+      "description": "Consume el backend nuevo de las features 54 (feed_event_types_expansion) y 55 (notifications_event_types_expansion) de backend_feature_list.json. Hoy feed-entry-list.tsx solo sabe renderizar la forma de una review (estrellas+texto) y el dropdown de notificaciones cae a texto genérico para cualquier tipo no reconocido. Añadir una variante de renderizado para eventos status_completed en el feed (p.ej. 'X completó Y', con poster e icono de estado en su color de FE-37) y para la notificación user_completed (icono/copy propio en vez del fallback genérico).",
+      "depends_on": [
+        24,
+        25,
+        36
+      ],
+      "acceptance": [
+        "feed-entry-list.tsx renderiza correctamente entradas de tipo status_completed (autor, item, fecha, sin estrellas/texto de review) además de las de rating_created ya soportadas",
+        "El dropdown de notificaciones muestra copy e icono específicos para user_completed en vez de caer al texto genérico de fallback",
+        "i18n: nuevas claves de mensaje para ambos tipos, es/en",
+        "typecheck+lint+build en verde; QA en navegador con datos de ambos tipos de evento"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 42,
+      "code": "FE-43",
+      "milestone": "M3",
+      "name": "library_board_view",
+      "title": "Library board view — vista de tablero por estado, alternativa a la grid plana",
+      "description": "Del audit de diseño: /u/[username]/library es siempre una grid plana de posters, sin vista de tablero por estado como referencia visual del backlog. Añadir un toggle grid/board en la página de biblioteca propia; la vista de tablero muestra una columna por estado (want/in_progress/completed/dropped) con los tokens de color de FE-37, cada una con sus items como cards compactas. Sin drag-and-drop en esta iteración — cambiar de estado se sigue haciendo desde el item detail, decisión explícita de scope para no acoplar esta feature a un rediseño del selector de estado.",
+      "depends_on": [
+        21,
+        36,
+        37
+      ],
+      "acceptance": [
+        "Toggle grid/board visible en /u/[username]/library (propia biblioteca; en perfiles ajenos se mantiene solo la grid, de solo lectura)",
+        "La vista de tablero muestra 4 columnas (una por estado), con el color de estado de FE-37 en el encabezado de cada columna y el conteo de items",
+        "Cada card en el tablero enlaza al item detail; sin drag-and-drop en esta iteración",
+        "La preferencia grid/board persiste entre visitas (localStorage) por usuario",
+        "Responsive: en mobile las columnas se apilan o son scrolleables horizontalmente sin romper el layout",
+        "i18n; typecheck+lint+build en verde; QA en navegador en desktop y mobile"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 43,
+      "code": "FE-44",
+      "milestone": "M3",
+      "name": "rating_widget_half_star",
+      "title": "Rating widget half-star — pasos de 0.5 en el selector de estrellas",
+      "description": "Consume el backend nuevo de la feature 53 (rating_score_granularity, backend_feature_list.json). El rating widget actual (rating-widget.tsx) solo permite estrellas enteras. Extenderlo para aceptar medio-punto (click en la mitad izquierda/derecha de una estrella), manteniendo compatibilidad visual con las estrellas de solo-lectura ya renderizadas en reviews existentes (item-reviews.tsx, feed-entry-list.tsx, user-review-card.tsx), que hoy asumen enteros.",
+      "depends_on": [
+        19,
+        20
+      ],
+      "acceptance": [
+        "rating-widget.tsx acepta selección en pasos de 0.5 (1.0 a 5.0)",
+        "Los componentes de solo-lectura que muestran estrellas (item-reviews.tsx, feed-entry-list.tsx, user-review-card.tsx) renderizan medias estrellas correctamente para scores existentes y nuevos",
+        "Ratings enteros ya existentes se siguen mostrando igual (sin regresión visual)",
+        "i18n; typecheck+lint+build en verde; QA en navegador: seleccionar 3.5, guardar, recargar y verificar que persiste"
+      ],
+      "status": "pending"
     }
   ]
 }

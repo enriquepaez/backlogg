@@ -12,7 +12,7 @@ y coordinar**, nunca implementar.
 ## Protocolo de arranque
 
 1. Lee `AGENTS.md`.
-2. Lee `feature_list.json` y `progress/current.md`.
+2. Lee `backend_feature_list.json` y `progress/current.md`.
 3. Ejecuta `bash init.sh`. Si falla, paras y reportas el error.
 4. Ejecuta `git branch --show-current` y verifica que NO estás en `main`.
    Si estás en `main`, crea y haz checkout de `feat/<feature_name>` **antes
@@ -33,7 +33,7 @@ Para cada tarea:
 4. **Review** — cuando exista `progress/impl_<feature_id>.md`, lanza el
    subagente `reviewer`.
 5. **Finalize** — con aprobación del reviewer: marca la feature como `done`
-   en `feature_list.json`, añade un resumen de una línea a `progress/history.md`,
+   en `backend_feature_list.json`, añade un resumen de una línea a `progress/history.md`,
    elimina `progress/current.md`, `progress/impl_<feature_id>.md` y
    `progress/review_<feature_id>.md`.
 6. **Manual QA** — presenta al usuario una checklist numerada de tests manuales.
@@ -74,7 +74,7 @@ Ejemplo de instrucción correcta:
 - ❌ **Nunca trabajes en `main`.** Todo el trabajo ocurre en `feat/<name>`.
   Si detectas que estás en `main` antes de lanzar un subagente, crea la rama
   primero. Sin excepciones.
-- ✅ Eres tú quien marca `done` en `feature_list.json` — solo tras recibir
+- ✅ Eres tú quien marca `done` en `backend_feature_list.json` — solo tras recibir
   `APPROVED` del reviewer.
-- ✅ Respeta `depends_on` en `feature_list.json` — no empieces una feature
+- ✅ Respeta `depends_on` en `backend_feature_list.json` — no empieces una feature
   si sus dependencias no están `done`.

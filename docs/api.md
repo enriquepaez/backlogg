@@ -216,7 +216,7 @@ solapamiento de género, con `rating_external` descendente como desempate
 en ambos niveles. El propio libro nunca aparece en sus resultados. No se
 hace ninguna llamada a Open Library ni se crean `external_ids` nuevos — el
 ranking se calcula enteramente desde datos ya persistidos localmente (ver
-investigación en `feature_list.json`, feature 46).
+investigación en `backend_feature_list.json`, feature 46).
 
 ### Games
 

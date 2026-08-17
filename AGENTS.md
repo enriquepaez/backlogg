@@ -11,14 +11,14 @@
 1. Ejecuta `bash init.sh` y verifica que termina sin errores. Si falla, **para**
    y resuelve el entorno antes de tocar código.
 2. Lee `progress/current.md` para entender en qué estado quedó la última sesión.
-3. Lee `feature_list.json` y elige **una** tarea con estado `pending`. No
+3. Lee `backend_feature_list.json` y elige **una** tarea con estado `pending`. No
    trabajes en más de una a la vez.
 
 ## 2. Mapa del repositorio
 
 | Archivo / carpeta              | Qué contiene                                                | Cuándo leerlo         |
 |--------------------------------|-------------------------------------------------------------|-----------------------|
-| `feature_list.json`            | Lista de features con estado (pending/in_progress/done)     | Siempre, al empezar   |
+| `backend_feature_list.json`    | Lista de features con estado (pending/in_progress/done)     | Siempre, al empezar   |
 | `frontend_feature_list.json`   | Backlog de features de frontend (`apps/web`), mismo formato | Al trabajar en frontend |
 | `issues_list.json`             | Backlog de bugs/issues (open/resolved), fuente de verdad — `progress/issues.md` quedó obsoleto | Al reportar o resolver un bug |
 | `progress/current.md`          | Estado de la sesión actual                                  | Siempre, al empezar   |
@@ -55,7 +55,7 @@
 ## 4. Cómo elegir una tarea
 
 ```
-1. Abre feature_list.json
+1. Abre backend_feature_list.json
 2. Filtra por status == "pending"
 3. Respeta depends_on — no empieces una feature si sus dependencias no están "done"
 4. Coge la de menor "id" que tenga sus dependencias satisfechas
@@ -76,7 +76,7 @@
 2. **Plan** — escribe el plan en `progress/current.md`.
 3. **Implement** — lanza el subagente `implementer`.
 4. **Review** — cuando exista `progress/impl_<feature_id>.md`, lanza `reviewer`.
-   El reviewer guarda su veredicto en `progress/review_<feature_id>.md` **solo si la tarea forma parte del `feature_list.json`**. Para bugfixes o cambios puntuales fuera del backlog, devuelve el veredicto únicamente como texto — sin crear ningún archivo en `progress/`.
+   El reviewer guarda su veredicto en `progress/review_<feature_id>.md` **solo si la tarea forma parte del `backend_feature_list.json`**. Para bugfixes o cambios puntuales fuera del backlog, devuelve el veredicto únicamente como texto — sin crear ningún archivo en `progress/`.
 5. **Finalize** — con aprobación del reviewer: marca `done`, mueve resumen a
    `progress/history.md`, limpia archivos temporales de `progress/`.
 6. **Manual QA** — presenta al usuario una checklist de tests manuales.
@@ -94,7 +94,7 @@
 Antes de terminar:
 
 1. Ejecuta `bash init.sh` — todo verde.
-2. Si la tarea está acabada: marca `status: "done"` en `feature_list.json`.
+2. Si la tarea está acabada: marca `status: "done"` en `backend_feature_list.json`.
 3. Mueve el resumen de `progress/current.md` al final de `progress/history.md`.
 4. Vacía `progress/current.md`.
 5. No dejes archivos temporales, `print()` de debug, ni TODOs sin contexto.
