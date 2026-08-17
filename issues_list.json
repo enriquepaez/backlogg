@@ -1,6 +1,6 @@
 {
   "project": "backlogg",
-  "description": "Backlog de bugs/issues detectados en QA manual (backend + frontend), fuera del flujo de feature_list.json/frontend_feature_list.json. Fuente de verdad para bugs — no usar progress/issues.md, que queda obsoleto y no se actualiza más.",
+  "description": "Backlog de bugs/issues detectados en QA manual (backend + frontend), fuera del flujo de backend_feature_list.json/frontend_feature_list.json. Fuente de verdad para bugs — no usar progress/issues.md, que queda obsoleto y no se actualiza más.",
   "rules": {
     "valid_status": ["open", "resolved"],
     "valid_severity": ["low", "medium", "high"],

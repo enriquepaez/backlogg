@@ -36,7 +36,7 @@ fi
 echo ""
 echo "── 2. Verificando archivos base del harness ────────────"
 
-for f in AGENTS.md feature_list.json progress/current.md \
+for f in AGENTS.md backend_feature_list.json progress/current.md \
           docs/architecture.md docs/conventions.md docs/verification.md \
           docs/schema.md docs/api.md docs/external-apis.md \
           CHECKPOINTS.md; do
@@ -49,12 +49,12 @@ for f in AGENTS.md feature_list.json progress/current.md \
 done
 
 echo ""
-echo "── 3. Validando feature_list.json ──────────────────────"
+echo "── 3. Validando backend_feature_list.json ──────────────────────"
 
 python3 - <<'PY'
 import json, sys
 try:
-    data = json.load(open("feature_list.json"))
+    data = json.load(open("backend_feature_list.json"))
     valid = {"pending", "in_progress", "done", "blocked"}
     in_progress = [f for f in data["features"] if f["status"] == "in_progress"]
     if len(in_progress) > 1:
@@ -64,9 +64,9 @@ try:
         if f["status"] not in valid:
             print(f"[FAIL]  Estado inválido en feature {f['id']}: {f['status']}")
             sys.exit(1)
-    print(f"[OK]    feature_list.json válido ({len(data['features'])} features)")
+    print(f"[OK]    backend_feature_list.json válido ({len(data['features'])} features)")
 except Exception as e:
-    print(f"[FAIL]  feature_list.json inválido: {e}")
+    print(f"[FAIL]  backend_feature_list.json inválido: {e}")
     sys.exit(1)
 PY
 

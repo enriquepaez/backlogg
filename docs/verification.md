@@ -13,8 +13,8 @@ Este script ejecuta en orden:
 
 1. **Comprobación del entorno** — verifica que Python y uv están disponibles.
 2. **Comprobación de archivos del harness** — verifica que existen todos los
-   archivos de infraestructura (`AGENTS.md`, `feature_list.json`, etc.).
-3. **Validación de `feature_list.json`** — formato correcto, máximo 1 feature
+   archivos de infraestructura (`AGENTS.md`, `backend_feature_list.json`, etc.).
+3. **Validación de `backend_feature_list.json`** — formato correcto, máximo 1 feature
    `in_progress` simultáneamente.
 4. **Lint** (`uv run ruff check .`) — cero errores.
 5. **Format check** (`uv run ruff format --check .`) — cero issues.
