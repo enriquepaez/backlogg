@@ -901,6 +901,30 @@ export interface paths {
         patch: operations["update_me_v1_users_me_patch"];
         trace?: never;
     };
+    "/v1/users/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload own avatar
+         * @description Upload an avatar image (multipart/form-data, field `file`). Accepts image/jpeg, image/png or image/webp up to 5MB, stores it in S3-compatible storage and overwrites avatar_url with the resulting public URL. Requires auth.
+         */
+        post: operations["upload_avatar_v1_users_me_avatar_post"];
+        /**
+         * Delete own avatar
+         * @description Delete the current avatar from storage (if any) and set avatar_url to null. Idempotent — a no-op 204 when avatar_url is already null. Requires auth.
+         */
+        delete: operations["delete_avatar_v1_users_me_avatar_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{username}": {
         parameters: {
             query?: never;
@@ -1410,6 +1434,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** Body_upload_avatar_v1_users_me_avatar_post */
+        Body_upload_avatar_v1_users_me_avatar_post: {
+            /** File */
+            file: string;
         };
         /** BookGenreOut */
         BookGenreOut: {
@@ -4633,6 +4662,57 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    upload_avatar_v1_users_me_avatar_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_avatar_v1_users_me_avatar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_avatar_v1_users_me_avatar_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

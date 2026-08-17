@@ -1,0 +1,17 @@
+meta {
+  name: Delete avatar — sin token (401)
+  type: http
+  seq: 24
+}
+
+delete {
+  url: {{baseUrl}}/v1/users/me/avatar
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

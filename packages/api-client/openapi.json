@@ -3345,6 +3345,71 @@
         ]
       }
     },
+    "/v1/users/me/avatar": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Upload own avatar",
+        "description": "Upload an avatar image (multipart/form-data, field `file`). Accepts image/jpeg, image/png or image/webp up to 5MB, stores it in S3-compatible storage and overwrites avatar_url with the resulting public URL. Requires auth.",
+        "operationId": "upload_avatar_v1_users_me_avatar_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_avatar_v1_users_me_avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Delete own avatar",
+        "description": "Delete the current avatar from storage (if any) and set avatar_url to null. Idempotent \u2014 a no-op 204 when avatar_url is already null. Requires auth.",
+        "operationId": "delete_avatar_v1_users_me_avatar_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/users/{username}": {
       "get": {
         "tags": [
@@ -4858,6 +4923,20 @@
         ],
         "title": "AdminUserOut",
         "description": "A single user row in the admin backoffice listing.\n\nDeliberately excludes ``email`` \u2014 same PII-minimization criterion as the\npublic ``UserOut`` (email is only ever returned by register/login/me,\nnever by an admin-facing or public listing)."
+      },
+      "Body_upload_avatar_v1_users_me_avatar_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_avatar_v1_users_me_avatar_post"
       },
       "BookGenreOut": {
         "properties": {

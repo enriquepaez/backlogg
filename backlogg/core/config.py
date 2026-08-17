@@ -22,6 +22,24 @@ class Settings(BaseSettings):
 
     ADMIN_API_KEY: str = ""
 
+    # S3-compatible object storage, used to store user avatar uploads. When
+    # neither R2_ENDPOINT_URL nor R2_ACCOUNT_ID (or any of the other R2_* vars)
+    # is set, the avatar upload/delete endpoints return a controlled 503
+    # instead of failing with an unconfigured client. R2_PUBLIC_BASE_URL has
+    # no trailing slash.
+    #
+    # R2_ENDPOINT_URL overrides the endpoint the boto3 client points at. Left
+    # empty, it defaults to real Cloudflare R2 built from R2_ACCOUNT_ID. Set
+    # it to point at MinIO in dev (http://localhost:9000) or Supabase Storage
+    # in prod (https://<project-ref>.supabase.co/storage/v1/s3) — any
+    # S3-compatible provider. See backlogg/users/adapters/r2_storage.py.
+    R2_ENDPOINT_URL: str = ""
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = ""
+    R2_PUBLIC_BASE_URL: str = ""
+
     JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     # Short-lived access token (minutes). Long-lived sessions are handled by
