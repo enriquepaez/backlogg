@@ -613,6 +613,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List users
+         * @description Paginated user listing for the admin backoffice, ordered by `username` asc. Optional `is_banned`/`is_admin` filters, combinable and independent — omitting all filters returns every user. `search` is a case-insensitive substring match against `username`, `display_name` OR `email`, combinable with the other filters; empty/whitespace-only is treated as absent. Never includes `email` in the response (PII minimization) even when matched by `search`. Requires `X-API-Key`.
+         */
+        get: operations["list_users_v1_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{username}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a single user's admin detail
+         * @description Admin-facing detail for a single user, by username. Never includes `email` (PII minimization). Unknown username -> 404. Requires `X-API-Key`.
+         */
+        get: operations["get_user_v1_admin_users__username__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/{type}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Manually edit a catalog item
+         * @description Update a subset of editable fields on a movie/series/book/game and lock them against the next nightly sync. Editable fields per type: movie/game -> title, poster_url, release_date, genres; series -> title, poster_url, first_air_date, genres; book -> title, poster_url, first_publish_date, genres. Set `unlock_fields` (list of field names) to release fields back to sync control — applied after the edits in the same request. Unknown or non-editable field -> 422. Unknown slug -> 404. Requires `X-API-Key`.
+         */
+        patch: operations["edit_catalog_item_v1_admin__type___slug__patch"];
+        trace?: never;
+    };
     "/v1/genres": {
         parameters: {
             query?: never;
@@ -1313,6 +1373,44 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminUserListOut */
+        AdminUserListOut: {
+            /** Items */
+            items: components["schemas"]["AdminUserOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Limit */
+            limit: number;
+        };
+        /**
+         * AdminUserOut
+         * @description A single user row in the admin backoffice listing.
+         *
+         *     Deliberately excludes ``email`` — same PII-minimization criterion as the
+         *     public ``UserOut`` (email is only ever returned by register/login/me,
+         *     never by an admin-facing or public listing).
+         */
+        AdminUserOut: {
+            /** Username */
+            username: string;
+            /** Display Name */
+            display_name: string | null;
+            /** Avatar Url */
+            avatar_url: string | null;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Is Superadmin */
+            is_superadmin: boolean;
+            /** Is Banned */
+            is_banned: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** BookGenreOut */
         BookGenreOut: {
             /** Id */
@@ -1388,6 +1486,66 @@ export interface components {
          * @enum {string}
          */
         BookSortEnum: "rating_desc" | "rating_asc" | "date_desc" | "date_asc" | "title_asc";
+        /**
+         * CatalogEditIn
+         * @description Admin edit payload for ``PATCH /v1/admin/{type}/{slug}`` (feature 49).
+         *
+         *     Only the fields relevant to the request's ``{type}`` may be set — see
+         *     docs/api.md for the per-type editable field table. A field that exists on
+         *     this schema but is not editable for the given ``type`` raises 422 at the
+         *     service layer; a key that is not part of this schema at all is rejected
+         *     by Pydantic itself (``extra="forbid"``) before it ever reaches the
+         *     service.
+         *
+         *     Every field explicitly set here (``exclude_unset`` — a field left at its
+         *     default is treated as "not provided") is persisted AND added to the
+         *     item's ``locked_fields``, so the next nightly sync leaves it untouched.
+         *
+         *     ``unlock_fields`` is the chosen desync mechanism (see ADR in docs/api.md):
+         *     a list of field names to release back to sync control, applied *after*
+         *     the edits above within the same request — so a field present in both the
+         *     edit payload and ``unlock_fields`` ends up unlocked, not locked.
+         */
+        CatalogEditIn: {
+            /** Title */
+            title?: string | null;
+            /** Poster Url */
+            poster_url?: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** First Air Date */
+            first_air_date?: string | null;
+            /** First Publish Date */
+            first_publish_date?: string | null;
+            /** Genres */
+            genres?: string[] | null;
+            /** Unlock Fields */
+            unlock_fields?: string[] | null;
+        };
+        /**
+         * CatalogEditOut
+         * @description Result of a catalog manual edit — the item's current editable state.
+         */
+        CatalogEditOut: {
+            /** Type */
+            type: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Poster Url */
+            poster_url: string | null;
+            /** Release Date */
+            release_date?: string | null;
+            /** First Air Date */
+            first_air_date?: string | null;
+            /** First Publish Date */
+            first_publish_date?: string | null;
+            /** Genres */
+            genres: string[];
+            /** Locked Fields */
+            locked_fields: string[];
+        };
         /** ContentStats */
         ContentStats: {
             /** Count */
@@ -3912,6 +4070,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_users_v1_admin_users_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by ban status */
+                is_banned?: boolean | null;
+                /** @description Filter by admin role */
+                is_admin?: boolean | null;
+                /** @description Case-insensitive substring match against username, display_name or email */
+                search?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: {
+                "x-api-key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_v1_admin_users__username__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string;
+            };
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_catalog_item_v1_admin__type___slug__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string;
+            };
+            path: {
+                type: "movie" | "series" | "book" | "game";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEditOut"];
                 };
             };
             /** @description Validation Error */

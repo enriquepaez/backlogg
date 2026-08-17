@@ -912,7 +912,7 @@ Response:
 ### Admin users list
 
 ```
-GET /v1/admin/users?is_banned=&is_admin=&page=&limit=
+GET /v1/admin/users?is_banned=&is_admin=&search=&page=&limit=
 → 200
 ```
 
@@ -922,6 +922,12 @@ grant/revoke-admin (roles) exigen conocer el username de antemano.
 
 - `is_banned` / `is_admin` — filtros booleanos opcionales, combinables e
   independientes. Sin filtros devuelve todos los usuarios.
+- `search` — texto libre opcional, combinable con `is_banned`/`is_admin`.
+  Compara (case-insensitive, `ILIKE` con comodines a ambos lados) contra
+  `username`, `display_name` **y** `email`. Vacío o solo espacios tras
+  `strip()` se trata igual que ausente (sin filtro). El email solo se usa
+  para **localizar** la fila — nunca se devuelve en la respuesta (ver más
+  abajo).
 - `page` / `limit` — paginación estándar (ver "Conventions" arriba).
 - Orden: `username` ascendente, estable entre páginas.
 
@@ -947,11 +953,44 @@ Response (`AdminUserListOut`):
 
 Cada entrada **nunca incluye `email`** — decisión deliberada de minimización
 de PII, mismo criterio que `UserOut` público (el email solo se devuelve en
-register/login/`GET /v1/users/me`, nunca en un listado).
+register/login/`GET /v1/users/me`, nunca en un listado). Esto aplica incluso
+cuando la fila fue localizada vía `search` sobre el propio `email`.
 
 **Auth**: misma protección `X-API-Key` que el resto de `/v1/admin/*` de solo
 lectura (`401` sin header o con uno incorrecto; `503` si `ADMIN_API_KEY` no
 está configurada). Sin Bearer — a diferencia de grant-admin/revoke-admin.
+
+### Admin user detail
+
+```
+GET /v1/admin/users/{username}
+→ 200
+```
+
+Detalle admin de un único usuario, por `username`. Complementa el listado
+anterior: la tabla del backoffice usa esto para renderizar la página de
+detalle de un usuario (con recarga/URL directa, sin depender de haber
+navegado desde el listado).
+
+Response (`AdminUserOut`, mismo shape que cada `item` de "Admin users list"):
+```json
+{
+  "username": "alice",
+  "display_name": "Alice",
+  "avatar_url": null,
+  "is_admin": false,
+  "is_superadmin": false,
+  "is_banned": false,
+  "created_at": "2026-05-25T02:03:12Z"
+}
+```
+
+- **Nunca incluye `email`** — mismo criterio de minimización de PII que el
+  listado.
+- `username` inexistente → `404`.
+
+**Auth**: misma protección `X-API-Key` que "Admin users list" (`401`/`503`).
+Sin Bearer.
 
 ## Metrics
 

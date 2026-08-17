@@ -1,4 +1,3 @@
-import { Star } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
@@ -6,13 +5,12 @@ import { CatalogCard } from "@/components/catalog-card";
 import { FollowWidget } from "@/components/follow-widget";
 import { ProfileReviewsPagination } from "@/components/profile-reviews-pagination";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { UserReviewCard } from "@/components/user-review-card";
 import { Link } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
-import { formatDate } from "@/lib/format-date";
 import { getUserLibrary, getUserProfile, LIBRARY_STATUSES, type LibraryEntry, type UserProfile } from "@/lib/library";
 import { toCatalogType } from "@/lib/search";
-import { getUserReviews, type UserReview } from "@/lib/user-content";
+import { getUserReviews } from "@/lib/user-content";
 import { cn } from "@/lib/utils";
 
 /** Page size for the reviews section — matches `PAGE_LIMIT` in `item-reviews.tsx`. */
@@ -24,8 +22,6 @@ const REVIEWS_PAGE_SIZE = 10;
  * fill exactly one row of the `lg:grid-cols-6` layout below.
  */
 const LIBRARY_PREVIEW_SIZE = 6;
-
-const SCORES = [1, 2, 3, 4, 5] as const;
 
 type RawParam = string | string[] | undefined;
 
@@ -126,7 +122,12 @@ export default async function UserProfilePage({
           <>
             <div className="flex flex-col gap-4">
               {reviewsResult.items.map((review) => (
-                <ProfileReviewCard key={review.id} review={review} locale={locale} t={t} />
+                <UserReviewCard
+                  key={review.id}
+                  review={review}
+                  locale={locale}
+                  dateLabel={(date) => t("reviews.dateLabel", { date })}
+                />
               ))}
             </div>
             <ProfileReviewsPagination username={username} page={page} totalPages={totalReviewPages} />
@@ -259,61 +260,3 @@ function LibrarySummary({
   );
 }
 
-function ProfileReviewCard({
-  review,
-  locale,
-  t,
-}: {
-  review: UserReview;
-  locale: string;
-  t: ProfileTranslator;
-}) {
-  const itemType = toCatalogType(review.item.item_type);
-  const href = itemType ? `/${itemType}/${review.item.slug}` : undefined;
-
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-          <div className="flex flex-col gap-2">
-            {href ? (
-              <Link href={href} className="w-fit text-sm font-medium hover:underline">
-                {review.item.title}
-              </Link>
-            ) : (
-              <p className="text-sm font-medium">{review.item.title}</p>
-            )}
-            <ReviewStars score={review.score} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {t("reviews.dateLabel", { date: formatDate(review.created_at, locale) })}
-          </p>
-        </div>
-
-        {review.review_text ? (
-          <p className="max-w-2xl text-sm leading-6 whitespace-pre-wrap text-foreground">
-            {review.review_text}
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ReviewStars({ score }: { score: number | null }) {
-  return (
-    <div className="flex items-center gap-1">
-      {SCORES.map((value) => (
-        <Star
-          key={value}
-          aria-hidden
-          className={
-            score !== null && value <= score
-              ? "size-4 fill-current text-yellow-500"
-              : "size-4 text-muted-foreground"
-          }
-        />
-      ))}
-    </div>
-  );
-}

@@ -1,0 +1,21 @@
+meta {
+  name: Get user — usuario inexistente (404)
+  type: http
+  seq: 28
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/users/nobody-does-not-exist
+  body: none
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}
