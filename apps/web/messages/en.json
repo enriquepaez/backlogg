@@ -354,7 +354,6 @@
         "unknown": "Something went wrong loading reports. Please try again."
       }
     },
-    "comingSoon": "This section is coming soon.",
     "sidebar": {
       "nav": "Admin sections",
       "overview": "Overview",
@@ -470,6 +469,81 @@
           "forbidden": "Only a superadmin can grant or revoke the admin role.",
           "unauthorized": "The configured admin key was rejected by the backend, or your session expired. Please try again.",
           "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+          "unknown": "Something went wrong. Please try again."
+        }
+      }
+    },
+    "catalog": {
+      "description": "Browse and manually correct {type}. Manually editing a field locks it against the next nightly sync.",
+      "dateLabel": {
+        "movie": "Release date",
+        "series": "First air date",
+        "book": "First publish date",
+        "game": "Release date"
+      },
+      "filters": {
+        "genreLabel": "Genre",
+        "genreAll": "All genres",
+        "sortLabel": "Sort by",
+        "sort": {
+          "rating_desc": "Highest rated",
+          "rating_asc": "Lowest rated",
+          "date_desc": "Newest",
+          "date_asc": "Oldest",
+          "title_asc": "Title (A–Z)"
+        },
+        "searchLabel": "Search by title",
+        "searchPlaceholder": "Search…",
+        "dateFromLabel": "Date from",
+        "dateToLabel": "Date to",
+        "dateRangeInvalid": "\"Date from\" must not be after \"Date to\".",
+        "ratingInternalMinLabel": "Backlogg rating (min)",
+        "ratingInternalMaxLabel": "Backlogg rating (max)",
+        "ratingInternalRangeInvalid": "The minimum Backlogg rating must not be greater than the maximum.",
+        "ratingExternalMinLabel": "External rating (min)",
+        "ratingExternalMaxLabel": "External rating (max)",
+        "ratingExternalRangeInvalid": "The minimum external rating must not be greater than the maximum.",
+        "moreFilters": "More filters",
+        "clearFilters": "Clear filters"
+      },
+      "empty": "No titles match these filters.",
+      "error": "Something went wrong loading this list. Please try again.",
+      "resultsCount": "Showing {shown} of {total}",
+      "pagination": {
+        "nav": "Pagination",
+        "previous": "Previous",
+        "next": "Next",
+        "pageStatus": "Page {page} of {totalPages}"
+      },
+      "columns": {
+        "item": "Title",
+        "genres": "Genres",
+        "rating": "Rating",
+        "actions": "Actions"
+      },
+      "emptyValue": "—",
+      "editAction": "Edit",
+      "dialog": {
+        "description": "Manually editing a field locks it against the next nightly sync. Untouched fields keep syncing normally.",
+        "loading": "Loading current values…",
+        "heading": "Edit “{title}”",
+        "fields": {
+          "title": "Title",
+          "posterUrl": "Poster URL",
+          "genres": "Genres (comma-separated)"
+        },
+        "lockedBadge": "Edited manually — won't sync",
+        "unlockLabel": "Unlock (let the next sync overwrite this field)",
+        "cancel": "Cancel",
+        "save": "Save changes",
+        "saving": "Saving…",
+        "success": "Changes saved.",
+        "errors": {
+          "title": "Title can't be empty.",
+          "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+          "not_found": "This item no longer exists.",
+          "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+          "validation": "Some of these values were rejected by the backend. Please review them and try again.",
           "unknown": "Something went wrong. Please try again."
         }
       }

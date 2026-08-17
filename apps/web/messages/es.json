@@ -354,7 +354,6 @@
         "unknown": "Algo salió mal al cargar los reportes. Inténtalo de nuevo."
       }
     },
-    "comingSoon": "Esta sección estará disponible próximamente.",
     "sidebar": {
       "nav": "Secciones de administración",
       "overview": "Resumen",
@@ -471,6 +470,81 @@
           "unauthorized": "La clave de administrador configurada fue rechazada por el backend, o tu sesión expiró. Inténtalo de nuevo.",
           "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
           "unknown": "Algo salió mal. Inténtalo de nuevo."
+        }
+      }
+    },
+    "catalog": {
+      "description": "Explora y corrige manualmente {type}. Editar un campo manualmente lo bloquea frente a la próxima sincronización nocturna.",
+      "dateLabel": {
+        "movie": "Fecha de estreno",
+        "series": "Fecha de primera emisión",
+        "book": "Fecha de primera publicación",
+        "game": "Fecha de lanzamiento"
+      },
+      "filters": {
+        "genreLabel": "Género",
+        "genreAll": "Todos los géneros",
+        "sortLabel": "Ordenar por",
+        "sort": {
+          "rating_desc": "Mejor valorados",
+          "rating_asc": "Peor valorados",
+          "date_desc": "Más recientes",
+          "date_asc": "Más antiguos",
+          "title_asc": "Título (A–Z)"
+        },
+        "searchLabel": "Buscar por título",
+        "searchPlaceholder": "Buscar…",
+        "dateFromLabel": "Fecha desde",
+        "dateToLabel": "Fecha hasta",
+        "dateRangeInvalid": "\"Fecha desde\" no puede ser posterior a \"Fecha hasta\".",
+        "ratingInternalMinLabel": "Valoración Backlogg (mín.)",
+        "ratingInternalMaxLabel": "Valoración Backlogg (máx.)",
+        "ratingInternalRangeInvalid": "La valoración Backlogg mínima no puede ser mayor que la máxima.",
+        "ratingExternalMinLabel": "Valoración externa (mín.)",
+        "ratingExternalMaxLabel": "Valoración externa (máx.)",
+        "ratingExternalRangeInvalid": "La valoración externa mínima no puede ser mayor que la máxima.",
+        "moreFilters": "Más filtros",
+        "clearFilters": "Limpiar filtros"
+      },
+      "empty": "Ningún título coincide con estos filtros.",
+      "error": "Algo falló al cargar este listado. Inténtalo de nuevo.",
+      "resultsCount": "Mostrando {shown} de {total}",
+      "pagination": {
+        "nav": "Paginación",
+        "previous": "Anterior",
+        "next": "Siguiente",
+        "pageStatus": "Página {page} de {totalPages}"
+      },
+      "columns": {
+        "item": "Título",
+        "genres": "Géneros",
+        "rating": "Valoración",
+        "actions": "Acciones"
+      },
+      "emptyValue": "—",
+      "editAction": "Editar",
+      "dialog": {
+        "description": "Editar un campo manualmente lo bloquea frente a la próxima sincronización nocturna. Los campos no tocados se siguen sincronizando con normalidad.",
+        "loading": "Cargando los valores actuales…",
+        "heading": "Editar “{title}”",
+        "fields": {
+          "title": "Título",
+          "posterUrl": "URL del póster",
+          "genres": "Géneros (separados por comas)"
+        },
+        "lockedBadge": "Editado manualmente — no se sincroniza",
+        "unlockLabel": "Desbloquear (permitir que la próxima sincronización lo sobrescriba)",
+        "cancel": "Cancelar",
+        "save": "Guardar cambios",
+        "saving": "Guardando…",
+        "success": "Cambios guardados.",
+        "errors": {
+          "title": "El título no puede estar vacío.",
+          "unauthorized": "El backend rechazó la clave de administración configurada. Revisa ADMIN_API_KEY en ambos lados.",
+          "not_found": "Este elemento ya no existe.",
+          "not_configured": "La clave de administración no está configurada. Define ADMIN_API_KEY para activar esta sección.",
+          "validation": "El backend rechazó alguno de estos valores. Revísalos e inténtalo de nuevo.",
+          "unknown": "Algo falló. Inténtalo de nuevo."
         }
       }
     }

@@ -30,7 +30,7 @@ export interface paths {
         };
         /**
          * List movies
-         * @description Paginated list of catalogued movies (no external fallback); genre filter + sort.
+         * @description Paginated list of catalogued movies (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).
          */
         get: operations["list_movies_v1_movies_get"];
         put?: never;
@@ -158,7 +158,7 @@ export interface paths {
         };
         /**
          * List series
-         * @description Paginated list of catalogued series (no external fallback); genre filter + sort.
+         * @description Paginated list of catalogued series (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).
          */
         get: operations["list_series_v1_series_get"];
         put?: never;
@@ -286,7 +286,7 @@ export interface paths {
         };
         /**
          * List books
-         * @description Paginated list of catalogued books (no external fallback); genre filter + sort.
+         * @description Paginated list of catalogued books (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).
          */
         get: operations["list_books_v1_books_get"];
         put?: never;
@@ -414,7 +414,7 @@ export interface paths {
         };
         /**
          * List games
-         * @description Paginated list of catalogued games (no external fallback); genre filter + sort.
+         * @description Paginated list of catalogued games (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).
          */
         get: operations["list_games_v1_games_get"];
         put?: never;
@@ -2901,6 +2901,20 @@ export interface operations {
     list_movies_v1_movies_get: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match on title (ILIKE) */
+                search?: string | null;
+                /** @description Inclusive lower bound on the type's date field */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on the type's date field */
+                date_to?: string | null;
+                /** @description Inclusive lower bound on rating_internal */
+                rating_internal_min?: number | null;
+                /** @description Inclusive upper bound on rating_internal */
+                rating_internal_max?: number | null;
+                /** @description Inclusive lower bound on rating_external */
+                rating_external_min?: number | null;
+                /** @description Inclusive upper bound on rating_external */
+                rating_external_max?: number | null;
                 /** @description Filter by genre slug */
                 genre?: string | null;
                 /** @description Sort order */
@@ -3165,6 +3179,20 @@ export interface operations {
     list_series_v1_series_get: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match on title (ILIKE) */
+                search?: string | null;
+                /** @description Inclusive lower bound on the type's date field */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on the type's date field */
+                date_to?: string | null;
+                /** @description Inclusive lower bound on rating_internal */
+                rating_internal_min?: number | null;
+                /** @description Inclusive upper bound on rating_internal */
+                rating_internal_max?: number | null;
+                /** @description Inclusive lower bound on rating_external */
+                rating_external_min?: number | null;
+                /** @description Inclusive upper bound on rating_external */
+                rating_external_max?: number | null;
                 /** @description Filter by genre slug */
                 genre?: string | null;
                 /** @description Sort order */
@@ -3429,6 +3457,20 @@ export interface operations {
     list_books_v1_books_get: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match on title (ILIKE) */
+                search?: string | null;
+                /** @description Inclusive lower bound on the type's date field */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on the type's date field */
+                date_to?: string | null;
+                /** @description Inclusive lower bound on rating_internal */
+                rating_internal_min?: number | null;
+                /** @description Inclusive upper bound on rating_internal */
+                rating_internal_max?: number | null;
+                /** @description Inclusive lower bound on rating_external */
+                rating_external_min?: number | null;
+                /** @description Inclusive upper bound on rating_external */
+                rating_external_max?: number | null;
                 /** @description Filter by genre slug */
                 genre?: string | null;
                 /** @description Sort order */
@@ -3693,6 +3735,20 @@ export interface operations {
     list_games_v1_games_get: {
         parameters: {
             query?: {
+                /** @description Case-insensitive substring match on title (ILIKE) */
+                search?: string | null;
+                /** @description Inclusive lower bound on the type's date field */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on the type's date field */
+                date_to?: string | null;
+                /** @description Inclusive lower bound on rating_internal */
+                rating_internal_min?: number | null;
+                /** @description Inclusive upper bound on rating_internal */
+                rating_internal_max?: number | null;
+                /** @description Inclusive lower bound on rating_external */
+                rating_external_min?: number | null;
+                /** @description Inclusive upper bound on rating_external */
+                rating_external_max?: number | null;
                 /** @description Filter by genre slug */
                 genre?: string | null;
                 /** @description Sort order */
