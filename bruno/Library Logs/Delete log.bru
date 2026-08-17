@@ -1,0 +1,21 @@
+meta {
+  name: Delete log
+  type: http
+  seq: 8
+}
+
+delete {
+  url: {{baseUrl}}/v1/log/1
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+tests {
+  test("status 204 or 404", function() {
+    expect([204, 404]).to.include(res.status);
+  });
+}

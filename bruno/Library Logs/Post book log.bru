@@ -1,0 +1,31 @@
+meta {
+  name: Post book log
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/v1/books/dune/log
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "note": "Reread"
+  }
+}
+
+tests {
+  test("status 201", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("item_type is BOOK", function() {
+    expect(res.body.item_type).to.equal("BOOK");
+  });
+}

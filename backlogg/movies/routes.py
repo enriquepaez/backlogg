@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.core.database import get_db
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
+from backlogg.library_logs import service as library_logs_service
+from backlogg.library_logs.schemas import LogIn, LogListOut, LogOut
 from backlogg.movies import service
 from backlogg.movies.schemas import MovieListOut, MovieListParams, MovieOut, SimilarMoviesOut
 from backlogg.ratings import service as ratings_service
@@ -132,6 +134,41 @@ async def delete_movie_library(
     db: AsyncSession = Depends(get_db),
 ):
     await library_service.remove_library_entry(db, item_type="MOVIE", slug=slug, user=current_user)
+
+
+@router.post(
+    "/{slug}/log",
+    response_model=LogOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Log a movie session",
+    description="Create a dated log entry (rewatch/session) for this movie; never upserts. Auth.",
+)
+async def log_movie(
+    slug: str,
+    payload: LogIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await library_logs_service.create_log_entry(
+        db, item_type="MOVIE", slug=slug, payload=payload, user=current_user
+    )
+
+
+@router.get(
+    "/{slug}/log",
+    response_model=LogListOut,
+    summary="List movie log entries",
+    description="Public, paginated log entries for a movie, newest logged_on first.",
+)
+async def list_movie_log(
+    slug: str,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await library_logs_service.list_item_log(
+        db, item_type="MOVIE", slug=slug, page=page, limit=limit
+    )
 
 
 @router.get(

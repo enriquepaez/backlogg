@@ -1,0 +1,23 @@
+meta {
+  name: Post movie log — sin token (401)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/v1/movies/oppenheimer-2023/log
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "logged_on": "2024-05-01"
+  }
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

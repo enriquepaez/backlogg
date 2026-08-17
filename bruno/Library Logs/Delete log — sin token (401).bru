@@ -1,0 +1,17 @@
+meta {
+  name: Delete log — sin token (401)
+  type: http
+  seq: 10
+}
+
+delete {
+  url: {{baseUrl}}/v1/log/1
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

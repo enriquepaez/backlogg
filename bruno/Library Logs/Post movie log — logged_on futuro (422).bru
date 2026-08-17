@@ -1,0 +1,27 @@
+meta {
+  name: Post movie log — logged_on futuro (422)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/movies/oppenheimer-2023/log
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "logged_on": "2099-01-01"
+  }
+}
+
+tests {
+  test("status 422", function() {
+    expect(res.status).to.equal(422);
+  });
+}

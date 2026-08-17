@@ -24,6 +24,7 @@ from backlogg.follows.routes import follows_router
 from backlogg.games.routes import router as games_router
 from backlogg.genres.routes import router as genres_router
 from backlogg.library.routes import user_library_router
+from backlogg.library_logs.routes import log_router, user_log_router
 from backlogg.metrics.routes import router as metrics_router
 from backlogg.moderation.routes import admin_moderation_router
 from backlogg.movies.routes import router as movies_router
@@ -129,6 +130,12 @@ OPENAPI_TAGS = [
     {
         "name": "library",
         "description": "Per-user backlog: want / in_progress / completed / dropped, cross-type.",
+    },
+    {
+        "name": "library_logs",
+        "description": (
+            "Dated activity log entries (rewatch/replay/reread) per item, decoupled from ratings."
+        ),
     },
     {
         "name": "notifications",
@@ -240,6 +247,8 @@ app.include_router(user_reviews_router, prefix=_V1)
 app.include_router(follows_router, prefix=_V1)
 app.include_router(feed_router, prefix=_V1)
 app.include_router(user_library_router, prefix=_V1)
+app.include_router(log_router, prefix=_V1)
+app.include_router(user_log_router, prefix=_V1)
 app.include_router(notifications_router, prefix=_V1)
 app.include_router(recommendations_router, prefix=_V1)
 app.include_router(reports_router, prefix=_V1)
