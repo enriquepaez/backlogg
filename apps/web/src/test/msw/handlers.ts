@@ -519,18 +519,54 @@ export const handlers = [
     return HttpResponse.json(trendingFixture);
   }),
 
-  // FE-11 global search. `q` is required by the real backend (422 on empty)
-  // — mirrored here so `searchCatalog`'s defensive 422 branch is exercised
-  // even though the page never sends an empty `q`. `no-results`/
-  // `rate-limited` are magic query values a test can opt into via `q=`
-  // instead of overriding this handler with `server.use(...)` every time.
+  // FE-11 global search, re-scoped by `browse_search_filters` Fase 1
+  // (backend): `q` is optional — absent is a valid filters-only search, but
+  // an explicit `q=""` still 422s (`Field(default=None, min_length=1)`,
+  // mirrored here), same as the real backend. `date_from`/`date_to`/
+  // `rating_external_min`/`rating_external_max` are combinable with `q` and
+  // 422 on an inverted range, mirroring the backend's own cross-field
+  // validation. `no-results`/`rate-limited` are magic `q` values a test can
+  // opt into instead of overriding this handler with `server.use(...)` every
+  // time.
   http.get(`${MOCK_API_BASE_URL}/v1/search`, ({ request }) => {
     const url = new URL(request.url);
     const q = url.searchParams.get("q");
+    const dateFrom = url.searchParams.get("date_from");
+    const dateTo = url.searchParams.get("date_to");
+    const ratingExternalMin = url.searchParams.get("rating_external_min");
+    const ratingExternalMax = url.searchParams.get("rating_external_max");
 
-    if (!q) {
+    if (q === "") {
       return HttpResponse.json(
-        { detail: [{ loc: ["query", "q"], msg: "field required", type: "value_error" }] },
+        {
+          detail: [
+            { loc: ["query", "q"], msg: "String should have at least 1 character", type: "string_too_short" },
+          ],
+        },
+        { status: 422 },
+      );
+    }
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      return HttpResponse.json(
+        { detail: [{ loc: ["query", "date_to"], msg: "date_from must be <= date_to", type: "value_error" }] },
+        { status: 422 },
+      );
+    }
+    if (
+      ratingExternalMin !== null &&
+      ratingExternalMax !== null &&
+      Number(ratingExternalMin) > Number(ratingExternalMax)
+    ) {
+      return HttpResponse.json(
+        {
+          detail: [
+            {
+              loc: ["query", "rating_external_max"],
+              msg: "rating_external_min must be <= rating_external_max",
+              type: "value_error",
+            },
+          ],
+        },
         { status: 422 },
       );
     }

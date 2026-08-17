@@ -156,7 +156,15 @@
       "movie": "Películas",
       "series": "Series",
       "book": "Libros",
-      "game": "Juegos"
+      "game": "Juegos",
+      "dateFromLabel": "Fecha desde",
+      "dateToLabel": "Fecha hasta",
+      "dateRangeInvalid": "\"Fecha desde\" no puede ser posterior a \"Fecha hasta\".",
+      "ratingExternalMinLabel": "Valoración externa (mín.)",
+      "ratingExternalMaxLabel": "Valoración externa (máx.)",
+      "ratingExternalRangeInvalid": "La valoración externa mínima no puede ser mayor que la máxima.",
+      "moreFilters": "Más filtros",
+      "clearFilters": "Limpiar filtros"
     },
     "rateLimited": {
       "waiting": "Demasiadas búsquedas. Inténtalo de nuevo en {seconds}s.",

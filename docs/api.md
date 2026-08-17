@@ -37,12 +37,27 @@ GET /health
 GET /v1/search?q=&type=&page=&limit=
 ```
 
-| Param   | Required | Description |
-|---------|----------|-------------|
-| `q`     | Yes      | Search query. Returns 422 if empty. |
-| `type`  | No       | Filter by content type: `movie`, `series`, `book`, `game` |
-| `page`  | No       | Page number, 1-based (default: 1) |
-| `limit` | No       | Results per page (default: 20, max: 100) |
+| Param                   | Required | Description |
+|-------------------------|----------|-------------|
+| `q`                     | No       | Search query. When present, must be non-empty — returns 422 if `q=`. When absent, `/search` behaves as a pure filter query (date/rating range only, no ranking). |
+| `type`                  | No       | Filter by content type: `movie`, `series`, `book`, `game` |
+| `page`                  | No       | Page number, 1-based (default: 1) |
+| `limit`                 | No       | Results per page (default: 20, max: 100) |
+| `date_from`             | No       | Inclusive lower bound on `release_date` |
+| `date_to`               | No       | Inclusive upper bound on `release_date` |
+| `rating_external_min`   | No       | Inclusive lower bound on `rating_external` |
+| `rating_external_max`   | No       | Inclusive upper bound on `rating_external` |
+
+`date_from`/`date_to` and `rating_external_min`/`rating_external_max` are
+independently optional and combinable with `q` and with each other.
+`date_from > date_to` or `rating_external_min > rating_external_max` returns
+`422`. There is no `rating_internal_*` filter here — the `catalog_search`
+materialized view backing this endpoint has no `rating_internal` column.
+
+**Without `q`, there is no external fallback**: the four external APIs
+(TMDB, Open Library, IGDB) all require a text term to search against, so the
+fan-out described below never fires when `q` is absent, regardless of how
+many (or few) local results the filters match.
 
 Response:
 ```json
@@ -64,11 +79,13 @@ Response:
 }
 ```
 
-**External fallback**: si la consulta devuelve 0 resultados locales, el
-servicio hace fan-out en paralelo a las APIs externas (TMDB, Open Library,
-IGDB — solo la correspondiente si se filtra por `type`), ingesta los top hits
-y re-consulta la vista local antes de responder. Un fallo en una API externa
-no aborta las demás ni devuelve error al cliente.
+**External fallback**: si `q` está presente y la consulta devuelve 0
+resultados locales, el servicio hace fan-out en paralelo a las APIs externas
+(TMDB, Open Library, IGDB — solo la correspondiente si se filtra por `type`),
+ingesta los top hits y re-consulta la vista local antes de responder. Un
+fallo en una API externa no aborta las demás ni devuelve error al cliente.
+Si `q` está ausente (consulta de filtro puro), el fallback **nunca** se
+dispara, sin importar cuántos resultados locales haya.
 
 El fallback externo está **rate-limited por IP** (`RATE_LIMIT_SEARCH_FALLBACK`):
 superar el límite devuelve `429` con header `Retry-After` **sin** llamar a las

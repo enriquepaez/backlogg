@@ -1,0 +1,23 @@
+meta {
+  name: Search — date and rating filters, no q
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/v1/search
+  body: none
+  auth: none
+}
+
+params:query {
+  date_from: 2020-01-01
+  date_to: 2021-12-31
+  rating_external_min: 6
+  rating_external_max: 10
+  ~type: movie
+}
+
+assert {
+  res.status: eq 200
+}

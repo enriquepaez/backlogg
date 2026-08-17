@@ -562,7 +562,7 @@ export interface paths {
         };
         /**
          * Search the catalog
-         * @description Cross-type full-text search; rate-limited external fallback on zero local hits.
+         * @description Cross-type search. `q` is optional (min_length=1 when present, 422 if empty); also supports `date_from`/`date_to`/`rating_external_min`/`rating_external_max` range filters (inclusive), independently optional and combinable with `q`. Rate-limited external fallback fires only on zero local hits AND when `q` is present — external APIs are never queried by date/rating filters alone.
          */
         get: operations["search_catalog_v1_search_get"];
         put?: never;
@@ -4072,11 +4072,23 @@ export interface operations {
     };
     search_catalog_v1_search_get: {
         parameters: {
-            query: {
-                q: string;
+            query?: {
+                /** @description Search query */
+                q?: string | null;
+                /** @description Filter by content type */
                 type?: ("movie" | "series" | "book" | "game") | null;
+                /** @description Page number */
                 page?: number;
+                /** @description Items per page */
                 limit?: number;
+                /** @description Inclusive lower bound on release_date */
+                date_from?: string | null;
+                /** @description Inclusive upper bound on release_date */
+                date_to?: string | null;
+                /** @description Inclusive lower bound on rating_external */
+                rating_external_min?: number | null;
+                /** @description Inclusive upper bound on rating_external */
+                rating_external_max?: number | null;
             };
             header?: never;
             path?: never;

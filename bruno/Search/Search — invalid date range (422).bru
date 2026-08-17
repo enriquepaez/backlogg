@@ -1,0 +1,20 @@
+meta {
+  name: Search — invalid date range (422)
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/v1/search
+  body: none
+  auth: none
+}
+
+params:query {
+  date_from: 2021-12-31
+  date_to: 2021-01-01
+}
+
+assert {
+  res.status: eq 422
+}

@@ -172,10 +172,13 @@ async def test_search_pagination(client, seeded_db):
     assert isinstance(body["results"], list)
 
 
-async def test_search_missing_q_returns_422(client, seeded_db):
-    """GET /search without q parameter returns 422."""
+async def test_search_missing_q_returns_200(client, seeded_db):
+    """GET /search without q parameter is now a valid pure-filter query (200)."""
     response = await client.get("/v1/search")
-    assert response.status_code == 422
+    assert response.status_code == 200
+    body = response.json()
+    assert "results" in body
+    assert "total" in body
 
 
 async def test_search_empty_q_returns_422(client, seeded_db):
