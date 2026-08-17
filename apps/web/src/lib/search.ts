@@ -17,6 +17,18 @@ export type SearchResultItem = components["schemas"]["SearchResultItem"];
 export type SearchOptions = {
   type?: CatalogType;
   page?: number;
+  /**
+   * Re-scope of FE-35 (`browse_search_filters`, Fase 1 backend): `GET /v1/search`
+   * now also accepts a date-range and an external-rating-range filter,
+   * independently optional and combinable with `q`/`type`. Mirrors
+   * `ListCatalogOptions` (`./catalog.ts`) minus `ratingInternalMin`/`Max` —
+   * `catalog_search` (the view backing this endpoint) has no
+   * `rating_internal` column, so there is no internal-rating filter here.
+   */
+  dateFrom?: string;
+  dateTo?: string;
+  ratingExternalMin?: number;
+  ratingExternalMax?: number;
 };
 
 /**
@@ -24,10 +36,13 @@ export type SearchOptions = {
  * single `ok`/`error` split like `listCatalog`) because the search page must
  * tell apart four cases with genuinely different UX (FE-11 acceptance):
  * a normal result set (possibly empty — `results: []` is a real "no matches"
- * state, not an error), a defensive 422 (the client never submits an empty
- * `q`, but the backend validates it too), and a 429 from the external
- * fallback's per-IP rate limit, which carries the `Retry-After` header value
- * so the page can surface a countdown instead of a generic error.
+ * state, not an error), a 422 (the client never intentionally submits an
+ * empty `q` or an invalid date/rating range — `SearchControls`, re-scope of
+ * FE-35, validates both client-side — but the backend validates them too, so
+ * this stays reachable defensively, e.g. a hand-edited/shared URL), and a 429
+ * from the external fallback's per-IP rate limit, which carries the
+ * `Retry-After` header value so the page can surface a countdown instead of
+ * a generic error.
  */
 export type SearchResult =
   | { status: "ok"; results: SearchResultItem[]; total: number; page: number; limit: number }
@@ -39,25 +54,37 @@ export type SearchResult =
 export const SEARCH_PAGE_SIZE = 24;
 
 /**
- * Cross-type search, `GET /v1/search?q=&type=&page=&limit=`. Deliberately
- * uncached (no `next.revalidate`): unlike the catalog list/browse endpoints
- * (which only change via the nightly sync), a search query can itself
- * trigger the backend's on-demand external fallback and ingest new items —
- * caching a query's first (possibly empty-fallback-triggering) response
- * would be wrong.
+ * Cross-type search, `GET /v1/search?q=&type=&page=&limit=&date_from=&date_to=&rating_external_min=&rating_external_max=`.
+ * Deliberately uncached (no `next.revalidate`): unlike the catalog
+ * list/browse endpoints (which only change via the nightly sync), a search
+ * query can itself trigger the backend's on-demand external fallback and
+ * ingest new items — caching a query's first (possibly
+ * empty-fallback-triggering) response would be wrong.
+ *
+ * `query` may be `""` — the backend accepts `q` *absent* (a filters-only
+ * search) but still 422s on `q=""` *explicit* (`Field(min_length=1)` when
+ * present), same distinction `backlogg/search/schemas.py` draws. So an empty
+ * (or whitespace-only) `query` omits the `q` param entirely rather than
+ * sending it as an empty string.
  */
 export async function searchCatalog(
   query: string,
   options: SearchOptions = {},
 ): Promise<SearchResult> {
+  const trimmed = query.trim();
+
   try {
     const { data, response } = await getApiClient().GET("/v1/search", {
       params: {
         query: {
-          q: query,
+          q: trimmed || undefined,
           type: options.type,
           page: options.page ?? 1,
           limit: SEARCH_PAGE_SIZE,
+          date_from: options.dateFrom,
+          date_to: options.dateTo,
+          rating_external_min: options.ratingExternalMin,
+          rating_external_max: options.ratingExternalMax,
         },
       },
     });

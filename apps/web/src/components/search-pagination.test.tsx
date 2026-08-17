@@ -71,4 +71,72 @@ describe("SearchPagination", () => {
       JSON.stringify({ pathname: "/search", query: { q: "dune" } }),
     );
   });
+
+  // Re-scope of FE-35 (`browse_search_filters`): the date-range and
+  // external-rating-range filters must survive pagination the same way
+  // `q`/`type` already do.
+  it("preserves the date-range and external-rating-range filters in both links", async () => {
+    render(
+      await SearchPagination({
+        query: "dune",
+        type: "movie",
+        page: 2,
+        totalPages: 3,
+        dateFrom: "2020-01-01",
+        dateTo: "2021-12-31",
+        ratingExternalMin: 6.5,
+        ratingExternalMax: 9,
+      }),
+    );
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      JSON.stringify({
+        pathname: "/search",
+        query: {
+          q: "dune",
+          type: "movie",
+          date_from: "2020-01-01",
+          date_to: "2021-12-31",
+          rating_external_min: "6.5",
+          rating_external_max: "9",
+        },
+      }),
+    );
+    expect(links[1]).toHaveAttribute(
+      "href",
+      JSON.stringify({
+        pathname: "/search",
+        query: {
+          q: "dune",
+          type: "movie",
+          date_from: "2020-01-01",
+          date_to: "2021-12-31",
+          rating_external_min: "6.5",
+          rating_external_max: "9",
+          page: "3",
+        },
+      }),
+    );
+  });
+
+  it("omits the q param entirely for a filters-only search (no query text)", async () => {
+    render(
+      await SearchPagination({
+        query: "",
+        page: 1,
+        totalPages: 2,
+        dateFrom: "2020-01-01",
+      }),
+    );
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      JSON.stringify({ pathname: "/search", query: { date_from: "2020-01-01", page: "2" } }),
+    );
+  });
 });

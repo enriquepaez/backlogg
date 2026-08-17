@@ -2383,18 +2383,27 @@
           "search"
         ],
         "summary": "Search the catalog",
-        "description": "Cross-type full-text search; rate-limited external fallback on zero local hits.",
+        "description": "Cross-type search. `q` is optional (min_length=1 when present, 422 if empty); also supports `date_from`/`date_to`/`rating_external_min`/`rating_external_max` range filters (inclusive), independently optional and combinable with `q`. Rate-limited external fallback fires only on zero local hits AND when `q` is present \u2014 external APIs are never queried by date/rating filters alone.",
         "operationId": "search_catalog_v1_search_get",
         "parameters": [
           {
             "name": "q",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "minLength": 1,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search query",
               "title": "Q"
-            }
+            },
+            "description": "Search query"
           },
           {
             "name": "type",
@@ -2415,8 +2424,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by content type",
               "title": "Type"
-            }
+            },
+            "description": "Filter by content type"
           },
           {
             "name": "page",
@@ -2425,9 +2436,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "limit",
@@ -2437,9 +2450,85 @@
               "type": "integer",
               "maximum": 100,
               "minimum": 1,
+              "description": "Items per page",
               "default": 20,
               "title": "Limit"
-            }
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on release_date",
+              "title": "Date From"
+            },
+            "description": "Inclusive lower bound on release_date"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on release_date",
+              "title": "Date To"
+            },
+            "description": "Inclusive upper bound on release_date"
+          },
+          {
+            "name": "rating_external_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_external",
+              "title": "Rating External Min"
+            },
+            "description": "Inclusive lower bound on rating_external"
+          },
+          {
+            "name": "rating_external_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_external",
+              "title": "Rating External Max"
+            },
+            "description": "Inclusive upper bound on rating_external"
           }
         ],
         "responses": {

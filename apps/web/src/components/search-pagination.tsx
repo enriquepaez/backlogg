@@ -10,6 +10,15 @@ export type SearchPaginationProps = {
   type?: CatalogType;
   page: number;
   totalPages: number;
+  /**
+   * Re-scope of FE-35 (`browse_search_filters`): the date-range and
+   * external-rating-range filters currently active, preserved in the
+   * previous/next page links the same way `type` already is.
+   */
+  dateFrom?: string;
+  dateTo?: string;
+  ratingExternalMin?: number;
+  ratingExternalMax?: number;
 };
 
 /**
@@ -18,11 +27,21 @@ export type SearchPaginationProps = {
  * (works with JS disabled, crawlable) rather than a client component. Kept
  * as its own component instead of generalizing `BrowsePagination` itself:
  * that one is coupled to `/browse/{type}` plus `genre`/`sort`, while this
- * one is coupled to the fixed `/search` route plus `q`/`type` — different
- * enough query shapes that sharing one component would need a bigger,
- * riskier refactor than FE-11's scope calls for.
+ * one is coupled to the fixed `/search` route plus `q`/`type`/the four
+ * advanced filters (re-scope of FE-35) — different enough query shapes that
+ * sharing one component would need a bigger, riskier refactor than FE-11's
+ * scope calls for.
  */
-export async function SearchPagination({ query, type, page, totalPages }: SearchPaginationProps) {
+export async function SearchPagination({
+  query,
+  type,
+  page,
+  totalPages,
+  dateFrom,
+  dateTo,
+  ratingExternalMin,
+  ratingExternalMax,
+}: SearchPaginationProps) {
   const t = await getTranslations("Search.pagination");
 
   if (totalPages <= 1) {
@@ -30,9 +49,24 @@ export async function SearchPagination({ query, type, page, totalPages }: Search
   }
 
   function hrefFor(targetPage: number) {
-    const q: Record<string, string> = { q: query };
+    const q: Record<string, string> = {};
+    if (query) {
+      q.q = query;
+    }
     if (type) {
       q.type = type;
+    }
+    if (dateFrom) {
+      q.date_from = dateFrom;
+    }
+    if (dateTo) {
+      q.date_to = dateTo;
+    }
+    if (ratingExternalMin !== undefined) {
+      q.rating_external_min = String(ratingExternalMin);
+    }
+    if (ratingExternalMax !== undefined) {
+      q.rating_external_max = String(ratingExternalMax);
     }
     if (targetPage > 1) {
       q.page = String(targetPage);

@@ -656,20 +656,22 @@
       "code": "FE-35",
       "milestone": "M1",
       "name": "browse_search_filters",
-      "title": "Browse público — filtros de búsqueda por nombre, fecha y rating",
-      "description": "Lleva al browse público (/browse/{type}, FE-9) los mismos filtros que ya tiene el backoffice admin (FE-34, ampliación post-QA): búsqueda por nombre (search, substring case-insensitive), rango de fecha (date_from/date_to) y rango de rating interno/externo (rating_internal_min/max, rating_external_min/max), consumiendo el backend de la feature 50 (catalog_search_filters, feature_list.json, ya done). El usuario confirmó explícitamente que el alcance de esos filtros es tanto admin como browse público — esta feature cierra la parte pública que quedó pendiente. apps/web/src/lib/catalog.ts (listCatalog/ListCatalogOptions) ya soporta estos params de forma opcional (ampliado en FE-34); esta feature es principalmente UI: los componentes de filtro del browse público (distintos de los del admin, sin sidebar/tabla admin) más el parsing de searchParams equivalente.",
+      "title": "Búsqueda global — filtros de búsqueda por fecha y rating externo",
+      "description": "Lleva a la búsqueda global (/search, FE-11) filtros de rango de fecha y rating externo, consumiendo el backend extendido de GET /v1/search (q ahora opcional, + date_from/date_to/rating_external_min/max — refinamiento fuera de backlog sobre la feature 50, catalog_search_filters, motivado por esta misma feature). Re-scope decidido explícitamente por el usuario tras QA manual: la primera implementación había puesto estos filtros en /browse/{type} (FE-9), revertido por completo a su estado original. Solo rating externo (no interno: la vista materializada catalog_search no tiene esa columna) — decisión explícita del usuario, es el rating que ya se muestra en cada CatalogCard. Sin filtro de nombre adicional (q ya cubre eso). apps/web/src/lib/search.ts (searchCatalog) y apps/web/src/components/search-controls.tsx llevan la UI; permite buscar solo con filtros, sin q.",
       "depends_on": [
-        10
+        10,
+        12
       ],
       "acceptance": [
-        "Filtros de búsqueda (search con debounce), rango de fecha y rango de rating (interno y externo) disponibles en /browse/{type} para movies/series/books/games, combinables entre sí y con genre/sort/page ya existentes",
-        "URLs shareables: todos los filtros activos (incluidos los nuevos) se reflejan en la query string; recargar la página o compartir el link preserva el estado de filtros",
-        "Paginación preserva los filtros activos en los links de página siguiente/anterior",
-        "Validación cliente de rangos inválidos (date_from>date_to, rating_*_min>max) con feedback claro, sin enviar la combinación inválida al backend",
-        "SSR/ISR preservado (mismo patrón Server Component URL-sincronizado que ya usa FE-9); sin romper el comportamiento actual del browse cuando no hay filtros nuevos activos",
+        "Filtros de rango de fecha y rango de rating externo disponibles en /search, combinables entre sí y con q/type/page ya existentes",
+        "Se puede buscar solo con filtros activos, sin q (backend feature: GET /v1/search con q opcional)",
+        "URLs shareables: todos los filtros activos se reflejan en la query string; recargar la página o compartir el link preserva el estado",
+        "Paginación preserva los filtros activos en los links de página siguiente/anterior; q se omite del link cuando la búsqueda es solo-filtros",
+        "Validación cliente de rangos inválidos (date_from>date_to, rating_external_min>max) con feedback claro, sin enviar la combinación inválida al backend",
+        "Parsers de searchParams robustos ante valores malformados (fecha o rating con formato inválido se descartan silenciosamente, sin fetch)",
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

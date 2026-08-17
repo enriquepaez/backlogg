@@ -13,6 +13,7 @@ abort the other fan-out tasks or return an error to the caller.
 
 import asyncio
 import logging
+from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -143,25 +144,42 @@ class SearchService:
 
     async def search(
         self,
-        q: str,
+        q: str | None,
         item_type: str | None = None,
         page: int = 1,
         limit: int = 20,
         client_ip: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        rating_external_min: float | None = None,
+        rating_external_max: float | None = None,
     ) -> tuple[list[dict], int]:
         """Search the catalog and return (results, total).
 
-        If the local catalog returns 0 results, fan-out to external APIs,
-        ingest the hits, refresh the materialized view and re-query.
+        If ``q`` is provided and the local catalog returns 0 results, fan-out
+        to external APIs, ingest the hits, refresh the materialized view and
+        re-query. When ``q`` is ``None`` this is a pure filter query (date/
+        rating range only) — the external fan-out never fires, since external
+        APIs need a text term to search against, not date/rating filters.
 
         The external fan-out is rate limited per ``client_ip`` (when provided)
         so a burst of misses cannot hammer the external APIs. Queries served
         entirely from the local catalog do not consume any quota.
         """
-        results, total = await self._repo.search(q=q, item_type=item_type, page=page, limit=limit)
+        results, total = await self._repo.search(
+            q=q,
+            item_type=item_type,
+            page=page,
+            limit=limit,
+            date_from=date_from,
+            date_to=date_to,
+            rating_external_min=rating_external_min,
+            rating_external_max=rating_external_max,
+        )
 
-        if total > 0:
-            # Fast path — local results found, skip fan-out (no quota consumed)
+        if total > 0 or q is None:
+            # Fast path — local results found, or no text term to fan out with
+            # (external APIs cannot be searched by date/rating filters alone).
             return results, total
 
         # Gate the external fan-out per IP before touching any external API.
@@ -186,5 +204,14 @@ class SearchService:
         await self._repo.refresh_catalog_search()
 
         # Re-query the local catalog with the freshly ingested data
-        results, total = await self._repo.search(q=q, item_type=item_type, page=page, limit=limit)
+        results, total = await self._repo.search(
+            q=q,
+            item_type=item_type,
+            page=page,
+            limit=limit,
+            date_from=date_from,
+            date_to=date_to,
+            rating_external_min=rating_external_min,
+            rating_external_max=rating_external_max,
+        )
         return results, total

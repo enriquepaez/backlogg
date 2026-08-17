@@ -156,7 +156,15 @@
       "movie": "Movies",
       "series": "Series",
       "book": "Books",
-      "game": "Games"
+      "game": "Games",
+      "dateFromLabel": "Date from",
+      "dateToLabel": "Date to",
+      "dateRangeInvalid": "\"Date from\" must not be after \"Date to\".",
+      "ratingExternalMinLabel": "External rating (min)",
+      "ratingExternalMaxLabel": "External rating (max)",
+      "ratingExternalRangeInvalid": "The minimum external rating must not be greater than the maximum.",
+      "moreFilters": "More filters",
+      "clearFilters": "Clear filters"
     },
     "rateLimited": {
       "waiting": "Too many searches. Try again in {seconds}s.",
