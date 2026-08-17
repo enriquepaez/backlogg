@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { AvatarUploadField } from "@/components/avatar-upload-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +40,14 @@ type SubmitError = "unauthorized" | "unknown" | null;
  * diff): `UserUpdate` treats a present-but-`null` field as "clear it", so an
  * emptied input must round-trip as `null`, not be omitted — omitting it
  * would leave the previous value untouched instead of clearing it.
+ *
+ * `AvatarUploadField` (feature 51 / FE-31) is an independent mechanism from
+ * the `avatarUrl` text input below: it talks to `POST`/`DELETE
+ * /api/users/me/avatar` directly instead of `PATCH /v1/users/me`, and
+ * already persists `avatar_url` server-side on success. It only needs to
+ * report back here so the text input and `router.refresh()` (for the nav)
+ * stay in sync with whichever mechanism last won — file upload and pasting
+ * a URL both write the same column, so the last one to run wins.
  */
 export function AccountProfileForm({ initial }: { initial: ProfileInitialValues }) {
   const t = useTranslations("Settings.profile");
@@ -50,6 +59,7 @@ export function AccountProfileForm({ initial }: { initial: ProfileInitialValues 
     register,
     handleSubmit,
     setError,
+    setValue,
     reset,
     formState: { errors, isSubmitting },
   } = useForm<ProfileFormValues>({
@@ -61,6 +71,13 @@ export function AccountProfileForm({ initial }: { initial: ProfileInitialValues 
   });
 
   const [submitError, setSubmitError] = useState<SubmitError>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(initial.avatarUrl);
+
+  function handleAvatarUpdated(nextAvatarUrl: string | null) {
+    setAvatarUrl(nextAvatarUrl);
+    setValue("avatarUrl", nextAvatarUrl ?? "");
+    router.refresh();
+  }
 
   const fieldMessage = errors.displayName
     ? tErrors(errors.displayName.message ?? "displayName")
@@ -112,6 +129,7 @@ export function AccountProfileForm({ initial }: { initial: ProfileInitialValues 
         bio: bio ?? "",
         avatarUrl: avatarUrl ?? "",
       });
+      setAvatarUrl(avatarUrl);
       toast.success(t("success"));
       router.refresh();
       return;
@@ -148,6 +166,8 @@ export function AccountProfileForm({ initial }: { initial: ProfileInitialValues 
           {...register("bio")}
         />
       </div>
+
+      <AvatarUploadField avatarUrl={avatarUrl} onUpdated={handleAvatarUpdated} />
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="profile-avatar-url">{t("avatarUrlLabel")}</Label>

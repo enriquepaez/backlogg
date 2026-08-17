@@ -1,0 +1,25 @@
+meta {
+  name: Upload avatar — tipo invalido (422)
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{baseUrl}}/v1/users/me/avatar
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:multipart-form {
+  file: @file(./assets/test-invalid.txt)
+}
+
+tests {
+  test("status 422", function() {
+    expect(res.status).to.equal(422);
+  });
+}

@@ -581,7 +581,7 @@
         "Fallback: seguir permitiendo pegar una URL externa si no se sube archivo",
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 31,

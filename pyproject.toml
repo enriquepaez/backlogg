@@ -18,6 +18,8 @@ dependencies = [
     "pyjwt>=2.9.0",
     "sentry-sdk[fastapi]>=2.0.0",
     "tenacity>=9.1.4",
+    "boto3>=1.35.0",
+    "python-multipart>=0.0.12",
 ]
 
 [project.optional-dependencies]

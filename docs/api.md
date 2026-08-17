@@ -358,6 +358,45 @@ PATCH /v1/users/me
 
 Body (reemplazo parcial, todos los campos opcionales):
 `{"display_name": string | null, "bio": string | null, "avatar_url": string | null}`.
+`avatar_url` aquí es texto libre (pegar una URL externa) — mecanismo adicional
+a `POST /v1/users/me/avatar`, no un reemplazo.
+
+```
+POST /v1/users/me/avatar
+→ 200  Avatar subido — mismo contrato de respuesta que UserMeOut
+→ 401  Sin token / token inválido o expirado
+→ 422  content-type no soportado
+→ 413  archivo mayor de 5MB
+→ 503  Almacenamiento no configurado
+```
+
+Body: `multipart/form-data` con un único campo `file`. Solo acepta
+`image/jpeg`, `image/png` o `image/webp` (cualquier otro content-type → 422);
+límite de tamaño 5MB (413 si se excede). El archivo se sube a un storage
+S3-compatible (`backlogg/users/adapters/r2_storage.py`) con key
+`avatars/{user_id}/{uuid4}.{ext}` (`ext` derivada del content-type validado,
+nunca del nombre de archivo del cliente) y la URL pública resultante
+(`R2_PUBLIC_BASE_URL` + key) sobrescribe `avatar_url`, sin importar si el
+valor previo venía de una subida anterior o de un `PATCH /v1/users/me` con una
+URL externa. El proveedor se selecciona vía `R2_ENDPOINT_URL`: MinIO en
+desarrollo local (`docker-compose.yml`, sin cuenta externa), Supabase Storage
+o Cloudflare R2 real en producción — el código de negocio no cambia entre
+proveedores, solo el endpoint y las credenciales (`R2_*` en `.env`). Si el
+storage no está configurado (falta `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/
+`R2_BUCKET_NAME`/`R2_PUBLIC_BASE_URL`, o falta tanto `R2_ENDPOINT_URL` como
+`R2_ACCOUNT_ID`), responde `503` sin traza de credenciales en el error —
+mismo espíritu que `ADMIN_API_KEY` (ver `POST /v1/admin/sync/{type}`).
+
+```
+DELETE /v1/users/me/avatar
+→ 204  Avatar borrado (o ya no había ninguno — idempotente)
+→ 401  Sin token / token inválido o expirado
+```
+
+Borra el objeto correspondiente en el storage (si `avatar_url` apunta a uno
+alojado ahí; si apunta a una URL externa pegada por `PATCH`, no se intenta
+borrar nada) y pone `avatar_url` a `null`. Idempotente: si `avatar_url` ya es
+`null`, responde `204` sin error.
 
 ```
 DELETE /v1/users/me

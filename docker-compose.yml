@@ -31,5 +31,51 @@ services:
       timeout: 5s
       retries: 10
 
+  # S3-compatible object storage for the avatar upload feature
+  # (POST /v1/users/me/avatar), FOR LOCAL DEVELOPMENT ONLY — no external
+  # account needed. Production uses Supabase Storage (or real Cloudflare R2)
+  # via the R2_* env vars, never this container. Point R2_ENDPOINT_URL at
+  # http://localhost:9000 to use it (see .env.example).
+  #
+  # Uses the official minio/minio image, not bitnami/minio: Bitnami stopped
+  # publishing free updated images to docker.io/bitnami in 2026 (moved behind
+  # a paid subscription; the old free tags only live on, frozen, under
+  # docker.io/bitnamilegacy, meant for temporary migration — not a fit for a
+  # new dev dependency). The official image has no equivalent of Bitnami's
+  # MINIO_DEFAULT_BUCKETS, so `minio-init` below creates the "avatars" bucket
+  # and makes it publicly readable on every startup (idempotent — `mc mb
+  # --ignore-existing` and `mc anonymous set` are both safe to re-run) and
+  # then exits; `minio` itself keeps running.
+  minio:
+    image: minio/minio:latest
+    container_name: backlogg-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # Dev-only credentials — must match R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY
+      # in .env when pointed at this container.
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      # Bind to localhost only, same rationale as the `db` service.
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - backlogg-miniodata:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: backlogg-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin123; do sleep 1; done;
+      mc mb --ignore-existing local/avatars;
+      mc anonymous set download local/avatars;
+      "
+    restart: "no"
+
 volumes:
   backlogg-pgdata:
+  backlogg-miniodata:

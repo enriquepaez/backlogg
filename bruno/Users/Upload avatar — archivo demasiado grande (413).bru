@@ -1,0 +1,25 @@
+meta {
+  name: Upload avatar — archivo demasiado grande (413)
+  type: http
+  seq: 22
+}
+
+post {
+  url: {{baseUrl}}/v1/users/me/avatar
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:multipart-form {
+  file: @file(./assets/test-avatar-oversized.png)
+}
+
+tests {
+  test("status 413", function() {
+    expect(res.status).to.equal(413);
+  });
+}

@@ -1,9 +1,13 @@
 """Endpoint tests for /auth/register, /auth/login, /users/me, /users/{username}."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from backlogg.core.config import settings
 from backlogg.main import app
+from backlogg.users import service
 
 
 @pytest_asyncio.fixture
@@ -174,3 +178,131 @@ async def test_get_user_public_profile_returns_200_without_email(client):
 async def test_get_user_public_profile_returns_404(client):
     response = await client.get("/v1/users/nobody-has-this-username-ever")
     assert response.status_code == 404
+
+
+# ── POST/DELETE /users/me/avatar (feature 51) ───────────────────────────────
+
+
+def _configure_r2(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "R2_ENDPOINT_URL", "")
+    monkeypatch.setattr(settings, "R2_ACCOUNT_ID", "test-account")
+    monkeypatch.setattr(settings, "R2_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setattr(settings, "R2_SECRET_ACCESS_KEY", "test-secret-key")
+    monkeypatch.setattr(settings, "R2_BUCKET_NAME", "test-bucket")
+    monkeypatch.setattr(settings, "R2_PUBLIC_BASE_URL", "https://avatars.example.com")
+
+
+async def _register_and_login(client, username: str, email: str) -> str:
+    await client.post("/v1/auth/register", json=_register_payload(username, email))
+    login_response = await client.post(
+        "/v1/auth/login", json={"username": username, "password": "s3cret-password"}
+    )
+    return login_response.json()["access_token"]
+
+
+async def test_upload_avatar_without_token_returns_401(client):
+    response = await client.post(
+        "/v1/users/me/avatar",
+        files={"file": ("avatar.png", b"fake-png-bytes", "image/png")},
+    )
+    assert response.status_code == 401
+
+
+async def test_upload_avatar_invalid_type_returns_422(client, monkeypatch):
+    _configure_r2(monkeypatch)
+    token = await _register_and_login(client, "route-avatar-bad-type", "route-avatar-1@example.com")
+
+    response = await client.post(
+        "/v1/users/me/avatar",
+        files={"file": ("notes.txt", b"just text", "text/plain")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+async def test_upload_avatar_too_large_returns_413(client, monkeypatch):
+    _configure_r2(monkeypatch)
+    token = await _register_and_login(client, "route-avatar-too-big", "route-avatar-2@example.com")
+    oversized = b"x" * (service._MAX_AVATAR_SIZE_BYTES + 1)
+
+    response = await client.post(
+        "/v1/users/me/avatar",
+        files={"file": ("avatar.png", oversized, "image/png")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 413
+
+
+async def test_upload_avatar_missing_credentials_returns_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "R2_ACCOUNT_ID", "")
+    monkeypatch.setattr(settings, "R2_ENDPOINT_URL", "")
+    token = await _register_and_login(client, "route-avatar-no-creds", "route-avatar-3@example.com")
+
+    response = await client.post(
+        "/v1/users/me/avatar",
+        files={"file": ("avatar.png", b"fake-png-bytes", "image/png")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 503
+
+
+async def test_upload_avatar_success_returns_200(client, monkeypatch):
+    _configure_r2(monkeypatch)
+    token = await _register_and_login(client, "route-avatar-success", "route-avatar-4@example.com")
+    fake_url = "https://avatars.example.com/avatars/1/fake-uuid.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=fake_url):
+        response = await client.post(
+            "/v1/users/me/avatar",
+            files={"file": ("avatar.png", b"fake-png-bytes", "image/png")},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["avatar_url"] == fake_url
+    assert body["username"] == "route-avatar-success"
+
+
+async def test_delete_avatar_without_token_returns_401(client):
+    response = await client.delete("/v1/users/me/avatar")
+    assert response.status_code == 401
+
+
+async def test_delete_avatar_success_returns_204(client, monkeypatch):
+    _configure_r2(monkeypatch)
+    token = await _register_and_login(client, "route-avatar-delete", "route-avatar-5@example.com")
+    fake_url = "https://avatars.example.com/avatars/1/fake-uuid.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=fake_url):
+        await client.post(
+            "/v1/users/me/avatar",
+            files={"file": ("avatar.png", b"fake-png-bytes", "image/png")},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+        response = await client.delete(
+            "/v1/users/me/avatar", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert response.status_code == 204
+    mock_delete.assert_called_once()
+
+    me_response = await client.get("/v1/users/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_response.json()["avatar_url"] is None
+
+
+async def test_delete_avatar_already_null_returns_204(client, monkeypatch):
+    _configure_r2(monkeypatch)
+    token = await _register_and_login(
+        client, "route-avatar-delete-noop", "route-avatar-6@example.com"
+    )
+
+    with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+        response = await client.delete(
+            "/v1/users/me/avatar", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert response.status_code == 204
+    mock_delete.assert_not_called()

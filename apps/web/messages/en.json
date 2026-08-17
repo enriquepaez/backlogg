@@ -752,6 +752,25 @@
         "displayName": "255 characters max.",
         "bio": "2000 characters max.",
         "avatarUrl": "Enter a valid image URL (http or https)."
+      },
+      "avatar": {
+        "heading": "Photo",
+        "orPasteUrl": "Or paste an external URL below.",
+        "chooseFile": "Choose photo",
+        "changeFile": "Change photo",
+        "uploading": "Uploading…",
+        "progressLabel": "Uploading photo",
+        "remove": "Remove photo",
+        "removing": "Removing…",
+        "uploadSuccess": "Your photo has been updated.",
+        "removeSuccess": "Your photo has been removed.",
+        "unauthorized": "Your session has expired. Please log in again.",
+        "errors": {
+          "invalidType": "Choose a JPEG, PNG or WEBP image.",
+          "tooLarge": "Image must be 5MB or smaller.",
+          "unavailable": "Photo upload isn't available right now. Try pasting a URL instead.",
+          "generic": "Couldn't upload your photo. Please try again."
+        }
       }
     },
     "verification": {

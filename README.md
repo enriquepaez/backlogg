@@ -61,6 +61,30 @@ uv run ruff check .           # solo lint
 docker compose exec db psql -U postgres -d backlogg   # inspección manual
 ```
 
+### Subida de avatares en local (MinIO, sin cuenta)
+
+`POST /v1/users/me/avatar` necesita un storage S3-compatible. En local se
+usa MinIO en Docker — sin cuenta externa ni tarjeta:
+
+```bash
+docker compose up -d minio minio-init   # arranca MinIO + crea el bucket "avatars" (público)
+```
+
+Añade a tu `.env`:
+
+```
+R2_ENDPOINT_URL=http://localhost:9000
+R2_ACCESS_KEY_ID=minioadmin
+R2_SECRET_ACCESS_KEY=minioadmin123
+R2_BUCKET_NAME=avatars
+R2_PUBLIC_BASE_URL=http://localhost:9000/avatars
+```
+
+Sin esto, el endpoint responde `503` de forma controlada en vez de fallar.
+Consola web de MinIO: http://localhost:9001 (mismas credenciales). Detalle
+completo, incluida la configuración de producción con Supabase Storage, en
+[`docs/operations.md`](docs/operations.md) (sección "Avatar storage").
+
 > `DATABASE_URL` (DB de dev) y `TEST_DATABASE_URL` deben apuntar a DBs
 > distintas — pytest trunca la de test en cada run. La plantilla ya las
 > configura bien (`backlogg` vs `backlogg_test`).

@@ -1,9 +1,10 @@
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.config import settings
@@ -13,6 +14,7 @@ from backlogg.library import repository as library_repo
 from backlogg.library.schemas import LibraryCounts
 from backlogg.ratings import repository as ratings_repo
 from backlogg.users import repository as repo
+from backlogg.users.adapters.r2_storage import R2StorageAdapter
 from backlogg.users.auth import (
     create_access_token,
     generate_opaque_token,
@@ -44,6 +46,19 @@ from backlogg.users.schemas import (
 logger = logging.getLogger(__name__)
 
 _ph = PasswordHasher()
+
+# ── Avatar upload (feature 51) ──────────────────────────────────────────────
+#
+# Business rules, not operational parameters — kept as constants here rather
+# than in core/config.py, matching the acceptance criteria of feature 51.
+_MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+_ALLOWED_AVATAR_CONTENT_TYPES: dict[str, str] = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+
+_r2 = R2StorageAdapter()
 
 
 def hash_password(password: str) -> str:
@@ -192,6 +207,104 @@ async def update_current_user(db: AsyncSession, user: User, payload: UserUpdate)
     updated = await repo.update_user(db, user, data)
     await db.commit()
     return UserMeOut.model_validate(updated)
+
+
+def _require_r2_configured() -> None:
+    """Raise a controlled 503 if avatar storage is not fully configured.
+
+    Mirrors the ``ADMIN_API_KEY`` pattern (backlogg/admin/auth.py): a missing
+    operational dependency is a service-availability problem, not a client
+    error, and the response never includes any credential value.
+
+    An explicit ``R2_ENDPOINT_URL`` (MinIO in dev, Supabase Storage or real R2
+    in prod) makes ``R2_ACCOUNT_ID`` unnecessary — the endpoint is used as-is
+    instead of being built from it (see
+    ``backlogg.users.adapters.r2_storage``). When no endpoint override is set,
+    ``R2_ACCOUNT_ID`` is still required to build the real R2 endpoint.
+    """
+    if not (
+        (settings.R2_ENDPOINT_URL or settings.R2_ACCOUNT_ID)
+        and settings.R2_ACCESS_KEY_ID
+        and settings.R2_SECRET_ACCESS_KEY
+        and settings.R2_BUCKET_NAME
+        and settings.R2_PUBLIC_BASE_URL
+    ):
+        raise HTTPException(status_code=503, detail="Avatar storage is not configured.")
+
+
+def _extract_r2_key(avatar_url: str) -> str | None:
+    """Return the R2 object key encoded in ``avatar_url``, or None if it isn't ours.
+
+    ``avatar_url`` can also hold an arbitrary external URL pasted through
+    ``PATCH /v1/users/me`` (feature 27) — only URLs under
+    ``R2_PUBLIC_BASE_URL`` map to an object this adapter is allowed to delete.
+    """
+    base = settings.R2_PUBLIC_BASE_URL.rstrip("/")
+    if not base:
+        return None
+    prefix = f"{base}/"
+    if avatar_url.startswith(prefix):
+        return avatar_url[len(prefix) :]
+    return None
+
+
+async def upload_avatar(db: AsyncSession, user: User, file: UploadFile) -> UserMeOut:
+    """Validate, upload to R2 and persist the authenticated user's avatar.
+
+    Overwrites any previous ``avatar_url`` (whether set by a prior upload or
+    pasted via ``PATCH /v1/users/me``) with the freshly uploaded object's
+    public URL.
+
+    Raises:
+        HTTPException 422: ``file.content_type`` is not one of image/jpeg,
+            image/png or image/webp.
+        HTTPException 413: the file exceeds ``_MAX_AVATAR_SIZE_BYTES`` (5MB).
+        HTTPException 503: R2 is not configured (see ``_require_r2_configured``).
+    """
+    ext = _ALLOWED_AVATAR_CONTENT_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(status_code=422, detail="Unsupported image type")
+
+    # Read at most one byte beyond the limit so an oversized upload never gets
+    # buffered fully into memory just to be rejected.
+    content = await file.read(_MAX_AVATAR_SIZE_BYTES + 1)
+    if len(content) > _MAX_AVATAR_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 5MB size limit")
+
+    _require_r2_configured()
+
+    key = f"avatars/{user.id}/{uuid4()}.{ext}"
+    public_url = await _r2.upload(key=key, content=content, content_type=file.content_type)
+
+    updated = await repo.update_user(db, user, {"avatar_url": public_url})
+    await db.commit()
+    return UserMeOut.model_validate(updated)
+
+
+async def delete_avatar(db: AsyncSession, user: User) -> None:
+    """Delete the current avatar (if any) and clear ``avatar_url``.
+
+    Idempotent: a no-op when ``avatar_url`` is already null. Best-effort on
+    the storage side — deleting the R2 object is skipped (and logged) rather
+    than failing the request when the URL isn't one of ours or R2 is
+    unreachable/unconfigured, so the user-facing state (no avatar) is always
+    reached.
+    """
+    if user.avatar_url is None:
+        return
+
+    key = _extract_r2_key(user.avatar_url)
+    if key is not None:
+        try:
+            await _r2.delete(key=key)
+        except Exception:  # noqa: BLE001 - storage failure must not block the delete
+            logger.warning(
+                "Failed to delete avatar object from R2 (key=%s); clearing avatar_url anyway",
+                key,
+            )
+
+    await repo.update_user(db, user, {"avatar_url": None})
+    await db.commit()
 
 
 async def delete_current_user(db: AsyncSession, user: User) -> None:

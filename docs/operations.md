@@ -47,6 +47,12 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 | `RATE_LIMIT_DEFAULT` | 120/60 | Bucket general reutilizable por la interfaz de rate limiting |
 | `LOG_LEVEL` | INFO | Nivel del logging estructurado JSON (DEBUG/INFO/WARNING/ERROR) |
 | `SENTRY_DSN` | (secret) | DSN de Sentry. **Vacío → integración off** (no se importa `sentry-sdk`, sin overhead) |
+| `R2_ENDPOINT_URL` | (config) | Endpoint S3-compatible del storage de avatares (Supabase Storage en prod). **Vacío → se construye desde `R2_ACCOUNT_ID`** (Cloudflare R2 real); relleno se usa tal cual |
+| `R2_ACCOUNT_ID` | (config) | Solo necesario si `R2_ENDPOINT_URL` está vacío (Cloudflare R2 real) |
+| `R2_ACCESS_KEY_ID` | (secret) | Access key S3 del proveedor de storage |
+| `R2_SECRET_ACCESS_KEY` | (secret) | Secret key S3. Nunca aparece en logs ni en respuestas de error |
+| `R2_BUCKET_NAME` | (config) | Bucket donde se guardan los avatares |
+| `R2_PUBLIC_BASE_URL` | (config) | Base pública desde la que se sirven los avatares subidos |
 
 El envío de email usa SMTP genérico de la stdlib (`smtplib`), sin dependencias
 externas. `SMTP_PASSWORD` es un secreto: configúralo en Render como
@@ -132,6 +138,65 @@ pares `clave=valor` embebidos en el texto del mensaje. El valor se sustituye por
 cuando `SENTRY_DSN` está presente; sin DSN no se importa nada (cero overhead). Si
 el DSN está configurado pero el paquete no está instalado, se loguea un warning y
 la app continúa sin error tracking.
+
+### Avatar storage (feature 51 + refinamiento storage_s3_generalize)
+
+`POST /v1/users/me/avatar` sube la imagen a un storage S3-compatible
+configurable — no está atado a Cloudflare R2. `R2_ENDPOINT_URL` selecciona
+el proveedor: vacío construye el endpoint real de R2 desde `R2_ACCOUNT_ID`;
+relleno se usa tal cual y sirve para cualquier S3-compatible (MinIO en dev,
+Supabase Storage en prod). Sin las credenciales completas, el endpoint
+responde `503` de forma controlada (sin filtrar configuración) en vez de
+fallar; ver `backlogg/users/service.py::_require_r2_configured`.
+
+**Dev local — MinIO (Docker, sin cuenta):**
+
+```bash
+docker compose up -d minio minio-init   # arranca MinIO + crea el bucket "avatars" (público, idempotente)
+```
+
+Añade a tu `.env` (bloque comentado ya presente en `.env.example`):
+
+```
+R2_ENDPOINT_URL=http://localhost:9000
+R2_ACCESS_KEY_ID=minioadmin
+R2_SECRET_ACCESS_KEY=minioadmin123
+R2_BUCKET_NAME=avatars
+R2_PUBLIC_BASE_URL=http://localhost:9000/avatars
+```
+
+Consola web de MinIO (inspección manual del bucket): http://localhost:9001
+(mismas credenciales `minioadmin`/`minioadmin123`).
+
+> Se usa la imagen oficial `minio/minio`, no `bitnami/minio`: Bitnami dejó de
+> publicar imágenes gratuitas actualizadas en 2026 (movidas detrás de una
+> suscripción de pago). `minio-init` (imagen `minio/mc`) crea el bucket y lo
+> hace público al arrancar porque la imagen oficial no tiene el equivalente
+> del `MINIO_DEFAULT_BUCKETS` de Bitnami.
+
+**Producción — Supabase Storage (free tier, sin tarjeta):**
+
+1. Crea un proyecto gratis en [supabase.com](https://supabase.com) (no pide
+   tarjeta).
+2. **Storage → New bucket** → créalo público (ej. `avatars`).
+3. **Project Settings → Storage → S3 Connection** → copia el endpoint S3,
+   con forma `https://<project-ref>.supabase.co/storage/v1/s3`.
+4. **Project Settings → Storage → Access Keys** (S3 Access Keys) → crea una
+   key nueva → copia `Access Key ID` y `Secret Access Key` (la secret no se
+   vuelve a mostrar).
+5. Configura en Render:
+   ```
+   R2_ENDPOINT_URL=https://<project-ref>.supabase.co/storage/v1/s3
+   R2_ACCESS_KEY_ID=<access key id>
+   R2_SECRET_ACCESS_KEY=<secret access key>      # environment secret
+   R2_BUCKET_NAME=<nombre-del-bucket>
+   R2_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>
+   ```
+   `R2_ACCOUNT_ID` no hace falta con `R2_ENDPOINT_URL` configurado.
+
+Si en el futuro se prefiere Cloudflare R2 real, basta con dejar
+`R2_ENDPOINT_URL` vacío y rellenar `R2_ACCOUNT_ID` — el resto del código no
+cambia.
 
 ## Secrets de GitHub Actions
 

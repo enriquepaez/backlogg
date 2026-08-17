@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
@@ -172,6 +172,41 @@ async def delete_me(
     db: AsyncSession = Depends(get_db),
 ):
     await service.delete_current_user(db, current_user)
+
+
+@users_router.post(
+    "/me/avatar",
+    response_model=UserMeOut,
+    summary="Upload own avatar",
+    description=(
+        "Upload an avatar image (multipart/form-data, field `file`). Accepts "
+        "image/jpeg, image/png or image/webp up to 5MB, stores it in "
+        "S3-compatible storage and overwrites avatar_url with the resulting "
+        "public URL. Requires auth."
+    ),
+)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.upload_avatar(db, current_user, file)
+
+
+@users_router.delete(
+    "/me/avatar",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own avatar",
+    description=(
+        "Delete the current avatar from storage (if any) and set avatar_url to "
+        "null. Idempotent — a no-op 204 when avatar_url is already null. Requires auth."
+    ),
+)
+async def delete_avatar(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await service.delete_avatar(db, current_user)
 
 
 @users_router.get(

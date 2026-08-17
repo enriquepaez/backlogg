@@ -1036,6 +1036,28 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 51,
+      "name": "user_avatar_upload",
+      "title": "Avatar upload — POST /v1/users/me/avatar (multipart) + almacenamiento en Cloudflare R2",
+      "description": "Prerrequisito de backend para FE-31 (avatar_upload, frontend_feature_list.json id 30), bloqueada hoy porque avatar_url es solo un VARCHAR(1000) de texto (docs/schema.md) sin ningún endpoint de subida ni capa de almacenamiento de archivos. Añade un adaptador de almacenamiento S3-compatible en backlogg/users/adapters/r2_storage.py usando Cloudflare R2 (mismo criterio de coste que Neon/Render free tier ya usados en el proyecto: 10GB gratis, sin cargos de egress, API compatible con S3 vía boto3). Nuevas dependencias en pyproject.toml: boto3 (cliente S3-compatible) y python-multipart (requerido por FastAPI para parsear UploadFile, no estaba instalado porque ningún endpoint existente recibe multipart/form-data). Nuevas variables de entorno en .env.example: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_BASE_URL (base pública servida por el bucket o un dominio custom delante de él). En dev, si R2_ACCOUNT_ID no está configurado, el endpoint debe devolver 503 (mismo patrón que ADMIN_API_KEY en la feature 18) en vez de fallar con un error no controlado al intentar subir. El objeto se guarda con key avatars/{user_id}/{uuid4}.{ext} (ext derivada del content-type validado, no del nombre de archivo del cliente) y la URL pública resultante (R2_PUBLIC_BASE_URL + key) se persiste en users.avatar_url, reutilizando la columna existente — sin migración nueva.",
+      "depends_on": [
+        27
+      ],
+      "acceptance": [
+        "POST /v1/users/me/avatar (multipart/form-data, campo file) requiere Authorization: Bearer válido (401 si falta o es inválido, mismo patrón que el resto de /v1/users/me/*)",
+        "Solo acepta content-type image/jpeg, image/png o image/webp; cualquier otro tipo -> 422",
+        "Límite de tamaño configurable (constante en el service, no en config.py, ya que no es un parámetro operacional sino una regla de negocio) de 5MB; archivo mayor -> 413",
+        "Sube el archivo al bucket R2 vía backlogg/users/adapters/r2_storage.py con key avatars/{user_id}/{uuid4}.{ext}, actualiza users.avatar_url con la URL pública resultante y devuelve 200 con el mismo contrato que UserMeOut",
+        "Si R2_ACCOUNT_ID (o el resto de credenciales R2) no está configurado -> 503, sin excepción no controlada ni traza de credenciales en el error",
+        "DELETE /v1/users/me/avatar borra el objeto del bucket (si existe) y pone users.avatar_url a null; 204. Idempotente: si avatar_url ya es null, 204 sin error",
+        "PATCH /v1/users/me (feature 27, ya existente) sigue aceptando avatar_url como texto libre para el caso de pegar una URL externa — este endpoint nuevo es un mecanismo adicional, no un reemplazo; subir un archivo sobrescribe cualquier avatar_url previo, sea de sync manual o de una subida anterior",
+        "docs/schema.md no cambia (no hay columna nueva); docs/api.md documenta POST y DELETE /v1/users/me/avatar junto al resto de endpoints de /v1/users/me, incluyendo límites de tipo/tamaño y el 503 de configuración ausente",
+        "Tests de servicio con el adaptador R2 mockeado (nunca contra el bucket real): tipo inválido, tamaño excedido, subida exitosa actualiza avatar_url, borrado exitoso, borrado con avatar_url ya null, credenciales ausentes -> 503",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
     }
   ]
 }

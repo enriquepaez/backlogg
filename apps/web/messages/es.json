@@ -752,6 +752,25 @@
         "displayName": "Máximo 255 caracteres.",
         "bio": "Máximo 2000 caracteres.",
         "avatarUrl": "Introduce una URL de imagen válida (http o https)."
+      },
+      "avatar": {
+        "heading": "Foto",
+        "orPasteUrl": "O pega una URL externa abajo.",
+        "chooseFile": "Elegir foto",
+        "changeFile": "Cambiar foto",
+        "uploading": "Subiendo…",
+        "progressLabel": "Subiendo foto",
+        "remove": "Quitar foto",
+        "removing": "Quitando…",
+        "uploadSuccess": "Tu foto se ha actualizado.",
+        "removeSuccess": "Tu foto se ha quitado.",
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "errors": {
+          "invalidType": "Elige una imagen JPEG, PNG o WEBP.",
+          "tooLarge": "La imagen debe pesar 5MB o menos.",
+          "unavailable": "La subida de fotos no está disponible ahora mismo. Prueba a pegar una URL.",
+          "generic": "No se pudo subir tu foto. Inténtalo de nuevo."
+        }
       }
     },
     "verification": {
