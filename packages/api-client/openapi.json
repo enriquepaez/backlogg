@@ -28,9 +28,137 @@
           "movies"
         ],
         "summary": "List movies",
-        "description": "Paginated list of catalogued movies (no external fallback); genre filter + sort.",
+        "description": "Paginated list of catalogued movies (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).",
         "operationId": "list_movies_v1_movies_get",
         "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on title (ILIKE)",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on title (ILIKE)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on the type's date field",
+              "title": "Date From"
+            },
+            "description": "Inclusive lower bound on the type's date field"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on the type's date field",
+              "title": "Date To"
+            },
+            "description": "Inclusive upper bound on the type's date field"
+          },
+          {
+            "name": "rating_internal_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_internal",
+              "title": "Rating Internal Min"
+            },
+            "description": "Inclusive lower bound on rating_internal"
+          },
+          {
+            "name": "rating_internal_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_internal",
+              "title": "Rating Internal Max"
+            },
+            "description": "Inclusive upper bound on rating_internal"
+          },
+          {
+            "name": "rating_external_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_external",
+              "title": "Rating External Min"
+            },
+            "description": "Inclusive lower bound on rating_external"
+          },
+          {
+            "name": "rating_external_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_external",
+              "title": "Rating External Max"
+            },
+            "description": "Inclusive upper bound on rating_external"
+          },
           {
             "name": "genre",
             "in": "query",
@@ -478,9 +606,137 @@
           "series"
         ],
         "summary": "List series",
-        "description": "Paginated list of catalogued series (no external fallback); genre filter + sort.",
+        "description": "Paginated list of catalogued series (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).",
         "operationId": "list_series_v1_series_get",
         "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on title (ILIKE)",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on title (ILIKE)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on the type's date field",
+              "title": "Date From"
+            },
+            "description": "Inclusive lower bound on the type's date field"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on the type's date field",
+              "title": "Date To"
+            },
+            "description": "Inclusive upper bound on the type's date field"
+          },
+          {
+            "name": "rating_internal_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_internal",
+              "title": "Rating Internal Min"
+            },
+            "description": "Inclusive lower bound on rating_internal"
+          },
+          {
+            "name": "rating_internal_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_internal",
+              "title": "Rating Internal Max"
+            },
+            "description": "Inclusive upper bound on rating_internal"
+          },
+          {
+            "name": "rating_external_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_external",
+              "title": "Rating External Min"
+            },
+            "description": "Inclusive lower bound on rating_external"
+          },
+          {
+            "name": "rating_external_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_external",
+              "title": "Rating External Max"
+            },
+            "description": "Inclusive upper bound on rating_external"
+          },
           {
             "name": "genre",
             "in": "query",
@@ -928,9 +1184,137 @@
           "books"
         ],
         "summary": "List books",
-        "description": "Paginated list of catalogued books (no external fallback); genre filter + sort.",
+        "description": "Paginated list of catalogued books (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).",
         "operationId": "list_books_v1_books_get",
         "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on title (ILIKE)",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on title (ILIKE)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on the type's date field",
+              "title": "Date From"
+            },
+            "description": "Inclusive lower bound on the type's date field"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on the type's date field",
+              "title": "Date To"
+            },
+            "description": "Inclusive upper bound on the type's date field"
+          },
+          {
+            "name": "rating_internal_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_internal",
+              "title": "Rating Internal Min"
+            },
+            "description": "Inclusive lower bound on rating_internal"
+          },
+          {
+            "name": "rating_internal_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_internal",
+              "title": "Rating Internal Max"
+            },
+            "description": "Inclusive upper bound on rating_internal"
+          },
+          {
+            "name": "rating_external_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_external",
+              "title": "Rating External Min"
+            },
+            "description": "Inclusive lower bound on rating_external"
+          },
+          {
+            "name": "rating_external_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_external",
+              "title": "Rating External Max"
+            },
+            "description": "Inclusive upper bound on rating_external"
+          },
           {
             "name": "genre",
             "in": "query",
@@ -1378,9 +1762,137 @@
           "games"
         ],
         "summary": "List games",
-        "description": "Paginated list of catalogued games (no external fallback); genre filter + sort.",
+        "description": "Paginated list of catalogued games (no external fallback); genre filter + sort, plus search/date-range/rating-range filters (feature 50).",
         "operationId": "list_games_v1_games_get",
         "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on title (ILIKE)",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on title (ILIKE)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on the type's date field",
+              "title": "Date From"
+            },
+            "description": "Inclusive lower bound on the type's date field"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on the type's date field",
+              "title": "Date To"
+            },
+            "description": "Inclusive upper bound on the type's date field"
+          },
+          {
+            "name": "rating_internal_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_internal",
+              "title": "Rating Internal Min"
+            },
+            "description": "Inclusive lower bound on rating_internal"
+          },
+          {
+            "name": "rating_internal_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_internal",
+              "title": "Rating Internal Max"
+            },
+            "description": "Inclusive upper bound on rating_internal"
+          },
+          {
+            "name": "rating_external_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on rating_external",
+              "title": "Rating External Min"
+            },
+            "description": "Inclusive lower bound on rating_external"
+          },
+          {
+            "name": "rating_external_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on rating_external",
+              "title": "Rating External Max"
+            },
+            "description": "Inclusive upper bound on rating_external"
+          },
           {
             "name": "genre",
             "in": "query",

@@ -140,6 +140,22 @@ export type ListCatalogOptions = {
   genre?: string;
   sort?: CatalogSort;
   page?: number;
+  /**
+   * Feature 50 (`catalog_search_filters`) params, added for the
+   * `/admin/{movies,series,books,games}` backoffice's second pass (FE-34,
+   * post-QA) — all optional/independent and combinable with `genre`/`sort`,
+   * same as the backend contract (`docs/api.md`). `/browse/{type}` (FE-9)
+   * doesn't set any of these yet, which is fine: every field here is
+   * optional, so omitting them keeps that page's existing `GET /v1/{type}`
+   * calls byte-for-byte the same.
+   */
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  ratingInternalMin?: number;
+  ratingInternalMax?: number;
+  ratingExternalMin?: number;
+  ratingExternalMax?: number;
 };
 
 /**
@@ -158,6 +174,13 @@ export async function listCatalog(
     sort: options.sort ?? DEFAULT_CATALOG_SORT,
     page: options.page ?? 1,
     limit: BROWSE_PAGE_SIZE,
+    search: options.search,
+    date_from: options.dateFrom,
+    date_to: options.dateTo,
+    rating_internal_min: options.ratingInternalMin,
+    rating_internal_max: options.ratingInternalMax,
+    rating_external_min: options.ratingExternalMin,
+    rating_external_max: options.ratingExternalMax,
   };
   const next = { revalidate: BROWSE_REVALIDATE_SECONDS };
 

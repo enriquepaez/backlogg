@@ -163,6 +163,35 @@ describe("listCatalog", () => {
 
     expect(await listCatalog("book")).toEqual({ ok: false });
   });
+
+  it("forwards search/date-range/rating-range filters (feature 50) to the request query string", async () => {
+    let requestedUrl = "";
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies`, ({ request }) => {
+        requestedUrl = request.url;
+        return HttpResponse.json(movieListFixture);
+      }),
+    );
+
+    await listCatalog("movie", {
+      search: "dune",
+      dateFrom: "2020-01-01",
+      dateTo: "2021-12-31",
+      ratingInternalMin: 3,
+      ratingInternalMax: 5,
+      ratingExternalMin: 6.5,
+      ratingExternalMax: 9,
+    });
+
+    const params = new URL(requestedUrl).searchParams;
+    expect(params.get("search")).toBe("dune");
+    expect(params.get("date_from")).toBe("2020-01-01");
+    expect(params.get("date_to")).toBe("2021-12-31");
+    expect(params.get("rating_internal_min")).toBe("3");
+    expect(params.get("rating_internal_max")).toBe("5");
+    expect(params.get("rating_external_min")).toBe("6.5");
+    expect(params.get("rating_external_max")).toBe("9");
+  });
 });
 
 describe("getGenres", () => {
