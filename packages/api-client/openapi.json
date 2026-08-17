@@ -2057,6 +2057,262 @@
         }
       }
     },
+    "/v1/admin/users": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List users",
+        "description": "Paginated user listing for the admin backoffice, ordered by `username` asc. Optional `is_banned`/`is_admin` filters, combinable and independent \u2014 omitting all filters returns every user. `search` is a case-insensitive substring match against `username`, `display_name` OR `email`, combinable with the other filters; empty/whitespace-only is treated as absent. Never includes `email` in the response (PII minimization) even when matched by `search`. Requires `X-API-Key`.",
+        "operationId": "list_users_v1_admin_users_get",
+        "parameters": [
+          {
+            "name": "is_banned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by ban status",
+              "title": "Is Banned"
+            },
+            "description": "Filter by ban status"
+          },
+          {
+            "name": "is_admin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by admin role",
+              "title": "Is Admin"
+            },
+            "description": "Filter by admin role"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match against username, display_name or email",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match against username, display_name or email"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/users/{username}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get a single user's admin detail",
+        "description": "Admin-facing detail for a single user, by username. Never includes `email` (PII minimization). Unknown username -> 404. Requires `X-API-Key`.",
+        "operationId": "get_user_v1_admin_users__username__get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/{type}/{slug}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Manually edit a catalog item",
+        "description": "Update a subset of editable fields on a movie/series/book/game and lock them against the next nightly sync. Editable fields per type: movie/game -> title, poster_url, release_date, genres; series -> title, poster_url, first_air_date, genres; book -> title, poster_url, first_publish_date, genres. Set `unlock_fields` (list of field names) to release fields back to sync control \u2014 applied after the edits in the same request. Unknown or non-editable field -> 422. Unknown slug -> 404. Requires `X-API-Key`.",
+        "operationId": "edit_catalog_item_v1_admin__type___slug__patch",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "series",
+                "book",
+                "game"
+              ],
+              "type": "string",
+              "title": "Type"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogEditIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEditOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/genres": {
       "get": {
         "tags": [
@@ -4001,6 +4257,96 @@
   },
   "components": {
     "schemas": {
+      "AdminUserListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "AdminUserListOut"
+      },
+      "AdminUserOut": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "title": "Is Admin"
+          },
+          "is_superadmin": {
+            "type": "boolean",
+            "title": "Is Superadmin"
+          },
+          "is_banned": {
+            "type": "boolean",
+            "title": "Is Banned"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "display_name",
+          "avatar_url",
+          "is_admin",
+          "is_superadmin",
+          "is_banned",
+          "created_at"
+        ],
+        "title": "AdminUserOut",
+        "description": "A single user row in the admin backoffice listing.\n\nDeliberately excludes ``email`` \u2014 same PII-minimization criterion as the\npublic ``UserOut`` (email is only ever returned by register/login/me,\nnever by an admin-facing or public listing)."
+      },
       "BookGenreOut": {
         "properties": {
           "id": {
@@ -4285,6 +4631,188 @@
           "title_asc"
         ],
         "title": "BookSortEnum"
+      },
+      "CatalogEditIn": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "first_air_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Air Date"
+          },
+          "first_publish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Publish Date"
+          },
+          "genres": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genres"
+          },
+          "unlock_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlock Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CatalogEditIn",
+        "description": "Admin edit payload for ``PATCH /v1/admin/{type}/{slug}`` (feature 49).\n\nOnly the fields relevant to the request's ``{type}`` may be set \u2014 see\ndocs/api.md for the per-type editable field table. A field that exists on\nthis schema but is not editable for the given ``type`` raises 422 at the\nservice layer; a key that is not part of this schema at all is rejected\nby Pydantic itself (``extra=\"forbid\"``) before it ever reaches the\nservice.\n\nEvery field explicitly set here (``exclude_unset`` \u2014 a field left at its\ndefault is treated as \"not provided\") is persisted AND added to the\nitem's ``locked_fields``, so the next nightly sync leaves it untouched.\n\n``unlock_fields`` is the chosen desync mechanism (see ADR in docs/api.md):\na list of field names to release back to sync control, applied *after*\nthe edits above within the same request \u2014 so a field present in both the\nedit payload and ``unlock_fields`` ends up unlocked, not locked."
+      },
+      "CatalogEditOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "first_air_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Air Date"
+          },
+          "first_publish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Publish Date"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Genres"
+          },
+          "locked_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locked Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "slug",
+          "title",
+          "poster_url",
+          "genres",
+          "locked_fields"
+        ],
+        "title": "CatalogEditOut",
+        "description": "Result of a catalog manual edit \u2014 the item's current editable state."
       },
       "ContentStats": {
         "properties": {

@@ -609,19 +609,24 @@
       "milestone": "M6",
       "name": "admin_users_directory",
       "title": "Admin users directory — listado de usuarios con filtros de ban/admin",
-      "description": "Backoffice: tabla de usuarios en el admin, paginada y filtrable por baneados/admins, en vez de tener que escribir el username a ciegas como hoy (FE-30). Cablea las acciones ban/unban y grant/revoke-admin ya construidas en FE-30 a filas concretas del listado, reusando esos route handlers/lógica sin reimplementarlos. Requiere el backend nuevo de la feature 48 (admin_users_list) en feature_list.json.",
+      "description": "Backoffice: shell de admin con sidebar persistente (Users/Movies/Series/Books/Games — solo Users funcional en esta pasada, el resto stub 'coming soon' para FE-34). Sección Users: tabla real (no cards) paginada y filtrable por baneados/admins, de solo lectura — cada fila navega a una página de detalle del usuario (perfil completo: bio, avatar, follower/following counts, library_counts, rol/estado admin, y sus reviews) donde viven las acciones ban/unban y grant/revoke-admin (ya construidas en FE-30, reusadas sin reimplementar su lógica/confirmación). Requiere un endpoint backend nuevo GET /v1/admin/users/{username} (no existía forma de consultar un único usuario por username en el admin; añadido como parte de esta feature, mismo patrón X-API-Key que el resto de /v1/admin/*, reusa users_repo.get_user_by_username ya usado por grant/revoke-admin) — tratado como ampliación de backend fuera de feature_list.json, mismo criterio que otras features frontend que revelaron un gap de backend menor (p.ej. FE-24 notifications). Reemplaza el diseño previo en cards con acciones inline por fila (versión anterior de esta misma feature, ya revertida).",
       "depends_on": [
         29
       ],
       "acceptance": [
-        "Nuevo route handler BFF que proxea GET /v1/admin/users?is_banned=&is_admin=&page=&limit= (mismo patrón X-API-Key que admin/stats y admin/reports)",
-        "Tabla paginada de usuarios con badges Admin/Superadmin/Banned por fila",
-        "Filtros por is_banned e is_admin que refrescan el listado (combinables e independientes)",
-        "Cada fila expone ban/unban inline; grant/revoke-admin inline solo si el caller es superadmin (mismo gate que AdminRolesSection de FE-30) — reusa la lógica/confirmación ya construida, no la reimplementa",
-        "La fila afectada refleja el nuevo estado (is_banned/is_admin) tras cada acción, sin recargar toda la página",
+        "Layout /admin con sidebar persistente (Users/Movies/Series/Books/Games); auth+is_admin gate centralizado en el layout",
+        "Overview (stats + reported reviews queue, ya existentes de FE-28/FE-29) en /admin (landing)",
+        "Nuevo endpoint backend GET /v1/admin/users/{username} → AdminUserOut, 404 si no existe, mismo X-API-Key que el resto de /v1/admin/*",
+        "Nuevo route handler BFF GET /api/admin/users/{username} que lo proxea (mismo patrón que el resto de rutas admin)",
+        "GET /api/admin/users?is_banned=&is_admin=&page=&limit= (ya existente) alimenta /admin/users: tabla real (elemento <table>) paginada, de solo lectura, con badges Admin/Superadmin/Banned por fila",
+        "Filtros por is_banned e is_admin que refrescan la tabla (combinables e independientes)",
+        "Cada fila navega a /admin/users/{username}: página de detalle con perfil completo (bio, avatar, follower/following counts, library_counts vía GET /v1/users/{username} público) + sus reviews (GET /v1/users/{username}/reviews público, paginado) + rol/estado admin (vía el endpoint nuevo)",
+        "Acciones ban/unban y grant/revoke-admin viven en la página de detalle (no en la tabla); grant/revoke-admin solo visible si el caller es superadmin (mismo gate que AdminRolesSection de FE-30) — reusa la lógica/confirmación ya construida, no la reimplementa",
+        "Tras cada acción, la página de detalle refleja el nuevo estado sin recarga completa",
+        "/admin/movies, /admin/series, /admin/books, /admin/games: stub 'coming soon' navegables desde el sidebar, sin funcionalidad (FE-34 los rellena)",
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 33,
@@ -629,10 +634,11 @@
       "milestone": "M6",
       "name": "admin_catalog_backoffice",
       "title": "Admin catalog backoffice — listado y edición de movies/series/books/games",
-      "description": "Backoffice: por cada tipo de contenido, listado filtrable/paginado (mismo patrón que FE-9 browse_by_type) con acción de editar por item. El formulario de edición llama al PATCH admin del backend (feature 49, catalog_manual_edit) y muestra qué campos quedan bloqueados frente al sync tras guardarlos. Requiere el backend nuevo de la feature 49 en feature_list.json.",
+      "description": "Backoffice: por cada tipo de contenido, listado filtrable/paginado (mismo patrón que FE-9 browse_by_type) con acción de editar por item. El formulario de edición llama al PATCH admin del backend (feature 49, catalog_manual_edit) y muestra qué campos quedan bloqueados frente al sync tras guardarlos. Requiere el backend nuevo de la feature 49 en feature_list.json. FE-33 (admin_users_directory) ya construye el shell de /admin con sidebar (Users/Movies/Series/Books/Games) y deja /admin/movies, /admin/series, /admin/books, /admin/games como stubs 'coming soon' — esta feature rellena esas 4 rutas dentro del shell existente, sin crear un layout/sidebar nuevo. UX de referencia a replicar (confirmada con el usuario tras QA de FE-33, ver /admin/users): tabla real (no cards) con filtros como <Select> con etiqueta de texto VISIBLE por campo (no solo aria-label, para que no se confundan entre sí como pasó en la primera versión de FE-33), campo de búsqueda con debounce, y un indicador de 'mostrando N de TOTAL' junto a la tabla/filtros — mismo patrón para movies/series/books/games que el que ya tiene /admin/users.",
       "depends_on": [
         10,
-        29
+        29,
+        32
       ],
       "acceptance": [
         "Sección admin con selector de tipo (movies/series/books/games); listado paginado con filtros de género/sort reusando el patrón de FE-9",

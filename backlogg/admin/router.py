@@ -12,6 +12,7 @@ from backlogg.admin import service as admin_service
 from backlogg.admin.auth import verify_api_key
 from backlogg.admin.schemas import (
     AdminUserListOut,
+    AdminUserOut,
     CatalogEditIn,
     CatalogEditOut,
     StatsResponse,
@@ -77,21 +78,42 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     description=(
         "Paginated user listing for the admin backoffice, ordered by `username` asc. "
         "Optional `is_banned`/`is_admin` filters, combinable and independent — omitting "
-        "both returns every user. Never includes `email` (PII minimization). Requires "
+        "all filters returns every user. `search` is a case-insensitive substring match "
+        "against `username`, `display_name` OR `email`, combinable with the other "
+        "filters; empty/whitespace-only is treated as absent. Never includes `email` in "
+        "the response (PII minimization) even when matched by `search`. Requires "
         "`X-API-Key`."
     ),
 )
 async def list_users(
     is_banned: bool | None = Query(default=None, description="Filter by ban status"),
     is_admin: bool | None = Query(default=None, description="Filter by admin role"),
+    search: str | None = Query(
+        default=None,
+        description="Case-insensitive substring match against username, display_name or email",
+    ),
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserListOut:
     """Return a paginated, filterable listing of users for the admin backoffice."""
     return await admin_service.list_users(
-        db, is_banned=is_banned, is_admin=is_admin, page=page, limit=limit
+        db, is_banned=is_banned, is_admin=is_admin, search=search, page=page, limit=limit
     )
+
+
+@router.get(
+    "/users/{username}",
+    response_model=AdminUserOut,
+    summary="Get a single user's admin detail",
+    description=(
+        "Admin-facing detail for a single user, by username. Never includes `email` "
+        "(PII minimization). Unknown username -> 404. Requires `X-API-Key`."
+    ),
+)
+async def get_user(username: str, db: AsyncSession = Depends(get_db)) -> AdminUserOut:
+    """Return the admin-facing detail of a single user, by username."""
+    return await admin_service.get_user(db, username)
 
 
 @router.patch(

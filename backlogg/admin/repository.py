@@ -3,7 +3,7 @@
 Only this file imports and uses SQLAlchemy for the admin domain.
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books.models import Book
@@ -38,19 +38,33 @@ async def list_users(
     db: AsyncSession,
     is_banned: bool | None,
     is_admin: bool | None,
+    search: str | None,
     page: int,
     limit: int,
 ) -> tuple[list[User], int]:
     """Paginated user listing for the admin backoffice, ordered by ``username`` asc.
 
-    ``is_banned``/``is_admin`` are optional and combinable — omitting both
-    returns every user. Returns a tuple of ``(items, total_count)``.
+    ``is_banned``/``is_admin``/``search`` are optional and combinable —
+    omitting all three returns every user. ``search`` is a case-insensitive
+    substring match (``ILIKE``) against ``username``, ``display_name`` OR
+    ``email`` — email is only ever used to *locate* a row here, never
+    returned (see ``AdminUserOut``, which has no ``email`` field). Returns a
+    tuple of ``(items, total_count)``.
     """
     filters = []
     if is_banned is not None:
         filters.append(User.is_banned == is_banned)
     if is_admin is not None:
         filters.append(User.is_admin == is_admin)
+    if search is not None:
+        pattern = f"%{search}%"
+        filters.append(
+            or_(
+                User.username.ilike(pattern),
+                User.display_name.ilike(pattern),
+                User.email.ilike(pattern),
+            )
+        )
 
     count_result = await db.execute(select(func.count()).select_from(User).where(*filters))
     total = count_result.scalar_one()

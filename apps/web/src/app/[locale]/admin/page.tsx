@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import { AdminModerationPanel } from "@/components/admin-moderation-panel";
 import { AdminReportsPanel } from "@/components/admin-reports-panel";
 import { AdminStatsPanel } from "@/components/admin-stats-panel";
-import { redirect } from "@/i18n/navigation";
-import { getCurrentUser } from "@/lib/api-fetch";
 
 /** OG metadata for `/admin` (FE-28), same shape as `/settings`'s `generateMetadata` (FE-17). */
 export async function generateMetadata({
@@ -27,63 +24,32 @@ export async function generateMetadata({
 }
 
 /**
- * Admin dashboard (FE-28): minimal landing page for the `/v1/admin/*`
- * surface — a stats overview for now, extended by FE-29 (report queue) and
- * FE-30 (moderation actions) later.
+ * Admin Overview (FE-28/FE-29): stats + the reported-reviews queue, the
+ * landing page of `/admin/*`. The auth+`is_admin` gate this page used to own
+ * directly now lives in `@/app/[locale]/admin/layout.tsx` (FE-33) — it
+ * covers this page and every route under `/admin/*` uniformly, so there is
+ * nothing left to check here.
  *
- * `proxy.ts` already redirects unauthenticated requests to `/admin` away at
- * the edge (`lib/auth/protected-routes.ts` lists it), but that check only
- * looks at cookie PRESENCE, not validity — this page still calls
- * `getCurrentUser()` itself (the real, server-side session check) and
- * redirects to `/login` on `null`, same defense-in-depth every other private
- * route uses (`/settings`, `/recommendations`, `/feed`).
- *
- * Real admin authorization (`admin_role_gate` fix, bundled onto this same
- * branch after FE-28 shipped): a signed-in session alone used to be enough
- * to reach this page, so ANY authenticated user could load it. `users` now
- * has a real `is_admin` column (`backlogg/users/models.py`, default `false`,
- * no API endpoint flips it — set by hand in the DB by an operator), exposed
- * on `UserMeOut` (`GET /v1/users/me`). A signed-in non-admin user
- * (`user.is_admin === false`) is redirected to `/` — NOT `/login`, since
- * they *are* authenticated, just not authorized for this section. This is
- * the actual authorization check; `/v1/admin/*` itself is still additionally
- * gated by the shared `X-API-Key` secret described below.
+ * `AdminUsersDirectoryPanel`/the former `AdminModerationPanel` (FE-30) no
+ * longer render here — FE-33 moved the user directory to its own
+ * `/admin/users` route (`@/app/[locale]/admin/users/page.tsx`), reachable
+ * from the sidebar this layout now renders.
  *
  * The actual data fetch happens client-side in `AdminStatsPanel`
  * (`@/components/admin-stats-panel.tsx`) against `GET /api/admin/stats`
  * (`@/app/api/admin/stats/route.ts`), the Route Handler that injects the key
  * server-side. `AdminReportsPanel` (FE-29, `@/components/admin-reports-panel.tsx`)
  * follows the exact same client-fetch-against-a-BFF-route pattern for the
- * report queue, mounted below it on this same page — no changes needed here
- * beyond rendering it, since the auth guard above already covers everything
- * under `/admin`.
- *
- * `AdminModerationPanel` (FE-30, `@/components/admin-moderation-panel.tsx`)
- * bundles the remaining moderation actions (ban/unban, grant/revoke admin).
- * It receives `isSuperadmin={user.is_superadmin}` straight from this page's
- * own `getCurrentUser()` call above — `UserMeOut.is_superadmin` (`docs/api.md`,
- * never present on the public `UserOut`) is the ONLY source of truth this app
- * has for whether the signed-in caller may see the grant/revoke-admin section
- * at all, same as `user.is_admin` already gating this entire page.
+ * report queue, mounted below it on this same page.
  */
 export default async function AdminPage({ params }: PageProps<"/[locale]/admin">) {
   const { locale } = await params;
   setRequestLocale(locale);
 
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect({ href: "/login", locale });
-    return;
-  }
-  if (!user.is_admin) {
-    redirect({ href: "/", locale });
-    return;
-  }
-
   const t = await getTranslations("Admin");
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-16">
+    <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t("heading")}</h1>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
@@ -91,7 +57,6 @@ export default async function AdminPage({ params }: PageProps<"/[locale]/admin">
 
       <AdminStatsPanel />
       <AdminReportsPanel />
-      <AdminModerationPanel isSuperadmin={user.is_superadmin} />
     </div>
   );
 }

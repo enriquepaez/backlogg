@@ -1,0 +1,27 @@
+meta {
+  name: Get user
+  type: http
+  seq: 27
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/users/alice
+  body: none
+  auth: none
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  Admin-facing detail for a single user, by username. Never includes email
+  (PII minimization). Unknown username returns 404. Requires the X-API-Key
+  header.
+}

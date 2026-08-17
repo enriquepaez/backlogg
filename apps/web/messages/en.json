@@ -354,14 +354,98 @@
         "unknown": "Something went wrong loading reports. Please try again."
       }
     },
-    "moderation": {
-      "users": {
-        "heading": "User moderation",
-        "description": "Ban or unban an account by username. A banned user can no longer log in and all of their reviews are hidden.",
-        "usernameLabel": "Username",
-        "usernamePlaceholder": "username",
+    "comingSoon": "This section is coming soon.",
+    "sidebar": {
+      "nav": "Admin sections",
+      "overview": "Overview",
+      "users": "Users",
+      "movies": "Movies",
+      "series": "Series",
+      "books": "Books",
+      "games": "Games"
+    },
+    "usersDirectory": {
+      "heading": "Users",
+      "description": "Browse every account and open one to see its full profile, review its status, and manage its roles or ban.",
+      "loading": "Loading users…",
+      "empty": "No users match these filters.",
+      "resultsCount": "Showing {shown} of {total} users",
+      "filters": {
+        "search": {
+          "label": "Search",
+          "placeholder": "Search by username, name or email"
+        },
+        "banned": {
+          "label": "Filter by ban status",
+          "all": "All",
+          "banned": "Banned",
+          "notBanned": "Not banned"
+        },
+        "admin": {
+          "label": "Filter by admin role",
+          "all": "All",
+          "admin": "Admin",
+          "notAdmin": "Not admin"
+        }
+      },
+      "columns": {
+        "user": "User",
+        "status": "Status",
+        "joined": "Joined"
+      },
+      "badges": {
+        "admin": "Admin",
+        "superadmin": "Superadmin",
+        "banned": "Banned"
+      },
+      "errors": {
+        "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+        "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+        "unknown": "Something went wrong loading users. Please try again."
+      },
+      "pagination": {
+        "nav": "Users pagination",
+        "previous": "Previous",
+        "next": "Next",
+        "pageStatus": "Page {page} of {totalPages}"
+      }
+    },
+    "userDetail": {
+      "profileError": "Something went wrong loading this user. Please try again.",
+      "viewPublicProfile": "View public profile",
+      "followerCount": "{count} followers",
+      "followingCount": "{count} following",
+      "joinedLabel": "Joined {date}",
+      "adminErrors": {
+        "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
+        "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
+        "unknown": "Something went wrong loading this user's admin status. Please try again."
+      },
+      "library": {
+        "heading": "Library"
+      },
+      "reviews": {
+        "heading": "Reviews",
+        "empty": "This user hasn't written any reviews yet.",
+        "error": "Something went wrong loading this user's reviews. Please try again.",
+        "dateLabel": "Reviewed {date}",
+        "pagination": {
+          "nav": "Reviews pagination",
+          "previous": "Previous",
+          "next": "Next",
+          "pageStatus": "Page {page} of {totalPages}"
+        }
+      },
+      "badges": {
+        "admin": "Admin",
+        "superadmin": "Superadmin",
+        "banned": "Banned"
+      },
+      "actions": {
         "banAction": "Ban",
         "unbanAction": "Unban",
+        "grantAction": "Grant admin",
+        "revokeAction": "Revoke admin",
         "submitting": "Working…",
         "banDialog": {
           "heading": "Ban this user?",
@@ -369,45 +453,22 @@
           "cancel": "Cancel",
           "confirm": "Ban"
         },
-        "statusBanned": "{username} is banned.",
-        "statusNotBanned": "{username} is not banned.",
-        "success": {
-          "banned": "User banned.",
-          "unbanned": "User unbanned."
-        },
-        "errors": {
-          "missingUsername": "Enter a username.",
-          "not_found": "No user exists with that username.",
-          "unauthorized": "The configured admin key was rejected by the backend. Check ADMIN_API_KEY on both sides.",
-          "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
-          "unknown": "Something went wrong. Please try again."
-        }
-      },
-      "roles": {
-        "heading": "Admin role",
-        "description": "Grant or revoke the admin role for another user. Only visible to superadmins.",
-        "usernameLabel": "Username",
-        "usernamePlaceholder": "username",
-        "grantAction": "Grant admin",
-        "revokeAction": "Revoke admin",
-        "submitting": "Working…",
         "revokeDialog": {
           "heading": "Revoke the admin role?",
           "description": "{username} will immediately lose access to the admin sections.",
           "cancel": "Cancel",
           "confirm": "Revoke"
         },
-        "statusAdmin": "{username} is an admin.",
-        "statusNotAdmin": "{username} is not an admin.",
         "success": {
+          "banned": "User banned.",
+          "unbanned": "User unbanned.",
           "granted": "Admin role granted.",
           "revoked": "Admin role revoked."
         },
         "errors": {
-          "missingUsername": "Enter a username.",
           "not_found": "No user exists with that username.",
           "forbidden": "Only a superadmin can grant or revoke the admin role.",
-          "unauthorized": "Your session expired or the admin key was rejected. Please sign in again.",
+          "unauthorized": "The configured admin key was rejected by the backend, or your session expired. Please try again.",
           "not_configured": "The admin key isn't configured. Set ADMIN_API_KEY to enable this section.",
           "unknown": "Something went wrong. Please try again."
         }

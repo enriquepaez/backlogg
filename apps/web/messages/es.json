@@ -354,14 +354,98 @@
         "unknown": "Algo salió mal al cargar los reportes. Inténtalo de nuevo."
       }
     },
-    "moderation": {
-      "users": {
-        "heading": "Moderación de usuarios",
-        "description": "Banea o desbanea una cuenta por su nombre de usuario. Un usuario baneado no puede iniciar sesión y todas sus reviews quedan ocultas.",
-        "usernameLabel": "Nombre de usuario",
-        "usernamePlaceholder": "nombre_de_usuario",
+    "comingSoon": "Esta sección estará disponible próximamente.",
+    "sidebar": {
+      "nav": "Secciones de administración",
+      "overview": "Resumen",
+      "users": "Usuarios",
+      "movies": "Películas",
+      "series": "Series",
+      "books": "Libros",
+      "games": "Videojuegos"
+    },
+    "usersDirectory": {
+      "heading": "Usuarios",
+      "description": "Explora todas las cuentas y abre una para ver su perfil completo, revisar su estado y gestionar sus roles o baneo.",
+      "loading": "Cargando usuarios…",
+      "empty": "No hay usuarios que coincidan con estos filtros.",
+      "resultsCount": "Mostrando {shown} de {total} usuarios",
+      "filters": {
+        "search": {
+          "label": "Buscar",
+          "placeholder": "Buscar por nombre de usuario, nombre o email"
+        },
+        "banned": {
+          "label": "Filtrar por estado de baneo",
+          "all": "Todos",
+          "banned": "Baneados",
+          "notBanned": "No baneados"
+        },
+        "admin": {
+          "label": "Filtrar por rol de administrador",
+          "all": "Todos",
+          "admin": "Administradores",
+          "notAdmin": "No administradores"
+        }
+      },
+      "columns": {
+        "user": "Usuario",
+        "status": "Estado",
+        "joined": "Se unió"
+      },
+      "badges": {
+        "admin": "Admin",
+        "superadmin": "Superadmin",
+        "banned": "Baneado"
+      },
+      "errors": {
+        "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
+        "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+        "unknown": "Algo salió mal al cargar los usuarios. Inténtalo de nuevo."
+      },
+      "pagination": {
+        "nav": "Paginación de usuarios",
+        "previous": "Anterior",
+        "next": "Siguiente",
+        "pageStatus": "Página {page} de {totalPages}"
+      }
+    },
+    "userDetail": {
+      "profileError": "Algo salió mal al cargar este usuario. Inténtalo de nuevo.",
+      "viewPublicProfile": "Ver perfil público",
+      "followerCount": "{count} seguidores",
+      "followingCount": "{count} siguiendo",
+      "joinedLabel": "Se unió {date}",
+      "adminErrors": {
+        "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
+        "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
+        "unknown": "Algo salió mal al cargar el estado de administración de este usuario. Inténtalo de nuevo."
+      },
+      "library": {
+        "heading": "Biblioteca"
+      },
+      "reviews": {
+        "heading": "Reseñas",
+        "empty": "Este usuario todavía no ha escrito ninguna reseña.",
+        "error": "Algo salió mal al cargar las reseñas de este usuario. Inténtalo de nuevo.",
+        "dateLabel": "Reseñado el {date}",
+        "pagination": {
+          "nav": "Paginación de reseñas",
+          "previous": "Anterior",
+          "next": "Siguiente",
+          "pageStatus": "Página {page} de {totalPages}"
+        }
+      },
+      "badges": {
+        "admin": "Admin",
+        "superadmin": "Superadmin",
+        "banned": "Baneado"
+      },
+      "actions": {
         "banAction": "Banear",
         "unbanAction": "Desbanear",
+        "grantAction": "Otorgar admin",
+        "revokeAction": "Revocar admin",
         "submitting": "Procesando…",
         "banDialog": {
           "heading": "¿Banear a este usuario?",
@@ -369,45 +453,22 @@
           "cancel": "Cancelar",
           "confirm": "Banear"
         },
-        "statusBanned": "{username} está baneado.",
-        "statusNotBanned": "{username} no está baneado.",
-        "success": {
-          "banned": "Usuario baneado.",
-          "unbanned": "Usuario desbaneado."
-        },
-        "errors": {
-          "missingUsername": "Introduce un nombre de usuario.",
-          "not_found": "No existe ningún usuario con ese nombre.",
-          "unauthorized": "La clave de administrador configurada fue rechazada por el backend. Revisa ADMIN_API_KEY en ambos lados.",
-          "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
-          "unknown": "Algo salió mal. Inténtalo de nuevo."
-        }
-      },
-      "roles": {
-        "heading": "Rol de administrador",
-        "description": "Otorga o revoca el rol de administrador a otro usuario. Solo visible para superadmins.",
-        "usernameLabel": "Nombre de usuario",
-        "usernamePlaceholder": "nombre_de_usuario",
-        "grantAction": "Otorgar admin",
-        "revokeAction": "Revocar admin",
-        "submitting": "Procesando…",
         "revokeDialog": {
           "heading": "¿Revocar el rol de administrador?",
           "description": "{username} perderá acceso inmediato a las secciones de administración.",
           "cancel": "Cancelar",
           "confirm": "Revocar"
         },
-        "statusAdmin": "{username} es administrador.",
-        "statusNotAdmin": "{username} no es administrador.",
         "success": {
+          "banned": "Usuario baneado.",
+          "unbanned": "Usuario desbaneado.",
           "granted": "Rol de administrador otorgado.",
           "revoked": "Rol de administrador revocado."
         },
         "errors": {
-          "missingUsername": "Introduce un nombre de usuario.",
           "not_found": "No existe ningún usuario con ese nombre.",
           "forbidden": "Solo un superadmin puede otorgar o revocar el rol de administrador.",
-          "unauthorized": "Tu sesión expiró o la clave de administrador fue rechazada. Vuelve a iniciar sesión.",
+          "unauthorized": "La clave de administrador configurada fue rechazada por el backend, o tu sesión expiró. Inténtalo de nuevo.",
           "not_configured": "La clave de administrador no está configurada. Define ADMIN_API_KEY para habilitar esta sección.",
           "unknown": "Algo salió mal. Inténtalo de nuevo."
         }

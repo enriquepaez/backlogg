@@ -130,21 +130,39 @@ async def set_user_admin_role(
     return RoleGrantOut(username=target.username, is_admin=is_admin)
 
 
+async def get_user(db: AsyncSession, username: str) -> AdminUserOut:
+    """Admin backoffice: a single user's admin-facing detail.
+
+    Reuses the same lookup as ``set_user_admin_role`` (``users_repo.get_user_by_username``).
+    Raises 404 if the username does not exist. Maps to ``AdminUserOut``, which
+    never includes ``email`` — same PII-minimization criterion as ``list_users``.
+    """
+    user = await users_repo.get_user_by_username(db, username)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return AdminUserOut.model_validate(user)
+
+
 async def list_users(
     db: AsyncSession,
     is_banned: bool | None,
     is_admin: bool | None,
+    search: str | None,
     page: int,
     limit: int,
 ) -> AdminUserListOut:
     """Admin backoffice: paginated users, ordered by ``username`` asc.
 
-    ``is_banned``/``is_admin`` are optional and combinable. Delegates the
+    ``is_banned``/``is_admin``/``search`` are optional and combinable. A
+    ``search`` that is empty/whitespace-only after stripping is treated as
+    absent (no filter) — same as omitting the query param. Delegates the
     query to the repository and maps the rows to ``AdminUserOut``, which
-    never includes ``email``.
+    never includes ``email`` (search can match against it, but it is never
+    returned).
     """
+    search = (search or "").strip() or None
     users, total = await admin_repo.list_users(
-        db, is_banned=is_banned, is_admin=is_admin, page=page, limit=limit
+        db, is_banned=is_banned, is_admin=is_admin, search=search, page=page, limit=limit
     )
     items = [AdminUserOut.model_validate(u) for u in users]
     return AdminUserListOut(items=items, total=total, page=page, limit=limit)
