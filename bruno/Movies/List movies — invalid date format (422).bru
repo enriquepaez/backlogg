@@ -1,0 +1,15 @@
+meta {
+  name: List movies — invalid date format (422)
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/v1/movies?date_from=not-a-date
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 422
+}

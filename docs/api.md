@@ -81,15 +81,26 @@ GET /v1/movies | /v1/series | /v1/books | /v1/games
 → 200  Lista paginada (solo items ya en DB, sin fallback externo)
 ```
 
-| Param   | Required | Description |
-|---------|----------|-------------|
-| `genre` | No       | Filtro por slug de género (p.ej. `action`) |
-| `sort`  | No       | `rating_desc` (default), `rating_asc`, `date_desc`, `date_asc`, `title_asc` |
-| `page`  | No       | Página, 1-based (default: 1) |
-| `limit` | No       | Items por página (default: 20, max: 100) |
+| Param                    | Required | Description |
+|--------------------------|----------|-------------|
+| `genre`                  | No       | Filtro por slug de género (p.ej. `action`) |
+| `sort`                   | No       | `rating_desc` (default), `rating_asc`, `date_desc`, `date_asc`, `title_asc` |
+| `page`                   | No       | Página, 1-based (default: 1) |
+| `limit`                  | No       | Items por página (default: 20, max: 100) |
+| `search`                 | No       | Substring case-insensitive sobre `title` (`ILIKE`) |
+| `date_from`              | No       | Límite inferior inclusivo sobre el campo de fecha del tipo (ISO `YYYY-MM-DD`) |
+| `date_to`                | No       | Límite superior inclusivo sobre el campo de fecha del tipo (ISO `YYYY-MM-DD`) |
+| `rating_internal_min`    | No       | Límite inferior inclusivo sobre `rating_internal` |
+| `rating_internal_max`    | No       | Límite superior inclusivo sobre `rating_internal` |
+| `rating_external_min`    | No       | Límite inferior inclusivo sobre `rating_external` |
+| `rating_external_max`    | No       | Límite superior inclusivo sobre `rating_external` |
 
-`date_*` ordena por `release_date` (movies/games), `first_air_date` (series)
-o `first_publish_date` (books).
+`date_*` ordena y filtra sobre `release_date` (movies/games), `first_air_date`
+(series) o `first_publish_date` (books). Todos los params son independientemente
+opcionales y combinables entre sí y con `genre`/`sort`/`page`/`limit` (AND
+lógico). `date_from`/`date_to` con formato inválido o `date_from > date_to` →
+`422`; lo mismo para `rating_internal_min > rating_internal_max` o
+`rating_external_min > rating_external_max`.
 
 Response:
 ```json

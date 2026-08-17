@@ -1,0 +1,25 @@
+meta {
+  name: List games — search and date-rating filters
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/v1/games
+  body: none
+  auth: none
+}
+
+params:query {
+  search: doom
+  date_from: 1990-01-01
+  date_to: 2020-12-31
+  rating_internal_min: 3
+  rating_internal_max: 5
+  rating_external_min: 6
+  rating_external_max: 10
+}
+
+assert {
+  res.status: eq 200
+}

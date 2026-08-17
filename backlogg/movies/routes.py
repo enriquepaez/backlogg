@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,7 +7,7 @@ from backlogg.core.database import get_db
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.movies import service
-from backlogg.movies.schemas import MovieListOut, MovieOut, MovieSortEnum, SimilarMoviesOut
+from backlogg.movies.schemas import MovieListOut, MovieListParams, MovieOut, SimilarMoviesOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
 from backlogg.users.auth import get_current_user, get_current_user_optional
@@ -18,16 +20,23 @@ router = APIRouter(prefix="/movies", tags=["movies"])
     "",
     response_model=MovieListOut,
     summary="List movies",
-    description="Paginated list of catalogued movies (no external fallback); genre filter + sort.",
+    description=(
+        "Paginated list of catalogued movies (no external fallback); genre filter + sort, "
+        "plus search/date-range/rating-range filters (feature 50)."
+    ),
 )
 async def list_movies(
-    genre: str | None = Query(default=None, description="Filter by genre slug"),
-    sort: MovieSortEnum = Query(default=MovieSortEnum.rating_desc, description="Sort order"),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    params: Annotated[MovieListParams, Query()],
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_movies(db, genre=genre, sort=sort, page=page, limit=limit)
+    return await service.list_movies(
+        db,
+        genre=params.genre,
+        sort=params.sort,
+        page=params.page,
+        limit=params.limit,
+        filters=params,
+    )
 
 
 @router.get(

@@ -1013,6 +1013,29 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 50,
+      "name": "catalog_search_filters",
+      "title": "Catalog search filters — búsqueda por nombre y rango de fecha/rating en GET /v1/{type}",
+      "description": "Amplía los 4 endpoints de listado (GET /v1/movies|series|books|games, feature 14) con nuevos query params opcionales, combinables entre sí y con genre/sort/page/limit ya existentes: search (substring case-insensitive sobre title, vía ILIKE), date_from/date_to (rango sobre el campo de fecha del tipo: release_date en movies/games, first_air_date en series, first_publish_date en books; ambos límites inclusivos, cualquiera de los dos es opcional de forma independiente), rating_internal_min/rating_internal_max y rating_external_min/rating_external_max (sobre rating_internal y rating_external respectivamente, límites inclusivos, min/max independientes entre sí). Motivación: FE-34 (admin_catalog_backoffice, frontend_feature_list.json) necesita estos filtros para el backoffice y FE-9 (browse_by_type, ya done) los necesitará para el browse público — confirmado con el usuario que ambos consumidores deben poder usarlos, así que el contrato vive en el endpoint público compartido en vez de duplicarse en un endpoint admin-only. La feature 39 (response_caching) añade Cache-Control/ETag a estos listados: la clave de caché/ETag debe incorporar los nuevos params para no servir una respuesta cacheada de una combinación de filtros distinta.",
+      "depends_on": [
+        14,
+        39
+      ],
+      "acceptance": [
+        "GET /v1/movies?search=dune filtra por substring case-insensitive de title (ILIKE), igual en series/books/games",
+        "GET /v1/movies?date_from=2020-01-01&date_to=2021-12-31 filtra por rango inclusivo sobre release_date; equivalente con first_air_date en series y first_publish_date en books; date_from y date_to son independientemente opcionales",
+        "GET /v1/movies?rating_internal_min=7&rating_internal_max=9 y rating_external_min/rating_external_max filtran por rango inclusivo sobre rating_internal/rating_external respectivamente; cada uno de los 4 params es independientemente opcional",
+        "Todos los params nuevos son combinables entre sí y con genre/sort/page/limit ya existentes (AND lógico)",
+        "date_from/date_to con formato inválido o date_from > date_to → 422; rating_*_min > rating_*_max → 422",
+        "La respuesta mantiene el mismo contrato (items[], total, page, limit) que documenta docs/api.md hoy",
+        "ETag/Cache-Control (feature 39) incorpora los nuevos params en su clave — dos requests con distintos filtros nunca comparten ETag",
+        "docs/api.md documenta los nuevos params en la tabla de GET /v1/{type}",
+        "Tests de repositorio (cada filtro individual + combinaciones) y de endpoint (incluye 422) para los 4 tipos",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
     }
   ]
 }

@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.books.models import Book, BookGenre, book_genres_join
 from backlogg.books.schemas import BookSortEnum
+from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 from backlogg.shared.models import Credit
 
 
@@ -14,16 +15,31 @@ async def list_books(
     sort: BookSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters | None = None,
 ) -> tuple[list[Book], int]:
-    """Return a paginated list of books with optional genre filter and sorting.
+    """Return a paginated list of books with optional genre/search/date/rating filters and sorting.
 
-    Sort by first_publish_date for date_desc / date_asc (not release_date).
-    Returns a tuple of (items, total_count).
+    Sort by first_publish_date for date_desc / date_asc (not release_date). ``filters``
+    (feature 50) holds ``search``/``date_from``/``date_to``/``rating_internal_min``/
+    ``rating_internal_max``/``rating_external_min``/``rating_external_max`` — all
+    independently optional and AND-combined with ``genre``. Returns a tuple of
+    (items, total_count).
     """
     base_query = select(Book).options(selectinload(Book.genres))
 
     if genre is not None:
         base_query = base_query.join(Book.genres).where(BookGenre.slug == genre)
+
+    if filters is not None:
+        clauses = build_catalog_filter_clauses(
+            filters,
+            title_col=Book.title,
+            date_col=Book.first_publish_date,
+            rating_internal_col=Book.rating_internal,
+            rating_external_col=Book.rating_external,
+        )
+        if clauses:
+            base_query = base_query.where(*clauses)
 
     # Count query (without pagination)
     count_query = select(func.count()).select_from(base_query.subquery())

@@ -1,0 +1,15 @@
+meta {
+  name: List series — invalid date range (422)
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/v1/series?date_from=2021-12-31&date_to=2021-01-01
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 422
+}

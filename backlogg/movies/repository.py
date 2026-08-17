@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
 from backlogg.movies.schemas import MovieSortEnum
+from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
 async def list_movies(
@@ -12,15 +13,30 @@ async def list_movies(
     sort: MovieSortEnum,
     page: int,
     limit: int,
+    filters: CatalogSearchFilters | None = None,
 ) -> tuple[list[Movie], int]:
-    """Return a paginated list of movies with optional genre filter and sorting.
+    """Return a paginated list of movies with optional genre/search/date/rating filters and sorting.
 
-    Returns a tuple of (items, total_count).
+    ``filters`` (feature 50) holds ``search``/``date_from``/``date_to``/
+    ``rating_internal_min``/``rating_internal_max``/``rating_external_min``/
+    ``rating_external_max`` — all independently optional and AND-combined
+    with ``genre``. Returns a tuple of (items, total_count).
     """
     base_query = select(Movie).options(selectinload(Movie.genres))
 
     if genre is not None:
         base_query = base_query.join(Movie.genres).where(MovieGenre.slug == genre)
+
+    if filters is not None:
+        clauses = build_catalog_filter_clauses(
+            filters,
+            title_col=Movie.title,
+            date_col=Movie.release_date,
+            rating_internal_col=Movie.rating_internal,
+            rating_external_col=Movie.rating_external,
+        )
+        if clauses:
+            base_query = base_query.where(*clauses)
 
     # Count query (without pagination)
     count_query = select(func.count()).select_from(base_query.subquery())

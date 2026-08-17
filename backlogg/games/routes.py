@@ -1,9 +1,11 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.core.database import get_db
 from backlogg.games import service
-from backlogg.games.schemas import GameListOut, GameOut, GameSortEnum, SimilarGameListOut
+from backlogg.games.schemas import GameListOut, GameListParams, GameOut, SimilarGameListOut
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.ratings import service as ratings_service
@@ -18,16 +20,23 @@ router = APIRouter(prefix="/games", tags=["games"])
     "",
     response_model=GameListOut,
     summary="List games",
-    description="Paginated list of catalogued games (no external fallback); genre filter + sort.",
+    description=(
+        "Paginated list of catalogued games (no external fallback); genre filter + sort, "
+        "plus search/date-range/rating-range filters (feature 50)."
+    ),
 )
 async def list_games(
-    genre: str | None = Query(default=None, description="Filter by genre slug"),
-    sort: GameSortEnum = Query(default=GameSortEnum.rating_desc, description="Sort order"),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    params: Annotated[GameListParams, Query()],
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_games(db, genre=genre, sort=sort, page=page, limit=limit)
+    return await service.list_games(
+        db,
+        genre=params.genre,
+        sort=params.sort,
+        page=params.page,
+        limit=params.limit,
+        filters=params,
+    )
 
 
 @router.get(
