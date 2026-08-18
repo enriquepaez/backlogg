@@ -665,6 +665,33 @@
       },
       "remove": "Quitar de la biblioteca",
       "error": "No se pudo actualizar tu biblioteca. Inténtalo de nuevo."
+    },
+    "activityLog": {
+      "heading": "Registro de actividad",
+      "description": "Registra un rewatch, repetición o relectura con su propia fecha, separado de tu puntuación.",
+      "loading": "Cargando tu registro de actividad…",
+      "loadError": "No se pudo cargar tu registro de actividad. Inténtalo de nuevo.",
+      "anonymousPrompt": "Inicia sesión para llevar el registro de tus rewatches, repeticiones y relecturas.",
+      "anonymousLoginLink": "Iniciar sesión",
+      "dateLabel": "Fecha",
+      "rewatchLabel": "Esto fue un rewatch",
+      "noteLabel": "Nota (opcional)",
+      "addEntry": "Añadir entrada",
+      "saving": "Guardando…",
+      "saveSuccess": "Tu entrada de registro se ha guardado.",
+      "historyHeading": "Tu historial para este título",
+      "historyEmpty": "Todavía no hay entradas de registro.",
+      "rewatchYes": "Rewatch",
+      "rewatchNo": "Primera vez",
+      "delete": "Eliminar",
+      "deleting": "Eliminando…",
+      "deleteSuccess": "Tu entrada de registro se ha eliminado.",
+      "deleteError": "No se pudo eliminar tu entrada de registro. Inténtalo de nuevo.",
+      "errors": {
+        "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+        "validation": "La fecha no puede ser futura.",
+        "save": "No se pudo guardar tu entrada de registro. Inténtalo de nuevo."
+      }
     }
   },
   "Auth": {

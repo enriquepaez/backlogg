@@ -787,7 +787,7 @@
         "No sustituye ni requiere el rating/review existente — ambos coexisten en el item detail",
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 41,
