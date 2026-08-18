@@ -17,6 +17,40 @@ if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// Node 22+'s own experimental `localStorage` global (a WHATWG Storage
+// backed by a file, opt-in via `--localstorage-file`) shadows jsdom's
+// window-scoped implementation without actually providing one when that
+// flag is absent — `window.localStorage` (same object as `globalThis` in
+// Vitest's jsdom environment) ends up `undefined` instead of a working
+// `Storage`, even though jsdom itself normally implements it. First hit by
+// `library-view-toggle.tsx` (FE-43), the first component in this codebase
+// to read/write `localStorage` in a way its tests exercise. A minimal
+// in-memory `Storage` polyfill, guarded the same way as the
+// `scrollIntoView` shim above, keeps every test's `localStorage` isolated
+// (cleared per test file's own `beforeEach`, same as a real fresh
+// `Storage`) without depending on this Node/jsdom quirk being fixed
+// upstream.
+if (typeof window !== "undefined" && !window.localStorage) {
+  const store = new Map<string, string>();
+  const memoryStorage: Storage = {
+    getItem: (key) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key, value) => {
+      store.set(key, String(value));
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  };
+  Object.defineProperty(window, "localStorage", { value: memoryStorage, configurable: true });
+}
+
 // Testing Library doesn't auto-cleanup outside of Jest's global afterEach
 // hook, so it's wired up explicitly here for Vitest.
 afterEach(() => {

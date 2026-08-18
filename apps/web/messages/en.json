@@ -211,6 +211,14 @@
       "rating_desc": "Your rating",
       "title_asc": "Title (A-Z)",
       "date_desc": "Release date"
+    },
+    "view": {
+      "label": "Library view",
+      "grid": "Grid",
+      "board": "Board"
+    },
+    "board": {
+      "columnEmpty": "No titles in this status."
     }
   },
   "Profile": {

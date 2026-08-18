@@ -829,7 +829,7 @@
         "Responsive: en mobile las columnas se apilan o son scrolleables horizontalmente sin romper el layout",
         "i18n; typecheck+lint+build en verde; QA en navegador en desktop y mobile"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 43,

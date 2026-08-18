@@ -62,6 +62,28 @@ export function isLibrarySort(value: string): value is LibrarySort {
 }
 
 /**
+ * Display mode for `/u/{username}/library` (FE-43): the existing flat
+ * poster grid (`"grid"`, FE-20) or a four-column board, one column per
+ * {@link LibraryStatusValue}, only ever offered on the viewer's own library
+ * (see `LibraryViewToggle`'s doc comment — perfiles ajenos always render
+ * `"grid"`, read-only, regardless of this value). Same `?view=` URL-driven
+ * convention as `LibrarySort`'s `?sort=`, so a board link is shareable/
+ * reloadable — `LibraryViewToggle` additionally mirrors the current choice
+ * into `localStorage` (keyed per-username, see that component) and, on a
+ * plain visit with no explicit `?view=`, replaces the URL with the saved
+ * preference.
+ */
+export type LibraryView = "grid" | "board";
+
+export const LIBRARY_VIEWS: readonly LibraryView[] = ["grid", "board"];
+
+export const DEFAULT_LIBRARY_VIEW: LibraryView = "grid";
+
+export function isLibraryView(value: string): value is LibraryView {
+  return (LIBRARY_VIEWS as readonly string[]).includes(value);
+}
+
+/**
  * Lookup key shared by {@link sortLibraryEntries}'s `rating_desc` branch and
  * `./library.ts`'s `getUserReviewScores` — both need to match a
  * `LibraryEntry` (`item.item_type`/`item.slug`, e.g. `"MOVIE"`/`"dune-2021"`)
