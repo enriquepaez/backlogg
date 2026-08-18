@@ -268,6 +268,8 @@
     },
     "entry": {
       "dateLabel": "Reviewed on {date}",
+      "completedDateLabel": "Completed on {date}",
+      "completedBadge": "Completed",
       "likeCount": "{count} likes"
     },
     "pagination": {
@@ -307,6 +309,7 @@
     "empty": "No notifications yet.",
     "newFollower": "{name} started following you.",
     "reviewLike": "{name} liked your review.",
+    "userCompleted": "{name} marked something as completed.",
     "generic": "{name} interacted with you.",
     "deleteAriaLabel": "Delete notification"
   },

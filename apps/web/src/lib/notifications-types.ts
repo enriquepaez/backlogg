@@ -54,13 +54,19 @@ export function notificationItemType(itemType: string | null): CatalogType | und
  *   resolves them for `review_like` (see `progress/impl_notifications_
  *   backend.md`), but the frontend stays defensive rather than link to
  *   `/null/undefined`.
+ * - `user_completed` (FE-42) → the completed item, resolved from
+ *   `target.item_type`/`target.slug` exactly like `review_like` — per
+ *   `docs/api.md`, the backend already resolves both fields the same way for
+ *   this type (`target_id` differs — it's the item's own id, not a rating's —
+ *   but this function never reads `target_id`, so that difference doesn't
+ *   matter here).
  * - Any other/future `type` → `undefined`, same "no link" fallback.
  */
 export function notificationHref(notification: NotificationItem): string | undefined {
   if (notification.type === "new_follower") {
     return `/u/${notification.actor.username}`;
   }
-  if (notification.type === "review_like") {
+  if (notification.type === "review_like" || notification.type === "user_completed") {
     const type = notificationItemType(notification.target.item_type);
     const slug = notification.target.slug;
     return type && slug ? `/${type}/${slug}` : undefined;

@@ -807,7 +807,7 @@
         "i18n: nuevas claves de mensaje para ambos tipos, es/en",
         "typecheck+lint+build en verde; QA en navegador con datos de ambos tipos de evento"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 42,

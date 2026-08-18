@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, X } from "lucide-react";
+import { Bell, CheckCircle2, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Link } from "@/i18n/navigation";
 import { formatDate } from "@/lib/format-date";
+import { STATUS_COLOR_CLASSES } from "@/lib/library-types";
 import { notificationHref, type NotificationItem } from "@/lib/notifications-types";
 import { cn } from "@/lib/utils";
 
@@ -221,6 +222,9 @@ function notificationMessage(item: NotificationItem, t: NotificationTranslator):
   if (item.type === "review_like") {
     return t("reviewLike", { name });
   }
+  if (item.type === "user_completed") {
+    return t("userCompleted", { name });
+  }
   return t("generic", { name });
 }
 
@@ -240,20 +244,41 @@ function NotificationRow({
 
   const content = (
     <div className="flex items-start gap-2">
-      {item.actor.avatar_url ? (
-        // Avatar hosts aren't configured in next/image's remotePatterns yet
-        // (catalog-image scope, later features) — same rationale as
-        // `FeedEntryAuthor` in `feed-entry-list.tsx`.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.actor.avatar_url} alt="" className="mt-0.5 size-6 shrink-0 rounded-full object-cover" />
-      ) : (
-        <span
-          aria-hidden="true"
-          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs"
-        >
-          {(item.actor.display_name ?? item.actor.username).slice(0, 2).toUpperCase()}
-        </span>
-      )}
+      <div className="relative mt-0.5 shrink-0">
+        {item.actor.avatar_url ? (
+          // Avatar hosts aren't configured in next/image's remotePatterns yet
+          // (catalog-image scope, later features) — same rationale as
+          // `FeedEntryAuthor` in `feed-entry-list.tsx`.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.actor.avatar_url} alt="" className="size-6 rounded-full object-cover" />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="flex size-6 items-center justify-center rounded-full bg-muted text-xs"
+          >
+            {(item.actor.display_name ?? item.actor.username).slice(0, 2).toUpperCase()}
+          </span>
+        )}
+        {item.type === "user_completed" ? (
+          // Own icon for `user_completed` (FE-42 acceptance), layered on the
+          // actor's avatar rather than replacing it — the message text still
+          // needs to say *who* completed something, so the avatar stays; this
+          // is purely the extra visual cue that distinguishes the type at a
+          // glance, same `STATUS_COLOR_CLASSES.completed` color (and
+          // `CheckCircle2` icon) `FeedEntryCompletedBadge`
+          // (`feed-entry-list.tsx`) uses for the same event, for consistency
+          // between the two surfaces.
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -right-1 -bottom-1 flex size-3.5 items-center justify-center rounded-full ring-2 ring-background",
+              STATUS_COLOR_CLASSES.completed,
+            )}
+          >
+            <CheckCircle2 className="size-2.5" />
+          </span>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-0.5">
         <p
           className={cn(
