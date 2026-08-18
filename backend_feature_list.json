@@ -1141,7 +1141,7 @@
         "Tests: generación en status_completed, notificación solo a followers directos, contrato de GET /notifications con el nuevo tipo",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

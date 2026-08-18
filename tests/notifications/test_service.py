@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 
 from backlogg.follows import service as follows_service
 from backlogg.follows.repository import count_following
+from backlogg.library import service as library_service
+from backlogg.library.schemas import LibraryStatus
 from backlogg.movies.repository import upsert_movie
 from backlogg.notifications import repository as notif_repo
 from backlogg.notifications import service as notif_service
@@ -181,6 +183,123 @@ async def test_unlike_does_not_notify(db):
     await ratings_service.unlike_review(db, rating_id=rating.id, user=liker)
 
     assert await notif_repo.count_unread(db, author.id) == 0
+
+
+# ── generation on status_completed (feature 55) ──────────────────────────
+
+
+async def test_complete_item_notifies_direct_follower(db):
+    completer = await _make_user(db, "notif-svc-completer-1")
+    follower = await _make_user(db, "notif-svc-completer-follower-1")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-1"))
+    await follows_service.follow_user(db, username="notif-svc-completer-1", user=follower)
+
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-1", LibraryStatus.completed, completer
+    )
+
+    rows, total = await notif_repo.list_notifications(db, follower.id, page=1, limit=20)
+    assert total == 1
+    assert rows[0].type == "user_completed"
+    assert rows[0].username == "notif-svc-completer-1"
+    assert rows[0].target_type == "MOVIE"
+
+
+async def test_complete_item_does_not_notify_followers_of_followers(db):
+    completer = await _make_user(db, "notif-svc-completer-2")
+    direct_follower = await _make_user(db, "notif-svc-completer-follower-2")
+    indirect_follower = await _make_user(db, "notif-svc-completer-follower-2b")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-2"))
+
+    # indirect_follower follows direct_follower, not the completer — must not
+    # be notified (no fan-out beyond direct followers).
+    await follows_service.follow_user(db, username="notif-svc-completer-2", user=direct_follower)
+    await follows_service.follow_user(
+        db, username="notif-svc-completer-follower-2", user=indirect_follower
+    )
+
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-2", LibraryStatus.completed, completer
+    )
+
+    # direct_follower also has an (unrelated) new_follower notification from
+    # indirect_follower following them — assert on user_completed specifically.
+    direct_rows, _ = await notif_repo.list_notifications(db, direct_follower.id, page=1, limit=20)
+    assert [r.type for r in direct_rows if r.type == "user_completed"] == ["user_completed"]
+
+    indirect_rows, _ = await notif_repo.list_notifications(
+        db, indirect_follower.id, page=1, limit=20
+    )
+    assert all(r.type != "user_completed" for r in indirect_rows)
+
+
+async def test_complete_item_does_not_notify_non_followers(db):
+    completer = await _make_user(db, "notif-svc-completer-3")
+    stranger = await _make_user(db, "notif-svc-stranger-3")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-3"))
+
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-3", LibraryStatus.completed, completer
+    )
+
+    assert await notif_repo.count_unread(db, stranger.id) == 0
+
+
+async def test_repeat_completion_generates_new_notification_each_time(db):
+    completer = await _make_user(db, "notif-svc-completer-4")
+    follower = await _make_user(db, "notif-svc-completer-follower-4")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-4"))
+    await follows_service.follow_user(db, username="notif-svc-completer-4", user=follower)
+
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-4", LibraryStatus.completed, completer
+    )
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-4", LibraryStatus.dropped, completer
+    )
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-4", LibraryStatus.completed, completer
+    )
+
+    rows, total = await notif_repo.list_notifications(db, follower.id, page=1, limit=20)
+    assert total == 2
+    assert all(row.type == "user_completed" for row in rows)
+
+
+async def test_repeat_completed_put_does_not_duplicate_notification(db):
+    completer = await _make_user(db, "notif-svc-completer-5")
+    follower = await _make_user(db, "notif-svc-completer-follower-5")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-5"))
+    await follows_service.follow_user(db, username="notif-svc-completer-5", user=follower)
+
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-5", LibraryStatus.completed, completer
+    )
+    # Re-PUTting the same status is a no-op transition — must not duplicate.
+    await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-5", LibraryStatus.completed, completer
+    )
+
+    assert await notif_repo.count_unread(db, follower.id) == 1
+
+
+async def test_complete_item_graceful_degradation(db, monkeypatch):
+    completer = await _make_user(db, "notif-svc-completer-6")
+    follower = await _make_user(db, "notif-svc-completer-follower-6")
+    await upsert_movie(db, _movie_data("notif-svc-completed-movie-6"))
+    await follows_service.follow_user(db, username="notif-svc-completer-6", user=follower)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("notification backend down")
+
+    monkeypatch.setattr(notif_repo, "create_notification", boom)
+
+    # Notification generation fails, but the library status write must still
+    # persist and the call must not raise.
+    out = await library_service.set_library_status(
+        db, "MOVIE", "notif-svc-completed-movie-6", LibraryStatus.completed, completer
+    )
+    assert out.status == "completed"
 
 
 # ── read side ────────────────────────────────────────────────────────────

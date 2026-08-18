@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.feed import repository as feed_repo
+from backlogg.follows import repository as follows_repo
 from backlogg.library import repository as repo
 from backlogg.library.schemas import (
     LibraryCounts,
@@ -20,6 +21,7 @@ from backlogg.library.schemas import (
     LibraryStatusOut,
     LibraryTypeFilter,
 )
+from backlogg.notifications import service as notifications_service
 from backlogg.users import repository as users_repo
 from backlogg.users.models import User
 
@@ -58,20 +60,46 @@ async def set_library_status(
     # transition: want/in_progress/dropped) does not insert another event.
     # Same-transaction as the status write for the same reason as
     # ratings.service.rate_item (plain local insert, no external call).
-    if status.value == "completed" and previous_status != "completed":
+    is_new_completion = status.value == "completed" and previous_status != "completed"
+    if is_new_completion:
         await feed_repo.create_status_completed_event(
             db, user_id=user.id, item_type=item_type, item_id=item.id
         )
 
     await db.commit()
 
-    return LibraryStatusOut(
+    # Build the response before the notification side effect below: each
+    # notify_user_completed call may commit/rollback the session on its own
+    # (graceful degradation), and a rollback expires every ORM instance in the
+    # session — reading entry.* afterwards would trigger an implicit lazy
+    # reload outside of an awaited context (MissingGreenlet). Snapshotting the
+    # response first sidesteps that entirely.
+    out = LibraryStatusOut(
         item_type=item_type,
         slug=slug,
         status=entry.status,
         created_at=entry.created_at,
         updated_at=entry.updated_at,
     )
+
+    # Notification fan-out (feature 55): one user_completed notification per
+    # direct follower — no fan-out to followers of followers, no dedup across
+    # repeated completions (each transition into completed is its own
+    # notification, same as review_like never deduplicating). Runs after the
+    # status write is committed and cannot break it (graceful degradation,
+    # same pattern as notify_new_follower/notify_review_like).
+    if is_new_completion:
+        follower_ids = await follows_repo.list_follower_ids(db, user.id)
+        for follower_id in follower_ids:
+            await notifications_service.notify_user_completed(
+                db,
+                recipient_id=follower_id,
+                actor_id=user.id,
+                item_type=item_type,
+                item_id=item.id,
+            )
+
+    return out
 
 
 async def remove_library_entry(db: AsyncSession, item_type: str, slug: str, user: User) -> None:

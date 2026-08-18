@@ -208,6 +208,31 @@ async def test_review_like_target_resolves_item_type_and_slug(client, db):
     assert target["slug"] == "route-notif-movie-1"
 
 
+async def test_user_completed_target_resolves_item_type_and_slug(client, db):
+    follower_token = await _register_and_login(client, "route-notif-follower-1")
+    completer_token = await _register_and_login(client, "route-notif-completer-1")
+    await movies_repo.upsert_movie(db, _movie_data("route-notif-movie-2"))
+
+    await client.post(
+        "/v1/users/route-notif-completer-1/follow", headers=_auth_headers(follower_token)
+    )
+    await client.put(
+        "/v1/movies/route-notif-movie-2/library",
+        json={"status": "completed"},
+        headers=_auth_headers(completer_token),
+    )
+
+    response = await client.get("/v1/notifications", headers=_auth_headers(follower_token))
+    body = response.json()
+    entry = body["items"][0]
+    assert entry["type"] == "user_completed"
+    assert entry["actor"]["username"] == "route-notif-completer-1"
+    target = entry["target"]
+    assert target["target_type"] == "MOVIE"
+    assert target["item_type"] == "MOVIE"
+    assert target["slug"] == "route-notif-movie-2"
+
+
 # ── DELETE /notifications/{id} ────────────────────────────────────────────
 
 

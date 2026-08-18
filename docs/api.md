@@ -705,9 +705,9 @@ GET /v1/notifications?page=&limit=
 ```
 
 Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
-`id`, `type` (`new_follower` | `review_like`), `actor` (`username`,
-`display_name`, `avatar_url`), `target` (`target_type`, `target_id`, `item_type`,
-`slug`), `is_read`, `created_at`.
+`id`, `type` (`new_follower` | `review_like` | `user_completed`), `actor`
+(`username`, `display_name`, `avatar_url`), `target` (`target_type`,
+`target_id`, `item_type`, `slug`), `is_read`, `created_at`.
 
 `target` es polimórfico: para `new_follower` los cuatro campos son `null` (no
 hay target — se enlaza al perfil del actor). Para `review_like`,
@@ -718,6 +718,18 @@ enlazar directo a `/{item_type}/{slug}` sin una consulta adicional (no existe
 `GET /v1/ratings/{id}`). Si la review referenciada está oculta por moderación
 (`is_hidden`), el target sigue resolviéndose igual: el enlace es al item, no a
 la review, así que la moderación de la review no afecta la notificación.
+
+Para `user_completed` (feature 55, generada cuando un usuario que sigues
+completa un item — un evento `status_completed` de la feature 54, ver
+`GET /v1/feed`), `target_type` = `item_type` en mayúscula y `target_id` = el id
+del item completado directamente (sin pasar por `user_ratings` — no hay
+review/rating involucrada); `item_type`/`slug` resuelven igual que en
+`review_like`, mismo contrato de cliente. Solo se notifica a followers
+**directos** del usuario que completó (sin fan-out a followers de followers),
+y solo en la transición a `completed`, no en cada rating — completar el mismo
+item varias veces (`completed → otro estado → completed`) genera una
+notificación nueva por follower cada vez, sin deduplicar histórico (mismo
+criterio que `review_like`).
 
 ```
 GET /v1/notifications/unread_count
@@ -798,6 +810,11 @@ PUT /v1/{type}/{slug}/library      ({type} = movies | series | books | games)
 Body: `{"status": "want"}`. Response (`LibraryStatusOut`): `item_type`, `slug`,
 `status`, `created_at`, `updated_at`. Llamar dos veces reemplaza el estado
 (upsert por `(user, item_type, item_id)`).
+
+Una transición *a* `completed` (no una repetición del mismo estado) genera un
+evento `status_completed` en el feed (feature 54, ver `GET /v1/feed`) y
+notifica `user_completed` a cada follower directo del caller (feature 55, ver
+`GET /v1/notifications`).
 
 ```
 DELETE /v1/{type}/{slug}/library
