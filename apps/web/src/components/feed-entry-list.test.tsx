@@ -17,6 +17,7 @@ const { FeedEntryList } = await import("./feed-entry-list");
 
 const duneEntry = {
   id: 1,
+  event_type: "rating_created" as const,
   author: { username: "bob", display_name: "Bob", avatar_url: null },
   item: {
     item_type: "MOVIE",

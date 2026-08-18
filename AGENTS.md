@@ -96,7 +96,11 @@ Antes de terminar:
 1. Ejecuta `bash init.sh` — todo verde.
 2. Si la tarea está acabada: marca `status: "done"` en `backend_feature_list.json`.
 3. Mueve el resumen de `progress/current.md` al final de `progress/history.md`.
-4. Vacía `progress/current.md`.
+4. Vacía `progress/current.md` — **trunca el contenido, nunca borres el
+   archivo** (`git rm`/`rm`). `init.sh` lo trata como archivo base obligatorio
+   (sección 2); si desaparece, `init.sh` falla en main y rompe el CI de la
+   siguiente feature que ramifique desde ahí. Deja el archivo trackeado y
+   vacío, p.ej. `: > progress/current.md`.
 5. No dejes archivos temporales, `print()` de debug, ni TODOs sin contexto.
 
 ## 7. Si te bloqueas

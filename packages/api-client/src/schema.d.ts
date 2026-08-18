@@ -129,6 +129,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/movies/{slug}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List movie log entries
+         * @description Public, paginated log entries for a movie, newest logged_on first.
+         */
+        get: operations["list_movie_log_v1_movies__slug__log_get"];
+        put?: never;
+        /**
+         * Log a movie session
+         * @description Create a dated log entry (rewatch/session) for this movie; never upserts. Auth.
+         */
+        post: operations["log_movie_v1_movies__slug__log_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/movies/{slug}": {
         parameters: {
             query?: never;
@@ -252,6 +276,30 @@ export interface paths {
          * @description Delete the caller's library entry for this series. Requires auth.
          */
         delete: operations["delete_series_library_v1_series__slug__library_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/series/{slug}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List series log entries
+         * @description Public, paginated log entries for a series, newest logged_on first.
+         */
+        get: operations["list_series_log_v1_series__slug__log_get"];
+        put?: never;
+        /**
+         * Log a series session
+         * @description Create a dated log entry (rewatch/session) for this series; never upserts. Auth.
+         */
+        post: operations["log_series_v1_series__slug__log_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -385,6 +433,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/books/{slug}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List book log entries
+         * @description Public, paginated log entries for a book, newest logged_on first.
+         */
+        get: operations["list_book_log_v1_books__slug__log_get"];
+        put?: never;
+        /**
+         * Log a book session
+         * @description Create a dated log entry (reread/session) for this book; never upserts. Auth.
+         */
+        post: operations["log_book_v1_books__slug__log_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/books/{slug}": {
         parameters: {
             query?: never;
@@ -508,6 +580,30 @@ export interface paths {
          * @description Delete the caller's library entry for this game. Requires auth.
          */
         delete: operations["delete_game_library_v1_games__slug__library_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/games/{slug}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List game log entries
+         * @description Public, paginated log entries for a game, newest logged_on first.
+         */
+        get: operations["list_game_log_v1_games__slug__log_get"];
+        put?: never;
+        /**
+         * Log a game session
+         * @description Create a dated log entry (replay/session) for this game; never upserts. Auth.
+         */
+        post: operations["log_game_v1_games__slug__log_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1093,6 +1189,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/log/{log_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete own log entry
+         * @description Remove the caller's own log entry. 404 if missing or owned by another user. Auth.
+         */
+        delete: operations["delete_log_v1_log__log_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{username}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a user's log history
+         * @description Public, paginated, cross-type log history for a user, newest logged_on first.
+         */
+        get: operations["get_user_log_v1_users__username__log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/notifications": {
         parameters: {
             query?: never;
@@ -1595,6 +1731,11 @@ export interface components {
         FeedEntryOut: {
             /** Id */
             id: number;
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "rating_created" | "status_completed";
             author: components["schemas"]["FeedAuthorOut"];
             item: components["schemas"]["FeedItemOut"];
             /** Score */
@@ -1602,7 +1743,7 @@ export interface components {
             /** Review Text */
             review_text: string | null;
             /** Like Count */
-            like_count: number;
+            like_count: number | null;
             /**
              * Created At
              * Format: date-time
@@ -1631,6 +1772,7 @@ export interface components {
          *             "username": "alice"
          *           },
          *           "created_at": "2026-05-25T18:04:11Z",
+         *           "event_type": "rating_created",
          *           "id": 512,
          *           "item": {
          *             "item_type": "MOVIE",
@@ -1641,6 +1783,22 @@ export interface components {
          *           "like_count": 12,
          *           "review_text": "A stunning adaptation.",
          *           "score": 5
+         *         },
+         *         {
+         *           "author": {
+         *             "avatar_url": "https://cdn.example.com/a/alice.png",
+         *             "display_name": "Alice",
+         *             "username": "alice"
+         *           },
+         *           "created_at": "2026-05-25T20:11:00Z",
+         *           "event_type": "status_completed",
+         *           "id": 513,
+         *           "item": {
+         *             "item_type": "GAME",
+         *             "poster_url": "https://images.igdb.com/hades.jpg",
+         *             "slug": "hades",
+         *             "title": "Hades"
+         *           }
          *         }
          *       ],
          *       "limit": 20,
@@ -1965,6 +2123,64 @@ export interface components {
          * @enum {string}
          */
         LibraryTypeFilter: "movie" | "series" | "book" | "game";
+        /**
+         * LogIn
+         * @description Request body for POST /{type}/{slug}/log.
+         *
+         *     ``logged_on`` defaults to the current date (resolved in the service) when
+         *     omitted. A future date is rejected here — at the schema layer, not in the
+         *     route or service — same as every other request-shape validation in the
+         *     codebase (Pydantic v2 models as the single source of truth for input
+         *     constraints).
+         */
+        LogIn: {
+            /** Logged On */
+            logged_on?: string | null;
+            /**
+             * Rewatch
+             * @default false
+             */
+            rewatch: boolean;
+            /** Note */
+            note?: string | null;
+        };
+        /** LogListOut */
+        LogListOut: {
+            /** Items */
+            items: components["schemas"]["LogOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Limit */
+            limit: number;
+        };
+        /**
+         * LogOut
+         * @description Response of POST /{type}/{slug}/log and each item of GET .../log.
+         */
+        LogOut: {
+            /** Id */
+            id: number;
+            /** Item Type */
+            item_type: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Logged On
+             * Format: date
+             */
+            logged_on: string;
+            /** Rewatch */
+            rewatch: boolean;
+            /** Note */
+            note: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** LogoutRequest */
         LogoutRequest: {
             /** Refresh Token */
@@ -2244,6 +2460,10 @@ export interface components {
         /**
          * RatingIn
          * @description Request body for PUT /{type}/{slug}/rating — full replace (upsert).
+         *
+         *     ``score`` allows half-star granularity: 1.0, 1.5, 2.0, ..., 5.0. A value
+         *     that is not a multiple of 0.5, or that falls outside 1-5, is rejected
+         *     with 422 (``multiple_of``/``ge``/``le`` Pydantic constraints).
          */
         RatingIn: {
             /** Score */
@@ -2720,6 +2940,48 @@ export interface components {
             /** Display Name */
             display_name?: string | null;
         };
+        /** UserLogItemOut */
+        UserLogItemOut: {
+            /** Item Type */
+            item_type: string;
+            /** Title */
+            title: string;
+            /** Slug */
+            slug: string;
+            /** Poster Url */
+            poster_url: string | null;
+        };
+        /** UserLogListOut */
+        UserLogListOut: {
+            /** Items */
+            items: components["schemas"]["UserLogOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Limit */
+            limit: number;
+        };
+        /** UserLogOut */
+        UserLogOut: {
+            /** Id */
+            id: number;
+            item: components["schemas"]["UserLogItemOut"];
+            /**
+             * Logged On
+             * Format: date
+             */
+            logged_on: string;
+            /** Rewatch */
+            rewatch: boolean;
+            /** Note */
+            note: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** UserLogin */
         UserLogin: {
             /** Username */
@@ -3174,6 +3436,77 @@ export interface operations {
             };
         };
     };
+    list_movie_log_v1_movies__slug__log_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_movie_v1_movies__slug__log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_movie_v1_movies__slug__get: {
         parameters: {
             query?: never;
@@ -3440,6 +3773,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_series_log_v1_series__slug__log_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_series_v1_series__slug__log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogOut"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -3730,6 +4134,77 @@ export interface operations {
             };
         };
     };
+    list_book_log_v1_books__slug__log_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_book_v1_books__slug__log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_book_v1_books__slug__get: {
         parameters: {
             query?: never;
@@ -3996,6 +4471,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_game_log_v1_games__slug__log_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_game_v1_games__slug__log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogOut"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -5046,6 +5592,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_log_v1_log__log_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                log_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_log_v1_users__username__log_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserLogListOut"];
                 };
             };
             /** @description Validation Error */
