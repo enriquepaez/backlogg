@@ -45,7 +45,7 @@ export function GenreSections({ genres, selectedType, typeLabels }: GenreSection
                 <Link
                   key={genre.slug}
                   href={{ pathname: `/browse/${type}`, query: { genre: genre.slug } }}
-                  className="rounded-full border border-input bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                 >
                   {genre.name} ({genre.count})
                 </Link>

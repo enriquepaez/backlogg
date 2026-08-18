@@ -255,10 +255,17 @@ function NotificationRow({
         </span>
       )}
       <div className="flex flex-col gap-0.5">
-        <p className={cn("text-sm", item.is_read ? "text-muted-foreground" : "font-medium text-foreground")}>
+        <p
+          className={cn(
+            "text-sm group-hover:text-accent-foreground",
+            item.is_read ? "text-muted-foreground" : "font-medium text-foreground"
+          )}
+        >
           {message}
         </p>
-        <p className="text-xs text-muted-foreground">{formatDate(item.created_at, locale)}</p>
+        <p className="text-xs text-muted-foreground group-hover:text-accent-foreground">
+          {formatDate(item.created_at, locale)}
+        </p>
       </div>
     </div>
   );
@@ -275,7 +282,7 @@ function NotificationRow({
   }
 
   return (
-    <li className="flex items-center gap-1 rounded-md hover:bg-accent">
+    <li className="group flex items-center gap-1 rounded-md hover:bg-accent">
       {/* `content` (the `Link`, when there's a target, or a plain `div`
           otherwise) and the delete button below are siblings inside this
           flex container — never one nested inside the other. A `<button>`
