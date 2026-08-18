@@ -112,10 +112,12 @@ function FeedEntryCard({
           </p>
         ) : null}
 
-        <div className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground">
-          <Heart aria-hidden className="size-4" />
-          {t("likeCount", { count: entry.like_count })}
-        </div>
+        {entry.like_count !== null ? (
+          <div className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground">
+            <Heart aria-hidden className="size-4" />
+            {t("likeCount", { count: entry.like_count })}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

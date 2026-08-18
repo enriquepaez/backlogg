@@ -552,6 +552,132 @@
         }
       }
     },
+    "/v1/movies/{slug}/log": {
+      "post": {
+        "tags": [
+          "movies"
+        ],
+        "summary": "Log a movie session",
+        "description": "Create a dated log entry (rewatch/session) for this movie; never upserts. Auth.",
+        "operationId": "log_movie_v1_movies__slug__log_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "movies"
+        ],
+        "summary": "List movie log entries",
+        "description": "Public, paginated log entries for a movie, newest logged_on first.",
+        "operationId": "list_movie_log_v1_movies__slug__log_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/movies/{slug}": {
       "get": {
         "tags": [
@@ -1116,6 +1242,132 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/series/{slug}/log": {
+      "post": {
+        "tags": [
+          "series"
+        ],
+        "summary": "Log a series session",
+        "description": "Create a dated log entry (rewatch/session) for this series; never upserts. Auth.",
+        "operationId": "log_series_v1_series__slug__log_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "series"
+        ],
+        "summary": "List series log entries",
+        "description": "Public, paginated log entries for a series, newest logged_on first.",
+        "operationId": "list_series_log_v1_series__slug__log_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogListOut"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1708,6 +1960,132 @@
         }
       }
     },
+    "/v1/books/{slug}/log": {
+      "post": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Log a book session",
+        "description": "Create a dated log entry (reread/session) for this book; never upserts. Auth.",
+        "operationId": "log_book_v1_books__slug__log_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "List book log entries",
+        "description": "Public, paginated log entries for a book, newest logged_on first.",
+        "operationId": "list_book_log_v1_books__slug__log_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/books/{slug}": {
       "get": {
         "tags": [
@@ -2272,6 +2650,132 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/games/{slug}/log": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "summary": "Log a game session",
+        "description": "Create a dated log entry (replay/session) for this game; never upserts. Auth.",
+        "operationId": "log_game_v1_games__slug__log_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "summary": "List game log entries",
+        "description": "Public, paginated log entries for a game, newest logged_on first.",
+        "operationId": "list_game_log_v1_games__slug__log_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogListOut"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -4100,6 +4604,117 @@
         }
       }
     },
+    "/v1/log/{log_id}": {
+      "delete": {
+        "tags": [
+          "library_logs"
+        ],
+        "summary": "Delete own log entry",
+        "description": "Remove the caller's own log entry. 404 if missing or owned by another user. Auth.",
+        "operationId": "delete_log_v1_log__log_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "log_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Log Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/{username}/log": {
+      "get": {
+        "tags": [
+          "library_logs"
+        ],
+        "summary": "Get a user's log history",
+        "description": "Public, paginated, cross-type log history for a user, newest logged_on first.",
+        "operationId": "get_user_log_v1_users__username__log_get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserLogListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/notifications": {
       "get": {
         "tags": [
@@ -5563,6 +6178,14 @@
             "type": "integer",
             "title": "Id"
           },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "rating_created",
+              "status_completed"
+            ],
+            "title": "Event Type"
+          },
           "author": {
             "$ref": "#/components/schemas/FeedAuthorOut"
           },
@@ -5572,7 +6195,7 @@
           "score": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -5592,7 +6215,14 @@
             "title": "Review Text"
           },
           "like_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Like Count"
           },
           "created_at": {
@@ -5604,6 +6234,7 @@
         "type": "object",
         "required": [
           "id",
+          "event_type",
           "author",
           "item",
           "score",
@@ -5687,6 +6318,7 @@
                 "username": "alice"
               },
               "created_at": "2026-05-25T18:04:11Z",
+              "event_type": "rating_created",
               "id": 512,
               "item": {
                 "item_type": "MOVIE",
@@ -5697,6 +6329,22 @@
               "like_count": 12,
               "review_text": "A stunning adaptation.",
               "score": 5
+            },
+            {
+              "author": {
+                "avatar_url": "https://cdn.example.com/a/alice.png",
+                "display_name": "Alice",
+                "username": "alice"
+              },
+              "created_at": "2026-05-25T20:11:00Z",
+              "event_type": "status_completed",
+              "id": 513,
+              "item": {
+                "item_type": "GAME",
+                "poster_url": "https://images.igdb.com/hades.jpg",
+                "slug": "hades",
+                "title": "Hades"
+              }
             }
           ],
           "limit": 20,
@@ -6462,6 +7110,126 @@
         "title": "LibraryTypeFilter",
         "description": "Content-type filter for GET /users/{username}/library (?type=)."
       },
+      "LogIn": {
+        "properties": {
+          "logged_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logged On"
+          },
+          "rewatch": {
+            "type": "boolean",
+            "title": "Rewatch",
+            "default": false
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "LogIn",
+        "description": "Request body for POST /{type}/{slug}/log.\n\n``logged_on`` defaults to the current date (resolved in the service) when\nomitted. A future date is rejected here \u2014 at the schema layer, not in the\nroute or service \u2014 same as every other request-shape validation in the\ncodebase (Pydantic v2 models as the single source of truth for input\nconstraints)."
+      },
+      "LogListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LogOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "LogListOut"
+      },
+      "LogOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "logged_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Logged On"
+          },
+          "rewatch": {
+            "type": "boolean",
+            "title": "Rewatch"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "item_type",
+          "slug",
+          "logged_on",
+          "rewatch",
+          "note",
+          "created_at"
+        ],
+        "title": "LogOut",
+        "description": "Response of POST /{type}/{slug}/log and each item of GET .../log."
+      },
       "LogoutRequest": {
         "properties": {
           "refresh_token": {
@@ -7168,7 +7936,8 @@
           "score": {
             "anyOf": [
               {
-                "type": "integer",
+                "type": "number",
+                "multipleOf": 0.5,
                 "maximum": 5.0,
                 "minimum": 1.0
               },
@@ -7193,7 +7962,7 @@
         },
         "type": "object",
         "title": "RatingIn",
-        "description": "Request body for PUT /{type}/{slug}/rating \u2014 full replace (upsert)."
+        "description": "Request body for PUT /{type}/{slug}/rating \u2014 full replace (upsert).\n\n``score`` allows half-star granularity: 1.0, 1.5, 2.0, ..., 5.0. A value\nthat is not a multiple of 0.5, or that falls outside 1-5, is rejected\nwith 422 (``multiple_of``/``ge``/``le`` Pydantic constraints)."
       },
       "RatingListOut": {
         "properties": {
@@ -7238,7 +8007,7 @@
           "score": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -8591,6 +9360,118 @@
         ],
         "title": "UserCreate"
       },
+      "UserLogItemOut": {
+        "properties": {
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_type",
+          "title",
+          "slug",
+          "poster_url"
+        ],
+        "title": "UserLogItemOut"
+      },
+      "UserLogListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserLogOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "UserLogListOut"
+      },
+      "UserLogOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "item": {
+            "$ref": "#/components/schemas/UserLogItemOut"
+          },
+          "logged_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Logged On"
+          },
+          "rewatch": {
+            "type": "boolean",
+            "title": "Rewatch"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "item",
+          "logged_on",
+          "rewatch",
+          "note",
+          "created_at"
+        ],
+        "title": "UserLogOut"
+      },
       "UserLogin": {
         "properties": {
           "username": {
@@ -8840,7 +9721,7 @@
           "score": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -9189,6 +10070,10 @@
     {
       "name": "library",
       "description": "Per-user backlog: want / in_progress / completed / dropped, cross-type."
+    },
+    {
+      "name": "library_logs",
+      "description": "Dated activity log entries (rewatch/replay/reread) per item, decoupled from ratings."
     },
     {
       "name": "notifications",
