@@ -132,6 +132,67 @@ async def test_get_feed_following_returns_followed_reviews(client, db):
     item_types = {entry["item"]["item_type"] for entry in body["items"]}
     assert item_types == {"MOVIE", "SERIES"}
     assert body["items"][0]["author"]["username"] == "feed-route-author"
+    assert all(entry["event_type"] == "rating_created" for entry in body["items"])
+
+
+async def test_get_feed_following_includes_status_completed_minimal_shape(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("feed-route-movie-3"))
+    caller_token = await _register_and_login(client, "feed-route-caller-2")
+    author_token = await _register_and_login(client, "feed-route-author-3")
+    await client.post("/v1/users/feed-route-author-3/follow", headers=_auth_headers(caller_token))
+
+    put_response = await client.put(
+        "/v1/movies/feed-route-movie-3/library",
+        json={"status": "completed"},
+        headers=_auth_headers(author_token),
+    )
+    assert put_response.status_code == 200
+
+    response = await client.get("/v1/feed?tab=following", headers=_auth_headers(caller_token))
+    assert response.status_code == 200
+    body = response.json()
+    entry = next(e for e in body["items"] if e["item"]["slug"] == "feed-route-movie-3")
+    assert entry["event_type"] == "status_completed"
+    assert entry["score"] is None
+    assert entry["review_text"] is None
+    assert entry["like_count"] is None
+    assert entry["author"]["username"] == "feed-route-author-3"
+
+
+async def test_get_feed_following_non_completed_status_does_not_appear(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("feed-route-movie-4"))
+    caller_token = await _register_and_login(client, "feed-route-caller-3")
+    author_token = await _register_and_login(client, "feed-route-author-4")
+    await client.post("/v1/users/feed-route-author-4/follow", headers=_auth_headers(caller_token))
+
+    await client.put(
+        "/v1/movies/feed-route-movie-4/library",
+        json={"status": "want"},
+        headers=_auth_headers(author_token),
+    )
+
+    response = await client.get("/v1/feed?tab=following", headers=_auth_headers(caller_token))
+    assert response.status_code == 200
+    body = response.json()
+    assert all(e["item"]["slug"] != "feed-route-movie-4" for e in body["items"])
+
+
+async def test_get_feed_popular_excludes_status_completed(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("feed-route-movie-5"))
+    author_token = await _register_and_login(client, "feed-route-author-5")
+
+    await client.put(
+        "/v1/movies/feed-route-movie-5/library",
+        json={"status": "completed"},
+        headers=_auth_headers(author_token),
+    )
+
+    response = await client.get(
+        "/v1/feed?tab=popular&limit=100", headers=_auth_headers(author_token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert all(e["item"]["slug"] != "feed-route-movie-5" for e in body["items"])
 
 
 async def test_get_feed_following_no_follows_returns_empty(client, db):

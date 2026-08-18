@@ -10,6 +10,7 @@ domain slices.
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.feed import repository as feed_repo
 from backlogg.notifications import service as notifications_service
 from backlogg.ratings import repository as repo
 from backlogg.ratings.schemas import (
@@ -67,6 +68,25 @@ async def rate_item(
         review_text=payload.review_text,
     )
     await repo.recalculate_item_aggregates(db, item_type, item.id)
+
+    # Feed event generation (feature 54): a rating with actual content
+    # (score and/or review_text) gets a rating_created event — inserted once
+    # and left alone on later updates to the same rating (ON CONFLICT DO
+    # NOTHING keyed on rating_id, so no duplicates). If an update clears both
+    # fields back to null, the event is removed — a contentless rating has
+    # nothing worth surfacing in the feed. This runs in the same transaction
+    # as the rating write (unlike the notifications side effects elsewhere in
+    # this codebase, which commit separately for graceful degradation): it's
+    # a plain local insert/delete with no external call, so keeping it atomic
+    # with the rating avoids ever having a rating without its event or vice
+    # versa.
+    if rating.score is not None or rating.review_text is not None:
+        await feed_repo.create_rating_event(
+            db, user_id=user.id, item_type=item_type, item_id=item.id, rating_id=rating.id
+        )
+    else:
+        await feed_repo.delete_rating_event(db, rating.id)
+
     await db.commit()
 
     like_count = await repo.count_likes(db, rating.id)

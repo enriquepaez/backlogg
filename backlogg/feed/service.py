@@ -16,6 +16,7 @@ from backlogg.users.models import User
 def _row_to_entry(row) -> FeedEntryOut:
     return FeedEntryOut(
         id=row.id,
+        event_type=row.event_type,
         author=FeedAuthorOut(
             username=row.username,
             display_name=row.display_name,

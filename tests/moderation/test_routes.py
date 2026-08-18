@@ -148,16 +148,18 @@ async def test_hide_review_excludes_from_user_reviews(client, db):
 
 
 async def test_hide_review_excludes_from_feed(client, db):
+    # Feed entries key on their activity_events id (feature 54), not the
+    # rating id, so identify the entry by its item slug instead.
     rating_id = await _seed_review(client, db, "mod-hide-movie-3", "mod-hide-author-3")
     viewer_token = await _register_and_login(client, "mod-hide-viewer-3")
 
     before = await client.get("/v1/feed?tab=popular", headers=_auth(viewer_token))
-    assert any(item["id"] == rating_id for item in before.json()["items"])
+    assert any(item["item"]["slug"] == "mod-hide-movie-3" for item in before.json()["items"])
 
     await client.post(f"/v1/admin/reviews/{rating_id}/hide", headers=_admin())
 
     after = await client.get("/v1/feed?tab=popular", headers=_auth(viewer_token))
-    assert all(item["id"] != rating_id for item in after.json()["items"])
+    assert all(item["item"]["slug"] != "mod-hide-movie-3" for item in after.json()["items"])
 
 
 async def test_unhide_restores_review_and_aggregate(client, db):
@@ -257,7 +259,7 @@ async def test_unban_restores_login(client, db):
 
 
 async def test_ban_hides_user_reviews_from_all_surfaces(client, db):
-    rating_id = await _seed_review(client, db, "mod-ban-movie-1", "mod-ban-author-1", score=4)
+    await _seed_review(client, db, "mod-ban-movie-1", "mod-ban-author-1", score=4)
 
     await client.post("/v1/admin/users/mod-ban-author-1/ban", headers=_admin())
 
@@ -274,7 +276,9 @@ async def test_ban_hides_user_reviews_from_all_surfaces(client, db):
 
     viewer_token = await _register_and_login(client, "mod-ban-viewer-1")
     feed = await client.get("/v1/feed?tab=popular", headers=_auth(viewer_token))
-    assert all(item["id"] != rating_id for item in feed.json()["items"])
+    # Feed entries key on their activity_events id (feature 54), not the
+    # rating id, so identify the entry by its item slug instead.
+    assert all(item["item"]["slug"] != "mod-ban-movie-1" for item in feed.json()["items"])
 
 
 async def test_unban_restores_user_reviews_and_aggregate(client, db):
