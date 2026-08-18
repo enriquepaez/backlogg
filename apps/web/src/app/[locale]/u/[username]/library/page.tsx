@@ -3,14 +3,20 @@ import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
 import { LibraryPagination } from "@/components/library-pagination";
+import { LibrarySortSelect } from "@/components/library-sort";
 import { Link } from "@/i18n/navigation";
 import { CATALOG_TYPES, isCatalogType, type CatalogType } from "@/lib/catalog-types";
 import {
+  DEFAULT_LIBRARY_SORT,
   getUserLibrary,
   getUserProfile,
+  getUserReviewScores,
+  isLibrarySort,
   isLibraryStatus,
   LIBRARY_STATUSES,
+  sortLibraryEntries,
   STATUS_COLOR_CLASSES,
+  type LibrarySort,
   type LibraryStatusValue,
   type UserProfile,
 } from "@/lib/library";
@@ -42,6 +48,11 @@ function parsePage(value: RawParam): number {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
+function parseSort(value: RawParam): LibrarySort {
+  const raw = firstValue(value);
+  return raw && isLibrarySort(raw) ? raw : DEFAULT_LIBRARY_SORT;
+}
+
 type LibraryTranslator = Awaited<ReturnType<typeof getTranslations<"Library">>>;
 
 /**
@@ -59,12 +70,14 @@ function StatusTabs({
   username,
   status,
   type,
+  sort,
   counts,
   t,
 }: {
   username: string;
   status: LibraryStatusValue | undefined;
   type: CatalogType | undefined;
+  sort: LibrarySort;
   counts: UserProfile["library_counts"];
   t: LibraryTranslator;
 }) {
@@ -72,6 +85,7 @@ function StatusTabs({
     const query: Record<string, string> = {};
     if (targetStatus) query.status = targetStatus;
     if (type) query.type = type;
+    if (sort !== DEFAULT_LIBRARY_SORT) query.sort = sort;
     return { pathname: `/u/${username}/library`, query };
   }
 
@@ -117,17 +131,20 @@ function TypeTabs({
   username,
   status,
   type,
+  sort,
   t,
 }: {
   username: string;
   status: LibraryStatusValue | undefined;
   type: CatalogType | undefined;
+  sort: LibrarySort;
   t: LibraryTranslator;
 }) {
   function hrefFor(targetType: CatalogType | undefined) {
     const query: Record<string, string> = {};
     if (status) query.status = status;
     if (targetType) query.type = targetType;
+    if (sort !== DEFAULT_LIBRARY_SORT) query.sort = sort;
     return { pathname: `/u/${username}/library`, query };
   }
 
@@ -172,6 +189,15 @@ function TypeTabs({
  * `@/lib/library`. Only a backend-confirmed 404 username goes through
  * `notFound()`, same `not-found`/`error` split as the item detail page
  * (`getItemDetail`'s doc comment, `src/lib/catalog.ts`).
+ *
+ * `sort` (FE-38) is applied client-side, in this component, via
+ * `sortLibraryEntries` over the single already-fetched page of `result.items`
+ * — the backend's `GET /v1/users/{username}/library` has no `sort` query
+ * param at all (see `LibrarySort`'s doc comment, `@/lib/library-types`).
+ * `getUserReviewScores` (the extra per-item "your rating" lookup
+ * `rating_desc` needs) is only fetched when that sort is actually selected,
+ * in parallel with `getUserLibrary` — every other sort needs no extra
+ * request.
  */
 export default async function UserLibraryPage({
   params,
@@ -184,6 +210,7 @@ export default async function UserLibraryPage({
   const status = parseStatus(query.status);
   const type = parseType(query.type);
   const page = parsePage(query.page);
+  const sort = parseSort(query.sort);
 
   const [t, tType, profileResult] = await Promise.all([
     getTranslations("Library"),
@@ -207,8 +234,12 @@ export default async function UserLibraryPage({
 
   const profile = profileResult.profile;
 
-  const result = await getUserLibrary(username, { status, type, page, limit: LIBRARY_PAGE_SIZE });
+  const [result, scores] = await Promise.all([
+    getUserLibrary(username, { status, type, page, limit: LIBRARY_PAGE_SIZE }),
+    sort === "rating_desc" ? getUserReviewScores(username) : Promise.resolve(undefined),
+  ]);
   const totalPages = result.ok ? Math.max(1, Math.ceil(result.total / result.limit)) : 1;
+  const items = result.ok ? sortLibraryEntries(result.items, sort, scores) : [];
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-16">
@@ -221,22 +252,24 @@ export default async function UserLibraryPage({
           username={username}
           status={status}
           type={type}
+          sort={sort}
           counts={profile.library_counts}
           t={t}
         />
-        <TypeTabs username={username} status={status} type={type} t={t} />
+        <TypeTabs username={username} status={status} type={type} sort={sort} t={t} />
+        <LibrarySortSelect username={username} status={status} type={type} selectedSort={sort} />
       </div>
 
       {!result.ok ? (
         <p role="alert" className="text-sm text-destructive">
           {t("error")}
         </p>
-      ) : result.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {result.items.map((entry) => {
+            {items.map((entry) => {
               const itemType = toCatalogType(entry.item.item_type);
               const entryStatus = isLibraryStatus(entry.status) ? entry.status : undefined;
               return (
@@ -258,6 +291,7 @@ export default async function UserLibraryPage({
             username={username}
             status={status}
             type={type}
+            sort={sort}
             page={result.page}
             totalPages={totalPages}
           />

@@ -204,6 +204,13 @@
       "previous": "Anterior",
       "next": "Siguiente",
       "pageStatus": "Página {page} de {totalPages}"
+    },
+    "sort": {
+      "label": "Ordenar por",
+      "updated_desc": "Actualizado recientemente",
+      "rating_desc": "Tu puntuación",
+      "title_asc": "Título (A-Z)",
+      "date_desc": "Fecha de estreno/publicación"
     }
   },
   "Profile": {

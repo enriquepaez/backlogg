@@ -4,9 +4,16 @@ import { getApiClient } from "@/lib/auth/session";
 
 import type { CatalogType } from "./catalog-types";
 import {
+  DEFAULT_LIBRARY_SORT,
+  isLibrarySort,
   isLibraryStatus,
+  LIBRARY_SORTS,
   LIBRARY_STATUSES,
+  reviewScoreKey,
+  sortLibraryEntries,
   STATUS_COLOR_CLASSES,
+  type LibraryEntry,
+  type LibrarySort,
   type LibraryStatusValue,
 } from "./library-types";
 
@@ -37,11 +44,18 @@ import {
  * directly on the detail response.
  */
 
-export type { LibraryStatusValue };
-export { isLibraryStatus, LIBRARY_STATUSES, STATUS_COLOR_CLASSES };
+export type { LibraryEntry, LibrarySort, LibraryStatusValue };
+export {
+  DEFAULT_LIBRARY_SORT,
+  isLibrarySort,
+  isLibraryStatus,
+  LIBRARY_SORTS,
+  LIBRARY_STATUSES,
+  sortLibraryEntries,
+  STATUS_COLOR_CLASSES,
+};
 
 export type LibraryStatusOut = components["schemas"]["LibraryStatusOut"];
-export type LibraryEntry = components["schemas"]["LibraryEntryOut"];
 export type UserProfile = components["schemas"]["UserOut"];
 
 type ApiResult<T> = { data?: T; response: Response };
@@ -143,6 +157,50 @@ export async function getUserLibrary(
   } catch (error) {
     console.error(`getUserLibrary(${username}): failed to reach the API`, error);
     return { ok: false };
+  }
+}
+
+/**
+ * `GET /v1/users/{username}/reviews?limit=` scanned for a per-item score
+ * map (FE-38's `rating_desc` library sort), keyed by
+ * {@link reviewScoreKey}. There is no `sort` param on
+ * `GET /v1/users/{username}/library` at all (`docs/api.md`) and its
+ * `LibraryEntryOut` carries no rating field, only `rating_external`
+ * (`LibraryItemOut`, the external critic/audience score — not what "your
+ * rating" means here) — so `page.tsx` reads the library owner's own score
+ * per item from this separate, already-public endpoint instead
+ * (`GET /v1/users/{username}/reviews`, same one `/u/{username}` uses to
+ * list reviews) and merges it in client-side via `sortLibraryEntries`.
+ *
+ * `REVIEW_SCORE_SCAN_LIMIT` mirrors `MY_RATING_SCAN_LIMIT`
+ * (`src/app/api/[type]/[slug]/rating/route.ts`) — same backend cap
+ * (`limit<=100`, `docs/api.md`) and the same accepted limitation: on a
+ * library owner with more than 100 reviews, a rating outside the first 100
+ * (newest first) is simply treated as unrated by `sortLibraryEntries`
+ * (sorts last), rather than fetching every page. Only called when
+ * `sort === "rating_desc"` (see `page.tsx`) — every other sort needs no
+ * extra request.
+ */
+const REVIEW_SCORE_SCAN_LIMIT = 100;
+
+export async function getUserReviewScores(username: string): Promise<Map<string, number>> {
+  const scores = new Map<string, number>();
+  try {
+    const { data, response } = await getApiClient().GET("/v1/users/{username}/reviews", {
+      params: { path: { username }, query: { limit: REVIEW_SCORE_SCAN_LIMIT } },
+    });
+    if (response.status !== 200 || !data) {
+      return scores;
+    }
+    for (const review of data.items) {
+      if (review.score !== null) {
+        scores.set(reviewScoreKey(review.item.item_type, review.item.slug), review.score);
+      }
+    }
+    return scores;
+  } catch (error) {
+    console.error(`getUserReviewScores(${username}): failed to reach the API`, error);
+    return scores;
   }
 }
 
