@@ -486,6 +486,104 @@ async def test_delete_notification_nonexistent_id_returns_false(db):
     assert deleted is False
 
 
+async def test_create_notification_user_completed_with_direct_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-18")
+    actor = await _make_user(db, "notif-repo-actor-18")
+    movie = await upsert_movie(db, _movie_data("notif-repo-target-movie-3"))
+
+    n = await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="user_completed",
+        target_type="MOVIE",
+        target_id=movie.id,
+    )
+
+    assert n.type == "user_completed"
+    assert n.target_type == "MOVIE"
+    assert n.target_id == movie.id
+
+
+async def test_list_notifications_user_completed_resolves_movie_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-19")
+    actor = await _make_user(db, "notif-repo-actor-19")
+    movie = await upsert_movie(db, _movie_data("notif-repo-target-movie-4"))
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="user_completed",
+        target_type="MOVIE",
+        target_id=movie.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "MOVIE"
+    assert rows[0].resolved_slug == "notif-repo-target-movie-4"
+
+
+async def test_list_notifications_user_completed_resolves_game_target(db):
+    recipient = await _make_user(db, "notif-repo-recip-20")
+    actor = await _make_user(db, "notif-repo-actor-20")
+    game = await upsert_game(db, _game_data("notif-repo-target-game-2"))
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="user_completed",
+        target_type="GAME",
+        target_id=game.id,
+    )
+
+    rows, _ = await list_notifications(db, recipient, page=1, limit=20)
+    assert rows[0].resolved_item_type == "GAME"
+    assert rows[0].resolved_slug == "notif-repo-target-game-2"
+
+
+async def test_list_notifications_mixed_review_like_and_user_completed(db):
+    """Both target flavors resolve correctly in the same result set."""
+    recipient = await _make_user(db, "notif-repo-recip-21")
+    actor = await _make_user(db, "notif-repo-actor-21")
+    movie = await upsert_movie(db, _movie_data("notif-repo-target-movie-5"))
+    series = await upsert_series(db, _series_data("notif-repo-target-series-2"))
+    rating = await upsert_rating(
+        db,
+        user_id=recipient,
+        item_type="SERIES",
+        item_id=series.id,
+        score=5,
+        review_text="great",
+    )
+
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="review_like",
+        target_type="review",
+        target_id=rating.id,
+    )
+    await create_notification(
+        db,
+        recipient_id=recipient,
+        actor_id=actor,
+        type="user_completed",
+        target_type="MOVIE",
+        target_id=movie.id,
+    )
+
+    rows, total = await list_notifications(db, recipient, page=1, limit=20)
+    assert total == 2
+    by_type = {row.type: row for row in rows}
+    assert by_type["review_like"].resolved_item_type == "SERIES"
+    assert by_type["review_like"].resolved_slug == "notif-repo-target-series-2"
+    assert by_type["user_completed"].resolved_item_type == "MOVIE"
+    assert by_type["user_completed"].resolved_slug == "notif-repo-target-movie-5"
+
+
 async def test_list_notifications_review_like_target_resolved_even_when_hidden(db):
     """A hidden review still resolves its item target — the link is to the
     item's page, not to the review itself, so moderation doesn't affect it."""

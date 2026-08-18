@@ -3,17 +3,27 @@
 Only this file imports and uses SQLAlchemy for the notifications domain. The
 list query joins the actor (users) so the actor's public fields
 (username/display_name/avatar_url) are resolved in one round-trip, avoiding
-N+1. It also resolves the target item (for ``review_like``) in the same
-query: LEFT JOIN to ``user_ratings`` on the notification's polymorphic
-target, then one conditional LEFT JOIN per content model (reusing
-``ITEM_MODELS`` from ``backlogg.ratings.repository``) so the item's
-``slug``/type can be COALESCEd out — a single round-trip regardless of which
-item type the review targets.
+N+1. It also resolves the target item in the same query, for both flavors of
+polymorphic target the table holds:
+
+- ``review_like`` (``target_type='review'``): LEFT JOIN to ``user_ratings`` on
+  the notification's target, then one conditional LEFT JOIN per content model
+  (reusing ``ITEM_MODELS`` from ``backlogg.ratings.repository``) matched on
+  ``user_ratings.item_type``/``item_id``.
+- ``user_completed`` (``target_type`` = the item's ``item_type`` uppercase):
+  the same per-content-model LEFT JOINs are reused, this time matched
+  directly on ``notifications.target_type``/``target_id`` — no
+  ``user_ratings`` hop, since there is no rating involved.
+
+Both flavors share the same four LEFT JOINs (one per content model) instead
+of duplicating the whole query — each join's ON clause simply ORs the two
+match conditions, so ``slug``/``item_type`` COALESCE out in a single
+round-trip regardless of which target flavor or item type is involved.
 """
 
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.notifications.models import Notification
@@ -55,6 +65,15 @@ async def list_notifications(
     )
     total = count_result.scalar_one()
 
+    # resolved_item_type: for review_like it's the rating's item_type (only
+    # known once user_ratings is joined); for user_completed (and any future
+    # type whose target_type is directly one of the four content types) it's
+    # the notification's own target_type — no user_ratings hop needed.
+    resolved_item_type_expr = case(
+        (UserRating.item_type.is_not(None), UserRating.item_type),
+        (Notification.target_type.in_(ITEM_MODELS.keys()), Notification.target_type),
+    ).label("resolved_item_type")
+
     paged_stmt = (
         select(
             Notification.id.label("id"),
@@ -66,7 +85,7 @@ async def list_notifications(
             User.username.label("username"),
             User.display_name.label("display_name"),
             User.avatar_url.label("avatar_url"),
-            UserRating.item_type.label("resolved_item_type"),
+            resolved_item_type_expr,
             func.coalesce(*(model.slug for model in ITEM_MODELS.values())).label("resolved_slug"),
         )
         .join(User, Notification.actor_id == User.id)
@@ -78,7 +97,8 @@ async def list_notifications(
     for item_type, model in ITEM_MODELS.items():
         paged_stmt = paged_stmt.outerjoin(
             model,
-            (UserRating.item_type == item_type) & (UserRating.item_id == model.id),
+            ((UserRating.item_type == item_type) & (UserRating.item_id == model.id))
+            | ((Notification.target_type == item_type) & (Notification.target_id == model.id)),
         )
     paged_stmt = (
         paged_stmt.where(Notification.recipient_id == recipient_id)

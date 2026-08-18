@@ -14,12 +14,19 @@ class NotificationActorOut(BaseModel):
 class NotificationTargetOut(BaseModel):
     """Polymorphic target of the notification (null for new_follower).
 
-    ``item_type``/``slug`` resolve the review's target item (movie/series/
-    book/game) so a client can link directly to it without a separate
-    ``GET /v1/ratings/{id}`` lookup — there is none. Populated only when
-    ``target_type == "review"``; ``null`` otherwise (including
-    ``new_follower``). ``item_type`` is uppercase (``"MOVIE"``, ``"SERIES"``,
-    ``"BOOK"``, ``"GAME"``) — same convention as the feed endpoints.
+    ``item_type``/``slug`` resolve the notification's target item (movie/
+    series/book/game) so a client can link directly to it without a separate
+    lookup. Resolved for two target flavors:
+
+    - ``review_like`` (``target_type == "review"``, ``target_id`` = the
+      ``user_ratings.id``): resolves via the rating's item.
+    - ``user_completed`` (``target_type`` = the item's ``item_type``
+      uppercase, ``target_id`` = the item id): resolves directly, no rating
+      involved.
+
+    ``null`` for types with no target (``new_follower``). ``item_type`` is
+    uppercase (``"MOVIE"``, ``"SERIES"``, ``"BOOK"``, ``"GAME"``) — same
+    convention as the feed endpoints.
     """
 
     target_type: str | None

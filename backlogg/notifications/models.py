@@ -20,7 +20,7 @@ __all__ = ["Notification", "NOTIFICATION_TYPES"]
 # Allowed values for Notification.type. Kept as a plain String + CheckConstraint
 # (same style as the polymorphic item_type on UserRating/library_entries) instead
 # of a native PG enum, so adding a new type later is a data-only migration.
-NOTIFICATION_TYPES = ("new_follower", "review_like")
+NOTIFICATION_TYPES = ("new_follower", "review_like", "user_completed")
 
 
 class Notification(Base):
@@ -30,6 +30,11 @@ class Notification(Base):
     - ``new_follower``: someone followed the recipient (no target).
     - ``review_like``: someone liked one of the recipient's reviews
       (``target_type='review'``, ``target_id`` = the UserRating id).
+    - ``user_completed``: a followed user completed an item (feature 54's
+      ``status_completed`` feed event), fanned out to each direct follower
+      (``target_type`` = the item's ``item_type`` uppercase, ``target_id`` =
+      the item id — a direct reference to the content row, unlike
+      ``review_like`` there is no rating involved).
 
     ``actor_id`` is the user who triggered the event; ``recipient_id`` is who
     receives the notification. Both FK to users with ON DELETE CASCADE, so a
@@ -56,7 +61,10 @@ class Notification(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("type IN ('new_follower', 'review_like')", name="ck_notifications_type"),
+        CheckConstraint(
+            "type IN ('new_follower', 'review_like', 'user_completed')",
+            name="ck_notifications_type",
+        ),
         # Feed query is "recipient's notifications, newest first" — a composite
         # index with created_at DESC serves both the WHERE and the ORDER BY.
         Index(

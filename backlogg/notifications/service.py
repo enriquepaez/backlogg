@@ -2,11 +2,13 @@
 
 Two responsibilities:
 
-1. Generation helpers (``notify_new_follower`` / ``notify_review_like``) called
-   as a side effect from the follows/ratings services. These are designed for
-   **graceful degradation**: the source operation (the follow / the like) is
-   already committed by its own service before these run, and any failure here
-   is swallowed (logged + rolled back) so it can never break the follow/like.
+1. Generation helpers (``notify_new_follower`` / ``notify_review_like`` /
+   ``notify_user_completed``) called as a side effect from the
+   follows/ratings/library services. These are designed for **graceful
+   degradation**: the source operation (the follow / the like / the
+   status_completed transition) is already committed by its own service
+   before these run, and any failure here is swallowed (logged + rolled back)
+   so it can never break that source operation.
 
 2. Read-side operations for the authenticated user: list, unread_count, mark_read.
 """
@@ -72,6 +74,33 @@ async def notify_review_like(
         await db.commit()
     except Exception:
         logger.exception("Failed to create review_like notification")
+        await db.rollback()
+
+
+async def notify_user_completed(
+    db: AsyncSession, *, recipient_id: int, actor_id: int, item_type: str, item_id: int
+) -> None:
+    """Create a ``user_completed`` notification for one of ``actor_id``'s direct followers.
+
+    Called once per direct follower after the ``status_completed`` feed event
+    (feature 54) has been committed by ``backlogg.library.service.set_library_status``.
+    ``target_type``/``target_id`` reference the completed item directly (no
+    rating involved, unlike ``review_like``). Swallows any error so a
+    notification failure never propagates back to the ``PUT .../library``
+    endpoint.
+    """
+    try:
+        await repo.create_notification(
+            db,
+            recipient_id=recipient_id,
+            actor_id=actor_id,
+            type="user_completed",
+            target_type=item_type,
+            target_id=item_id,
+        )
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to create user_completed notification")
         await db.rollback()
 
 

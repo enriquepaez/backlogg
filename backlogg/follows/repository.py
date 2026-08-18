@@ -80,6 +80,17 @@ async def list_followers(
     return list(result.scalars().all()), total
 
 
+async def list_follower_ids(db: AsyncSession, user_id: int) -> list[int]:
+    """All direct follower ids of ``user_id`` (no pagination).
+
+    Used for fan-out side effects (feature 55's ``user_completed``
+    notification) — deliberately direct followers only, no traversal to
+    followers-of-followers.
+    """
+    result = await db.execute(select(Follow.follower_id).where(Follow.followed_id == user_id))
+    return list(result.scalars().all())
+
+
 async def list_following(
     db: AsyncSession, user_id: int, page: int, limit: int
 ) -> tuple[list[User], int]:
