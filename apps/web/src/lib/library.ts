@@ -5,16 +5,20 @@ import { getApiClient } from "@/lib/auth/session";
 import type { CatalogType } from "./catalog-types";
 import {
   DEFAULT_LIBRARY_SORT,
+  DEFAULT_LIBRARY_VIEW,
   isLibrarySort,
   isLibraryStatus,
+  isLibraryView,
   LIBRARY_SORTS,
   LIBRARY_STATUSES,
+  LIBRARY_VIEWS,
   reviewScoreKey,
   sortLibraryEntries,
   STATUS_COLOR_CLASSES,
   type LibraryEntry,
   type LibrarySort,
   type LibraryStatusValue,
+  type LibraryView,
 } from "./library-types";
 
 /**
@@ -44,13 +48,16 @@ import {
  * directly on the detail response.
  */
 
-export type { LibraryEntry, LibrarySort, LibraryStatusValue };
+export type { LibraryEntry, LibrarySort, LibraryStatusValue, LibraryView };
 export {
   DEFAULT_LIBRARY_SORT,
+  DEFAULT_LIBRARY_VIEW,
   isLibrarySort,
   isLibraryStatus,
+  isLibraryView,
   LIBRARY_SORTS,
   LIBRARY_STATUSES,
+  LIBRARY_VIEWS,
   sortLibraryEntries,
   STATUS_COLOR_CLASSES,
 };

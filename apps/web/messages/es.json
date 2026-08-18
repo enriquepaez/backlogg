@@ -211,6 +211,14 @@
       "rating_desc": "Tu puntuación",
       "title_asc": "Título (A-Z)",
       "date_desc": "Fecha de estreno/publicación"
+    },
+    "view": {
+      "label": "Vista de la biblioteca",
+      "grid": "Cuadrícula",
+      "board": "Tablero"
+    },
+    "board": {
+      "columnEmpty": "No hay títulos en este estado."
     }
   },
   "Profile": {
