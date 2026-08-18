@@ -116,6 +116,17 @@ async def test_upsert_rating_creates(db):
     assert rating.review_text == "Good"
 
 
+async def test_upsert_rating_accepts_half_star_score(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-movie-17"))
+    user_id = await _make_user(db, "rating-repo-user-26")
+
+    rating = await upsert_rating(
+        db, user_id=user_id, item_type="MOVIE", item_id=movie.id, score=3.5, review_text="Half star"
+    )
+
+    assert float(rating.score) == 3.5
+
+
 async def test_upsert_rating_idempotent_updates_existing_row(db):
     movie = await upsert_movie(db, _movie_data("repo-rating-movie-3"))
     user_id = await _make_user(db, "rating-repo-user-2")
@@ -166,6 +177,25 @@ async def test_recalculate_item_aggregates_computes_avg_and_count(db):
     refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-movie-4")
     assert refreshed.rating_count_internal == 2
     assert float(refreshed.rating_internal) == 3.0
+
+
+async def test_recalculate_item_aggregates_computes_avg_with_mixed_decimal_scores(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-movie-16"))
+    user_a = await _make_user(db, "rating-repo-user-24")
+    user_b = await _make_user(db, "rating-repo-user-25")
+
+    await upsert_rating(
+        db, user_id=user_a, item_type="MOVIE", item_id=movie.id, score=3.5, review_text=None
+    )
+    await upsert_rating(
+        db, user_id=user_b, item_type="MOVIE", item_id=movie.id, score=4, review_text=None
+    )
+
+    await recalculate_item_aggregates(db, "MOVIE", movie.id)
+
+    refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-movie-16")
+    assert refreshed.rating_count_internal == 2
+    assert float(refreshed.rating_internal) == 3.75
 
 
 async def test_recalculate_item_aggregates_ignores_null_scores(db):

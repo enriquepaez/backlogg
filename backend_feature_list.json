@@ -1099,7 +1099,7 @@
         "Tests de servicio y endpoint: score=3.5 aceptado, score=3.3 rechazado (422), score=1 y score=5 siguen aceptados, recálculo de rating_internal con valores decimales mixtos",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 54,

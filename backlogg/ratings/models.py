@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -7,7 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
-    Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -21,7 +22,11 @@ __all__ = ["UserRating", "ReviewLike"]
 
 
 class UserRating(Base):
-    """One row per (user, item): an optional 1-5 score and/or optional review text.
+    """One row per (user, item): an optional 1-5 score (half-star steps) and/or
+    optional review text.
+
+    ``score`` allows half-star granularity — 1.0, 1.5, 2.0, ..., 5.0 — enforced
+    by ``ck_user_ratings_score_range`` (``score * 2`` must be a whole number).
 
     Polymorphic ``item_type`` + ``item_id`` — same pattern as
     ``backlogg.shared.models.Credit`` / ``backlogg.shared.external_ids.ExternalId``.
@@ -37,7 +42,7 @@ class UserRating(Base):
     )
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(2, 1), nullable=True)
     review_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-review moderation flag. A hidden review is preserved in the table but
     # excluded from public listings, the feed and the rating aggregates.
@@ -52,7 +57,8 @@ class UserRating(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "item_type", "item_id", name="uq_user_rating_item"),
         CheckConstraint(
-            "score IS NULL OR (score >= 1 AND score <= 5)", name="ck_user_ratings_score_range"
+            "score IS NULL OR (score >= 1 AND score <= 5 AND score * 2 = FLOOR(score * 2))",
+            name="ck_user_ratings_score_range",
         ),
         Index("idx_user_ratings_item", "item_type", "item_id"),
         Index("idx_user_ratings_user", "user_id"),

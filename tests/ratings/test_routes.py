@@ -174,6 +174,52 @@ async def test_put_movie_rating_invalid_score_returns_422(client, db):
     assert response.status_code == 422
 
 
+async def test_put_movie_rating_half_star_score_accepted(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-half-1"))
+    token = await _register_and_login(client, "route-rating-user-half-1")
+
+    response = await client.put(
+        "/v1/movies/route-rating-movie-half-1/rating",
+        json={"score": 3.5, "review_text": "Half star"},
+        headers=_auth_headers(token),
+    )
+    assert response.status_code == 200
+    assert response.json()["score"] == 3.5
+
+
+async def test_put_movie_rating_score_not_multiple_of_half_returns_422(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-half-2"))
+    token = await _register_and_login(client, "route-rating-user-half-2")
+
+    response = await client.put(
+        "/v1/movies/route-rating-movie-half-2/rating",
+        json={"score": 3.3, "review_text": "Not a valid step"},
+        headers=_auth_headers(token),
+    )
+    assert response.status_code == 422
+
+
+async def test_put_movie_rating_score_1_and_5_still_accepted(client, db):
+    await movies_repo.upsert_movie(db, _movie_data("route-rating-movie-half-3"))
+    token = await _register_and_login(client, "route-rating-user-half-3")
+
+    low = await client.put(
+        "/v1/movies/route-rating-movie-half-3/rating",
+        json={"score": 1, "review_text": "Bad"},
+        headers=_auth_headers(token),
+    )
+    assert low.status_code == 200
+    assert low.json()["score"] == 1
+
+    high = await client.put(
+        "/v1/movies/route-rating-movie-half-3/rating",
+        json={"score": 5, "review_text": "Great"},
+        headers=_auth_headers(token),
+    )
+    assert high.status_code == 200
+    assert high.json()["score"] == 5
+
+
 async def test_put_movie_rating_slug_not_found_returns_404(client, db):
     token = await _register_and_login(client, "route-rating-user-3")
 

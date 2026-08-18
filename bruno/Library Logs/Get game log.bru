@@ -1,0 +1,24 @@
+meta {
+  name: Get game log
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/v1/games/the-witcher-3-wild-hunt/log
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("paginated shape", function() {
+    expect(res.body).to.have.property("items");
+    expect(res.body).to.have.property("total");
+    expect(res.body).to.have.property("page");
+    expect(res.body).to.have.property("limit");
+  });
+}

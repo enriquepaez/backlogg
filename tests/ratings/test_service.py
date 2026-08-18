@@ -74,6 +74,24 @@ async def test_rate_item_creates_and_recalculates_aggregate(db):
     assert float(movie.rating_internal) == 5.0
 
 
+async def test_rate_item_accepts_half_star_score_and_recalculates(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-11"))
+    user = await _make_user(db, "svc-rating-user-20")
+
+    result = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-11",
+        payload=RatingIn(score=3.5, review_text="Half star"),
+        user=user,
+    )
+
+    assert result.score == 3.5
+
+    movie = await get_movie_by_slug(db, "service-rating-movie-11")
+    assert float(movie.rating_internal) == 3.5
+
+
 async def test_rate_item_slug_not_found_raises_404(db):
     user = await _make_user(db, "svc-rating-user-2")
 
