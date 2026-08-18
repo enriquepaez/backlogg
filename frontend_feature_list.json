@@ -768,7 +768,7 @@
         "Contraste AA verificado para el nuevo acento sobre ambos fondos (light/dark)",
         "typecheck+lint+build en verde; QA visual: home, item detail y library muestran el nuevo acento y titular de forma consistente"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 40,
