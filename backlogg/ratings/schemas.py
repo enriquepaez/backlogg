@@ -4,9 +4,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RatingIn(BaseModel):
-    """Request body for PUT /{type}/{slug}/rating — full replace (upsert)."""
+    """Request body for PUT /{type}/{slug}/rating — full replace (upsert).
 
-    score: int | None = Field(default=None, ge=1, le=5)
+    ``score`` allows half-star granularity: 1.0, 1.5, 2.0, ..., 5.0. A value
+    that is not a multiple of 0.5, or that falls outside 1-5, is rejected
+    with 422 (``multiple_of``/``ge``/``le`` Pydantic constraints).
+    """
+
+    score: float | None = Field(default=None, ge=1, le=5, multiple_of=0.5)
     review_text: str | None = Field(default=None, max_length=10000)
 
 
@@ -21,7 +26,7 @@ class RatingAuthorOut(BaseModel):
 class RatingOut(BaseModel):
     id: int
     user: RatingAuthorOut
-    score: int | None
+    score: float | None
     review_text: str | None
     like_count: int
     liked_by_viewer: bool
@@ -46,7 +51,7 @@ class UserReviewItemOut(BaseModel):
 class UserReviewOut(BaseModel):
     id: int
     item: UserReviewItemOut
-    score: int | None
+    score: float | None
     review_text: str | None
     created_at: datetime
     updated_at: datetime

@@ -489,12 +489,14 @@ PUT /v1/{type}/{slug}/rating
 → 200  Upsert de la puntuación/review del usuario autenticado
 → 401  Sin token
 → 404  Slug no encontrado
-→ 422  score fuera de 1-5
+→ 422  score fuera de 1-5, o no múltiplo de 0.5
 ```
 
-Body: `{"score": 1-5 | null, "review_text": string | null}` — reemplazo
-completo (PUT), no parcial: omitir un campo lo deja en `null`. Tras cada
-upsert se recalculan `rating_internal` (AVG) y `rating_count_internal`
+Body: `{"score": 1.0-5.0 en pasos de 0.5 | null, "review_text": string | null}`
+— reemplazo completo (PUT), no parcial: omitir un campo lo deja en `null`.
+`score` admite granularidad de media estrella (1.0, 1.5, 2.0, ..., 5.0); un
+valor que no sea múltiplo de 0.5, o esté fuera de 1-5, devuelve `422`. Tras
+cada upsert se recalculan `rating_internal` (AVG) y `rating_count_internal`
 (COUNT) del item.
 
 Response: `id`, `user` (`username`, `display_name`, `avatar_url`), `score`,

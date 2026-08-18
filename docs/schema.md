@@ -501,11 +501,11 @@ every still-active `refresh_tokens` row for the user (forces re-login).
 
 ### `user_ratings`
 
-One row per (user, item): an optional 1-5 `score` and/or optional
-`review_text` — either can be null, but the row exists once a user has
-rated and/or reviewed an item (upsert on repeat calls). Polymorphic
-`item_type` + `item_id`, same pattern as `credits`/`external_ids`; no real
-FK to movies/series/books/games.
+One row per (user, item): an optional 1-5 `score` (half-star steps — 1.0,
+1.5, 2.0, ..., 5.0) and/or optional `review_text` — either can be null, but
+the row exists once a user has rated and/or reviewed an item (upsert on
+repeat calls). Polymorphic `item_type` + `item_id`, same pattern as
+`credits`/`external_ids`; no real FK to movies/series/books/games.
 
 ```sql
 CREATE TABLE user_ratings (
@@ -513,14 +513,16 @@ CREATE TABLE user_ratings (
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     item_type       VARCHAR(20) NOT NULL,     -- MOVIE, SERIES, BOOK, GAME
     item_id         BIGINT NOT NULL,
-    score           INTEGER,                  -- 1-5, nullable (text-only review)
+    score           NUMERIC(2,1),             -- 1.0-5.0 in 0.5 steps, nullable (text-only review)
     review_text     TEXT,
     is_hidden       BOOLEAN NOT NULL DEFAULT false, -- content moderation (admin)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT uq_user_rating_item UNIQUE (user_id, item_type, item_id),
-    CONSTRAINT ck_user_ratings_score_range CHECK (score IS NULL OR (score >= 1 AND score <= 5))
+    CONSTRAINT ck_user_ratings_score_range CHECK (
+        score IS NULL OR (score >= 1 AND score <= 5 AND score * 2 = FLOOR(score * 2))
+    )
 );
 
 CREATE INDEX idx_user_ratings_item ON user_ratings (item_type, item_id);

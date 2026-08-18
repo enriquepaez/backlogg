@@ -74,7 +74,7 @@ async def upsert_rating(
     user_id: int,
     item_type: str,
     item_id: int,
-    score: int | None,
+    score: float | None,
     review_text: str | None,
 ) -> UserRating:
     """Insert or update the (user, item) rating. Full replace of score/review_text."""

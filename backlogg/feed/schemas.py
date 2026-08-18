@@ -20,7 +20,7 @@ class FeedEntryOut(BaseModel):
     id: int
     author: FeedAuthorOut
     item: FeedItemOut
-    score: int | None
+    score: float | None
     review_text: str | None
     like_count: int
     created_at: datetime
