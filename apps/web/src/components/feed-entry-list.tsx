@@ -1,4 +1,4 @@
-import { Heart, ImageOff, Star } from "lucide-react";
+import { CheckCircle2, Heart, ImageOff, Star } from "lucide-react";
 import Image from "next/image";
 import { getTranslations } from "next-intl/server";
 
@@ -6,6 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
+import { STATUS_COLOR_CLASSES } from "@/lib/library-types";
+import { cn } from "@/lib/utils";
 
 import type { components } from "@backlogg/api-client";
 
@@ -35,12 +37,22 @@ export type FeedEntryListProps = {
 };
 
 /**
- * List of feed entries (FE-23, `/feed`): each one shows its author
- * (avatar+name, linked to `/u/{username}`), item (poster+title, linked to
- * `/{type}/{slug}`), score, review text and like count. Deliberately
- * non-interactive — unlike `ItemReviews`'s `ReviewCard`, FE-23's acceptance
- * only calls for *rendering* `like_count`, not toggling it from the feed;
- * liking a review still happens on that review's own item detail page.
+ * List of feed entries (FE-23, `/feed`; `status_completed` support added by
+ * FE-42): each one shows its author (avatar+name, linked to `/u/{username}`)
+ * and item (poster+title, linked to `/{type}/{slug}`). What else it shows
+ * depends on `entry.event_type` (see `FeedEntryCard`):
+ *
+ * - `rating_created`: score (stars), review text and like count.
+ * - `status_completed`: a "completed" badge (`STATUS_COLOR_CLASSES.completed`,
+ *   same status color as FE-37's library UI) instead — the backend always
+ *   sends `score`/`review_text`/`like_count` as `null` for this type
+ *   (`docs/api.md`), so those three pieces of UI are already absent without
+ *   any extra branching; only the badge needs one.
+ *
+ * Deliberately non-interactive — unlike `ItemReviews`'s `ReviewCard`, FE-23's
+ * acceptance only calls for *rendering* `like_count`, not toggling it from
+ * the feed; liking a review still happens on that review's own item detail
+ * page.
  */
 export async function FeedEntryList({ entries, locale }: FeedEntryListProps) {
   const t = await getTranslations("Feed.entry");
@@ -67,6 +79,7 @@ function FeedEntryCard({
 }) {
   const itemType = feedItemType(entry.item.item_type);
   const itemHref = itemType ? `/${itemType}/${entry.item.slug}` : undefined;
+  const isCompleted = entry.event_type === "status_completed";
 
   return (
     <Card>
@@ -74,7 +87,9 @@ function FeedEntryCard({
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <FeedEntryAuthor author={entry.author} />
           <p className="text-xs text-muted-foreground">
-            {t("dateLabel", { date: formatDate(entry.created_at, locale) })}
+            {isCompleted
+              ? t("completedDateLabel", { date: formatDate(entry.created_at, locale) })
+              : t("dateLabel", { date: formatDate(entry.created_at, locale) })}
           </p>
         </div>
 
@@ -102,7 +117,7 @@ function FeedEntryCard({
             ) : (
               <p className="text-sm font-medium">{entry.item.title}</p>
             )}
-            <FeedEntryStars score={entry.score} />
+            {isCompleted ? <FeedEntryCompletedBadge t={t} /> : <FeedEntryStars score={entry.score} />}
           </div>
         </div>
 
@@ -152,6 +167,34 @@ function FeedEntryAuthor({ author }: { author: FeedEntry["author"] }) {
       )}
       <span className="text-sm font-medium hover:underline">{name}</span>
     </Link>
+  );
+}
+
+/**
+ * Status pill shown on a `status_completed` entry in place of
+ * `FeedEntryStars` (there is no score for this event type) — same
+ * `STATUS_COLOR_CLASSES.completed` color and pill shape `CatalogCard` uses
+ * for the viewer's own library-status badge (FE-37), for visual consistency
+ * between "you marked this completed" (library) and "someone you follow
+ * marked this completed" (feed) even though the two badges live in
+ * different components with different data. `CheckCircle2` (not reused from
+ * anywhere else in the codebase — no prior "completed" icon convention
+ * existed before this feature) reads as "done" at a glance next to the
+ * item's title, mirroring the "X completed Y" shape asked for by pairing
+ * this badge with the author name already shown above and the item title
+ * already shown to its left.
+ */
+function FeedEntryCompletedBadge({ t }: { t: FeedEntryTranslator }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold",
+        STATUS_COLOR_CLASSES.completed,
+      )}
+    >
+      <CheckCircle2 aria-hidden className="size-3.5" />
+      {t("completedBadge")}
+    </span>
   );
 }
 

@@ -67,6 +67,24 @@ const reviewLikeNoSlug = {
   created_at: "2026-05-25T18:04:11Z",
 };
 
+const userCompleted = {
+  id: 5,
+  type: "user_completed",
+  actor: { username: "frank", display_name: "Frank", avatar_url: null },
+  target: { target_type: "MOVIE", target_id: 77, item_type: "MOVIE", slug: "the-matrix-1999" },
+  is_read: false,
+  created_at: "2026-05-25T18:04:11Z",
+};
+
+const userCompletedNoSlug = {
+  id: 6,
+  type: "user_completed",
+  actor: { username: "grace", display_name: null, avatar_url: null },
+  target: { target_type: "MOVIE", target_id: 78, item_type: null, slug: null },
+  is_read: false,
+  created_at: "2026-05-25T18:04:11Z",
+};
+
 const alreadyRead = {
   id: 4,
   type: "new_follower",
@@ -345,5 +363,47 @@ describe("NotificationBell", () => {
 
     await waitFor(() => expect(screen.getByText('reviewLike:{"name":"carol"}')).toBeInTheDocument());
     expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  it("shows the user_completed-specific message instead of the generic fallback", async () => {
+    server.use(unreadCountHandler(0));
+    server.use(notificationsHandler([userCompleted]));
+
+    render(<NotificationBell />);
+
+    await act(async () => {
+      openBell();
+    });
+
+    expect(await screen.findByText('userCompleted:{"name":"Frank"}')).toBeInTheDocument();
+    expect(screen.queryByText(/^generic:/)).not.toBeInTheDocument();
+  });
+
+  it("links user_completed to the completed item, same as review_like's target resolution", async () => {
+    server.use(unreadCountHandler(0));
+    server.use(notificationsHandler([userCompleted]));
+
+    render(<NotificationBell />);
+
+    await act(async () => {
+      openBell();
+    });
+
+    const row = (await screen.findByText('userCompleted:{"name":"Frank"}')).closest("a");
+    expect(row).toHaveAttribute("href", "/movie/the-matrix-1999");
+  });
+
+  it("does not render a link for a user_completed with no resolved target (defensive)", async () => {
+    server.use(unreadCountHandler(0));
+    server.use(notificationsHandler([userCompletedNoSlug]));
+
+    render(<NotificationBell />);
+
+    await act(async () => {
+      openBell();
+    });
+
+    const message = await screen.findByText('userCompleted:{"name":"grace"}');
+    expect(message.closest("a")).toBeNull();
   });
 });

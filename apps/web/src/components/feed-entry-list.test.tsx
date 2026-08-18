@@ -84,4 +84,52 @@ describe("FeedEntryList", () => {
     expect(screen.getByText("Dune")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dune" })).not.toBeInTheDocument();
   });
+
+  describe("status_completed entries", () => {
+    const completedEntry = {
+      id: 3,
+      event_type: "status_completed" as const,
+      author: { username: "bob", display_name: "Bob", avatar_url: null },
+      item: {
+        item_type: "MOVIE",
+        title: "Dune",
+        slug: "dune-2021",
+        poster_url: "https://image.tmdb.org/t/p/w500/dune.jpg",
+      },
+      score: null,
+      review_text: null,
+      like_count: null,
+      created_at: "2026-05-25T18:04:11Z",
+    };
+
+    it("renders the author and item like any other entry", async () => {
+      render(await FeedEntryList({ entries: [completedEntry], locale: "en" }));
+
+      expect(screen.getByRole("link", { name: /Bob/ })).toHaveAttribute("href", "/u/bob");
+      expect(screen.getByRole("link", { name: "Dune" })).toHaveAttribute("href", "/movie/dune-2021");
+    });
+
+    it("uses the completed-specific date label instead of the review one", async () => {
+      render(await FeedEntryList({ entries: [completedEntry], locale: "en" }));
+
+      expect(
+        screen.getByText('completedDateLabel:{"date":"May 25, 2026"}'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/^dateLabel:/)).not.toBeInTheDocument();
+    });
+
+    it("shows a completed badge instead of stars, review text or a like count", async () => {
+      render(await FeedEntryList({ entries: [completedEntry], locale: "en" }));
+
+      expect(screen.getByText("completedBadge")).toBeInTheDocument();
+      expect(screen.queryByText(/^likeCount:/)).not.toBeInTheDocument();
+    });
+
+    it("renders rating_created and status_completed entries side by side", async () => {
+      render(await FeedEntryList({ entries: [duneEntry, completedEntry], locale: "en" }));
+
+      expect(screen.getByText('likeCount:{"count":12}')).toBeInTheDocument();
+      expect(screen.getByText("completedBadge")).toBeInTheDocument();
+    });
+  });
 });
