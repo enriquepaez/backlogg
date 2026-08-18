@@ -3,7 +3,12 @@ import type { ApiClient, components } from "@backlogg/api-client";
 import { getApiClient } from "@/lib/auth/session";
 
 import type { CatalogType } from "./catalog-types";
-import { isLibraryStatus, LIBRARY_STATUSES, type LibraryStatusValue } from "./library-types";
+import {
+  isLibraryStatus,
+  LIBRARY_STATUSES,
+  STATUS_COLOR_CLASSES,
+  type LibraryStatusValue,
+} from "./library-types";
 
 /**
  * Library/backlog helpers (FE-20): add/change/remove the caller's own
@@ -33,7 +38,7 @@ import { isLibraryStatus, LIBRARY_STATUSES, type LibraryStatusValue } from "./li
  */
 
 export type { LibraryStatusValue };
-export { isLibraryStatus, LIBRARY_STATUSES };
+export { isLibraryStatus, LIBRARY_STATUSES, STATUS_COLOR_CLASSES };
 
 export type LibraryStatusOut = components["schemas"]["LibraryStatusOut"];
 export type LibraryEntry = components["schemas"]["LibraryEntryOut"];

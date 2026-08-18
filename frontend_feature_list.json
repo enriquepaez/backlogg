@@ -711,7 +711,7 @@
         "Contraste AA en ambos temas para los 4 colores sobre su fondo",
         "typecheck+lint+build en verde; QA visual: los 4 estados se distinguen sin leer el texto"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 37,

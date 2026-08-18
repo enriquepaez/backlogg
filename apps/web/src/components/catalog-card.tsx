@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { STATUS_COLOR_CLASSES, type LibraryStatusValue } from "@/lib/library-types";
+import { cn } from "@/lib/utils";
 
 export type CatalogCardProps = {
   /** Item title. Catalog content is never translated (see `apps/web/AGENTS.md` / i18n note). */
@@ -16,6 +18,26 @@ export type CatalogCardProps = {
    * omitted for the per-type "featured" grids where it would be redundant.
    */
   typeLabel?: string;
+  /**
+   * The viewer's own backlog status for this item (FE-37), when known —
+   * drives the color of the small status badge rendered over the poster
+   * (bottom-left, `--status-<status>`/`--status-<status>-foreground` from
+   * `globals.css`, same pair `ViewerStatusSlot`'s active button and
+   * `StatusTabs`'s active tab use). Only `/u/[username]/library/page.tsx`
+   * passes this today — it's the only grid whose `LibraryEntryOut` already
+   * carries a `status` per item; other grids (home, browse, search, similar)
+   * don't have that data per item and simply omit the prop, which omits the
+   * badge (see `libraryStatusLabel` below).
+   */
+  libraryStatus?: LibraryStatusValue;
+  /**
+   * Localized text for the {@link libraryStatus} badge (e.g.
+   * `Library.statusTabs.want` -> "Want"), pre-translated by the caller —
+   * same house style as `typeLabel`, since this presentational component has
+   * no i18n context of its own. Required whenever `libraryStatus` is set;
+   * the badge is omitted if either is missing.
+   */
+  libraryStatusLabel?: string;
   /**
    * Item detail page path (e.g. `/movie/dune-2021`, FE-10), made available
    * once FE-10 shipped a route to link to. When omitted the card renders as
@@ -44,6 +66,8 @@ export function CatalogCard({
   posterUrl,
   ratingExternal,
   typeLabel,
+  libraryStatus,
+  libraryStatusLabel,
   href,
   footer,
 }: CatalogCardProps) {
@@ -76,6 +100,16 @@ export function CatalogCard({
           <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-xs font-medium text-foreground shadow-sm">
             <Star aria-hidden className="size-3 fill-current" />
             {ratingExternal.toFixed(1)}
+          </span>
+        ) : null}
+        {libraryStatus && libraryStatusLabel ? (
+          <span
+            className={cn(
+              "absolute bottom-2 left-2 rounded-md px-2.5 py-1 text-sm font-semibold shadow-sm",
+              STATUS_COLOR_CLASSES[libraryStatus],
+            )}
+          >
+            {libraryStatusLabel}
           </span>
         ) : null}
       </div>

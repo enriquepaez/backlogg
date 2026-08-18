@@ -7,7 +7,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import type { CatalogType } from "@/lib/catalog-types";
-import { LIBRARY_STATUSES, type LibraryStatusValue } from "@/lib/library-types";
+import {
+  LIBRARY_STATUSES,
+  STATUS_COLOR_CLASSES_IMPORTANT,
+  type LibraryStatusValue,
+} from "@/lib/library-types";
+import { cn } from "@/lib/utils";
 
 export type ViewerStatusSlotProps = {
   /**
@@ -164,11 +169,20 @@ export function ViewerStatusSlot({ type, slug }: ViewerStatusSlotProps) {
       <span className="text-sm font-medium text-muted-foreground">{t("heading")}</span>
       <div role="group" aria-label={t("heading")} className="flex flex-wrap gap-2">
         {LIBRARY_STATUSES.map((value) => (
+          // `STATUS_COLOR_CLASSES_IMPORTANT` (not the plain
+          // `STATUS_COLOR_CLASSES` used by `CatalogCard`'s badge and
+          // `StatusTabs` in `library/page.tsx`) — this button carries
+          // `variant="outline"`, whose `dark:*` classes otherwise win the
+          // cascade over the status color in dark theme. See the doc
+          // comment on `STATUS_COLOR_CLASSES_IMPORTANT` (FE-37 bugfix).
           <Button
             key={value}
             type="button"
             size="sm"
-            variant={status === value ? "default" : "outline"}
+            variant="outline"
+            className={cn(
+              status === value && `!border-transparent ${STATUS_COLOR_CLASSES_IMPORTANT[value]}`,
+            )}
             aria-pressed={status === value}
             disabled={pending}
             onClick={() => setStatusTo(value)}
