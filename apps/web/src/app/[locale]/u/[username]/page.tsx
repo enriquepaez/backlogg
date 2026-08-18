@@ -3,12 +3,13 @@ import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
 import { FollowWidget } from "@/components/follow-widget";
+import { LibraryStatusCounts } from "@/components/library-status-counts";
 import { ProfileReviewsPagination } from "@/components/profile-reviews-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import { UserReviewCard } from "@/components/user-review-card";
 import { Link } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
-import { getUserLibrary, getUserProfile, LIBRARY_STATUSES, type LibraryEntry, type UserProfile } from "@/lib/library";
+import { getUserLibrary, getUserProfile, type LibraryEntry, type UserProfile } from "@/lib/library";
 import { toCatalogType } from "@/lib/search";
 import { getUserReviews } from "@/lib/user-content";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,6 @@ function parsePage(value: RawParam): number {
 }
 
 type ProfileTranslator = Awaited<ReturnType<typeof getTranslations<"Profile">>>;
-type LibraryStatusTranslator = Awaited<ReturnType<typeof getTranslations<"Library.statusTabs">>>;
 type BrowseTranslator = Awaited<ReturnType<typeof getTranslations<"Browse">>>;
 
 /**
@@ -66,16 +66,14 @@ export default async function UserProfilePage({
   const query = await searchParams;
   const page = parsePage(query.page);
 
-  const [t, tLibraryStatus, tType, profileResult, reviewsResult, libraryResult, currentUser] =
-    await Promise.all([
-      getTranslations("Profile"),
-      getTranslations("Library.statusTabs"),
-      getTranslations("Browse"),
-      getUserProfile(username),
-      getUserReviews(username, { page, limit: REVIEWS_PAGE_SIZE }),
-      getUserLibrary(username, { limit: LIBRARY_PREVIEW_SIZE }),
-      getCurrentUser(),
-    ]);
+  const [t, tType, profileResult, reviewsResult, libraryResult, currentUser] = await Promise.all([
+    getTranslations("Profile"),
+    getTranslations("Browse"),
+    getUserProfile(username),
+    getUserReviews(username, { page, limit: REVIEWS_PAGE_SIZE }),
+    getUserLibrary(username, { limit: LIBRARY_PREVIEW_SIZE }),
+    getCurrentUser(),
+  ]);
 
   if (profileResult.status === "not-found") {
     notFound();
@@ -106,7 +104,6 @@ export default async function UserProfilePage({
         counts={profile.library_counts}
         preview={libraryResult.ok ? libraryResult.items : []}
         t={t}
-        tStatus={tLibraryStatus}
         tType={tType}
       />
 
@@ -201,27 +198,26 @@ function ProfileHeader({
 }
 
 /**
- * Library section of the profile (FE-21, enriched post-QA): the per-status
- * counts remain the at-a-glance summary, now paired with a small poster
- * preview (`CatalogCard`, same component the full library grid at
- * `/u/{username}/library` uses) of the user's `LIBRARY_PREVIEW_SIZE` most
- * recent entries — plain counts alone read as too sparse. The preview is
- * simply omitted when `preview` is empty (no empty-state copy), same as how
- * the full library page treats a genuinely empty library.
+ * Library section of the profile (FE-21, enriched post-QA; counts made
+ * prominent in FE-39): a colored per-status count summary
+ * (`LibraryStatusCounts`, FE-39) is the at-a-glance headline, paired with a
+ * small poster preview (`CatalogCard`, same component the full library grid
+ * at `/u/{username}/library` uses) of the user's `LIBRARY_PREVIEW_SIZE` most
+ * recent entries — the preview is simply omitted when `preview` is empty (no
+ * empty-state copy), same as how the full library page treats a genuinely
+ * empty library.
  */
 function LibrarySummary({
   username,
   counts,
   preview,
   t,
-  tStatus,
   tType,
 }: {
   username: string;
   counts: UserProfile["library_counts"];
   preview: LibraryEntry[];
   t: ProfileTranslator;
-  tStatus: LibraryStatusTranslator;
   tType: BrowseTranslator;
 }) {
   return (
@@ -232,13 +228,7 @@ function LibrarySummary({
           {t("library.viewAll")}
         </Link>
       </div>
-      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-        {LIBRARY_STATUSES.map((status) => (
-          <span key={status}>
-            {tStatus(status)}: {counts[status]}
-          </span>
-        ))}
-      </div>
+      <LibraryStatusCounts username={username} counts={counts} />
       {preview.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {preview.map((entry) => {

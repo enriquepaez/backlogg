@@ -226,7 +226,8 @@
     },
     "library": {
       "heading": "Biblioteca",
-      "viewAll": "Ver biblioteca completa"
+      "viewAll": "Ver biblioteca completa",
+      "countsLabel": "Conteos de biblioteca por estado"
     },
     "reviews": {
       "heading": "Reseñas",
