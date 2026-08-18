@@ -9,6 +9,7 @@ delete logic in one place instead of duplicating it across four domain slices.
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.feed import repository as feed_repo
 from backlogg.library import repository as repo
 from backlogg.library.schemas import (
     LibraryCounts,
@@ -42,6 +43,7 @@ async def set_library_status(
 ) -> LibraryStatusOut:
     """Upsert the authenticated user's backlog status for an item."""
     item = await _get_item_or_404(db, item_type, slug)
+    previous_status = await repo.get_library_status(db, user.id, item_type, item.id)
 
     entry = await repo.upsert_library_entry(
         db,
@@ -50,6 +52,17 @@ async def set_library_status(
         item_id=item.id,
         status=status.value,
     )
+
+    # Feed event generation (feature 54): only a transition *into* completed
+    # is feed-worthy — re-PUTting an already-completed status (or any other
+    # transition: want/in_progress/dropped) does not insert another event.
+    # Same-transaction as the status write for the same reason as
+    # ratings.service.rate_item (plain local insert, no external call).
+    if status.value == "completed" and previous_status != "completed":
+        await feed_repo.create_status_completed_event(
+            db, user_id=user.id, item_type=item_type, item_id=item.id
+        )
+
     await db.commit()
 
     return LibraryStatusOut(

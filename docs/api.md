@@ -656,22 +656,40 @@ vivo de la DB en cada request — no hace falta volver a hacer login). Response
 
 ```
 GET /v1/feed?tab=following|popular&page=&limit=
-→ 200  Feed paginado, cross-type (UNION ALL de movies/series/books/games)
+→ 200  Feed paginado, cross-type, leído de activity_events (feature 54)
 → 401  Sin token
 → 422  tab distinto de following/popular
 ```
 
-Auth requerida en ambas pestañas. `tab` por defecto `following`.
+Auth requerida en ambas pestañas. `tab` por defecto `following`. El feed lee
+de la tabla genérica `activity_events` (ver `docs/schema.md`) en vez de hacer
+UNION ALL directo sobre `user_ratings` — hoy existen dos tipos de evento,
+`rating_created` y `status_completed`.
 
-- `tab=following`: reviews de los usuarios que el caller sigue, orden
-  reverse-chronological. Caller sin follows → lista vacía (no es error).
-- `tab=popular`: reviews de los últimos 30 días ordenadas por `like_count`
-  desc y, a igualdad, por `created_at` desc.
+- `tab=following`: eventos (de ambos tipos) de los usuarios que el caller
+  sigue, orden reverse-chronological. Caller sin follows → lista vacía (no es
+  error).
+- `tab=popular`: solo eventos `rating_created` de los últimos 30 días
+  ordenados por `like_count` desc y, a igualdad, por `created_at` desc.
+  `status_completed` no participa en esta pestaña — no tiene likes, y
+  mostrarlo con un `like_count` siempre a cero rompería el sentido de
+  "popular" (sí aparece en `tab=following`).
 
 Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
-`id`, `author` (`username`, `display_name`, `avatar_url`), `item` (`item_type`,
-`title`, `slug`, `poster_url`), `score`, `review_text`, `like_count`,
-`created_at`.
+`id` (id del evento en `activity_events`, **no** el id de la rating), `event_type`
+(`rating_created` | `status_completed`), `author` (`username`, `display_name`,
+`avatar_url`), `item` (`item_type`, `title`, `slug`, `poster_url`), `score`,
+`review_text`, `like_count`, `created_at`.
+
+Forma por tipo de evento:
+
+- `rating_created`: mantiene el contrato previo a la feature 54 —
+  `score`/`review_text`/`like_count` poblados desde la rating asociada
+  (`like_count` es un entero, `0` si nadie le ha dado like).
+- `status_completed`: forma mínima — `score`, `review_text` y `like_count`
+  son siempre `null`. Se genera cuando un `PUT /{tipo}/{slug}/library` hace
+  transicionar el status a `completed` (el resto de transiciones —
+  `want`/`in_progress`/`dropped` — no generan evento).
 
 ### Notifications
 

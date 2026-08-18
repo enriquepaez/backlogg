@@ -1121,7 +1121,7 @@
         "Tests de repositorio y endpoint cubriendo ambos tipos de evento, el backfill y ambas pestañas del feed",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 55,

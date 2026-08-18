@@ -8,7 +8,9 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
+from backlogg.feed.models import ActivityEvent
 from backlogg.library import service
 from backlogg.library.schemas import LibraryStatus, LibraryTypeFilter
 from backlogg.movies.repository import upsert_movie
@@ -174,3 +176,81 @@ async def test_get_library_counts(db):
     counts = await service.get_library_counts(db, user.id)
     assert counts.want == 1
     assert counts.completed == 0
+
+
+# ── feed event generation (feature 54) ──────────────────────────────────
+
+
+async def _events_for(db, user_id, item_type, item_id):
+    result = await db.execute(
+        select(ActivityEvent).where(
+            ActivityEvent.user_id == user_id,
+            ActivityEvent.item_type == item_type,
+            ActivityEvent.item_id == item_id,
+            ActivityEvent.event_type == "status_completed",
+        )
+    )
+    return result.scalars().all()
+
+
+async def test_set_library_status_completed_creates_event(db):
+    movie = await upsert_movie(db, _movie_data("svc-library-movie-9"))
+    user = await _make_user(db, "library-svc-user-9")
+
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-9", LibraryStatus.completed, user
+    )
+
+    events = await _events_for(db, user.id, "MOVIE", movie.id)
+    assert len(events) == 1
+    assert events[0].rating_id is None
+
+
+async def test_set_library_status_non_completed_transitions_do_not_create_event(db):
+    movie = await upsert_movie(db, _movie_data("svc-library-movie-10"))
+    user = await _make_user(db, "library-svc-user-10")
+
+    await service.set_library_status(db, "MOVIE", "svc-library-movie-10", LibraryStatus.want, user)
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-10", LibraryStatus.in_progress, user
+    )
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-10", LibraryStatus.dropped, user
+    )
+
+    events = await _events_for(db, user.id, "MOVIE", movie.id)
+    assert events == []
+
+
+async def test_set_library_status_repeat_completed_does_not_duplicate_event(db):
+    movie = await upsert_movie(db, _movie_data("svc-library-movie-11"))
+    user = await _make_user(db, "library-svc-user-11")
+
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-11", LibraryStatus.completed, user
+    )
+    # Re-PUTting the same status is a no-op transition — must not duplicate.
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-11", LibraryStatus.completed, user
+    )
+
+    events = await _events_for(db, user.id, "MOVIE", movie.id)
+    assert len(events) == 1
+
+
+async def test_set_library_status_completed_again_after_dropped_creates_new_event(db):
+    movie = await upsert_movie(db, _movie_data("svc-library-movie-12"))
+    user = await _make_user(db, "library-svc-user-12")
+
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-12", LibraryStatus.completed, user
+    )
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-12", LibraryStatus.dropped, user
+    )
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-12", LibraryStatus.completed, user
+    )
+
+    events = await _events_for(db, user.id, "MOVIE", movie.id)
+    assert len(events) == 2

@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
+from backlogg.feed.models import ActivityEvent
 from backlogg.movies.repository import get_movie_by_slug, upsert_movie
 from backlogg.ratings import service
 from backlogg.ratings.schemas import RatingIn
@@ -131,6 +133,101 @@ async def test_rate_item_upsert_replaces_previous_score(db):
     movie = await get_movie_by_slug(db, "service-rating-movie-2")
     assert movie.rating_count_internal == 1
     assert float(movie.rating_internal) == 4.0
+
+
+# ── feed event generation (feature 54) ──────────────────────────────────
+
+
+async def test_rate_item_creates_rating_created_event(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-12"))
+    user = await _make_user(db, "svc-rating-user-21")
+
+    result = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-12",
+        payload=RatingIn(score=5, review_text="Excellent"),
+        user=user,
+    )
+
+    rows = (
+        (await db.execute(select(ActivityEvent).where(ActivityEvent.rating_id == result.id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].event_type == "rating_created"
+    assert rows[0].user_id == user.id
+    assert rows[0].item_type == "MOVIE"
+
+
+async def test_rate_item_successive_updates_do_not_duplicate_event(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-13"))
+    user = await _make_user(db, "svc-rating-user-22")
+
+    first = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-13",
+        payload=RatingIn(score=2, review_text="Meh"),
+        user=user,
+    )
+    await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-13",
+        payload=RatingIn(score=4, review_text="Better on rewatch"),
+        user=user,
+    )
+
+    rows = (
+        (await db.execute(select(ActivityEvent).where(ActivityEvent.rating_id == first.id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+
+
+async def test_rate_item_clearing_content_removes_event(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-14"))
+    user = await _make_user(db, "svc-rating-user-23")
+
+    rating = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-14",
+        payload=RatingIn(score=5, review_text="Loved it"),
+        user=user,
+    )
+    await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-14",
+        payload=RatingIn(score=None, review_text=None),
+        user=user,
+    )
+
+    result = await db.execute(select(ActivityEvent).where(ActivityEvent.rating_id == rating.id))
+    assert result.scalar_one_or_none() is None
+
+
+async def test_delete_item_rating_cascades_event_removal(db):
+    await upsert_movie(db, _movie_data("service-rating-movie-15"))
+    user = await _make_user(db, "svc-rating-user-24")
+
+    rating = await service.rate_item(
+        db,
+        item_type="MOVIE",
+        slug="service-rating-movie-15",
+        payload=RatingIn(score=5, review_text="Loved it"),
+        user=user,
+    )
+    await service.delete_item_rating(
+        db, item_type="MOVIE", slug="service-rating-movie-15", user=user
+    )
+
+    result = await db.execute(select(ActivityEvent).where(ActivityEvent.rating_id == rating.id))
+    assert result.scalar_one_or_none() is None
 
 
 # ── delete_item_rating ──────────────────────────────────────────────────
