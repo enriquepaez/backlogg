@@ -68,6 +68,13 @@ export async function SiteHeader() {
                 <Link href="/recommendations" className="hover:text-foreground">
                   {t("recommendations")}
                 </Link>
+                {/* `/u/{username}/library` (FE-20/21) had no nav entry point
+                    (FE-36) — same auth-gated shape as `/feed` and
+                    `/recommendations` above, pointing at the signed-in
+                    user's own backlog. */}
+                <Link href={`/u/${navUser.username}/library`} className="hover:text-foreground">
+                  {t("library")}
+                </Link>
               </>
             ) : null}
           </nav>
