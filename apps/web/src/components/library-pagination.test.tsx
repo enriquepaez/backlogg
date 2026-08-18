@@ -65,6 +65,38 @@ describe("LibraryPagination", () => {
     );
   });
 
+  it("includes a non-default sort in the query and omits the default one", async () => {
+    render(
+      await LibraryPagination({
+        username: "alice",
+        sort: "title_asc",
+        page: 1,
+        totalPages: 2,
+      }),
+    );
+
+    expect(screen.getAllByRole("link")[0]).toHaveAttribute(
+      "href",
+      JSON.stringify({ pathname: "/u/alice/library", query: { sort: "title_asc", page: "2" } }),
+    );
+  });
+
+  it("omits sort from the query when it's the default (updated_desc)", async () => {
+    render(
+      await LibraryPagination({
+        username: "alice",
+        sort: "updated_desc",
+        page: 1,
+        totalPages: 2,
+      }),
+    );
+
+    expect(screen.getAllByRole("link")[0]).toHaveAttribute(
+      "href",
+      JSON.stringify({ pathname: "/u/alice/library", query: { page: "2" } }),
+    );
+  });
+
   it("only renders a next link on page 1, omitting status/type when unset", async () => {
     render(
       await LibraryPagination({

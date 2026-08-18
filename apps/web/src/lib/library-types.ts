@@ -30,6 +30,116 @@ export function isLibraryStatus(value: string): value is LibraryStatusValue {
   return (LIBRARY_STATUSES as readonly string[]).includes(value);
 }
 
+/** A single `/u/{username}/library` (FE-20) entry — `GET /v1/users/{username}/library`'s per-item shape. */
+export type LibraryEntry = components["schemas"]["LibraryEntryOut"];
+
+/**
+ * Sort order for `/u/{username}/library` (FE-38), same `?sort=` convention
+ * as `CatalogSort` (`./catalog-types.ts`, FE-9 browse) but a distinct union:
+ * the backend's `GET /v1/users/{username}/library` has no `sort` query
+ * param at all (`docs/api.md` — it's always reverse-chronological by
+ * `created_at`), so every value here is applied client-side, in
+ * `sortLibraryEntries` below, over the single already-fetched page of
+ * entries rather than as a request parameter. That's also why this can't
+ * just reuse `CatalogSort`: `updated_desc` has no browse equivalent (it
+ * reads `LibraryEntryOut.updated_at`, already present on every entry), and
+ * `rating_desc` means "the library owner's own score for that item" (see
+ * {@link reviewScoreKey}'s doc comment), not `rating_external`.
+ */
+export type LibrarySort = "updated_desc" | "rating_desc" | "title_asc" | "date_desc";
+
+export const LIBRARY_SORTS: readonly LibrarySort[] = [
+  "updated_desc",
+  "rating_desc",
+  "title_asc",
+  "date_desc",
+];
+
+export const DEFAULT_LIBRARY_SORT: LibrarySort = "updated_desc";
+
+export function isLibrarySort(value: string): value is LibrarySort {
+  return (LIBRARY_SORTS as readonly string[]).includes(value);
+}
+
+/**
+ * Lookup key shared by {@link sortLibraryEntries}'s `rating_desc` branch and
+ * `./library.ts`'s `getUserReviewScores` — both need to match a
+ * `LibraryEntry` (`item.item_type`/`item.slug`, e.g. `"MOVIE"`/`"dune-2021"`)
+ * against a `UserReviewOut` (`item.item_type`/`item.slug`, same casing
+ * convention per the backend's UNION ALL rows) for the same underlying item.
+ * `.toUpperCase()` on both sides guards against the two endpoints ever
+ * drifting on casing.
+ */
+export function reviewScoreKey(itemType: string, slug: string): string {
+  return `${itemType.toUpperCase()}:${slug}`;
+}
+
+/**
+ * Descending comparator for nullable ISO date strings (`YYYY-MM-DD` or
+ * `YYYY-MM-DDTHH:mm:ssZ` — lexicographic order matches chronological order
+ * for both, no `Date` parsing needed). Missing dates always sort last,
+ * regardless of direction, rather than being treated as `""` (which would
+ * otherwise sort first under plain string comparison).
+ */
+function compareNullableIsoDatesDesc(a: string | null, b: string | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a < b ? 1 : a > b ? -1 : 0;
+}
+
+/**
+ * Applies a {@link LibrarySort} to one already-fetched page of
+ * `/u/{username}/library` entries (FE-38) — pure and synchronous, no
+ * network calls, so `page.tsx` can call it directly after `getUserLibrary`
+ * resolves. Only reorders the entries it's given; see this module's
+ * `LibrarySort` doc comment for why a page's worth of entries (not the
+ * user's whole library) is the unit being sorted.
+ *
+ * `scores` (the library owner's own rating per item, keyed by
+ * {@link reviewScoreKey}) is only consulted for `rating_desc` and is
+ * optional elsewhere — callers only fetch it (`getUserReviewScores`) when
+ * `sort === "rating_desc"`, to avoid an extra request on every page load.
+ * Entries with no score (rated `null`, or missing from `scores` entirely —
+ * e.g. it fell outside `getUserReviewScores`'s scan, see that function's
+ * doc comment) always sort last, same "missing sorts last" rule as
+ * {@link compareNullableIsoDatesDesc}.
+ */
+export function sortLibraryEntries(
+  entries: LibraryEntry[],
+  sort: LibrarySort,
+  scores?: Map<string, number>,
+): LibraryEntry[] {
+  const sorted = [...entries];
+
+  switch (sort) {
+    case "title_asc":
+      sorted.sort((a, b) => a.item.title.localeCompare(b.item.title));
+      break;
+    case "date_desc":
+      sorted.sort((a, b) => compareNullableIsoDatesDesc(a.item.release_date, b.item.release_date));
+      break;
+    case "rating_desc": {
+      const scoreOf = (entry: LibraryEntry): number | null =>
+        scores?.get(reviewScoreKey(entry.item.item_type, entry.item.slug)) ?? null;
+      sorted.sort((a, b) => {
+        const scoreA = scoreOf(a);
+        const scoreB = scoreOf(b);
+        if (scoreA === null && scoreB === null) return 0;
+        if (scoreA === null) return 1;
+        if (scoreB === null) return -1;
+        return scoreB - scoreA;
+      });
+      break;
+    }
+    case "updated_desc":
+      sorted.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+      break;
+  }
+
+  return sorted;
+}
+
 /**
  * Tailwind classes for each status's design-system color pair (FE-37,
  * `--status-<status>`/`--status-<status>-foreground` in `globals.css`).

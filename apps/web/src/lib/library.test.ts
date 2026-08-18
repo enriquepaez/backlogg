@@ -24,6 +24,7 @@ const {
   deleteLibraryStatus,
   getUserLibrary,
   getUserProfile,
+  getUserReviewScores,
   getViewerLibraryStatus,
   isLibraryStatus,
   putLibraryStatus,
@@ -191,6 +192,76 @@ describe("getUserLibrary", () => {
     );
 
     expect(await getUserLibrary("alice")).toEqual({ ok: false });
+  });
+});
+
+const aliceReviewsPage = {
+  items: [
+    {
+      id: 1,
+      item: { item_type: "MOVIE", title: "Dune", slug: "dune-2021", poster_url: null },
+      score: 4.5,
+      review_text: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+    {
+      id: 2,
+      item: { item_type: "BOOK", title: "Dune", slug: "dune", poster_url: null },
+      score: null,
+      review_text: "no score, review only",
+      created_at: "2026-01-02T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+    },
+  ],
+  total: 2,
+  page: 1,
+  limit: 100,
+};
+
+describe("getUserReviewScores", () => {
+  it("builds a score map keyed by item_type:slug, skipping null scores", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/reviews`, () =>
+        HttpResponse.json(aliceReviewsPage),
+      ),
+    );
+
+    const scores = await getUserReviewScores("alice");
+
+    expect(scores).toEqual(new Map([["MOVIE:dune-2021", 4.5]]));
+  });
+
+  it("requests the max scan limit", async () => {
+    let capturedUrl: URL | undefined;
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/reviews`, ({ request }) => {
+        capturedUrl = new URL(request.url);
+        return HttpResponse.json(aliceReviewsPage);
+      }),
+    );
+
+    await getUserReviewScores("alice");
+
+    expect(capturedUrl?.searchParams.get("limit")).toBe("100");
+  });
+
+  it("returns an empty map on a non-200 response", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/reviews`, () =>
+        HttpResponse.json({ detail: "Username not found" }, { status: 404 }),
+      ),
+    );
+
+    expect(await getUserReviewScores("ghost")).toEqual(new Map());
+  });
+
+  it("returns an empty map when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/users/:username/reviews`, () => HttpResponse.error()),
+    );
+
+    expect(await getUserReviewScores("alice")).toEqual(new Map());
   });
 });
 

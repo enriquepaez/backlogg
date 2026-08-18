@@ -204,6 +204,13 @@
       "previous": "Previous",
       "next": "Next",
       "pageStatus": "Page {page} of {totalPages}"
+    },
+    "sort": {
+      "label": "Sort by",
+      "updated_desc": "Recently updated",
+      "rating_desc": "Your rating",
+      "title_asc": "Title (A-Z)",
+      "date_desc": "Release date"
     }
   },
   "Profile": {
