@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleUserRound, LogOut, MailCheck, Settings } from "lucide-react";
+import { CircleUserRound, Library, LogOut, MailCheck, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,9 @@ function initials(user: NavUser): string {
  * "settings" entry linking to `/settings`, the only entry point into that
  * page's profile-edit/delete-account flows; a post-QA follow-up on FE-21
  * adds the "my profile" entry linking to `/u/{username}`, the public
- * profile page that previously had no header entry point).
+ * profile page that previously had no header entry point; FE-36 adds the
+ * "library" entry linking to `/u/{username}/library`, which also had no
+ * nav entry point).
  *
  * A Radix `DropdownMenu` (shadcn/ui primitives, `src/components/ui/dropdown-
  * menu.tsx`) rather than the previous inline avatar+name+button: it is the
@@ -96,6 +98,12 @@ export function UserNav({ user }: { user: NavUser }) {
           <Link href={`/u/${user.username}`}>
             <CircleUserRound aria-hidden="true" />
             {t("profile")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={`/u/${user.username}/library`}>
+            <Library aria-hidden="true" />
+            {t("library")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

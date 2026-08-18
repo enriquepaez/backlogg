@@ -690,7 +690,7 @@
         "i18n: sin strings hardcodeados (clave next-intl es/en)",
         "typecheck+lint+build en verde; QA en navegador confirma el enlace en ambas ubicaciones"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 36,
