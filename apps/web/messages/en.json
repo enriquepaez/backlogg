@@ -226,7 +226,8 @@
     },
     "library": {
       "heading": "Library",
-      "viewAll": "View full library"
+      "viewAll": "View full library",
+      "countsLabel": "Library counts by status"
     },
     "reviews": {
       "heading": "Reviews",

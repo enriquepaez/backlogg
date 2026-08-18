@@ -749,7 +749,7 @@
         "Visible tanto en el perfil propio como en el de otros usuarios (los conteos ya son públicos, feature 31)",
         "i18n; typecheck+lint+build en verde; QA en navegador"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 39,
