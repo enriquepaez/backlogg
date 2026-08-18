@@ -27,6 +27,14 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-status-want: var(--status-want);
+  --color-status-want-foreground: var(--status-want-foreground);
+  --color-status-in-progress: var(--status-in-progress);
+  --color-status-in-progress-foreground: var(--status-in-progress-foreground);
+  --color-status-completed: var(--status-completed);
+  --color-status-completed-foreground: var(--status-completed-foreground);
+  --color-status-dropped: var(--status-dropped);
+  --color-status-dropped-foreground: var(--status-dropped-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -64,6 +72,77 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /*
+   * Library status colors (FE-37): one hue per backlog status, spread apart
+   * so the four are distinguishable at a glance without reading their label.
+   * Round 4 (post-QA) is a deliberate pivot AWAY from round 3's "soft badge"
+   * pastel pattern (light tint background + dark saturated text of the same
+   * hue) back to a solid, high-chroma background — per explicit user
+   * feedback: "siguen siendo colores poco vivos. Tienen que ser amarillo,
+   * rojo, verde y azul y que resalten." Round 3 fixed contrast (AAA, all
+   * pairs >= 7.5:1) but the pastel/tinted convention itself (GitHub/Linear/
+   * Notion/Radix "soft" badges) was rejected as too subdued regardless of
+   * its contrast ratio — this is a design-direction choice, not a contrast
+   * bug. Round 2's mistake was never "solid background" per se, it was not
+   * verifying that the *perceived* gap (not just the WCAG ratio on paper)
+   * was large enough — round 2 used mid-lightness saturated backgrounds
+   * (L ~= 0.5-0.8) against lightness-extreme text, which cleared AA/AAA
+   * numerically but still read as low-contrast due to the
+   * Helmholtz–Kohlrausch effect (a vivid mid-lightness hue looks "brighter"
+   * than its L suggests). Round 4 keeps the solid-background approach but
+   * pushes each hue's *background* lightness well away from mid-range
+   * (deep/rich in light theme, bright in dark theme) so both the formula and
+   * the eye agree there is a real gap, while maximizing chroma at that
+   * lightness (the max-in-gamut chroma, minus a small safety margin) so the
+   * color reads as vivid, not muted.
+   *
+   * The four hues were also remapped to the canonical colors the user asked
+   * for by name — red, yellow, green, blue — instead of the "distinguishable
+   * but off" hues used since round 1 (amber instead of yellow, purple
+   * instead of red):
+   *   - want: blue, hue 258 (unchanged) — already reads as canonical blue,
+   *     within ~2-7 degrees of Tailwind's blue-500/600 (259.8/262.9) and
+   *     sRGB primary blue #0000ff (264.1), verified via sRGB->OKLCH round
+   *     trip of those references.
+   *   - in_progress: yellow, hue 100 (was 70/amber) — hue 70 reads as
+   *     orange/amber, not yellow. sRGB primary yellow #ffff00 is hue 109.8,
+   *     Tailwind's yellow-400/500 sit at 86-92; 100 is squarely between both
+   *     references and reads as unambiguous yellow, not orange or lime.
+   *   - completed: green, hue 145 (unchanged) — already within ~3-7 degrees
+   *     of sRGB primary green (142.5) and Tailwind green-500/600 (149.2-149.6).
+   *   - dropped: red, hue 25 (was 320/purple) — matches Tailwind red-500's
+   *     hue (25.3) and sits close to sRGB primary red (29.2). Note this hue
+   *     is intentionally close to `--destructive`'s hue (27.325, itself
+   *     ~= Tailwind red-600) — "red" has very little usable hue range before
+   *     it reads as pink/magenta (< ~15) or orange (> ~40), so the two colors
+   *     are told apart by lightness/chroma instead: `--destructive` sits at a
+   *     lighter, less saturated coral-red (L 0.577/0.704, C 0.245/0.191) built
+   *     for buttons/alerts, while `--status-dropped` is pushed to a deeper,
+   *     more saturated true red in light theme (L 0.44, C 0.176) and to the
+   *     hue's near-absolute chroma ceiling in dark theme (L 0.63, C 0.252) —
+   *     see the dark-theme comment below for why dark mode couldn't reuse the
+   *     "bright bg + dark text" structure the other three hues use here
+   *     without colliding with `--destructive` in appearance.
+   *
+   * Verified the same way as prior rounds: OKLCH -> OKLab -> LMS -> linear
+   * sRGB (Björn Ottosson's matrices), checking each channel lands in [0, 1]
+   * (in-gamut, no clipping) and computing the WCAG relative-luminance
+   * contrast ratio for bg/fg. Target this round: AAA (>= 7:1) where
+   * reachable without giving up meaningful chroma; AA (>= 4.5:1) as the hard
+   * floor everywhere. 7 of the 8 pairs clear AAA (7.30-14.80:1); the 8th
+   * (`--status-dropped` in dark theme) intentionally stays at AA (4.99:1) —
+   * see the dark-theme comment for why. Full numeric derivation (per-hue
+   * gamut sweep, exact contrast ratios, hex previews) lives in
+   * progress/impl_library_status_colors.md, not just eyeballed.
+   */
+  --status-want: oklch(0.45 0.164 258);
+  --status-want-foreground: oklch(0.985 0 0);
+  --status-in-progress: oklch(0.9 0.184 100);
+  --status-in-progress-foreground: oklch(0.145 0 0);
+  --status-completed: oklch(0.42 0.129 145);
+  --status-completed-foreground: oklch(0.985 0 0);
+  --status-dropped: oklch(0.44 0.176 25);
+  --status-dropped-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -99,6 +178,37 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* See the `:root` block above for the round 4 rationale (solid vivid
+     backgrounds, canonical red/yellow/green/blue hues — pivot away from
+     round 3's pastel "soft badge"). `want`/`in_progress`/`completed` mirror
+     the light theme structurally: a *bright*, near-max-chroma background
+     with dark text, so the badge still stands out against the dark page
+     background (`--background: oklch(0.145 0 0)`) instead of blending into
+     it the way a dark-tinted background would. `--status-dropped` breaks
+     that mirroring on purpose: a bright, bg-with-dark-text red in this
+     lightness band (L ~= 0.70, matching the other three) lands almost
+     exactly on `--destructive`'s dark-theme value (L 0.704, C 0.191,
+     H 22.216, ~#ff6467 — a light coral-red), which would make the two
+     indistinguishable. Instead `--status-dropped` here uses the hue's
+     near-absolute chroma ceiling in sRGB gamut (L 0.63, C 0.252, ~#fe0d2d —
+     a saturated "stop-sign" red, clearly more intense/less washed-out than
+     `--destructive`'s coral) with dark text, which only clears WCAG AA
+     (4.99:1) rather than AAA — reaching AAA here would mean sliding the
+     background lightness toward `--destructive`'s band and giving up most
+     of the chroma, i.e. trading away the exact two things (distinctness,
+     vividness) this round exists to fix. `in_progress` (yellow) reuses the
+     identical light-theme value in both themes: yellow's max-chroma-in-gamut
+     point is inherently a high, near-white lightness (~0.90-0.91) regardless
+     of surrounding theme, so there is no light/dark lightness trade-off to
+     make for that hue the way there is for the other three. */
+  --status-want: oklch(0.7 0.155 258);
+  --status-want-foreground: oklch(0.145 0 0);
+  --status-in-progress: oklch(0.9 0.184 100);
+  --status-in-progress-foreground: oklch(0.145 0 0);
+  --status-completed: oklch(0.68 0.211 145);
+  --status-completed-foreground: oklch(0.145 0 0);
+  --status-dropped: oklch(0.63 0.252 25);
+  --status-dropped-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

@@ -10,6 +10,7 @@ import {
   getUserProfile,
   isLibraryStatus,
   LIBRARY_STATUSES,
+  STATUS_COLOR_CLASSES,
   type LibraryStatusValue,
   type UserProfile,
 } from "@/lib/library";
@@ -93,7 +94,9 @@ function StatusTabs({
             className={cn(
               "rounded-full border px-3 py-1 text-sm font-medium transition-colors",
               isActive
-                ? "border-transparent bg-primary text-primary-foreground"
+                ? tab.value
+                  ? `border-transparent ${STATUS_COLOR_CLASSES[tab.value]}`
+                  : "border-transparent bg-primary text-primary-foreground"
                 : "border-border bg-background text-muted-foreground hover:text-foreground",
             )}
           >
@@ -235,6 +238,7 @@ export default async function UserLibraryPage({
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {result.items.map((entry) => {
               const itemType = toCatalogType(entry.item.item_type);
+              const entryStatus = isLibraryStatus(entry.status) ? entry.status : undefined;
               return (
                 <CatalogCard
                   key={`${entry.item.item_type}-${entry.item.slug}`}
@@ -242,6 +246,8 @@ export default async function UserLibraryPage({
                   posterUrl={entry.item.poster_url}
                   ratingExternal={entry.item.rating_external}
                   typeLabel={itemType ? tType(`heading.${itemType}`) : entry.item.item_type}
+                  libraryStatus={entryStatus}
+                  libraryStatusLabel={entryStatus ? t(`statusTabs.${entryStatus}`) : undefined}
                   href={itemType ? `/${itemType}/${entry.item.slug}` : undefined}
                 />
               );

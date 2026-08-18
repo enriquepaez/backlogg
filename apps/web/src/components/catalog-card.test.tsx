@@ -117,4 +117,35 @@ describe("CatalogCard", () => {
 
     expect(container.querySelector('[data-slot="card-content"]')?.children).toHaveLength(1);
   });
+
+  it("shows the library status badge, colored by status, when libraryStatus and libraryStatusLabel are provided (FE-37)", () => {
+    render(
+      <CatalogCard
+        title="Dune"
+        posterUrl={null}
+        ratingExternal={null}
+        libraryStatus="in_progress"
+        libraryStatusLabel="In progress"
+      />,
+    );
+
+    const badge = screen.getByText("In progress");
+    expect(badge).toHaveClass("bg-status-in-progress", "text-status-in-progress-foreground");
+  });
+
+  it("omits the library status badge when libraryStatus is not provided", () => {
+    render(
+      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} libraryStatusLabel="In progress" />,
+    );
+
+    expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+  });
+
+  it("omits the library status badge when libraryStatusLabel is not provided", () => {
+    render(
+      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} libraryStatus="in_progress" />,
+    );
+
+    expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+  });
 });

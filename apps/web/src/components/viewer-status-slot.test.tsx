@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
+import { LIBRARY_STATUSES, STATUS_COLOR_CLASSES_IMPORTANT } from "@/lib/library-types";
 
 // Same rationale as `rating-widget.test.tsx` for mocking `@/i18n/navigation`
 // (the anonymous state's "log in" link), `next-intl` (assertions match on
@@ -96,6 +97,37 @@ describe("ViewerStatusSlot", () => {
     expect(pressed).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "remove" })).toBeInTheDocument();
   });
+
+  it.each(LIBRARY_STATUSES)(
+    "gives the active '%s' status button its own `!important` status color, distinct from the others (FE-37)",
+    async (activeStatus) => {
+      // `!`-prefixed classes (`STATUS_COLOR_CLASSES_IMPORTANT`, not the plain
+      // `STATUS_COLOR_CLASSES`) — this button uses `variant="outline"`, whose
+      // `dark:*` rules otherwise win the cascade over the status color in
+      // dark theme (FE-37 bugfix, see the doc comment on
+      // `STATUS_COLOR_CLASSES_IMPORTANT`).
+      server.use(
+        http.get("/api/movie/dune-2021/library", () =>
+          HttpResponse.json({ authenticated: true, status: activeStatus }),
+        ),
+      );
+
+      renderSlot();
+
+      const activeButton = await screen.findByRole("button", { name: `status.${activeStatus}` });
+      expect(activeButton).toHaveClass("!border-transparent");
+      for (const className of STATUS_COLOR_CLASSES_IMPORTANT[activeStatus].split(" ")) {
+        expect(activeButton).toHaveClass(className);
+      }
+
+      for (const otherStatus of LIBRARY_STATUSES.filter((value) => value !== activeStatus)) {
+        const inactiveButton = screen.getByRole("button", { name: `status.${otherStatus}` });
+        for (const className of STATUS_COLOR_CLASSES_IMPORTANT[otherStatus].split(" ")) {
+          expect(inactiveButton).not.toHaveClass(className);
+        }
+      }
+    },
+  );
 
   it("sets a new status with an optimistic update, forwarding the exact PUT body", async () => {
     server.use(
