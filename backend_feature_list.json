@@ -1142,6 +1142,89 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 56,
+      "name": "auth_recovery_rate_limiting",
+      "title": "Rate limiting en recuperación de cuenta y refresh — cierra el hueco antes de producción",
+      "description": "Motivado por el audit2 de producción (2026-08-19): solo /auth/register y /auth/login llevan Depends(rate_limit_auth); /auth/password/forgot, /auth/password/reset, /auth/verify/request, /auth/verify/confirm y /auth/refresh no tienen ningún límite. /auth/password/forgot es no autenticado y, con SMTP en Gmail (~500 envíos/día en docs/operations.md), un atacante sin credenciales puede agotar el cupo diario de email para usuarios legítimos o explotar la diferencia de latencia entre 'email existe' y 'no existe' para enumerar cuentas.",
+      "depends_on": [
+        36,
+        27,
+        34
+      ],
+      "acceptance": [
+        "Depends(rate_limit_auth) (o un bucket dedicado más estricto) aplicado a /auth/password/forgot, /auth/password/reset, /auth/verify/request, /auth/verify/confirm y /auth/refresh",
+        "Al exceder el límite responde 429 con Retry-After, mismo formato que /auth/login",
+        "Tests: cada una de las 5 rutas devuelve 429 tras exceder el límite configurado",
+        "docs/operations.md actualizado si se añade un bucket de env var nuevo",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 57,
+      "name": "notification_fanout_batching",
+      "title": "Batchear el fan-out de notificaciones user_completed en vez de N inserts secuenciales",
+      "description": "Motivado por el audit2 de producción (2026-08-19): PUT /{type}/{slug}/library llama a notify_user_completed una vez por follower directo, cada llamada con su propio INSERT+commit individual y secuencial, bloqueando la respuesta del PUT. En Render free tier (CPU compartida, cold starts) un usuario con un número no trivial de followers puede convertir un simple 'marcar como completado' en una request lenta o en timeout.",
+      "depends_on": [
+        55
+      ],
+      "acceptance": [
+        "El fan-out de notify_user_completed hace un único INSERT batched (o se mueve a un BackgroundTask de FastAPI) en vez de N round-trips secuenciales",
+        "PUT /{type}/{slug}/library responde sin esperar al fan-out completo, o el fan-out queda reducido a una sola sentencia",
+        "Se mantiene el graceful degradation ya existente (un fallo en notificaciones no rompe el PUT de library)",
+        "Test: completar un item con muchos followers no aumenta el número de queries linealmente (o no bloquea la respuesta si se mueve a background)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 58,
+      "name": "banned_user_immediate_revocation",
+      "title": "get_current_user debe rechazar usuarios baneados en vez de esperar a que expire el access token",
+      "description": "Motivado por el audit2 de producción (2026-08-19): login_user y refresh_tokens ya comprueban is_banned, pero get_current_user (dependencia de todas las rutas autenticadas) no lo hace. Un usuario baneado conserva capacidad de escritura (ratings, likes, activity log, etc.) hasta que expira su access token ya emitido (hasta JWT_EXPIRE_MINUTES, default 15 min), pese a que la documentación de moderación promete efecto inmediato.",
+      "depends_on": [
+        43,
+        27
+      ],
+      "acceptance": [
+        "get_current_user rechaza con 401 a un usuario con is_banned=true, sin coste adicional de query (el user ya se carga en memoria)",
+        "Test: banear a un usuario con un access token ya emitido y válido hace que su siguiente request autenticada devuelva 401, no 200",
+        "No hay regresión en el flujo normal (usuario no baneado sigue autenticando igual)",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 59,
+      "name": "admin_key_constant_time_compare",
+      "title": "Comparación de X-API-Key en tiempo constante (hmac.compare_digest)",
+      "description": "Motivado por el audit2 de producción (2026-08-19): la verificación de X-API-Key en las rutas /v1/admin/* usa != de Python, que no es tiempo-constante y corta en el primer byte distinto. Protege acciones de alto privilegio (ban de usuarios, sync manual). Fix trivial: hmac.compare_digest.",
+      "depends_on": [
+        43
+      ],
+      "acceptance": [
+        "backlogg/admin/auth.py usa hmac.compare_digest(x_api_key, configured_key) en vez de !=",
+        "Tests existentes de auth admin (401 sin key / key incorrecta, 200 con key correcta) siguen en verde",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 60,
+      "name": "library_entries_composite_index",
+      "title": "Índice compuesto (user_id, status) en library_entries",
+      "description": "Motivado por el audit2 de producción (2026-08-19): el patrón de lectura más frecuente del proyecto, GET /users/{username}/library?status=completed, filtra por user_id y luego status dentro de cada rama del UNION ALL, pero solo existen índices separados para user_id e (item_type, item_id). Con el volumen actual es inofensivo; antes de escalar merece la pena.",
+      "depends_on": [
+        31
+      ],
+      "acceptance": [
+        "Nueva migración Alembic añade Index sobre (user_id, status) en library_entries, reversible en downgrade()",
+        "docs/schema.md actualizado con el índice nuevo",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
