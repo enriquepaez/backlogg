@@ -82,4 +82,13 @@ describe("ReviewStars", () => {
 
     expect(container.querySelectorAll("svg.fill-current")).toHaveLength(0);
   });
+
+  it("renders a half-filled star for a .5 score, without regressing whole-number scores", () => {
+    const wholeNumber = render(<ReviewStars score={4} />);
+    expect(wholeNumber.container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(0);
+    wholeNumber.unmount();
+
+    const halfPoint = render(<ReviewStars score={3.5} />);
+    expect(halfPoint.container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(1);
+  });
 });

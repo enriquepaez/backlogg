@@ -1,9 +1,10 @@
-import { CheckCircle2, Heart, ImageOff, Star } from "lucide-react";
+import { CheckCircle2, Heart, ImageOff } from "lucide-react";
 import Image from "next/image";
 import { getTranslations } from "next-intl/server";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { StarRating } from "@/components/star-rating";
 import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
 import { STATUS_COLOR_CLASSES } from "@/lib/library-types";
@@ -12,8 +13,6 @@ import { cn } from "@/lib/utils";
 import type { components } from "@backlogg/api-client";
 
 export type FeedEntry = components["schemas"]["FeedEntryOut"];
-
-const SCORES = [1, 2, 3, 4, 5] as const;
 
 /**
  * Maps the backend's uppercase `FeedItemOut.item_type` to the route-segment
@@ -117,7 +116,11 @@ function FeedEntryCard({
             ) : (
               <p className="text-sm font-medium">{entry.item.title}</p>
             )}
-            {isCompleted ? <FeedEntryCompletedBadge t={t} /> : <FeedEntryStars score={entry.score} />}
+            {isCompleted ? (
+              <FeedEntryCompletedBadge t={t} />
+            ) : entry.score !== null ? (
+              <StarRating score={entry.score} />
+            ) : null}
           </div>
         </div>
 
@@ -171,8 +174,8 @@ function FeedEntryAuthor({ author }: { author: FeedEntry["author"] }) {
 }
 
 /**
- * Status pill shown on a `status_completed` entry in place of
- * `FeedEntryStars` (there is no score for this event type) — same
+ * Status pill shown on a `status_completed` entry in place of the shared
+ * `StarRating` (there is no score for this event type) — same
  * `STATUS_COLOR_CLASSES.completed` color and pill shape `CatalogCard` uses
  * for the viewer's own library-status badge (FE-37), for visual consistency
  * between "you marked this completed" (library) and "someone you follow
@@ -195,25 +198,5 @@ function FeedEntryCompletedBadge({ t }: { t: FeedEntryTranslator }) {
       <CheckCircle2 aria-hidden className="size-3.5" />
       {t("completedBadge")}
     </span>
-  );
-}
-
-function FeedEntryStars({ score }: { score: number | null }) {
-  if (score === null) {
-    return null;
-  }
-
-  return (
-    <div className="flex items-center gap-1">
-      {SCORES.map((value) => (
-        <Star
-          key={value}
-          aria-hidden
-          className={
-            value <= score ? "size-4 fill-current text-yellow-500" : "size-4 text-muted-foreground"
-          }
-        />
-      ))}
-    </div>
   );
 }

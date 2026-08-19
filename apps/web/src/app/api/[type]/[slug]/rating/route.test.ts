@@ -148,11 +148,38 @@ describe("PUT /api/{type}/{slug}/rating", () => {
     expect(apiFetchMock).not.toHaveBeenCalled();
   });
 
-  it.each([0, 6, 1.5, "5"])("returns 400 for an out-of-range/invalid score %p", async (score) => {
+  it.each([0, 6, 1.25, "5"])("returns 400 for an out-of-range/invalid score %p", async (score) => {
     const response = await PUT(putRequest({ score, review_text: null }), params("movie", "dune-2021"));
 
     expect(response.status).toBe(400);
     expect(apiFetchMock).not.toHaveBeenCalled();
+  });
+
+  // Bugfix (post-review, FE-44): half-point scores (steps of 0.5, e.g. 3.5)
+  // are valid per the backend schema (`ge=1, le=5, multiple_of=0.5`,
+  // `backlogg/ratings/schemas.py`) and must reach `putRating`, not be
+  // rejected by `isValidScore` as if they were non-integers.
+  it("accepts a half-point score (3.5) and forwards it to putRating", async () => {
+    const halfScoreRating = { ...aliceRating, score: 3.5 };
+    apiFetchMock.mockImplementationOnce(
+      async (call: (client: unknown, token: string | undefined) => unknown) => {
+        putRatingMock.mockResolvedValue({ data: halfScoreRating, response: backendResponse(200) });
+        return call({ name: "fake-client" }, "the-token");
+      },
+    );
+
+    const response = await PUT(putRequest({ score: 3.5, review_text: null }), params("movie", "dune-2021"));
+    const body = await response.json();
+
+    expect(putRatingMock).toHaveBeenCalledWith(
+      { name: "fake-client" },
+      { Authorization: "Bearer the-token" },
+      "movie",
+      "dune-2021",
+      { score: 3.5, review_text: null },
+    );
+    expect(response.status).toBe(200);
+    expect(body).toEqual(halfScoreRating);
   });
 
   it("returns the updated rating on a 200 from the backend", async () => {

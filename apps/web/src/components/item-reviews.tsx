@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Heart, Star } from "lucide-react";
+import { Heart } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { StarRating } from "@/components/star-rating";
 import type { CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
 
@@ -15,7 +16,6 @@ import type { components } from "@backlogg/api-client";
 type Rating = components["schemas"]["RatingOut"];
 type RatingAuthor = components["schemas"]["RatingAuthorOut"];
 
-const SCORES = [1, 2, 3, 4, 5] as const;
 /** Page size for the reviews listing — mirrors `DEFAULT_LIMIT` in the BFF route (`app/api/[type]/[slug]/ratings/route.ts`). */
 const PAGE_LIMIT = 10;
 
@@ -266,7 +266,7 @@ function ReviewCard({
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="flex flex-col gap-2">
             <ReviewAuthor user={review.user} />
-            <ReviewStars score={review.score} />
+            <StarRating score={review.score} />
           </div>
           <p className="text-xs text-muted-foreground">
             {t("dateLabel", { date: formatDate(review.created_at, locale) })}
@@ -340,23 +340,5 @@ function ReviewAuthor({ user }: { user: RatingAuthor }) {
       )}
       <span className="text-sm font-medium hover:underline">{name}</span>
     </Link>
-  );
-}
-
-function ReviewStars({ score }: { score: number | null }) {
-  return (
-    <div className="flex items-center gap-1">
-      {SCORES.map((value) => (
-        <Star
-          key={value}
-          aria-hidden
-          className={
-            score !== null && value <= score
-              ? "size-4 fill-current text-yellow-500"
-              : "size-4 text-muted-foreground"
-          }
-        />
-      ))}
-    </div>
   );
 }

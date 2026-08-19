@@ -631,7 +631,7 @@
       "errors": {
         "empty": "Elige una puntuación o escribe una reseña antes de guardar.",
         "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
-        "validation": "Introduce una puntuación entre 1 y 5.",
+        "validation": "Introduce una puntuación entre 1 y 5, en pasos de 0.5.",
         "save": "No se pudo guardar tu puntuación. Inténtalo de nuevo."
       }
     },

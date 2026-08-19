@@ -19,7 +19,14 @@ const MY_RATING_SCAN_LIMIT = 100;
 type PutPayload = { score?: unknown; review_text?: unknown };
 
 function isValidScore(value: unknown): value is number | null {
-  return value === null || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5);
+  return (
+    value === null ||
+    (typeof value === "number" &&
+      Number.isFinite(value) &&
+      value * 2 === Math.round(value * 2) &&
+      value >= 1 &&
+      value <= 5)
+  );
 }
 
 function isNullableString(value: unknown): value is string | null {
