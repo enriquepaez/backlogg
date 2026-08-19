@@ -60,6 +60,31 @@ describe("FeedEntryList", () => {
     expect(screen.queryByText("A stunning adaptation.")).not.toBeInTheDocument();
   });
 
+  it("renders a half-filled star for an entry with a .5 score", async () => {
+    const { container } = render(
+      await FeedEntryList({ entries: [{ ...duneEntry, score: 3.5 }], locale: "en" }),
+    );
+
+    expect(container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(1);
+  });
+
+  it("renders no half-star marker for a whole-number score (no regression)", async () => {
+    const { container } = render(await FeedEntryList({ entries: [duneEntry], locale: "en" }));
+
+    expect(container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(0);
+  });
+
+  it("renders no stars at all for a text-only review (null score)", async () => {
+    const { container } = render(
+      await FeedEntryList({ entries: [{ ...duneEntry, score: null }], locale: "en" }),
+    );
+
+    // lucide-react tags each icon's <svg> with a `lucide-<name>` class
+    // (e.g. `lucide-star`/`lucide-heart`) — scope the assertion to stars so
+    // the entry's own (unrelated) Heart like-count icon doesn't count.
+    expect(container.querySelectorAll("svg.lucide-star")).toHaveLength(0);
+  });
+
   it("renders one card per entry", async () => {
     const carolEntry = {
       ...duneEntry,

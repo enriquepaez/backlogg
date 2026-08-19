@@ -848,7 +848,7 @@
         "Ratings enteros ya existentes se siguen mostrando igual (sin regresión visual)",
         "i18n; typecheck+lint+build en verde; QA en navegador: seleccionar 3.5, guardar, recargar y verificar que persiste"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

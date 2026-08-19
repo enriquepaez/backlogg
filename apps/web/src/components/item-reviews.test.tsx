@@ -93,6 +93,15 @@ describe("ItemReviews", () => {
     expect(screen.getByText('likeCount:{"count":2}')).toBeInTheDocument();
   });
 
+  it("renders a half-filled star for a review with a .5 score", async () => {
+    server.use(reviewsHandler([{ ...bob, score: 3.5 }]));
+
+    const { container } = renderReviews();
+
+    await screen.findByText("Bob");
+    expect(container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(1);
+  });
+
   it("falls back to username and initials when display_name/avatar are missing", async () => {
     server.use(reviewsHandler([alice]));
 

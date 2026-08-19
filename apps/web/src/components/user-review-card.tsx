@@ -1,12 +1,9 @@
-import { Star } from "lucide-react";
-
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { StarRating } from "@/components/star-rating";
 import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
 import type { UserReview } from "@/lib/user-content";
-
-const SCORES = [1, 2, 3, 4, 5] as const;
 
 /**
  * Maps the backend's uppercase `UserReviewItemOut.item_type` to the
@@ -35,10 +32,11 @@ function reviewItemType(itemType: string): CatalogType | undefined {
  * detail page (its own `Admin.userDetail.reviews.dateLabel`) can reuse this
  * component without either owning the other's translation namespace.
  *
- * `item-reviews.tsx` has its own, unrelated `ReviewStars` (same visual, tied
- * to that file's own review shape) — not merged with this one, same
- * rationale this component's own extraction doc comment already gives for
- * not duplicating a THIRD copy instead of sharing this one.
+ * `ReviewStars` here is now a thin, exported (and directly tested) wrapper
+ * around the shared `StarRating` (`@/components/star-rating`, added by
+ * FE-44 for half-star granularity) — kept as its own named export rather than
+ * inlined at the one call site below purely so `user-review-card.test.tsx`'s
+ * existing direct import of it keeps working unchanged.
  */
 export type UserReviewCardProps = {
   review: UserReview;
@@ -62,7 +60,7 @@ export function UserReviewCard({ review, locale, dateLabel }: UserReviewCardProp
             ) : (
               <p className="text-sm font-medium">{review.item.title}</p>
             )}
-            <ReviewStars score={review.score} />
+            <StarRating score={review.score} />
           </div>
           <p className="text-xs text-muted-foreground">{dateLabel(formatDate(review.created_at, locale))}</p>
         </div>
@@ -78,19 +76,5 @@ export function UserReviewCard({ review, locale, dateLabel }: UserReviewCardProp
 }
 
 export function ReviewStars({ score }: { score: number | null }) {
-  return (
-    <div className="flex items-center gap-1">
-      {SCORES.map((value) => (
-        <Star
-          key={value}
-          aria-hidden
-          className={
-            score !== null && value <= score
-              ? "size-4 fill-current text-yellow-500"
-              : "size-4 text-muted-foreground"
-          }
-        />
-      ))}
-    </div>
-  );
+  return <StarRating score={score} />;
 }

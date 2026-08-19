@@ -631,7 +631,7 @@
       "errors": {
         "empty": "Pick a score or write a review before saving.",
         "unauthorized": "Your session has expired. Please log in again.",
-        "validation": "Enter a score between 1 and 5.",
+        "validation": "Enter a score between 1 and 5, in steps of 0.5.",
         "save": "Couldn't save your rating. Please try again."
       }
     },

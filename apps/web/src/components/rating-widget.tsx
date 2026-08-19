@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Star } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { StarIcon, StarRating } from "@/components/star-rating";
 import { Textarea } from "@/components/ui/textarea";
 import { ReportReviewButton } from "@/components/report-review-button";
 import { Link } from "@/i18n/navigation";
@@ -20,7 +20,8 @@ import type { components } from "@backlogg/api-client";
 type Rating = components["schemas"]["RatingOut"];
 type RatingAuthor = components["schemas"]["RatingAuthorOut"];
 
-const SCORES = [1, 2, 3, 4, 5] as const;
+/** The 5 star positions of the picker — each one splits into two half-point values (`position - 0.5`/`position`), see `StarPicker`. */
+const STAR_POSITIONS = [1, 2, 3, 4, 5] as const;
 const REVIEW_MAX_LENGTH = 10000;
 
 type Phase = "loading" | "anonymous" | "load-error" | "form" | "summary";
@@ -73,6 +74,22 @@ export function RatingWidget({
   });
 
   const [score, setScore] = useState<number | null>(null);
+  /**
+   * Live hover/focus preview for the score picker (post-launch QA fix,
+   * FE-44): the half-point value currently under the pointer (or keyboard
+   * focus), or `null` when the pointer/focus isn't over any star. `null`
+   * falls back to the actually-selected {@link score} — see `displayScore`
+   * below, computed once and threaded through every `StarPicker` so all
+   * five stars preview the same hypothetical selection in sync (hovering
+   * the 4th star's right half fills stars 1-4 solid, not just the one under
+   * the cursor). Mirrors Letterboxd/Backloggd's picker convention per
+   * explicit QA feedback: without this, a picker whose two half-width click
+   * targets are each only a few pixels wide gives the user no visual
+   * feedback about where the left/right split actually falls until *after*
+   * they've already committed a click — see `StarPicker`'s doc comment for
+   * the matching hit-target-size half of this same fix.
+   */
+  const [hoverScore, setHoverScore] = useState<number | null>(null);
   const [reviewText, setReviewText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -111,6 +128,7 @@ export function RatingWidget({
 
   function openForm() {
     setScore(rating?.score ?? null);
+    setHoverScore(null);
     setReviewText(rating?.review_text ?? "");
     setFormError(null);
     setPhase("form");
@@ -122,7 +140,8 @@ export function RatingWidget({
     setPhase("summary");
   }
 
-  function toggleScore(value: number) {
+  /** Selects `value` (a half-point step, e.g. `3` or `3.5`) or clears the score if it's already selected — same toggle-off behavior the single-button-per-star picker had before FE-44 split each star into two half-width click targets. */
+  function selectScore(value: number) {
     setScore((current) => (current === value ? null : value));
   }
 
@@ -229,7 +248,7 @@ export function RatingWidget({
               <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                 <div className="flex flex-col gap-2">
                   <RaterIdentity user={rating.user} />
-                  <StarRow score={rating.score} />
+                  <StarRating score={rating.score} starClassName="size-5" />
                 </div>
                 <div className="text-xs text-muted-foreground">
                   <p>{t("createdOnLabel", { date: formatDate(rating.created_at, locale) })}</p>
@@ -262,25 +281,31 @@ export function RatingWidget({
           </Card>
         ) : (
           <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-            <div role="group" aria-label={t("scoreLabel")} className="flex items-center gap-1">
-              {SCORES.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={score === value}
-                  aria-label={t("starAriaLabel", { value })}
-                  onClick={() => toggleScore(value)}
-                  className="rounded p-0.5 focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  <Star
-                    aria-hidden
-                    className={
-                      score !== null && value <= score
-                        ? "size-6 fill-current text-yellow-500"
-                        : "size-6 text-muted-foreground"
-                    }
-                  />
-                </button>
+            <div
+              role="group"
+              aria-label={t("scoreLabel")}
+              className="flex items-center gap-1.5"
+              onMouseLeave={() => setHoverScore(null)}
+              onBlur={(event) => {
+                // Only clear once focus leaves the whole group (not when it
+                // just moves from one star's button to the next one inside
+                // it) — `relatedTarget` is the element about to receive
+                // focus.
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setHoverScore(null);
+                }
+              }}
+            >
+              {STAR_POSITIONS.map((position) => (
+                <StarPicker
+                  key={position}
+                  position={position}
+                  score={score}
+                  displayScore={hoverScore ?? score}
+                  onSelect={selectScore}
+                  onHover={setHoverScore}
+                  ariaLabel={(value) => t("starAriaLabel", { value })}
+                />
               ))}
             </div>
 
@@ -365,21 +390,103 @@ function raterInitials(user: Pick<RatingAuthor, "username" | "display_name">): s
   return source.slice(0, 2).toUpperCase();
 }
 
-function StarRow({ score }: { score: number | null }) {
+/**
+ * One star position (1-5) of the score picker, split into two half-width,
+ * independently focusable/clickable buttons — left selects `position - 0.5`,
+ * right selects `position` (FE-44: half-star granularity, mirroring the
+ * backend's `user_ratings.score` step of 0.5). Visually renders a single
+ * `StarIcon` (the same fill/half/empty logic `StarRating` uses for read-only
+ * display, so the picker and the saved-rating summary right above it always
+ * agree on what "3.5" looks like) underneath two transparent buttons.
+ *
+ * Each half is its own real `<button>` — same "one focusable, clickable
+ * element per selectable value" shape the previous one-button-per-star
+ * picker had, just twice as many of them, so keyboard users can still Tab
+ * through and Enter/Space-select every value (1.5, 2, 2.5, ..., 5) without
+ * any extra arrow-key handling. The first star (`position === 1`) is the one
+ * exception: `position - 0.5` would be `0.5`, below the backend's minimum
+ * (`ge=1`, `docs/schema.md`), so its left half is not rendered at all —
+ * both halves of the first star select the full value `1`.
+ *
+ * Post-launch QA fix: two changes on top of the above, neither touched by
+ * `starFillAt`/the click-handling logic itself (that part was already
+ * pixel-correct — reproduced live against `next dev` in a real Chromium tab
+ * via a throwaway Playwright harness rather than trusting jsdom again, given
+ * this exact feature already had one bug hidden by a mock once; a 1px sweep
+ * across a star's width showed the left/right hit-test boundary lands
+ * exactly at the midpoint every time). What real mouse users actually
+ * struggle with is aiming at that boundary at all:
+ *
+ * 1. `size-6` (24px) stars gave each half only a 12px-wide target — under
+ *    WCAG 2.5.5's 24px pointer-target guidance even for the *whole* star,
+ *    let alone one half of it. Bumped the picker's own stars (only the
+ *    interactive picker — `StarRating`'s read-only display elsewhere is
+ *    unaffected, no visual regression there) to `size-9` (36px), giving each
+ *    half an 18px target.
+ * 2. There was no visual feedback at all about where that boundary sits
+ *    before committing a click — a real user has no way to self-correct an
+ *    almost-right aim. `displayScore` (hover/hover-preview score, computed
+ *    in `RatingWidget` from `hoverScore ?? score` and threaded down here)
+ *    now drives the rendered `StarIcon` fill independently of the actually
+ *    *selected* `score` (still the only thing `aria-pressed` reflects), so
+ *    every star lights up live as the pointer (or keyboard focus) moves
+ *    across the two buttons, the same live-preview convention
+ *    Letterboxd/Backloggd use.
+ */
+function StarPicker({
+  position,
+  score,
+  displayScore,
+  onSelect,
+  onHover,
+  ariaLabel,
+}: {
+  position: number;
+  /** The actually-selected score — drives `aria-pressed` only. */
+  score: number | null;
+  /** `hoverScore ?? score` — drives the rendered `StarIcon` fill. */
+  displayScore: number | null;
+  onSelect: (value: number) => void;
+  /** Called on hover/focus of either half with that half's value; `RatingWidget` resets it to `null` when the pointer/focus leaves the whole group. */
+  onHover: (value: number) => void;
+  ariaLabel: (value: number) => string;
+}) {
+  const halfValue = position - 0.5;
+  const fullValue = position;
+  const hasHalf = halfValue >= 1;
+
   return (
-    <div className="flex items-center gap-1">
-      {SCORES.map((value) => (
-        <Star
-          key={value}
-          aria-hidden
-          className={
-            score !== null && value <= score
-              ? "size-5 fill-current text-yellow-500"
-              : "size-5 text-muted-foreground"
-          }
+    <span className="relative inline-block size-9">
+      <StarIcon
+        position={position}
+        score={displayScore}
+        className="pointer-events-none absolute inset-0 size-9"
+      />
+      {hasHalf && (
+        <button
+          type="button"
+          aria-pressed={score === halfValue}
+          aria-label={ariaLabel(halfValue)}
+          onClick={() => onSelect(halfValue)}
+          onMouseEnter={() => onHover(halfValue)}
+          onFocus={() => onHover(halfValue)}
+          className="absolute inset-y-0 left-0 w-1/2 rounded-l focus-visible:outline-2 focus-visible:outline-ring"
         />
-      ))}
-    </div>
+      )}
+      <button
+        type="button"
+        aria-pressed={score === fullValue}
+        aria-label={ariaLabel(fullValue)}
+        onClick={() => onSelect(fullValue)}
+        onMouseEnter={() => onHover(fullValue)}
+        onFocus={() => onHover(fullValue)}
+        className={
+          hasHalf
+            ? "absolute inset-y-0 right-0 w-1/2 rounded-r focus-visible:outline-2 focus-visible:outline-ring"
+            : "absolute inset-0 rounded focus-visible:outline-2 focus-visible:outline-ring"
+        }
+      />
+    </span>
   );
 }
 
