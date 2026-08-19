@@ -1160,7 +1160,7 @@
         "docs/operations.md actualizado si se añade un bucket de env var nuevo",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 57,

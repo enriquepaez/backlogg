@@ -52,8 +52,12 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
 @auth_router.post(
     "/refresh",
     response_model=TokenPairOut,
+    dependencies=[Depends(rate_limit_auth)],
     summary="Refresh tokens",
-    description="Rotate the refresh token and issue a fresh pair. Reuse revokes all sessions.",
+    description=(
+        "Rotate the refresh token and issue a fresh pair. Reuse revokes all "
+        "sessions. Rate-limited per IP."
+    ),
 )
 async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     return await service.refresh_tokens(db, payload)
@@ -80,8 +84,12 @@ async def logout(
     "/verify/request",
     response_model=MessageOut,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_auth)],
     summary="Request email verification",
-    description="Send an email-verification link to the caller (logged in dev). Requires auth.",
+    description=(
+        "Send an email-verification link to the caller (logged in dev). "
+        "Requires auth. Rate-limited per IP."
+    ),
 )
 async def request_email_verification(
     current_user: User = Depends(get_current_user),
@@ -94,8 +102,12 @@ async def request_email_verification(
 @auth_router.post(
     "/verify/confirm",
     response_model=MessageOut,
+    dependencies=[Depends(rate_limit_auth)],
     summary="Confirm email verification",
-    description="Consume a single-use verification token; marks the email verified. Requires auth.",
+    description=(
+        "Consume a single-use verification token; marks the email verified. "
+        "Requires auth. Rate-limited per IP."
+    ),
 )
 async def confirm_email_verification(
     payload: VerifyConfirmRequest, db: AsyncSession = Depends(get_db)
@@ -110,8 +122,11 @@ async def confirm_email_verification(
     "/password/forgot",
     response_model=MessageOut,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_auth)],
     summary="Request password reset",
-    description="Send a reset link if the email exists. Identical response either way.",
+    description=(
+        "Send a reset link if the email exists. Identical response either way. Rate-limited per IP."
+    ),
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
@@ -124,8 +139,12 @@ async def forgot_password(
 @auth_router.post(
     "/password/reset",
     response_model=MessageOut,
+    dependencies=[Depends(rate_limit_auth)],
     summary="Reset password",
-    description="Consume a single-use reset token; changes password and revokes all sessions.",
+    description=(
+        "Consume a single-use reset token; changes password and revokes all "
+        "sessions. Rate-limited per IP."
+    ),
 )
 async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     return await service.reset_password(db, payload)
