@@ -849,6 +849,113 @@
         "i18n; typecheck+lint+build en verde; QA en navegador: seleccionar 3.5, guardar, recargar y verificar que persiste"
       ],
       "status": "done"
+    },
+    {
+      "id": 44,
+      "code": "FE-45",
+      "milestone": "M3",
+      "name": "profile_seo_metadata",
+      "title": "generateMetadata en perfiles públicos — título/descripción/OG por usuario",
+      "description": "Motivado por el audit2 de producción (2026-08-19): /u/[username] y /u/[username]/library no exportan generateMetadata (a diferencia de [type]/[slug]/page.tsx, que sí). El perfil público es la superficie más 'shareable' del producto; hoy un link a un perfil compartido en redes muestra el título/descripción genéricos del layout raíz, sin Open Graph propio.",
+      "depends_on": [
+        35
+      ],
+      "acceptance": [
+        "/u/[username]/page.tsx exporta generateMetadata con título 'display_name — Backlogg' (o username si no hay display_name) y descripción",
+        "/u/[username]/library/page.tsx exporta generateMetadata equivalente",
+        "Open Graph image usa el avatar del usuario si existe, con fallback genérico si no",
+        "i18n; typecheck+lint+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 45,
+      "code": "FE-46",
+      "milestone": "M3",
+      "name": "sitemap_robots",
+      "title": "sitemap.ts y robots.ts para el catálogo público",
+      "description": "Motivado por el audit2 de producción (2026-08-19): no existe src/app/sitemap.ts ni robots.ts. docs/frontend-plan.md documenta explícitamente que el catálogo público (movie/series/book/game + perfiles de usuario) usa SSR con ISR pensado para SEO, pero sin sitemap el descubrimiento por crawler depende solo de enlaces internos.",
+      "depends_on": [
+        35
+      ],
+      "acceptance": [
+        "src/app/sitemap.ts genera entradas para las rutas de catálogo público (movie/series/book/game), paginadas desde la API",
+        "src/app/robots.ts permite crawl del catálogo público y referencia el sitemap",
+        "Rutas privadas/autenticadas (settings, admin) excluidas del sitemap",
+        "typecheck+lint+build en verde; verificación manual de /sitemap.xml y /robots.txt en dev"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 46,
+      "code": "FE-47",
+      "milestone": "M3",
+      "name": "rating_accessibility_labels",
+      "title": "Estrellas de solo-lectura accesibles para lectores de pantalla",
+      "description": "Motivado por el audit2 de producción (2026-08-19): StarRating (star-rating.tsx) no tiene aria-label/role en el contenedor y cada estrella es aria-hidden. Los 4 sitios que muestran una puntuación guardada (resumen del rating widget, item-reviews, user-review-card, feed) no tienen ningún texto equivalente — un usuario de lector de pantalla no se entera de qué puntuación tiene una review en ningún sitio de la app.",
+      "depends_on": [
+        20
+      ],
+      "acceptance": [
+        "El contenedor de StarRating expone un aria-label con el valor numérico de la puntuación (o 'sin puntuación' cuando score es null)",
+        "Los 4 call sites existentes (rating widget resumen, item-reviews, user-review-card, feed) heredan el fix sin cambios propios (StarRating es el único renderer)",
+        "i18n de la nueva label; typecheck+lint+test en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 47,
+      "code": "FE-48",
+      "milestone": "M3",
+      "name": "personal_widgets_query_refactor",
+      "title": "Migrar los widgets personales a TanStack Query (rating, library status, activity log, notificaciones)",
+      "description": "Motivado por el audit2 de producción (2026-08-19): docs/frontend-plan.md documenta TanStack Query como el patrón obligatorio para superficies personales/sociales, y QueryProvider ya está montado en el layout raíz, pero rating-widget.tsx, viewer-status-slot.tsx, activity-log-widget.tsx y notification-bell.tsx reimplementan cada uno su propio useState+useEffect+fetch con las mismas 4-5 fases casi copiadas. Sin caché entre navegaciones ni invalidación cruzada (p.ej. cambiar el estado de biblioteca en el item detail no invalida library_counts ya renderizado en el perfil). No bloqueante para producción, pero es deuda que conviene resolver antes de que se sumen más widgets con este mismo patrón duplicado.",
+      "depends_on": [
+        20,
+        31,
+        40,
+        42
+      ],
+      "acceptance": [
+        "rating-widget.tsx, viewer-status-slot.tsx, activity-log-widget.tsx y notification-bell.tsx usan useQuery/useMutation de TanStack Query en vez de useState+useEffect+fetch manual",
+        "Invalidación cruzada: completar un item en el item detail invalida el library_counts del perfil (y viceversa según corresponda)",
+        "Mismos estados observables (loading/anonymous/load-error/ready) preservados, sin regresión de comportamiento",
+        "Tests existentes migrados y en verde; typecheck+lint+test en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 48,
+      "code": "FE-49",
+      "milestone": "M3",
+      "name": "avatar_next_image",
+      "title": "Migrar avatares a next/image (remotePatterns del host de avatares)",
+      "description": "Motivado por el audit2 de producción (2026-08-19): next.config.ts solo registra remotePatterns para los hosts de pósters de catálogo (TMDB/Open Library/IGDB); ningún host de avatar está configurado, así que los 4+ sitios que renderizan avatares (user-nav, feed, notification-bell, rating-widget) usan <img> plano sin optimizar. Deuda conocida y documentada inline en cada sitio; conviene resolverla de una vez.",
+      "depends_on": [
+        30
+      ],
+      "acceptance": [
+        "El host de storage de avatares (R2_PUBLIC_BASE_URL / equivalente) añadido a remotePatterns en next.config.ts",
+        "Los 4 sitios identificados (user-nav, feed-entry-list, notification-bell, rating-widget) migrados de <img> a next/image",
+        "typecheck+lint+build en verde; verificación visual de que los avatares siguen cargando en dev"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 49,
+      "code": "FE-50",
+      "milestone": "M3",
+      "name": "activity_log_delete_confirm",
+      "title": "Confirmación antes de borrar una entrada del activity log",
+      "description": "Motivado por el audit2 de producción (2026-08-19): ActivityLogWidget borra una entrada de log directamente al click, sin diálogo intermedio, a diferencia de delete-account-dialog.tsx que sí confirma una acción destructiva análoga. Impacto bajo (una entrada de log no es tan sensible como la cuenta), pero inconsistente con el patrón ya establecido.",
+      "depends_on": [
+        40
+      ],
+      "acceptance": [
+        "Borrar una entrada del activity log pide confirmación (mismo patrón de diálogo que delete-account-dialog.tsx, adaptado al contexto)",
+        "i18n; typecheck+lint+test en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
