@@ -1194,7 +1194,7 @@
         "No hay regresión en el flujo normal (usuario no baneado sigue autenticando igual)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 59,
