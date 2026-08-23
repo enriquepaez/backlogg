@@ -36,4 +36,20 @@ export const env = {
   get ADMIN_API_KEY(): string {
     return required("ADMIN_API_KEY");
   },
+
+  /**
+   * Public origin this app is served from, used only as `metadataBase`
+   * (`[locale]/layout.tsx`'s `generateMetadata`) so relative OG/Twitter image
+   * paths — e.g. the `/opengraph-image` fallback referenced by
+   * `u/[username]/page.tsx` (FE-45) — resolve to absolute URLs a social
+   * crawler can actually fetch. No `NEXT_PUBLIC_` prefix: `metadataBase`
+   * resolution happens exclusively inside `generateMetadata`, which is a
+   * server-only export that never ships to the client bundle (unlike, say,
+   * a value read from a Client Component). Not `required()` — unlike
+   * `API_INTERNAL_URL`/`ADMIN_API_KEY`, every environment has a sane
+   * default: the dev server's own origin (FE-1).
+   */
+  get SITE_URL(): string {
+    return process.env.SITE_URL || "http://localhost:3000";
+  },
 } as const;
