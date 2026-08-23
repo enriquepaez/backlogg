@@ -884,7 +884,7 @@
         "Rutas privadas/autenticadas (settings, admin) excluidas del sitemap",
         "typecheck+lint+build en verde; verificación manual de /sitemap.xml y /robots.txt en dev"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 46,
