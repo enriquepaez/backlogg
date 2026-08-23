@@ -1209,7 +1209,7 @@
         "Tests existentes de auth admin (401 sin key / key incorrecta, 200 con key correcta) siguen en verde",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 60,

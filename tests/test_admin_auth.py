@@ -7,8 +7,12 @@ Acceptance criteria validated here:
   AC4  GET /admin/stats protected with same logic
   AC5  ADMIN_API_KEY not set → 503
   AC6  Key value does not appear in error response bodies
+
+Feature 59 — admin_key_constant_time_compare:
+  AC7  verify_api_key uses hmac.compare_digest instead of != for the comparison
 """
 
+import hmac
 from unittest.mock import AsyncMock, patch
 
 import pytest_asyncio
@@ -126,3 +130,14 @@ async def test_stats_key_not_in_401_body(client_with_key):
     assert response.status_code == 401
     assert _VALID_KEY not in response.text
     assert _WRONG_KEY not in response.text
+
+
+# ── Constant-time comparison (feature 59) ──────────────────────────────────────
+
+
+async def test_verify_api_key_uses_hmac_compare_digest(client_with_key):
+    """AC7: verify_api_key delegates the header/key comparison to hmac.compare_digest."""
+    with patch("backlogg.admin.auth.hmac.compare_digest", wraps=hmac.compare_digest) as mock_cmp:
+        response = await client_with_key.get("/v1/admin/stats", headers={"X-API-Key": _VALID_KEY})
+    assert response.status_code == 200
+    mock_cmp.assert_called_once_with(_VALID_KEY, _VALID_KEY)

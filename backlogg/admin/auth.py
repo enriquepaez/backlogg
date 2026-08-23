@@ -9,6 +9,8 @@ Rules:
 - The key value is never included in log output or error response bodies.
 """
 
+import hmac
+
 from fastapi import Header, HTTPException
 
 from backlogg.core.config import settings
@@ -29,7 +31,7 @@ async def verify_api_key(x_api_key: str = Header(default="")) -> None:
             detail="Admin API key is not configured.",
         )
 
-    if not x_api_key or x_api_key != configured_key:
+    if not x_api_key or not hmac.compare_digest(x_api_key, configured_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing X-API-Key header.",
