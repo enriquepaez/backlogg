@@ -1,9 +1,10 @@
 import { act } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
+import { renderWithQuery } from "@/test/render-with-query";
 
 // Same rationale as `rating-widget.test.tsx` for mocking `@/i18n/navigation`
 // (the anonymous state's "log in" link) and `next-intl` (assertions match on
@@ -40,7 +41,7 @@ const entryOne = { id: 1, logged_on: "2026-01-01", rewatch: false, note: "First 
 const entryTwo = { id: 2, logged_on: "2026-02-01", rewatch: true, note: null };
 
 function renderWidget() {
-  return render(<ActivityLogWidget type="movie" slug="dune-2021" />);
+  return renderWithQuery(<ActivityLogWidget type="movie" slug="dune-2021" />);
 }
 
 beforeEach(() => {

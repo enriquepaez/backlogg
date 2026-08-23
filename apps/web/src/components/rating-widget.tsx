@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,12 +14,56 @@ import { ReportReviewButton } from "@/components/report-review-button";
 import { Link } from "@/i18n/navigation";
 import type { CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
+import { queryKeys } from "@/lib/queries/query-keys";
 import { recomputeAggregate, type RatingAggregate } from "@/lib/ratings-aggregate";
 
 import type { components } from "@backlogg/api-client";
 
 type Rating = components["schemas"]["RatingOut"];
 type RatingAuthor = components["schemas"]["RatingAuthorOut"];
+
+/** `GET /api/{type}/{slug}/rating`'s response shape. */
+type RatingGetResponse = { authenticated: boolean; rating: Rating | null };
+
+/** Outcome of the `PUT /api/{type}/{slug}/rating` mutation, branched on the response status the same way the original inline `fetch` handler did — kept as a plain return value (not a thrown error) for every *expected* HTTP outcome, so `handleSubmit` can map it to a {@link FormErrorKey} the same way it always did; only a genuine network failure (the `fetch` call itself rejecting) throws, caught by the mutation's caller. */
+type SaveRatingResult =
+  | { status: "saved"; rating: Rating }
+  | { status: "unauthorized" }
+  | { status: "validation" }
+  | { status: "failed" };
+
+type DeleteRatingResult = { status: "deleted" } | { status: "failed" };
+
+async function fetchViewerRating(type: CatalogType, slug: string): Promise<RatingGetResponse> {
+  const response = await fetch(`/api/${type}/${slug}/rating`);
+  if (!response.ok) {
+    throw new Error(`unexpected status ${response.status}`);
+  }
+  return (await response.json()) as RatingGetResponse;
+}
+
+async function saveRating(
+  type: CatalogType,
+  slug: string,
+  body: { score: number | null; review_text: string | null },
+): Promise<SaveRatingResult> {
+  const response = await fetch(`/api/${type}/${slug}/rating`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 200) {
+    return { status: "saved", rating: (await response.json()) as Rating };
+  }
+  if (response.status === 401) return { status: "unauthorized" };
+  if (response.status === 422) return { status: "validation" };
+  return { status: "failed" };
+}
+
+async function deleteRatingRequest(type: CatalogType, slug: string): Promise<DeleteRatingResult> {
+  const response = await fetch(`/api/${type}/${slug}/rating`, { method: "DELETE" });
+  return response.status === 204 ? { status: "deleted" } : { status: "failed" };
+}
 
 /** The 5 star positions of the picker — each one splits into two half-point values (`position - 0.5`/`position`), see `StarPicker`. */
 const STAR_POSITIONS = [1, 2, 3, 4, 5] as const;
@@ -43,18 +88,27 @@ export type RatingWidgetProps = {
  * (`ReportReviewButton`).
  *
  * A Client Component fetching its own initial state client-side (on mount,
- * via the BFF `GET`) rather than the page's Server Component passing it down
- * — the item detail page stays a public, ISR-cached Server Component
- * (`src/lib/catalog.ts`'s `ITEM_REVALIDATE_SECONDS`); reading the viewer's
- * session there would force `cookies()` into that render and make the whole
- * page dynamic per request. See `viewer-status-slot.tsx`'s doc comment for
- * the same tension around `viewer_status` (FE-20, still unresolved there).
+ * via the BFF `GET`, through TanStack Query's `useQuery` as of FE-48 — see
+ * that feature's `progress/impl_47.md` for why the whole "personal widgets"
+ * family moved off raw `useState`+`useEffect`+`fetch`) rather than the
+ * page's Server Component passing it down — the item detail page stays a
+ * public, ISR-cached Server Component (`src/lib/catalog.ts`'s
+ * `ITEM_REVALIDATE_SECONDS`); reading the viewer's session there would force
+ * `cookies()` into that render and make the whole page dynamic per request.
+ * See `viewer-status-slot.tsx`'s doc comment for the same tension around
+ * `viewer_status` (FE-20, still unresolved there).
  *
  * Renders a `"loading"` skeleton for the very first paint (including SSR/the
  * pre-hydration HTML) so this never blocks or alters the page's own
  * server-rendered output — only the client-side fetch after mount decides
  * between the anonymous prompt, the empty-state composer, or the viewer's
- * saved rating.
+ * saved rating. `phase`/`rating` are computed fresh on every render straight
+ * from `ratingQuery` (see that computation below) rather than mirrored into
+ * their own `useState` via an effect — the local `editing` flag is the only
+ * genuinely local piece: it's what lets `phase` land on `"form"` even while
+ * an already-loaded `rating` is non-null (`openForm`/`cancelForm` toggle it
+ * directly), a distinction that isn't a server data state at all, just a
+ * local UI mode no derivation from `ratingQuery` alone could represent.
  */
 export function RatingWidget({
   type,
@@ -65,9 +119,30 @@ export function RatingWidget({
   const t = useTranslations("ItemDetail.rating");
   const tErrors = useTranslations("ItemDetail.rating.errors");
   const locale = useLocale();
+  const queryClient = useQueryClient();
 
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [rating, setRating] = useState<Rating | null>(null);
+  const ratingQuery = useQuery({
+    queryKey: queryKeys.rating.detail(type, slug),
+    queryFn: () => fetchViewerRating(type, slug),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (body: { score: number | null; review_text: string | null }) =>
+      saveRating(type, slug, body),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteRatingRequest(type, slug),
+  });
+
+  /**
+   * Whether the composer is open — the only piece of "what should this
+   * widget show" that isn't derived from `ratingQuery` (see `phase`/`rating`
+   * below): editing an already-loaded rating is a local UI mode, not a
+   * server data state. Defaults to `false`; when there's no saved rating yet
+   * `phase` below falls back to `"form"` regardless, so this only matters
+   * once a rating exists.
+   */
+  const [editing, setEditing] = useState(false);
   const [aggregate, setAggregate] = useState<RatingAggregate>({
     ratingInternal: initialRatingInternal,
     ratingCountInternal: initialRatingCountInternal,
@@ -95,49 +170,49 @@ export function RatingWidget({
   const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<FormErrorKey>(null);
 
+  // `phase`/`rating` are derived straight from `ratingQuery` on every
+  // render — not synced into their own state via a `useEffect` (that
+  // pattern, tried in an earlier version of this migration, trips
+  // `react-hooks/set-state-in-effect`: a `useQuery` result is already
+  // reactive state, so mirroring it into a second `useState` is exactly the
+  // "you might not need an effect" case that lint rule flags). Mirrors the
+  // original inline `load()`'s three branches (still loading, failed, or
+  // resolved) — `editing` (declared above) is what supplies the fourth,
+  // non-data-driven distinction between `"form"` and `"summary"`.
+  let phase: Phase;
+  let rating: Rating | null = null;
+  if (ratingQuery.isPending) {
+    phase = "loading";
+  } else if (ratingQuery.isError) {
+    phase = "load-error";
+  } else if (!ratingQuery.data.authenticated) {
+    phase = "anonymous";
+  } else {
+    rating = ratingQuery.data.rating;
+    phase = editing || !rating ? "form" : "summary";
+  }
+
+  // Logging-only — no `setState` here, so this doesn't trip
+  // `react-hooks/set-state-in-effect` (`phase` above already derives the
+  // `"load-error"` UI state on its own, synchronously, every render).
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const response = await fetch(`/api/${type}/${slug}/rating`);
-        if (!response.ok) {
-          throw new Error(`unexpected status ${response.status}`);
-        }
-        const data = (await response.json()) as { authenticated: boolean; rating: Rating | null };
-        if (cancelled) return;
-
-        if (!data.authenticated) {
-          setPhase("anonymous");
-          return;
-        }
-        setRating(data.rating);
-        setPhase(data.rating ? "summary" : "form");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("RatingWidget: failed to load the viewer's own rating", error);
-        setPhase("load-error");
-      }
+    if (ratingQuery.isError) {
+      console.error("RatingWidget: failed to load the viewer's own rating", ratingQuery.error);
     }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [type, slug]);
+  }, [ratingQuery.isError, ratingQuery.error]);
 
   function openForm() {
     setScore(rating?.score ?? null);
     setHoverScore(null);
     setReviewText(rating?.review_text ?? "");
     setFormError(null);
-    setPhase("form");
+    setEditing(true);
   }
 
   function cancelForm() {
     if (!rating) return;
     setFormError(null);
-    setPhase("summary");
+    setEditing(false);
   }
 
   /** Selects `value` (a half-point step, e.g. `3` or `3.5`) or clears the score if it's already selected — same toggle-off behavior the single-button-per-star picker had before FE-44 split each star into two half-width click targets. */
@@ -157,12 +232,11 @@ export function RatingWidget({
     setFormError(null);
     setSubmitting(true);
 
-    let response: Response;
+    let result: SaveRatingResult;
     try {
-      response = await fetch(`/api/${type}/${slug}/rating`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score, review_text: trimmedReview.length ? trimmedReview : null }),
+      result = await saveMutation.mutateAsync({
+        score,
+        review_text: trimmedReview.length ? trimmedReview : null,
       });
     } catch {
       setFormError("save");
@@ -170,19 +244,26 @@ export function RatingWidget({
       return;
     }
 
-    if (response.status === 200) {
-      const saved = (await response.json()) as Rating;
+    if (result.status === "saved") {
+      const saved = result.rating;
       setAggregate((current) => recomputeAggregate(current, rating?.score ?? null, saved.score));
-      setRating(saved);
-      setPhase("summary");
+      setEditing(false);
       setSubmitting(false);
+      // Keeps the query cache in sync with the mutation's result so a later
+      // remount (e.g. navigating away and back within `staleTime`) shows the
+      // freshly-saved rating without an extra round trip, instead of
+      // re-fetching or briefly flashing the pre-save value.
+      queryClient.setQueryData(queryKeys.rating.detail(type, slug), {
+        authenticated: true,
+        rating: saved,
+      } satisfies RatingGetResponse);
       toast.success(t("saveSuccess"));
       return;
     }
 
-    if (response.status === 401) {
+    if (result.status === "unauthorized") {
       setFormError("unauthorized");
-    } else if (response.status === 422) {
+    } else if (result.status === "validation") {
       setFormError("validation");
     } else {
       setFormError("save");
@@ -194,22 +275,25 @@ export function RatingWidget({
     if (!rating) return;
     setDeleting(true);
 
-    let response: Response;
+    let result: DeleteRatingResult;
     try {
-      response = await fetch(`/api/${type}/${slug}/rating`, { method: "DELETE" });
+      result = await deleteMutation.mutateAsync();
     } catch {
       setDeleting(false);
       toast.error(t("deleteError"));
       return;
     }
 
-    if (response.status === 204) {
+    if (result.status === "deleted") {
       setAggregate((current) => recomputeAggregate(current, rating.score, null));
-      setRating(null);
       setScore(null);
       setReviewText("");
-      setPhase("form");
+      setEditing(false);
       setDeleting(false);
+      queryClient.setQueryData(queryKeys.rating.detail(type, slug), {
+        authenticated: true,
+        rating: null,
+      } satisfies RatingGetResponse);
       toast.success(t("deleteSuccess"));
       return;
     }

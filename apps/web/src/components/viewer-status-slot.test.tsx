@@ -1,9 +1,10 @@
 import { act } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
+import { renderWithQuery } from "@/test/render-with-query";
 import { LIBRARY_STATUSES, STATUS_COLOR_CLASSES_IMPORTANT } from "@/lib/library-types";
 
 // Same rationale as `rating-widget.test.tsx` for mocking `@/i18n/navigation`
@@ -33,7 +34,7 @@ vi.mock("sonner", () => ({
 const { ViewerStatusSlot } = await import("./viewer-status-slot");
 
 function renderSlot(status: string | null = null) {
-  return render(<ViewerStatusSlot status={status} type="movie" slug="dune-2021" />);
+  return renderWithQuery(<ViewerStatusSlot status={status} type="movie" slug="dune-2021" />);
 }
 
 async function statusGroup() {
