@@ -1224,7 +1224,7 @@
         "docs/schema.md actualizado con el índice nuevo",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

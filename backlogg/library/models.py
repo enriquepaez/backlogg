@@ -55,4 +55,5 @@ class LibraryEntry(Base):
         ),
         Index("idx_library_entries_item", "item_type", "item_id"),
         Index("idx_library_entries_user", "user_id"),
+        Index("idx_library_entries_user_status", "user_id", "status"),
     )
