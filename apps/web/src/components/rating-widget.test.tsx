@@ -177,8 +177,14 @@ describe("RatingWidget", () => {
     expect(await screen.findByText("Alice")).toBeInTheDocument();
     // alt="" (decorative, name shown as text right next to it) gives the
     // <img> a "presentation" role rather than "img", so it isn't reachable
-    // via `getByRole("img")` — query the element directly instead.
-    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.com/alice.png");
+    // via `getByRole("img")` — query the element directly instead. `next/
+    // image` (FE-49) rewrites `src` to `/_next/image?url=<encoded>&w=...&q=...`
+    // rather than passing the original URL through verbatim, so assert on the
+    // decoded `url` search param instead of the raw `src` attribute.
+    const img = container.querySelector("img");
+    expect(img).toBeInTheDocument();
+    const rewrittenSrc = new URL(img!.getAttribute("src")!, "http://localhost");
+    expect(rewrittenSrc.searchParams.get("url")).toBe("https://example.com/alice.png");
     expect(screen.queryByText("AL")).not.toBeInTheDocument();
   });
 

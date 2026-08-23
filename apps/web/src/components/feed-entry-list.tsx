@@ -155,11 +155,13 @@ function FeedEntryAuthor({ author }: { author: FeedEntry["author"] }) {
   return (
     <Link href={`/u/${author.username}`} className="flex w-fit items-center gap-2">
       {author.avatar_url ? (
-        // Avatar hosts aren't configured in next/image's remotePatterns yet
-        // (catalog-image scope, later features) — same rationale as
-        // `ReviewAuthor` in `item-reviews.tsx`.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={author.avatar_url} alt="" className="size-6 rounded-full object-cover" />
+        <Image
+          src={author.avatar_url}
+          alt=""
+          width={24}
+          height={24}
+          className="size-6 rounded-full object-cover"
+        />
       ) : (
         <span
           aria-hidden="true"
