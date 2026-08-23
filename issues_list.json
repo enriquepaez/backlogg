@@ -2,8 +2,15 @@
   "project": "backlogg",
   "description": "Backlog de bugs/issues detectados en QA manual (backend + frontend), fuera del flujo de backend_feature_list.json/frontend_feature_list.json. Fuente de verdad para bugs — no usar progress/issues.md, que queda obsoleto y no se actualiza más.",
   "rules": {
-    "valid_status": ["open", "resolved"],
-    "valid_severity": ["low", "medium", "high"],
+    "valid_status": [
+      "open",
+      "resolved"
+    ],
+    "valid_severity": [
+      "low",
+      "medium",
+      "high"
+    ],
     "one_issue_at_a_time": false,
     "require_verification_to_close": true
   },
@@ -163,6 +170,23 @@
       "solution": "1) `get_work_detail`: `follow_redirects=True` en el `httpx.AsyncClient`. El JSON de una edición no tiene el mismo shape que el de un work (confirmado contra las 4 respuestas reales): `authors` es una lista plana `[{\"key\": \"/authors/OL..A\"}]` en vez de `[{\"author\": {\"key\": ...}}]`, la fecha vive en `publish_date` en vez de `first_publish_date`, y no hay `description`. Se añadió `_normalize_edition_as_work` (detecta `type.key == \"/type/edition\"`) que reshapea `authors` al formato de work y copia `publish_date` a `first_publish_date` solo si esta última está ausente, así `_persist_book_authors` y `book_to_dict` (`backlogg/books/service.py`, `backlogg/books/adapters/open_library.py`) no necesitan cambios — ya toleraban `description` ausente sin lanzar. 2) `get_author`: mismo patrón de `AsyncClient` sin `follow_redirects` auditado y corregido por consistencia — no se encontró evidencia real de 301 en producción para `/authors/{id}.json` (spot-check contra 5 IDs reales en vivo, todos 200), pero es el mismo riesgo estructural y el fix es inocuo cuando no aplica. 3) `search_book` y `_fetch_popular_page`/`get_popular_books` auditados y dejados sin tocar, documentado en su docstring: pegan contra `/search.json` (endpoint de búsqueda, no lookup de un recurso por ID), así que no pueden recibir el 301 de \"tipo de recurso equivocado\" que sí afecta a `/works/{id}.json` y `/authors/{id}.json`.",
       "verification": "Test nuevo en `tests/books/test_open_library_adapter.py`: reproduce el 301 real con un mock que simula el follow transparente de httpx cuando `follow_redirects=True` (y confirma que el kwarg se pasa), verifica la normalización de `authors`/`first_publish_date` contra el payload real de OL para `OL8796283M`, confirma que una respuesta de work genuina pasa sin modificar, confirma 404→None, y confirma que el dict normalizado fluye por `_persist_book_authors` sin lanzar excepción (2 credits AUTHOR persistidos). `get_author` cubierto con el mismo patrón de captura de kwargs. `bash init.sh` en verde (708 tests).",
       "notes": "No se tocó el fix de Issue #7 (people_errors/retry TMDB), Issue #8 (URLs /v1) ni Issue #9 (tenacity en `_fetch_popular_page`) — los tres siguen mergeados y verificados en producción."
+    },
+    {
+      "id": 11,
+      "title": "ThemeProvider (next-themes) dispara warning de React 19: script tag renderizado por un componente",
+      "area": "frontend",
+      "severity": "low",
+      "status": "resolved",
+      "discovered": "2026-08-23",
+      "resolved": "2026-08-23",
+      "resolution_ref": "rama fix/theme_provider_script_tag_warning (investigación, sin merge — no hay cambio de código que shippear)",
+      "symptom": "En dev (Next.js 16.3.0, Turbopack), al cargar cualquier página bajo [locale]/layout.tsx aparece en la consola del navegador un Console Error de React: \"Encountered a script tag while rendering React component. Scripts inside React components are never executed when rendering on the client.\" Stack: at script, at ThemeProvider (src/components/theme-provider.tsx:10:10), at LocaleLayout (src/app/[locale]/layout.tsx:77:11). Reportado por el usuario navegando la app manualmente, sin relación con ninguna feature en curso.",
+      "cause": "Pendiente de investigar a fondo, pero identificado en la exploración inicial del leader: apps/web/src/components/theme-provider.tsx es un wrapper directo de next-themes (^0.4.6) sin lógica propia. next-themes@0.4.6 (node_modules/next-themes/dist/index.mjs) renderiza internamente un elemento <script> crudo vía dangerouslySetInnerHTML (componente interno memoizado \"_\", el ThemeScript que fija la clase de tema en <html> antes de la hidratación, para evitar flash de tema incorrecto). react/react-dom son 19.2.8 en este repo; el warning apunta a un cambio de comportamiento de React 19.2.x sobre <script> tags renderizados directamente en JSX (fuera de next/script) en Client Components. Falta confirmar si es: (a) un warning nuevo introducido por una versión reciente de React 19 que next-themes 0.4.6 aun no contempla, con fix ya disponible en una versión más nueva de next-themes o en curso upstream, o (b) algo resoluble desde este repo sin tocar la librería.",
+      "solution": [
+        "No se aplicó ningún cambio de código. Causa raíz confirmada: next-themes@0.4.6 renderiza un <script> crudo (dangerouslySetInnerHTML, mecanismo anti-flash de tema) que React 19.2.x marca con un console.error de DEV cuando ThemeProvider se remonta puramente en cliente (p. ej. LanguageSwitcher haciendo router.replace del segmento raíz [locale]). Es un issue upstream conocido y sin fix publicado: pacocoursey/next-themes#397, con PR #386 abierto y sin mergear (return null del ThemeScript en cliente). La 1.0.0-beta.0 tampoco lo corrige (inspeccionado el bundle). Se descartó silenciar el warning interceptando console.error por ser un hack frágil (se rompe si upstream cambia el texto del mensaje, arriesga esconder otros warnings legítimos) para resolver algo puramente cosmético sin impacto funcional."
+      ],
+      "verification": "Confirmado con Playwright que el warning es exclusivo de pnpm dev (aparece tras cargar /es y cambiar de idioma con el LanguageSwitcher) y NO aparece en pnpm build + next start con el mismo flujo exacto — React elimina estos console.error de DEV del bundle de producción. Confirmado que el theme toggle (claro/oscuro) y el script anti-flash siguen funcionando con normalidad (sin código nuevo): localStorage se actualiza, la clase dark/light se aplica antes de hidratar en un reload. typecheck/lint/test (1057 tests)/build en verde, sin cambios en el árbol de trabajo.",
+      "notes": "No relacionado con FE-49 (avatar_next_image, rama feat/avatar_next_image) ni con ninguna otra feature en curso — theme-provider.tsx no forma parte de ningún diff activo. Investigar y resolver en su propia rama fix/theme_provider_script_tag_warning (worktree separado), sin mezclar con trabajo de features en curso. Revisitar cuando next-themes publique un release con el fix de PR #386 (bump de versión sería la solución correcta entonces, sin código propio que desmantelar)."
     }
   ]
 }
