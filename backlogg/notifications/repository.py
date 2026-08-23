@@ -23,9 +23,10 @@ round-trip regardless of which target flavor or item type is involved.
 
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, insert, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.follows.models import Follow
 from backlogg.notifications.models import Notification
 from backlogg.ratings.models import UserRating
 from backlogg.ratings.repository import ITEM_MODELS
@@ -52,6 +53,33 @@ async def create_notification(
     db.add(notification)
     await db.flush()
     return notification
+
+
+async def create_user_completed_notifications_for_followers(
+    db: AsyncSession, *, actor_id: int, item_type: str, item_id: int
+) -> int:
+    """Fan out a ``user_completed`` notification to every direct follower of ``actor_id``.
+
+    Single ``INSERT ... SELECT`` — recipients are read straight from
+    ``follows`` inside the statement, so this is one round-trip regardless of
+    follower count (feature 57), instead of one INSERT per follower. Returns
+    the number of rows inserted.
+    """
+    select_recipients = select(
+        Follow.follower_id.label("recipient_id"),
+        literal(actor_id).label("actor_id"),
+        literal("user_completed").label("type"),
+        literal(item_type).label("target_type"),
+        literal(item_id).label("target_id"),
+    ).where(Follow.followed_id == actor_id)
+
+    stmt = insert(Notification).from_select(
+        ["recipient_id", "actor_id", "type", "target_type", "target_id"],
+        select_recipients,
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount
 
 
 async def list_notifications(

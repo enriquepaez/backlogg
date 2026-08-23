@@ -6,11 +6,13 @@ Runs against the real Postgres test DB (no mocks) per docs/conventions.md.
 from datetime import UTC, datetime
 
 from backlogg.books.repository import upsert_book
+from backlogg.follows.repository import create_follow_if_not_exists
 from backlogg.games.repository import upsert_game
 from backlogg.movies.repository import upsert_movie
 from backlogg.notifications.repository import (
     count_unread,
     create_notification,
+    create_user_completed_notifications_for_followers,
     delete_notification,
     list_notifications,
     mark_read,
@@ -159,6 +161,42 @@ async def test_create_notification_review_like_with_target(db):
     assert n.type == "review_like"
     assert n.target_type == "review"
     assert n.target_id == 999
+
+
+# ── create_user_completed_notifications_for_followers (feature 57) ──────
+
+
+async def test_create_user_completed_notifications_for_followers_batches_insert(db):
+    actor = await _make_user(db, "notif-repo-fanout-actor-1")
+    followers = [await _make_user(db, f"notif-repo-fanout-follower-1-{i}") for i in range(5)]
+    non_follower = await _make_user(db, "notif-repo-fanout-stranger-1")
+    for follower_id in followers:
+        await create_follow_if_not_exists(db, follower_id=follower_id, followed_id=actor)
+    movie = await upsert_movie(db, _movie_data("notif-repo-fanout-movie-1"))
+
+    inserted = await create_user_completed_notifications_for_followers(
+        db, actor_id=actor, item_type="MOVIE", item_id=movie.id
+    )
+
+    assert inserted == len(followers)
+    for follower_id in followers:
+        assert await count_unread(db, follower_id) == 1
+        rows, _ = await list_notifications(db, follower_id, page=1, limit=20)
+        assert rows[0].type == "user_completed"
+        assert rows[0].target_type == "MOVIE"
+        assert rows[0].target_id == movie.id
+    assert await count_unread(db, non_follower) == 0
+
+
+async def test_create_user_completed_notifications_for_followers_no_followers(db):
+    actor = await _make_user(db, "notif-repo-fanout-actor-2")
+    movie = await upsert_movie(db, _movie_data("notif-repo-fanout-movie-2"))
+
+    inserted = await create_user_completed_notifications_for_followers(
+        db, actor_id=actor, item_type="MOVIE", item_id=movie.id
+    )
+
+    assert inserted == 0
 
 
 # ── list_notifications ───────────────────────────────────────────────────
