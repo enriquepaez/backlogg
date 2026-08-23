@@ -112,6 +112,40 @@ async def test_get_current_user_unknown_user_raises_401(db):
     assert exc_info.value.status_code == 401
 
 
+async def test_get_current_user_banned_user_raises_401(db):
+    """A ban must revoke access immediately, even for a token issued before it.
+
+    The token here is minted before the ban and never re-issued — it is still
+    cryptographically valid — yet the very next resolve must reject it.
+    """
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from backlogg.users.repository import get_user_by_username, set_user_banned
+
+    user = await service.register_user(
+        db,
+        UserCreate(
+            username="jwt-user-banned",
+            email="jwt-user-banned@example.com",
+            password="s3cret-password",
+        ),
+    )
+    persisted = await get_user_by_username(db, user.username)
+    token = create_access_token(persisted.id)
+
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    # Sanity check: the token resolves fine before the ban.
+    resolved = await get_current_user(credentials=credentials, db=db)
+    assert resolved.id == persisted.id
+
+    await set_user_banned(db, persisted, True)
+    await db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(credentials=credentials, db=db)
+    assert exc_info.value.status_code == 401
+
+
 # ── register_user / login_user ────────────────────────────────────────────────
 
 

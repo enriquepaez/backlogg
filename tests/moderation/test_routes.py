@@ -241,6 +241,24 @@ async def test_banned_user_cannot_refresh(client, db):
     assert refresh.status_code == 401
 
 
+async def test_banned_user_access_token_revoked_immediately(client, db):
+    """A ban must revoke an already-issued access token immediately (feature 58).
+
+    Without this, a banned user keeps write access until the JWT expires
+    (up to JWT_EXPIRE_MINUTES) since access tokens aren't looked up in the DB.
+    """
+    token = await _register_and_login(client, "mod-ban-immediate-user")
+
+    # The token works before the ban.
+    before = await client.get("/v1/users/me", headers=_auth(token))
+    assert before.status_code == 200
+
+    await client.post("/v1/admin/users/mod-ban-immediate-user/ban", headers=_admin())
+
+    after = await client.get("/v1/users/me", headers=_auth(token))
+    assert after.status_code == 401
+
+
 async def test_unban_restores_login(client, db):
     await _register_and_login(client, "mod-unban-login-user")
     await client.post("/v1/admin/users/mod-unban-login-user/ban", headers=_admin())

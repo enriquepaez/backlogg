@@ -9,6 +9,8 @@ Rules:
 - Token malformed/invalid signature → 401
 - Token expired → 401
 - Token valid but the user no longer exists → 401
+- Token valid but the user is banned → 401 (immediate revocation: a ban must
+  not wait for an already-issued access token to expire)
 """
 
 import hashlib
@@ -78,7 +80,8 @@ async def get_current_user(
 
     Raises:
         HTTPException 401: Authorization header is missing, the token is
-            invalid/expired, or it no longer maps to an existing user.
+            invalid/expired, it no longer maps to an existing user, or the
+            user is banned.
     """
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -102,6 +105,12 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid or expired token") from None
 
     if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # A ban must take effect immediately, even for an access token issued
+    # before the ban — never wait for it to expire. `user` is already loaded
+    # above, so this is just an attribute check, no extra query.
+    if user.is_banned:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return user
