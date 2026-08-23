@@ -721,12 +721,18 @@ CREATE TABLE library_entries (
 
 CREATE INDEX idx_library_entries_item ON library_entries (item_type, item_id);
 CREATE INDEX idx_library_entries_user ON library_entries (user_id);
+CREATE INDEX idx_library_entries_user_status ON library_entries (user_id, status);
 ```
 
 `updated_at` is refreshed by the shared `trigger_set_updated_at()` trigger
 (defined in migration 0001). The public profile (`GET /users/{username}`)
 derives `library_counts` (`COUNT` grouped by `status`, zero-filled) from this
 table, and `GET /{type}/{slug}` derives the caller's `viewer_status` from it.
+`idx_library_entries_user_status` (migration 0027) covers the hottest read
+path, `GET /users/{username}/library?status=...`, which filters by `user_id`
+and then `status` within each branch of the repository's `UNION ALL` —
+flagged by production audit2 (2026-08-19) as uncovered by the existing
+single-column indexes.
 
 ### `library_logs`
 
