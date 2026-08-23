@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { Link } from "@/i18n/navigation";
 import type { MyLogEntry } from "@/lib/activity-log";
 import type { CatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
+import { queryKeys } from "@/lib/queries/query-keys";
 
 const NOTE_MAX_LENGTH = 10000;
 
@@ -23,6 +25,49 @@ export type ActivityLogWidgetProps = {
   type: CatalogType;
   slug: string;
 };
+
+/** `GET /api/{type}/{slug}/log`'s response shape — only `mine` is read here (see this file's own doc comment). */
+type LogGetResponse = { authenticated: boolean; mine: MyLogEntry[] };
+
+/** Outcome of `POST /api/{type}/{slug}/log`, branched on response status the same way `RatingWidget`'s `SaveRatingResult` is — see that type's doc comment. */
+type CreateLogResult =
+  | { status: "created"; entry: MyLogEntry }
+  | { status: "unauthorized" }
+  | { status: "validation" }
+  | { status: "failed" };
+
+type DeleteLogResult = { status: "deleted" } | { status: "failed" };
+
+async function fetchViewerLog(type: CatalogType, slug: string): Promise<LogGetResponse> {
+  const response = await fetch(`/api/${type}/${slug}/log`);
+  if (!response.ok) {
+    throw new Error(`unexpected status ${response.status}`);
+  }
+  return (await response.json()) as LogGetResponse;
+}
+
+async function createLogEntry(
+  type: CatalogType,
+  slug: string,
+  body: { logged_on: string | null; rewatch: boolean; note: string | null },
+): Promise<CreateLogResult> {
+  const response = await fetch(`/api/${type}/${slug}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 201) {
+    return { status: "created", entry: (await response.json()) as MyLogEntry };
+  }
+  if (response.status === 401) return { status: "unauthorized" };
+  if (response.status === 422) return { status: "validation" };
+  return { status: "failed" };
+}
+
+async function deleteLogEntryRequest(id: number): Promise<DeleteLogResult> {
+  const response = await fetch(`/api/log/${id}`, { method: "DELETE" });
+  return response.status === 204 ? { status: "deleted" } : { status: "failed" };
+}
 
 /** Today's date as `YYYY-MM-DD`, in the browser's local timezone — the create form's default `logged_on` and its `max` bound (a future date is a 422, `docs/api.md`). */
 function todayIso(): string {
@@ -61,14 +106,38 @@ function insertSorted(entries: MyLogEntry[], entry: MyLogEntry): MyLogEntry[] {
  * which mirror the public item-scoped listing) is what this widget renders
  * as history — see that route's doc comment for how "the caller's own logs
  * for this item" is derived and its known scan-limit caveat.
+ *
+ * FE-48: the initial load runs through TanStack Query's `useQuery`
+ * (`logQuery` below), and both mutations through `useMutation`'s
+ * `mutateAsync`. `phase`/`entries` are derived straight from `logQuery` on
+ * every render rather than mirrored into their own state via a `useEffect`
+ * (that pattern trips `react-hooks/set-state-in-effect` — a `useQuery`
+ * result is already reactive state) — `handleSubmit`/`handleDelete` write
+ * their result into the query cache directly (`queryClient.setQueryData`),
+ * which is what `entries` re-derives from on the next render, rather than
+ * keeping a parallel local list the cache could drift out of sync with. No
+ * cross-widget invalidation here, unlike `ViewerStatusSlot`: a logged
+ * session has no effect on `library_counts` or any other query this feature
+ * touches.
  */
 export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
   const t = useTranslations("ItemDetail.activityLog");
   const tErrors = useTranslations("ItemDetail.activityLog.errors");
   const locale = useLocale();
+  const queryClient = useQueryClient();
+  const logKey = queryKeys.activityLog.detail(type, slug);
 
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [entries, setEntries] = useState<MyLogEntry[]>([]);
+  const logQuery = useQuery({
+    queryKey: logKey,
+    queryFn: () => fetchViewerLog(type, slug),
+  });
+  const createMutation = useMutation({
+    mutationFn: (body: { logged_on: string | null; rewatch: boolean; note: string | null }) =>
+      createLogEntry(type, slug, body),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteLogEntryRequest(id),
+  });
 
   const [loggedOn, setLoggedOn] = useState(todayIso());
   const [rewatch, setRewatch] = useState(false);
@@ -77,36 +146,29 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
   const [formError, setFormError] = useState<FormErrorKey>(null);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
 
+  // See this component's own doc comment for why `phase`/`entries` are
+  // derived here instead of synced into their own state via an effect.
+  let phase: Phase;
+  let entries: MyLogEntry[] = [];
+  if (logQuery.isPending) {
+    phase = "loading";
+  } else if (logQuery.isError) {
+    phase = "load-error";
+  } else if (!logQuery.data.authenticated) {
+    phase = "anonymous";
+  } else {
+    phase = "ready";
+    entries = logQuery.data.mine;
+  }
+
+  // Logging-only — no `setState`, so this doesn't trip
+  // `react-hooks/set-state-in-effect` (`phase` above already derives the
+  // `"load-error"` state on its own, synchronously, every render).
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const response = await fetch(`/api/${type}/${slug}/log`);
-        if (!response.ok) {
-          throw new Error(`unexpected status ${response.status}`);
-        }
-        const data = (await response.json()) as { authenticated: boolean; mine: MyLogEntry[] };
-        if (cancelled) return;
-
-        if (!data.authenticated) {
-          setPhase("anonymous");
-          return;
-        }
-        setEntries(data.mine);
-        setPhase("ready");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("ActivityLogWidget: failed to load the viewer's own log history", error);
-        setPhase("load-error");
-      }
+    if (logQuery.isError) {
+      console.error("ActivityLogWidget: failed to load the viewer's own log history", logQuery.error);
     }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [type, slug]);
+  }, [logQuery.isError, logQuery.error]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -116,16 +178,12 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
 
     const trimmedNote = note.trim();
 
-    let response: Response;
+    let result: CreateLogResult;
     try {
-      response = await fetch(`/api/${type}/${slug}/log`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          logged_on: loggedOn || null,
-          rewatch,
-          note: trimmedNote.length ? trimmedNote : null,
-        }),
+      result = await createMutation.mutateAsync({
+        logged_on: loggedOn || null,
+        rewatch,
+        note: trimmedNote.length ? trimmedNote : null,
       });
     } catch {
       setFormError("save");
@@ -133,11 +191,15 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
       return;
     }
 
-    if (response.status === 201) {
-      const saved = (await response.json()) as { id: number; logged_on: string; rewatch: boolean; note: string | null };
-      setEntries((current) =>
-        insertSorted(current, { id: saved.id, logged_on: saved.logged_on, rewatch: saved.rewatch, note: saved.note }),
-      );
+    if (result.status === "created") {
+      // Reads the cache's current value (not the closured `entries` above)
+      // right before writing it back — avoids a stale base if anything else
+      // touched this same query key while the `POST` above was in flight.
+      const current = queryClient.getQueryData<LogGetResponse>(logKey);
+      queryClient.setQueryData(logKey, {
+        authenticated: true,
+        mine: insertSorted(current?.mine ?? [], result.entry),
+      } satisfies LogGetResponse);
       setLoggedOn(todayIso());
       setRewatch(false);
       setNote("");
@@ -146,9 +208,9 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
       return;
     }
 
-    if (response.status === 401) {
+    if (result.status === "unauthorized") {
       setFormError("unauthorized");
-    } else if (response.status === 422) {
+    } else if (result.status === "validation") {
       setFormError("validation");
     } else {
       setFormError("save");
@@ -160,9 +222,9 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
     if (deletingIds.has(id)) return;
     setDeletingIds((current) => new Set(current).add(id));
 
-    let response: Response;
+    let result: DeleteLogResult;
     try {
-      response = await fetch(`/api/log/${id}`, { method: "DELETE" });
+      result = await deleteMutation.mutateAsync(id);
     } catch {
       setDeletingIds((current) => {
         const next = new Set(current);
@@ -179,8 +241,12 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
       return next;
     });
 
-    if (response.status === 204) {
-      setEntries((current) => current.filter((entry) => entry.id !== id));
+    if (result.status === "deleted") {
+      const current = queryClient.getQueryData<LogGetResponse>(logKey);
+      queryClient.setQueryData(logKey, {
+        authenticated: true,
+        mine: (current?.mine ?? []).filter((entry) => entry.id !== id),
+      } satisfies LogGetResponse);
       toast.success(t("deleteSuccess"));
       return;
     }

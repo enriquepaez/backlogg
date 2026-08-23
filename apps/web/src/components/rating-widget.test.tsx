@@ -1,9 +1,10 @@
 import { act } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
+import { renderWithQuery } from "@/test/render-with-query";
 
 // Same rationale as `verify-email-status.test.tsx` for mocking
 // `@/i18n/navigation` (the anonymous state's "log in" link) and `next-intl`
@@ -53,7 +54,7 @@ const savedRating = {
 };
 
 function renderWidget() {
-  return render(
+  return renderWithQuery(
     <RatingWidget type="movie" slug="dune-2021" initialRatingInternal={4.2} initialRatingCountInternal={87} />,
   );
 }
@@ -311,7 +312,7 @@ describe("RatingWidget", () => {
       ),
     );
 
-    render(
+    renderWithQuery(
       <RatingWidget type="movie" slug="dune-2021" initialRatingInternal={null} initialRatingCountInternal={0} />,
     );
     await screen.findByRole("group", { name: "scoreLabel" });

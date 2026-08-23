@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bell, CheckCircle2, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   DropdownMenu,
@@ -16,12 +17,44 @@ import { Link } from "@/i18n/navigation";
 import { formatDate } from "@/lib/format-date";
 import { STATUS_COLOR_CLASSES } from "@/lib/library-types";
 import { notificationHref, type NotificationItem } from "@/lib/notifications-types";
+import { queryKeys } from "@/lib/queries/query-keys";
 import { cn } from "@/lib/utils";
 
 /** Dropdown page size — small enough for a header widget, matches `GET /api/notifications`'s own default (`src/app/api/notifications/route.ts`). */
 const PAGE_LIMIT = 10;
 
 type ListState = "idle" | "loading" | "loaded" | "error";
+
+type UnreadCountResponse = { unread_count: number };
+type NotificationsListResponse = { items: NotificationItem[] };
+type DeleteNotificationResult = { status: "deleted" } | { status: "failed" };
+type MarkAllReadResult = { status: "ok" } | { status: "failed" };
+
+async function fetchUnreadCount(): Promise<UnreadCountResponse> {
+  const response = await fetch("/api/notifications/unread_count");
+  if (!response.ok) {
+    throw new Error(`unexpected status ${response.status}`);
+  }
+  return (await response.json()) as UnreadCountResponse;
+}
+
+async function fetchNotificationsList(page: number, limit: number): Promise<NotificationsListResponse> {
+  const response = await fetch(`/api/notifications?page=${page}&limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`unexpected status ${response.status}`);
+  }
+  return (await response.json()) as NotificationsListResponse;
+}
+
+async function deleteNotificationRequest(id: number): Promise<DeleteNotificationResult> {
+  const response = await fetch(`/api/notifications/${id}`, { method: "DELETE" });
+  return response.status === 204 ? { status: "deleted" } : { status: "failed" };
+}
+
+async function markAllReadRequest(): Promise<MarkAllReadResult> {
+  const response = await fetch("/api/notifications/read", { method: "POST" });
+  return response.status === 204 ? { status: "ok" } : { status: "failed" };
+}
 
 /**
  * Session-aware header entry point (FE-24): bell icon + unread badge, with a
@@ -56,81 +89,120 @@ type ListState = "idle" | "loading" | "loaded" | "error";
  * list itself is still refetched on every open (not cached across opens) so
  * a notification that arrived since the last open is picked up without
  * needing a polling interval, which is out of scope here.
+ *
+ * FE-48: the unread-count load and the dropdown's list load both run through
+ * TanStack Query's `useQuery`. `unreadCount`/`listState`/`items` are derived
+ * straight from the two queries (plus `open`) on every render rather than
+ * mirrored into their own state via a `useEffect` — that pattern trips
+ * `react-hooks/set-state-in-effect`, since a `useQuery` result is already
+ * reactive state (see `RatingWidget`'s doc comment for the same reasoning
+ * spelled out in more depth). `handleDelete`/`handleMarkAllRead` write their
+ * result straight into the query cache (`queryClient.setQueryData`), which
+ * is what the derived values re-read on the next render.
+ *
+ * The list query stays keyed to `page=1`/`PAGE_LIMIT` (`queryKeys.
+ * notifications.list`) but with an explicit `staleTime: 0` override (unlike
+ * every other query this feature adds, which relies on the app-wide 60s
+ * default, `query-provider.tsx`) — the doc comment above is explicit that
+ * the list must refetch fresh "on every open, not cached across opens",
+ * which a shared 60s `staleTime` would silently violate on a second open
+ * within that window. `enabled: open` ties the fetch to the dropdown's own
+ * open state instead of firing on mount like the unread-count query does.
  */
 export function NotificationBell() {
   const t = useTranslations("Notifications");
   const locale = useLocale();
+  const queryClient = useQueryClient();
 
-  const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
-  const [listState, setListState] = useState<ListState>("idle");
-  const [items, setItems] = useState<NotificationItem[]>([]);
 
+  const unreadCountQuery = useQuery({
+    queryKey: queryKeys.notifications.unreadCount,
+    queryFn: fetchUnreadCount,
+  });
+  const listKey = queryKeys.notifications.list(1, PAGE_LIMIT);
+  const listQuery = useQuery({
+    queryKey: listKey,
+    queryFn: () => fetchNotificationsList(1, PAGE_LIMIT),
+    enabled: open,
+    staleTime: 0,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteNotificationRequest(id),
+  });
+  const markAllReadMutation = useMutation({
+    mutationFn: markAllReadRequest,
+  });
+
+  const unreadCount = unreadCountQuery.data?.unread_count ?? null;
+
+  // Only meaningful while the dropdown is actually open — same as the
+  // original `handleOpenChange`, which only ever touched `listState`/`items`
+  // on the `next === true` branch. `isFetching` (not `isPending`) drives the
+  // "loading" branch: after the very first open, `listQuery` already has
+  // cached data, so `isPending` alone would stay `false` on a second open
+  // even while the `staleTime: 0` background refetch (see this component's
+  // doc comment) is still in flight.
+  let listState: ListState;
+  if (!open) {
+    listState = "idle";
+  } else if (listQuery.isFetching) {
+    listState = "loading";
+  } else if (listQuery.isError) {
+    listState = "error";
+  } else {
+    listState = "loaded";
+  }
+  // The backend has no `is_read` filter on `GET /v1/notifications` (out of
+  // scope to add one — see `progress/current.md`), so already-read
+  // notifications are dropped client-side: the dropdown should only ever
+  // show what's still unread.
+  const items = open && listQuery.data ? listQuery.data.items.filter((item) => !item.is_read) : [];
+
+  // Logging-only — no `setState`, so this doesn't trip
+  // `react-hooks/set-state-in-effect` (`listState`/`unreadCount` above
+  // already derive their own error/idle states, synchronously, every
+  // render).
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadUnreadCount() {
-      try {
-        const response = await fetch("/api/notifications/unread_count");
-        if (!response.ok) {
-          throw new Error(`unexpected status ${response.status}`);
-        }
-        const data = (await response.json()) as { unread_count: number };
-        if (!cancelled) {
-          setUnreadCount(data.unread_count);
-        }
-      } catch (error) {
-        if (cancelled) return;
-        console.error("NotificationBell: failed to load the unread count", error);
-      }
+    if (unreadCountQuery.isError) {
+      console.error("NotificationBell: failed to load the unread count", unreadCountQuery.error);
     }
+  }, [unreadCountQuery.isError, unreadCountQuery.error]);
+  useEffect(() => {
+    if (open && listQuery.isError) {
+      console.error("NotificationBell: failed to load notifications", listQuery.error);
+    }
+  }, [open, listQuery.isError, listQuery.error]);
 
-    void loadUnreadCount();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleOpenChange(next: boolean) {
+  function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) {
-      return;
-    }
-
-    setListState("loading");
-    try {
-      const response = await fetch(`/api/notifications?page=1&limit=${PAGE_LIMIT}`);
-      if (!response.ok) {
-        throw new Error(`unexpected status ${response.status}`);
-      }
-      const data = (await response.json()) as { items: NotificationItem[] };
-      // The backend has no `is_read` filter on `GET /v1/notifications` (out
-      // of scope to add one — see `progress/current.md`), so already-read
-      // notifications are dropped client-side: the dropdown should only ever
-      // show what's still unread.
-      setItems(data.items.filter((item) => !item.is_read));
-      setListState("loaded");
-    } catch (error) {
-      console.error("NotificationBell: failed to load notifications", error);
-      setListState("error");
-    }
   }
 
   async function handleDelete(id: number) {
-    // Optimistic-ish: fire the delete first, but only update local state on
+    // Optimistic-ish: fire the delete first, but only update the cache on
     // success — a failed delete leaves the row in place rather than lying
     // about what the backend actually did.
     try {
-      const response = await fetch(`/api/notifications/${id}`, { method: "DELETE" });
-      if (response.status !== 204) {
-        throw new Error(`unexpected status ${response.status}`);
+      const result = await deleteMutation.mutateAsync(id);
+      if (result.status !== "deleted") {
+        throw new Error("delete failed");
+      }
+      const currentList = queryClient.getQueryData<NotificationsListResponse>(listKey);
+      if (currentList) {
+        queryClient.setQueryData(listKey, {
+          items: currentList.items.filter((item) => item.id !== id),
+        } satisfies NotificationsListResponse);
       }
       // Every item currently rendered is unread (the list is filtered
-      // client-side to unread-only on load — see `handleOpenChange`), so
-      // deleting any visible row is always exactly one fewer unread
-      // notification, with no ambiguity about whether it was already read.
-      setItems((prev) => prev.filter((item) => item.id !== id));
-      setUnreadCount((prev) => (prev ? prev - 1 : 0));
+      // client-side to unread-only above), so deleting any visible row is
+      // always exactly one fewer unread notification, with no ambiguity
+      // about whether it was already read.
+      const currentUnread = queryClient.getQueryData<UnreadCountResponse>(
+        queryKeys.notifications.unreadCount,
+      );
+      queryClient.setQueryData(queryKeys.notifications.unreadCount, {
+        unread_count: currentUnread ? Math.max(0, currentUnread.unread_count - 1) : 0,
+      } satisfies UnreadCountResponse);
     } catch (error) {
       console.error("NotificationBell: failed to delete notification", error);
     }
@@ -141,16 +213,18 @@ export function NotificationBell() {
     // reset, instead of Radix's default "close on select" behavior.
     event.preventDefault();
     try {
-      const response = await fetch("/api/notifications/read", { method: "POST" });
-      if (response.status !== 204) {
-        throw new Error(`unexpected status ${response.status}`);
+      const result = await markAllReadMutation.mutateAsync();
+      if (result.status !== "ok") {
+        throw new Error("mark-all-read failed");
       }
       // The endpoint marks ALL of the caller's unread notifications (no
       // `ids` sent) and the list only ever contains unread items, so a
       // successful call means everything currently shown just became read —
       // no need to refetch.
-      setItems([]);
-      setUnreadCount(0);
+      queryClient.setQueryData(listKey, { items: [] } satisfies NotificationsListResponse);
+      queryClient.setQueryData(queryKeys.notifications.unreadCount, {
+        unread_count: 0,
+      } satisfies UnreadCountResponse);
     } catch (error) {
       console.error("NotificationBell: failed to mark notifications read", error);
     }

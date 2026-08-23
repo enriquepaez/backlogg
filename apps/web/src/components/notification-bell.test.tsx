@@ -1,9 +1,10 @@
 import { act } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
+import { renderWithQuery } from "@/test/render-with-query";
 
 // Same rationale as `user-nav.test.tsx` for mocking `@/i18n/navigation`/
 // `next-intl` and using `pointerDown` (not `click`) to open the Radix
@@ -103,7 +104,7 @@ describe("NotificationBell", () => {
   it("shows no badge when the unread count is 0", async () => {
     server.use(unreadCountHandler(0));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await waitFor(() => expect(screen.getByRole("button")).toHaveAttribute("aria-label", "bellLabel"));
     expect(screen.queryByText("3")).not.toBeInTheDocument();
@@ -112,7 +113,7 @@ describe("NotificationBell", () => {
   it("shows the unread count as a badge once loaded", async () => {
     server.use(unreadCountHandler(3));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.getByRole("button")).toHaveAttribute(
@@ -124,7 +125,7 @@ describe("NotificationBell", () => {
   it("caps the visible badge at 99+", async () => {
     server.use(unreadCountHandler(150));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     expect(await screen.findByText("99+")).toBeInTheDocument();
   });
@@ -140,7 +141,7 @@ describe("NotificationBell", () => {
       }),
     );
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("2");
 
     await act(async () => {
@@ -159,7 +160,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(1));
     server.use(notificationsHandler([reviewLike, alreadyRead]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("1");
 
     await act(async () => {
@@ -174,7 +175,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(0));
     server.use(notificationsHandler([]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -195,7 +196,7 @@ describe("NotificationBell", () => {
       }),
     );
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("2");
 
     await act(async () => {
@@ -220,7 +221,7 @@ describe("NotificationBell", () => {
     server.use(notificationsHandler([reviewLike]));
     server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 204 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -235,7 +236,7 @@ describe("NotificationBell", () => {
     server.use(notificationsHandler([newFollower]));
     server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 204 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -250,7 +251,7 @@ describe("NotificationBell", () => {
     server.use(notificationsHandler([reviewLikeNoSlug]));
     server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 204 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -265,7 +266,7 @@ describe("NotificationBell", () => {
     server.use(notificationsHandler([]));
     server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 204 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -278,7 +279,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(0));
     server.use(http.get("/api/notifications", () => new HttpResponse(null, { status: 500 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -291,7 +292,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(2));
     server.use(notificationsHandler([reviewLike, newFollower]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("2");
 
     await act(async () => {
@@ -313,7 +314,7 @@ describe("NotificationBell", () => {
       }),
     );
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("2");
 
     await act(async () => {
@@ -347,7 +348,7 @@ describe("NotificationBell", () => {
     server.use(notificationsHandler([reviewLike]));
     server.use(http.delete("/api/notifications/2", () => new HttpResponse(null, { status: 500 })));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
     await screen.findByText("1");
 
     await act(async () => {
@@ -369,7 +370,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(0));
     server.use(notificationsHandler([userCompleted]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -383,7 +384,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(0));
     server.use(notificationsHandler([userCompleted]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();
@@ -397,7 +398,7 @@ describe("NotificationBell", () => {
     server.use(unreadCountHandler(0));
     server.use(notificationsHandler([userCompletedNoSlug]));
 
-    render(<NotificationBell />);
+    renderWithQuery(<NotificationBell />);
 
     await act(async () => {
       openBell();

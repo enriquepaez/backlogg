@@ -922,7 +922,7 @@
         "Mismos estados observables (loading/anonymous/load-error/ready) preservados, sin regresión de comportamiento",
         "Tests existentes migrados y en verde; typecheck+lint+test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 48,
