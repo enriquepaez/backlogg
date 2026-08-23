@@ -856,6 +856,10 @@
       "error": "No se pudo borrar tu cuenta. Inténtalo de nuevo."
     }
   },
+  "StarRating": {
+    "ariaLabel": "{value} de 5 estrellas",
+    "unratedAriaLabel": "Sin puntuación"
+  },
   "LanguageSwitcher": {
     "label": "Idioma",
     "en": "English",

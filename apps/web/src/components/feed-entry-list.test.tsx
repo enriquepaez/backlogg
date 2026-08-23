@@ -13,6 +13,18 @@ vi.mock("next-intl/server", () => ({
       values ? `${key}:${JSON.stringify(values)}` : key,
 }));
 
+// `FeedEntryStars` renders the shared `StarRating` (`@/components/star-rating`),
+// which since FE-47 calls the client-side `useTranslations` (from `next-intl`,
+// not `next-intl/server`) itself for its `role="img"` `aria-label` — mocked
+// the same way `rating-widget.test.tsx`/`item-reviews.test.tsx` mock it, so
+// this Server Component's test doesn't need a real `NextIntlClientProvider`.
+vi.mock("next-intl", () => ({
+  useTranslations:
+    () =>
+    (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${key}:${JSON.stringify(vars)}` : key,
+}));
+
 const { FeedEntryList } = await import("./feed-entry-list");
 
 const duneEntry = {
@@ -72,6 +84,17 @@ describe("FeedEntryList", () => {
     const { container } = render(await FeedEntryList({ entries: [duneEntry], locale: "en" }));
 
     expect(container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(0);
+  });
+
+  // FE-47: `FeedEntryStars` is a thin wrapper around `StarRating` — confirms
+  // this call site (a Server Component, `feed-entry-list.tsx`) inherits the
+  // `role="img"` + `aria-label` fix without any changes of its own.
+  it("exposes the entry's score to assistive tech via role=img + aria-label", async () => {
+    const { container } = render(await FeedEntryList({ entries: [duneEntry], locale: "en" }));
+
+    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      'ariaLabel:{"value":4}',
+    );
   });
 
   it("renders no stars at all for a text-only review (null score)", async () => {

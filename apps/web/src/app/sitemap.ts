@@ -30,6 +30,20 @@ const MAX_PAGES_PER_TYPE = 500;
  */
 const SITEMAP_REVALIDATE_SECONDS = 60 * 60 * 6; // 6h
 
+/**
+ * Forces this route to render per-request instead of being prerendered at
+ * `next build` time. `getApiClient()` (via `session.ts`) throws if
+ * `API_INTERNAL_URL` is unset, and CI's build step (`ci.yml`) never sets it —
+ * there's no live backend available there, only during `pnpm --filter web
+ * build`'s type/lint checks. Without this, Next tries to statically
+ * pre-render `/sitemap.xml` at build time (it has no `cookies()`/other
+ * dynamic API to opt out on its own, unlike `/recommendations` or
+ * `/admin/*`) and the build fails outright instead of degrading. ISR restores
+ * the same "don't refetch more than the nightly sync warrants" behavior at
+ * request time via `SITEMAP_REVALIDATE_SECONDS` on each backend fetch below.
+ */
+export const dynamic = "force-dynamic";
+
 type CatalogPage = { items: { slug: string }[]; total: number };
 
 /**

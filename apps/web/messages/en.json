@@ -856,6 +856,10 @@
       "error": "Couldn't delete your account. Please try again."
     }
   },
+  "StarRating": {
+    "ariaLabel": "{value} out of 5 stars",
+    "unratedAriaLabel": "No rating"
+  },
   "LanguageSwitcher": {
     "label": "Language",
     "en": "English",

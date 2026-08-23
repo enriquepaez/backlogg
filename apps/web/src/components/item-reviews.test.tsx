@@ -102,6 +102,20 @@ describe("ItemReviews", () => {
     expect(container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(1);
   });
 
+  // FE-47: `ReviewStars` (a `StarRating` wrapper) is the only renderer of a
+  // review's stars — confirms this call site inherits the `role="img"` +
+  // `aria-label` fix without any changes of its own.
+  it("exposes each review's score to assistive tech via role=img + aria-label", async () => {
+    server.use(reviewsHandler([bob]));
+
+    const { container } = renderReviews();
+
+    await screen.findByText("Bob");
+    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      'ariaLabel:{"value":4}',
+    );
+  });
+
   it("falls back to username and initials when display_name/avatar are missing", async () => {
     server.use(reviewsHandler([alice]));
 
