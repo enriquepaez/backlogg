@@ -292,7 +292,7 @@ async def test_complete_item_graceful_degradation(db, monkeypatch):
     async def boom(*args, **kwargs):
         raise RuntimeError("notification backend down")
 
-    monkeypatch.setattr(notif_repo, "create_notification", boom)
+    monkeypatch.setattr(notif_repo, "create_user_completed_notifications_for_followers", boom)
 
     # Notification generation fails, but the library status write must still
     # persist and the call must not raise.
@@ -300,6 +300,66 @@ async def test_complete_item_graceful_degradation(db, monkeypatch):
         db, "MOVIE", "notif-svc-completed-movie-6", LibraryStatus.completed, completer
     )
     assert out.status == "completed"
+
+
+# ── batched fan-out (feature 57) ─────────────────────────────────────────
+
+
+async def _completion_execute_call_count(
+    db, *, follower_count: int, suffix: str
+) -> tuple[int, list]:
+    """Run a fresh completion with ``follower_count`` direct followers.
+
+    Returns how many ``AsyncSession.execute`` calls it took end to end, plus
+    the follower users, so callers can also assert on correctness.
+    """
+    completer = await _make_user(db, f"notif-svc-completer-fanout-{suffix}")
+    followers = []
+    for i in range(follower_count):
+        follower = await _make_user(db, f"notif-svc-completer-follower-fanout-{suffix}-{i}")
+        await follows_service.follow_user(
+            db, username=f"notif-svc-completer-fanout-{suffix}", user=follower
+        )
+        followers.append(follower)
+    await upsert_movie(db, _movie_data(f"notif-svc-completed-movie-fanout-{suffix}"))
+
+    calls = 0
+    original_execute = db.execute
+
+    async def counting_execute(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await original_execute(*args, **kwargs)
+
+    db.execute = counting_execute
+    try:
+        await library_service.set_library_status(
+            db,
+            "MOVIE",
+            f"notif-svc-completed-movie-fanout-{suffix}",
+            LibraryStatus.completed,
+            completer,
+        )
+    finally:
+        db.execute = original_execute
+    return calls, followers
+
+
+async def test_complete_item_fanout_does_not_scale_with_follower_count(db):
+    """The whole set_library_status call (status write + feed event + the
+    user_completed fan-out) must emit the same number of queries whether the
+    completer has 2 or 25 direct followers — the fan-out is one batched
+    INSERT ... SELECT, not one INSERT per follower."""
+    few_calls, _ = await _completion_execute_call_count(db, follower_count=2, suffix="few")
+    many_calls, many_followers = await _completion_execute_call_count(
+        db, follower_count=25, suffix="many"
+    )
+
+    assert few_calls == many_calls
+
+    # Correctness: the batched insert must still have reached every follower.
+    for follower in many_followers:
+        assert await notif_repo.count_unread(db, follower.id) == 1
 
 
 # ── read side ────────────────────────────────────────────────────────────

@@ -1177,7 +1177,7 @@
         "Test: completar un item con muchos followers no aumenta el número de queries linealmente (o no bloquea la respuesta si se mueve a background)",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 58,

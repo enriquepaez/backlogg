@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.feed import repository as feed_repo
-from backlogg.follows import repository as follows_repo
 from backlogg.library import repository as repo
 from backlogg.library.schemas import (
     LibraryCounts,
@@ -68,8 +67,8 @@ async def set_library_status(
 
     await db.commit()
 
-    # Build the response before the notification side effect below: each
-    # notify_user_completed call may commit/rollback the session on its own
+    # Build the response before the notification side effect below:
+    # notify_user_completed_fanout may commit/rollback the session on its own
     # (graceful degradation), and a rollback expires every ORM instance in the
     # session — reading entry.* afterwards would trigger an implicit lazy
     # reload outside of an awaited context (MissingGreenlet). Snapshotting the
@@ -85,19 +84,18 @@ async def set_library_status(
     # Notification fan-out (feature 55): one user_completed notification per
     # direct follower — no fan-out to followers of followers, no dedup across
     # repeated completions (each transition into completed is its own
-    # notification, same as review_like never deduplicating). Runs after the
-    # status write is committed and cannot break it (graceful degradation,
-    # same pattern as notify_new_follower/notify_review_like).
+    # notification, same as review_like never deduplicating). A single
+    # batched INSERT ... SELECT (feature 57) instead of one INSERT+commit per
+    # follower, so the response no longer waits on N sequential round-trips.
+    # Runs after the status write is committed and cannot break it (graceful
+    # degradation, same pattern as notify_new_follower/notify_review_like).
     if is_new_completion:
-        follower_ids = await follows_repo.list_follower_ids(db, user.id)
-        for follower_id in follower_ids:
-            await notifications_service.notify_user_completed(
-                db,
-                recipient_id=follower_id,
-                actor_id=user.id,
-                item_type=item_type,
-                item_id=item.id,
-            )
+        await notifications_service.notify_user_completed_fanout(
+            db,
+            actor_id=user.id,
+            item_type=item_type,
+            item_id=item.id,
+        )
 
     return out
 

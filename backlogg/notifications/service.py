@@ -3,7 +3,7 @@
 Two responsibilities:
 
 1. Generation helpers (``notify_new_follower`` / ``notify_review_like`` /
-   ``notify_user_completed``) called as a side effect from the
+   ``notify_user_completed_fanout``) called as a side effect from the
    follows/ratings/library services. These are designed for **graceful
    degradation**: the source operation (the follow / the like / the
    status_completed transition) is already committed by its own service
@@ -77,30 +77,28 @@ async def notify_review_like(
         await db.rollback()
 
 
-async def notify_user_completed(
-    db: AsyncSession, *, recipient_id: int, actor_id: int, item_type: str, item_id: int
+async def notify_user_completed_fanout(
+    db: AsyncSession, *, actor_id: int, item_type: str, item_id: int
 ) -> None:
-    """Create a ``user_completed`` notification for one of ``actor_id``'s direct followers.
+    """Fan out a ``user_completed`` notification to every direct follower of ``actor_id``.
 
-    Called once per direct follower after the ``status_completed`` feed event
-    (feature 54) has been committed by ``backlogg.library.service.set_library_status``.
+    Called after the ``status_completed`` feed event (feature 54) has been
+    committed by ``backlogg.library.service.set_library_status``.
     ``target_type``/``target_id`` reference the completed item directly (no
-    rating involved, unlike ``review_like``). Swallows any error so a
-    notification failure never propagates back to the ``PUT .../library``
-    endpoint.
+    rating involved, unlike ``review_like``). A single batched ``INSERT ...
+    SELECT`` (feature 57) replaces what used to be one INSERT+commit per
+    follower — on Render's free tier (shared CPU, cold starts) that N-query
+    loop could turn a "mark as completed" into a slow request or a timeout
+    for users with many followers. Swallows any error so a notification
+    failure never propagates back to the ``PUT .../library`` endpoint.
     """
     try:
-        await repo.create_notification(
-            db,
-            recipient_id=recipient_id,
-            actor_id=actor_id,
-            type="user_completed",
-            target_type=item_type,
-            target_id=item_id,
+        await repo.create_user_completed_notifications_for_followers(
+            db, actor_id=actor_id, item_type=item_type, item_id=item_id
         )
         await db.commit()
     except Exception:
-        logger.exception("Failed to create user_completed notification")
+        logger.exception("Failed to fan out user_completed notifications")
         await db.rollback()
 
 
