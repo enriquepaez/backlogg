@@ -866,7 +866,7 @@
         "Open Graph image usa el avatar del usuario si existe, con fallback genérico si no",
         "i18n; typecheck+lint+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 45,

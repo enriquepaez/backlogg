@@ -11,6 +11,7 @@ import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
+import { env } from "@/lib/env";
 import "../globals.css";
 
 const geistSans = Geist({
@@ -42,6 +43,13 @@ export async function generateMetadata({
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "Metadata.home" });
   return {
+    // Set once for the whole tree (root layout, per Next's own guidance —
+    // see `metadataBase`'s doc comment in
+    // `generate-metadata.md`) so URL-based metadata fields defined in any
+    // route segment below — e.g. `u/[username]/page.tsx`'s OG image
+    // fallback (FE-45) — can use a relative path and still resolve to an
+    // absolute URL in the rendered `<meta>` tags.
+    metadataBase: new URL(env.SITE_URL),
     title: t("title"),
     description: t("description"),
   };

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
@@ -241,6 +242,41 @@ function resolveBoardColumns(
   ) as Record<LibraryStatusValue, number>;
 
   return { entriesByStatus, countsByStatus };
+}
+
+/**
+ * OG metadata for the public library page (FE-45) — same pattern as the
+ * profile page's own `generateMetadata` (`../page.tsx`), with its own
+ * `Metadata.profileLibrary` copy ("{name}'s library") rather than reusing
+ * `Metadata.profile`. `{}`-on-non-`ok` degrade and the `avatar_url`-or-
+ * generic-`/opengraph-image` fallback are identical — see that sibling's
+ * doc comment for the rationale.
+ */
+export async function generateMetadata({
+  params,
+}: PageProps<"/[locale]/u/[username]/library">): Promise<Metadata> {
+  const { locale, username } = await params;
+  const result = await getUserProfile(username);
+  if (result.status !== "ok") {
+    return {};
+  }
+
+  const profile = result.profile;
+  const name = profile.display_name ?? profile.username;
+  const tm = await getTranslations({ locale, namespace: "Metadata.profileLibrary" });
+  const title = tm("title", { name });
+  const description = tm("description", { name });
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      images: [profile.avatar_url ?? "/opengraph-image"],
+    },
+  };
 }
 
 /**

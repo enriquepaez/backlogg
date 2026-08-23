@@ -59,6 +59,14 @@
     "admin": {
       "title": "Admin — backlogg",
       "description": "Estadísticas del catálogo y herramientas de moderación para operadores de backlogg."
+    },
+    "profile": {
+      "title": "{name} — backlogg",
+      "descriptionFallback": "Consulta las puntuaciones, reseñas y biblioteca de {name} en backlogg."
+    },
+    "profileLibrary": {
+      "title": "Biblioteca de {name} — backlogg",
+      "description": "Explora el backlog de películas, series, libros y juegos de {name} en backlogg."
     }
   },
   "Home": {
