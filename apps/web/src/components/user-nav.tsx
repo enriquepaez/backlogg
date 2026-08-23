@@ -2,6 +2,7 @@
 
 import { CircleUserRound, Library, LogOut, MailCheck, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -71,13 +72,11 @@ export function UserNav({ user }: { user: NavUser }) {
           aria-label={t("accountMenu")}
         >
           {user.avatarUrl ? (
-            // Avatar hosts aren't configured in `next/image`'s remotePatterns
-            // yet (catalog-image scope, later features); a plain <img> avoids
-            // that dependency for now.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={user.avatarUrl}
               alt=""
+              width={24}
+              height={24}
               className="size-6 rounded-full object-cover"
             />
           ) : (

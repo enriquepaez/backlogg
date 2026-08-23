@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -436,9 +437,8 @@ export function RatingWidget({
  * makes no assumption either way — the same shape FE-19 will reuse to show
  * *other* users' reviews.
  *
- * Mirrors the avatar-or-initials pattern from `user-nav.tsx`'s `UserNav`
- * (including the same `<img>`-over-`next/image` rationale: avatar hosts
- * aren't in `remotePatterns` yet). Not reusing that component's `initials()`
+ * Mirrors the avatar-or-initials pattern from `user-nav.tsx`'s `UserNav`.
+ * Not reusing that component's `initials()`
  * directly — it isn't exported, and its `NavUser` shape is camelCase
  * (`displayName`/`avatarUrl`) while `RatingAuthorOut` is snake_case, so
  * reusing it would mean building an adapter object just to call a 3-line
@@ -451,11 +451,13 @@ function RaterIdentity({ user }: { user: RatingAuthor }) {
   return (
     <div className="flex items-center gap-2">
       {user.avatar_url ? (
-        // Avatar hosts aren't configured in `next/image`'s remotePatterns
-        // yet (catalog-image scope, later features); a plain <img> avoids
-        // that dependency for now.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={user.avatar_url} alt="" className="size-6 rounded-full object-cover" />
+        <Image
+          src={user.avatar_url}
+          alt=""
+          width={24}
+          height={24}
+          className="size-6 rounded-full object-cover"
+        />
       ) : (
         <span
           aria-hidden="true"

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bell, CheckCircle2, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -320,11 +321,13 @@ function NotificationRow({
     <div className="flex items-start gap-2">
       <div className="relative mt-0.5 shrink-0">
         {item.actor.avatar_url ? (
-          // Avatar hosts aren't configured in next/image's remotePatterns yet
-          // (catalog-image scope, later features) — same rationale as
-          // `FeedEntryAuthor` in `feed-entry-list.tsx`.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.actor.avatar_url} alt="" className="size-6 rounded-full object-cover" />
+          <Image
+            src={item.actor.avatar_url}
+            alt=""
+            width={24}
+            height={24}
+            className="size-6 rounded-full object-cover"
+          />
         ) : (
           <span
             aria-hidden="true"

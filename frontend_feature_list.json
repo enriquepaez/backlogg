@@ -939,7 +939,7 @@
         "Los 4 sitios identificados (user-nav, feed-entry-list, notification-bell, rating-widget) migrados de <img> a next/image",
         "typecheck+lint+build en verde; verificación visual de que los avatares siguen cargando en dev"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 49,
