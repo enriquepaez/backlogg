@@ -18,6 +18,18 @@ vi.mock("@/i18n/navigation", () => ({
   ),
 }));
 
+// `UserReviewCard`/`ReviewStars` render the shared `StarRating`
+// (`@/components/star-rating`), which since FE-47 calls `useTranslations`
+// itself for its `role="img"` `aria-label` — mocked the same way
+// `rating-widget.test.tsx`/`item-reviews.test.tsx` mock `next-intl`, so this
+// Server Component's test doesn't need a real `NextIntlClientProvider`.
+vi.mock("next-intl", () => ({
+  useTranslations:
+    () =>
+    (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${key}:${JSON.stringify(vars)}` : key,
+}));
+
 const { UserReviewCard, ReviewStars } = await import("./user-review-card");
 
 const review = {
@@ -90,5 +102,24 @@ describe("ReviewStars", () => {
 
     const halfPoint = render(<ReviewStars score={3.5} />);
     expect(halfPoint.container.querySelectorAll('[data-slot="half-star"]')).toHaveLength(1);
+  });
+
+  // FE-47: `ReviewStars` is a thin wrapper around `StarRating` — confirms
+  // this call site (a Server Component, `user-review-card.tsx`) inherits the
+  // `role="img"` + `aria-label` fix without any changes of its own.
+  it("exposes the score to assistive tech via role=img + aria-label", () => {
+    const { container } = render(<ReviewStars score={4} />);
+
+    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      'ariaLabel:{"value":4}',
+    );
+  });
+
+  it("falls back to an 'unrated' aria-label when the score is null", () => {
+    const { container } = render(<ReviewStars score={null} />);
+
+    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      "unratedAriaLabel",
+    );
   });
 });

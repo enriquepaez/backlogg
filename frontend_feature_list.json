@@ -901,7 +901,7 @@
         "Los 4 call sites existentes (rating widget resumen, item-reviews, user-review-card, feed) heredan el fix sin cambios propios (StarRating es el único renderer)",
         "i18n de la nueva label; typecheck+lint+test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 47,

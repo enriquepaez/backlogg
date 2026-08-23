@@ -1,7 +1,19 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { StarRating, starFillAt } from "./star-rating";
+// `(key, vars?)` mirrors `next-intl`'s real interpolation shape closely
+// enough to assert on `StarRating.ariaLabel`/`StarRating.unratedAriaLabel`
+// without pulling in a real `NextIntlClientProvider` — same rationale
+// `rating-widget.test.tsx`/`item-reviews.test.tsx` document for their own
+// identical mock.
+vi.mock("next-intl", () => ({
+  useTranslations:
+    () =>
+    (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${key}:${JSON.stringify(vars)}` : key,
+}));
+
+const { StarRating, starFillAt } = await import("./star-rating");
 
 describe("starFillAt", () => {
   it("marks every position up to the integer part of the score as full", () => {
@@ -43,6 +55,26 @@ describe("StarRating", () => {
     const { container } = render(<StarRating score={null} />);
 
     expect(container.querySelectorAll("svg.fill-current")).toHaveLength(0);
+  });
+
+  // FE-47 (production audit2, 2026-08-19): every individual `<Star>` is
+  // `aria-hidden`, so the container's own `aria-label` is the only thing a
+  // screen reader announces for this whole widget — without it, none of the
+  // 4 call sites exposed any rating to assistive tech.
+  it("exposes the numeric score to assistive tech via role=img + aria-label", () => {
+    const { container } = render(<StarRating score={3.5} />);
+
+    const widget = container.querySelector('[role="img"]');
+    expect(widget).not.toBeNull();
+    expect(widget!.getAttribute("aria-label")).toBe('ariaLabel:{"value":3.5}');
+  });
+
+  it("falls back to an 'unrated' aria-label when the score is null", () => {
+    const { container } = render(<StarRating score={null} />);
+
+    const widget = container.querySelector('[role="img"]');
+    expect(widget).not.toBeNull();
+    expect(widget!.getAttribute("aria-label")).toBe("unratedAriaLabel");
   });
 
   it("renders exactly one half-star marker for a X.5 score", () => {
