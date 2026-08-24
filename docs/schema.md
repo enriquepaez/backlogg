@@ -293,33 +293,41 @@ CREATE INDEX idx_company_credits_item ON company_credits (item_type, item_id);
 
 Materialized view used for cross-type full-text search.
 
+`search_vector` indexes the title twice: once as-is, once with all
+punctuation stripped (spaces preserved as word separators) so a query typed
+without punctuation (`Spiderman`) still matches a punctuated title
+(`Spider-Man`) — the `simple` dictionary never generates that concatenated
+lexeme on its own. `overview` is left unnormalized.
+
 ```sql
 CREATE MATERIALIZED VIEW catalog_search AS
 SELECT
     id,
     'MOVIE'         AS item_type,
+    slug,
     title,
     overview,
     poster_url,
     release_date,
     rating_external,
-    to_tsvector('simple', title || ' ' || COALESCE(overview, '')) AS search_vector
+    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, '')) AS search_vector
 FROM movies
 UNION ALL
-SELECT id, 'SERIES', title, overview, poster_url, first_air_date, rating_external,
-    to_tsvector('simple', title || ' ' || COALESCE(overview, ''))
+SELECT id, 'SERIES', slug, title, overview, poster_url, first_air_date, rating_external,
+    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM series
 UNION ALL
-SELECT id, 'BOOK', title, overview, poster_url, first_publish_date, rating_external,
-    to_tsvector('simple', title || ' ' || COALESCE(overview, ''))
+SELECT id, 'BOOK', slug, title, overview, poster_url, first_publish_date, rating_external,
+    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM books
 UNION ALL
-SELECT id, 'GAME', title, overview, poster_url, release_date, rating_external,
-    to_tsvector('simple', title || ' ' || COALESCE(overview, ''))
+SELECT id, 'GAME', slug, title, overview, poster_url, release_date, rating_external,
+    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM games;
 
 CREATE INDEX idx_catalog_search_vector ON catalog_search USING GIN (search_vector);
 CREATE INDEX idx_catalog_search_type ON catalog_search (item_type);
+CREATE UNIQUE INDEX uq_catalog_search_type_id ON catalog_search (item_type, id);
 ```
 
 Refreshed after each sync job completes:
