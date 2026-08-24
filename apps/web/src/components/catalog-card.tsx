@@ -114,7 +114,15 @@ export function CatalogCard({
         ) : null}
       </div>
       <CardContent>
-        <p className="line-clamp-2 text-sm font-medium" title={title}>
+        {/*
+         * `min-h-10` reserves space for exactly 2 lines of `text-sm`
+         * (Tailwind v4 default: font-size 0.875rem, line-height
+         * calc(1.25 / 0.875) = 1.25rem/line -> 2 * 1.25rem = 2.5rem =
+         * min-h-10), so 1-line and 2-line titles produce the same card
+         * height across a grid (issue #12) while `line-clamp-2` still
+         * truncates longer titles.
+         */}
+        <p className="line-clamp-2 min-h-10 text-sm font-medium" title={title}>
           {title}
         </p>
         {footer}
