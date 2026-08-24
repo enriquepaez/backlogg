@@ -193,12 +193,31 @@
       "title": "CatalogCard: la altura de la card cambia según si el título ocupa 1 o 2 líneas, rompiendo la alineación del grid",
       "area": "frontend",
       "severity": "medium",
-      "status": "open",
+      "status": "resolved",
       "discovered": "2026-08-24",
+      "resolved": "2026-08-24",
+      "resolution_ref": "rama fix/issue-12-catalog-card-height (PR pendiente)",
       "symptom": "Reportado por el usuario navegando la app: en cualquier grid de catálogo (browse, search, trending, genres, library grid view), las cards con un título de una sola línea son más bajas que las cards con un título que ocupa 2 líneas — las cards no tienen una altura uniforme dentro de la misma fila del grid.",
       "cause": "apps/web/src/components/catalog-card.tsx:117 ya usa `line-clamp-2` en el `<p>` del título, así que el texto nunca desborda más de 2 líneas — pero ese elemento no reserva altura fija para 2 líneas cuando el título real ocupa solo 1, así que la card completa se encoge. Falta un `min-height` (o `h-[Nrem]`/`line-height` explícito equivalente a 2 líneas) en el contenedor del título para que todas las cards reserven el mismo espacio, tengan 1 o 2 líneas de texto.",
-      "solution": [],
+      "solution": "Añadida `min-h-10` (2.5rem) al `<p>` del título en catalog-card.tsx, junto a `line-clamp-2` (sin cambiar a `line-clamp-1`, opción descartada por el usuario). El valor corresponde exactamente a 2 líneas de `text-sm` en la config de Tailwind v4 del proyecto (line-height 1.25rem/línea, sin overrides en globals.css). Test nuevo en catalog-card.test.tsx que verifica ambas clases en el título.",
+      "verification": "pnpm --filter web test (1060 tests), lint y typecheck en verde; build exitoso. bash init.sh en verde (950 tests, sin cambios en backlogg/tests/alembic). Reviewer: APPROVED (checklist completo: clase min-h-10 verificada matemáticamente contra tailwindcss/theme.css, line-clamp-2 intacto, test con señal real, scope limitado a catalog-card.tsx/.test.tsx). QA manual pendiente de confirmación del usuario antes de commit/push/PR.",
       "notes": "El usuario propuso dos alternativas válidas: (a) fijar la altura de la card para que quepan siempre 2 líneas (con truncado a 2 líneas, que es lo que ya hace line-clamp-2 — solo falta la altura mínima), o (b) truncar a 1 línea. Se eligió (a) por defecto al redactar la solución porque conserva más información del título y ya existe la mitad del trabajo (line-clamp-2); si el usuario prefiere (b) en QA, es un cambio de una clase (`line-clamp-1` + ajustar min-height a 1 línea)."
+    },
+    {
+      "id": 13,
+      "title": "Búsqueda full-text no encuentra títulos con guion si el usuario escribe la palabra sin guion (\"Spiderman\" no encuentra \"Spider-Man\")",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-08-24",
+      "symptom": "Reportado por el usuario: buscar \"Spiderman\" en /search devuelve un único resultado (el juego \"Spiderman 2\", sin guion en el título) y no muestra ninguna de las 12+ películas/series/libro \"Spider-Man\" (con guion) que sí existen en la DB local — confirmado por psql: la tabla `catalog_search` tiene 9 movies, 1 series y 1 book con \"Spider-Man\" en el título.",
+      "cause": "La vista materializada `catalog_search` (alembic/versions/0006_catalog_search.py) construye `search_vector` con `to_tsvector('simple', title || ' ' || overview)`. El diccionario `simple` de Postgres tokeniza una palabra compuesta con guion en 3 lexemas — la palabra completa con guion, y cada mitad por separado — pero NUNCA genera la forma concatenada sin guion. Confirmado en vivo: `to_tsvector('simple', 'Spider-Man')` -> `'man':3 'spider':2 'spider-man':1` (sin `'spiderman'`), mientras que `to_tsvector('simple', 'Spiderman 2')` -> `'spiderman':1 '2':2`. `plainto_tsquery('simple', 'Spiderman')` -> `'spiderman'`, que no matchea ninguno de los 3 lexemas del título con guion. Mismo problema confirmado para otros títulos con guion (p.ej. \"X-Men '97\" no aparecería buscando \"xmen\"), no es específico de Spider-Man — cualquier título con guion es invisible a una búsqueda del usuario que omita el guion, un patrón de tecleo muy común.",
+      "solution": [
+        "Generalizada a cualquier puntuación (no solo guiones) a petición del usuario. Añadir al texto fuente del `search_vector` una variante del título con TODA puntuación eliminada (no solo guiones) pero espacios preservados como separador de palabras: `regexp_replace(title, '[^a-zA-Z0-9\\s]', '', 'g')`. Verificado en vivo contra los casos reales de la DB: 'Spider-Man: Homecoming' -> 'SpiderMan Homecoming' (tokeniza a 'spiderman'+'homecoming'), 'Marvel''s Spider-Man' -> 'Marvels SpiderMan' ('marvels'+'spiderman'), 'X-Men ''97' -> 'XMen 97' ('xmen'+'97'), 'S.W.A.T.' -> 'SWAT' ('swat'). Fuente final del vector: `to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\\s]', '', 'g') || ' ' || COALESCE(overview, ''))` (overview se deja sin normalizar — el bug reportado y verificado es sobre títulos, no sinopsis). Recrear `catalog_search` vía nueva migración Alembic (DROP+CREATE, mismo patrón que 0006/0007) + `REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search`.",
+        "Alternativa (no elegida): normalizar en el lado de la query en vez del índice — más frágil, requeriría intentar varias reescrituras de `q` en cada búsqueda en vez de resolverlo una sola vez en el índice, y no cubre el caso simétrico (título en DB sin puntuación, query del usuario con puntuación)."
+      ],
+      "verification": "GET /v1/search?q=Spiderman debe incluir las películas/series/libro \"Spider-Man\" además del juego. GET /v1/search?q=xmen debe encontrar \"X-Men '97\". GET /v1/search?q=marvels y ?q=swat deben encontrar sus títulos con apóstrofe/puntos respectivos. No debe romper búsquedas existentes con o sin puntuación (regresión) ni duplicar resultados.",
+      "notes": "Encontrado por el leader investigando el reporte del usuario, con queries psql directas contra backlogg-db (contenedor Docker local) — no confirmado aún contra el catálogo completo de producción, pero la causa es estructural (comportamiento documentado del diccionario `simple` de Postgres), no depende de qué datos haya. Decidido con el usuario: se aborda después de shippear el issue #12 (CatalogCard), en su propia rama."
     }
   ]
 }

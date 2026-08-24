@@ -76,6 +76,14 @@ describe("CatalogCard", () => {
     expect(screen.getByText("Hades")).toBeInTheDocument();
   });
 
+  it("reserves a 2-line minimum height on the title so 1-line and 2-line titles align across a grid (issue #12)", () => {
+    render(
+      <CatalogCard title="Hades" posterUrl={null} ratingExternal={null} />,
+    );
+
+    expect(screen.getByText("Hades")).toHaveClass("line-clamp-2", "min-h-10");
+  });
+
   it("wraps itself in a link to the item detail page when href is given", () => {
     render(
       <CatalogCard
