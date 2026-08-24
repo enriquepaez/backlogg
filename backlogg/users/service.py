@@ -248,12 +248,36 @@ def _extract_r2_key(avatar_url: str) -> str | None:
     return None
 
 
+async def _delete_r2_object_best_effort(avatar_url: str | None) -> None:
+    """Delete the R2 object backing ``avatar_url``, if any, without raising.
+
+    A no-op when ``avatar_url`` is ``None`` or isn't one of ours (see
+    ``_extract_r2_key``). Storage failures are logged and swallowed — callers
+    use this once the user-facing state no longer depends on the deletion
+    succeeding, so an unreachable/unconfigured bucket never blocks a request.
+    """
+    if avatar_url is None:
+        return
+    key = _extract_r2_key(avatar_url)
+    if key is None:
+        return
+    try:
+        await _r2.delete(key=key)
+    except Exception:  # noqa: BLE001 - storage failure must not block the caller
+        logger.warning(
+            "Failed to delete avatar object from R2 (key=%s); continuing anyway",
+            key,
+        )
+
+
 async def upload_avatar(db: AsyncSession, user: User, file: UploadFile) -> UserMeOut:
     """Validate, upload to R2 and persist the authenticated user's avatar.
 
     Overwrites any previous ``avatar_url`` (whether set by a prior upload or
     pasted via ``PATCH /v1/users/me``) with the freshly uploaded object's
-    public URL.
+    public URL. Once the new URL is committed, the R2 object behind the
+    previous ``avatar_url`` (if it was one of ours) is deleted best-effort so
+    re-uploading repeatedly doesn't leak orphaned objects in the bucket.
 
     Raises:
         HTTPException 422: ``file.content_type`` is not one of image/jpeg,
@@ -273,11 +297,16 @@ async def upload_avatar(db: AsyncSession, user: User, file: UploadFile) -> UserM
 
     _require_r2_configured()
 
+    previous_avatar_url = user.avatar_url
+
     key = f"avatars/{user.id}/{uuid4()}.{ext}"
     public_url = await _r2.upload(key=key, content=content, content_type=file.content_type)
 
     updated = await repo.update_user(db, user, {"avatar_url": public_url})
     await db.commit()
+
+    await _delete_r2_object_best_effort(previous_avatar_url)
+
     return UserMeOut.model_validate(updated)
 
 
@@ -293,15 +322,7 @@ async def delete_avatar(db: AsyncSession, user: User) -> None:
     if user.avatar_url is None:
         return
 
-    key = _extract_r2_key(user.avatar_url)
-    if key is not None:
-        try:
-            await _r2.delete(key=key)
-        except Exception:  # noqa: BLE001 - storage failure must not block the delete
-            logger.warning(
-                "Failed to delete avatar object from R2 (key=%s); clearing avatar_url anyway",
-                key,
-            )
+    await _delete_r2_object_best_effort(user.avatar_url)
 
     await repo.update_user(db, user, {"avatar_url": None})
     await db.commit()
@@ -318,12 +339,19 @@ async def delete_current_user(db: AsyncSession, user: User) -> None:
     ``rating_internal``/``rating_count_internal`` for each — the recompute now
     reads ``user_ratings`` with the user's rows already gone. The final commit
     persists both the deletion and the refreshed aggregates atomically.
+
+    The avatar's R2 object (if any) has no row referencing it, so it isn't
+    touched by the cascade — it's deleted best-effort, same as
+    ``delete_avatar``, so account deletion doesn't leak an orphaned object.
     """
+    avatar_url = user.avatar_url
     rated_items = await ratings_repo.get_distinct_rated_items_for_user(db, user.id)
     await repo.delete_user(db, user)
     for item_type, item_id in rated_items:
         await ratings_repo.recalculate_item_aggregates(db, item_type, item_id)
     await db.commit()
+
+    await _delete_r2_object_best_effort(avatar_url)
 
 
 # ── Account recovery (email verification + password reset) ─────────────────────

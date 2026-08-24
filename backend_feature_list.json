@@ -1242,7 +1242,7 @@
         "Test: borrar una cuenta con avatar subido dispara el borrado del objeto R2 correspondiente",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 62,
