@@ -329,7 +329,8 @@
     "reviewLike": "{name} liked your review.",
     "userCompleted": "{name} marked something as completed.",
     "generic": "{name} interacted with you.",
-    "deleteAriaLabel": "Delete notification"
+    "deleteAriaLabel": "Delete notification",
+    "unauthorized": "Your session has expired. Please log in again."
   },
   "Admin": {
     "heading": "Admin",
@@ -685,7 +686,8 @@
         "dropped": "Dropped"
       },
       "remove": "Remove from library",
-      "error": "Couldn't update your library. Please try again."
+      "error": "Couldn't update your library. Please try again.",
+      "unauthorized": "Your session has expired. Please log in again."
     }
   },
   "Auth": {

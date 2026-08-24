@@ -1,7 +1,7 @@
 import { act } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server } from "@/test/msw/server";
 import { renderWithQuery } from "@/test/render-with-query";
@@ -23,6 +23,16 @@ vi.mock("next-intl", () => ({
     (key: string, vars?: Record<string, unknown>) =>
       vars ? `${key}:${JSON.stringify(vars)}` : key,
   useLocale: () => "en",
+}));
+
+// Same rationale as `rating-widget.test.tsx`/`viewer-status-slot.test.tsx` for
+// mocking `sonner`'s `toast` (FE-54: this component didn't use it before).
+const toastError = vi.fn();
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: (...args: unknown[]) => toastError(...args),
+  },
 }));
 
 const { NotificationBell } = await import("./notification-bell");
@@ -94,6 +104,10 @@ const alreadyRead = {
   is_read: true,
   created_at: "2026-05-25T18:04:11Z",
 };
+
+beforeEach(() => {
+  toastError.mockClear();
+});
 
 afterEach(() => {
   server.resetHandlers();
@@ -364,6 +378,56 @@ describe("NotificationBell", () => {
 
     await waitFor(() => expect(screen.getByText('reviewLike:{"name":"carol"}')).toBeInTheDocument());
     expect(screen.getByText("1")).toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("shows the session-expired toast (not just a log) when deleting a notification returns a 401", async () => {
+    server.use(unreadCountHandler(1));
+    server.use(notificationsHandler([reviewLike]));
+    server.use(http.delete("/api/notifications/2", () => new HttpResponse(null, { status: 401 })));
+
+    renderWithQuery(<NotificationBell />);
+    await screen.findByText("1");
+
+    await act(async () => {
+      openBell();
+    });
+
+    await screen.findByText('reviewLike:{"name":"carol"}');
+    const deleteButton = screen.getByRole("button", { name: "deleteAriaLabel" });
+
+    await act(async () => {
+      fireEvent.click(deleteButton);
+    });
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("unauthorized"));
+    // The row stays in place, same as any other failed delete.
+    expect(screen.getByText('reviewLike:{"name":"carol"}')).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  it("shows the session-expired toast when marking all as read returns a 401", async () => {
+    server.use(unreadCountHandler(2));
+    server.use(notificationsHandler([reviewLike, newFollower]));
+    server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 401 })));
+
+    renderWithQuery(<NotificationBell />);
+    await screen.findByText("2");
+
+    await act(async () => {
+      openBell();
+    });
+
+    const markAllReadItem = await screen.findByRole("menuitem", { name: "markAllRead" });
+
+    await act(async () => {
+      fireEvent.click(markAllReadItem);
+    });
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("unauthorized"));
+    // Nothing is cleared locally on a failed mark-all-read.
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText('reviewLike:{"name":"carol"}')).toBeInTheDocument();
   });
 
   it("shows the user_completed-specific message instead of the generic fallback", async () => {

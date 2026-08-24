@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 /** `GET /api/{type}/{slug}/library`'s response shape. */
 type LibraryStatusGetResponse = { authenticated: boolean; status: LibraryStatusValue | null };
 
-/** Mutation outcomes only ever distinguish success/failure — the caller (`setStatusTo`/`remove`) only ever branches on that, same as the original inline `fetch` calls, which read nothing but `response.status` off a successful/failed PUT/DELETE. A thrown error (network failure) is treated identically to a `"failed"` result by both callers' `try`/`catch`. */
-type LibraryMutationResult = { status: "ok" } | { status: "failed" };
+/** Mutation outcomes (FE-54: `"unauthorized"` added, mirroring `SaveRatingResult` in `rating-widget.tsx`) — the caller (`setStatusTo`/`remove`) branches on all three, same as the original inline `fetch` calls, which read nothing but `response.status` off a successful/failed PUT/DELETE. A thrown error (network failure) is still treated identically to a `"failed"` result by both callers' `try`/`catch`. */
+type LibraryMutationResult = { status: "ok" } | { status: "unauthorized" } | { status: "failed" };
 
 async function fetchViewerLibraryStatus(
   type: CatalogType,
@@ -43,7 +43,9 @@ async function putViewerLibraryStatus(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
-  return response.status === 200 ? { status: "ok" } : { status: "failed" };
+  if (response.status === 200) return { status: "ok" };
+  if (response.status === 401) return { status: "unauthorized" };
+  return { status: "failed" };
 }
 
 async function deleteViewerLibraryStatus(
@@ -51,7 +53,9 @@ async function deleteViewerLibraryStatus(
   slug: string,
 ): Promise<LibraryMutationResult> {
   const response = await fetch(`/api/${type}/${slug}/library`, { method: "DELETE" });
-  return response.status === 204 ? { status: "ok" } : { status: "failed" };
+  if (response.status === 204) return { status: "ok" };
+  if (response.status === 401) return { status: "unauthorized" };
+  return { status: "failed" };
 }
 
 export type ViewerStatusSlotProps = {
@@ -183,18 +187,17 @@ export function ViewerStatusSlot({ type, slug }: ViewerStatusSlotProps) {
       status: next,
     } satisfies LibraryStatusGetResponse);
 
-    let ok = false;
+    let result: LibraryMutationResult = { status: "failed" };
     try {
-      const result = await setStatusMutation.mutateAsync(next);
-      ok = result.status === "ok";
+      result = await setStatusMutation.mutateAsync(next);
     } catch {
-      ok = false;
+      result = { status: "failed" };
     } finally {
-      if (!ok) {
-        queryClient.setQueryData(statusKey, previous);
-        toast.error(t("error"));
-      } else {
+      if (result.status === "ok") {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.counts.all });
+      } else {
+        queryClient.setQueryData(statusKey, previous);
+        toast.error(result.status === "unauthorized" ? t("unauthorized") : t("error"));
       }
       setPending(false);
     }
@@ -209,18 +212,17 @@ export function ViewerStatusSlot({ type, slug }: ViewerStatusSlotProps) {
       status: null,
     } satisfies LibraryStatusGetResponse);
 
-    let ok = false;
+    let result: LibraryMutationResult = { status: "failed" };
     try {
-      const result = await deleteMutation.mutateAsync();
-      ok = result.status === "ok";
+      result = await deleteMutation.mutateAsync();
     } catch {
-      ok = false;
+      result = { status: "failed" };
     } finally {
-      if (!ok) {
-        queryClient.setQueryData(statusKey, previous);
-        toast.error(t("error"));
-      } else {
+      if (result.status === "ok") {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.counts.all });
+      } else {
+        queryClient.setQueryData(statusKey, previous);
+        toast.error(result.status === "unauthorized" ? t("unauthorized") : t("error"));
       }
       setPending(false);
     }
