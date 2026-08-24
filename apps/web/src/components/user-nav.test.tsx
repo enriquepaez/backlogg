@@ -26,6 +26,20 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+// FE-55 "navbar decluttering" adds `LanguageMenuItem`/`ThemeMenuItem` as
+// `DropdownMenuSub` entries inside this menu — their own behavior (locale/
+// theme switching) is covered by `language-switcher.test.tsx`/
+// `mode-toggle.test.tsx`, out of scope for `UserNav`'s own tests, same
+// rationale as mocking `LanguageSwitcher`/`ModeToggle` used to be in
+// `site-header.test.tsx` (still is, under their new names).
+vi.mock("@/components/language-switcher", () => ({
+  LanguageMenuItem: () => <div data-testid="language-menu-item" />,
+}));
+
+vi.mock("@/components/mode-toggle", () => ({
+  ThemeMenuItem: () => <div data-testid="theme-menu-item" />,
+}));
+
 // Same rationale as `logout-button.test.tsx`: exercise the real `sonner`
 // module shape but spy on the two calls this component's actions can trigger
 // (`useLogout` never calls `toast.success`; `useResendVerification` calls
@@ -103,6 +117,15 @@ describe("UserNav", () => {
 
     const settingsItem = await screen.findByRole("menuitem", { name: /settings/i });
     expect(settingsItem).toHaveAttribute("href", "/settings");
+  });
+
+  it("shows the language and theme entries (FE-55: moved here from the header)", async () => {
+    render(<UserNav user={testUser} />);
+
+    openMenu();
+
+    expect(await screen.findByTestId("language-menu-item")).toBeInTheDocument();
+    expect(screen.getByTestId("theme-menu-item")).toBeInTheDocument();
   });
 
   it("shows a my-profile entry that links to /u/{username}", async () => {

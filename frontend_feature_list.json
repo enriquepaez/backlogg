@@ -1049,7 +1049,7 @@
         "i18n de las labels nuevas (triggers de los dropdowns); typecheck+lint+test+build en verde",
         "QA manual: el usuario revisa el resultado visual antes de darlo por bueno"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 55,

@@ -842,14 +842,20 @@
     "en": "English",
     "es": "Español"
   },
+  "ThemeMenu": {
+    "label": "Theme",
+    "light": "Light",
+    "system": "System",
+    "dark": "Dark"
+  },
   "Nav": {
     "brand": "backlogg",
     "primaryNav": "Main navigation",
-    "home": "Home",
     "search": "Search",
+    "explore": "Explore",
     "trending": "Trending",
     "genres": "Genres",
-    "showcase": "Showcase",
+    "activity": "Activity",
     "feed": "Feed",
     "recommendations": "For you",
     "library": "Library",
