@@ -2,10 +2,9 @@ import type { CatalogType } from "@/lib/catalog-types";
 
 /**
  * Central TanStack Query key factory for the "personal widgets" (FE-48):
- * the viewer's own rating, their library/backlog status, their activity log
- * history, notifications, and the public per-status library counts shown on
- * a profile page. Before this feature each of `rating-widget.tsx`,
- * `viewer-status-slot.tsx`, `activity-log-widget.tsx` and
+ * the viewer's own rating, their library/backlog status, notifications, and
+ * the public per-status library counts shown on a profile page. Before this
+ * feature each of `rating-widget.tsx`, `viewer-status-slot.tsx` and
  * `notification-bell.tsx` reimplemented its own `useState` + `useEffect` +
  * `fetch` — no shared cache, no cross-widget invalidation, and no vocabulary
  * for query identity. Centralizing the key shapes here (rather than each
@@ -46,10 +45,6 @@ export const queryKeys = {
       /** Per-status library counts for one user's public profile — backs `GET /api/users/{username}/library_counts`. */
       byUsername: (username: string) => ["library", "counts", username] as const,
     },
-  },
-  /** The viewer's own activity log history for one item — backs `GET /api/{type}/{slug}/log`. */
-  activityLog: {
-    detail: (type: CatalogType, slug: string) => ["activity-log", type, slug] as const,
   },
   notifications: {
     /** Backs `GET /api/notifications/unread_count` (the header bell's badge). */

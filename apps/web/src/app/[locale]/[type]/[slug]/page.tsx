@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
-import { ActivityLogWidget } from "@/components/activity-log-widget";
 import { ItemCredits, type ItemCredit } from "@/components/item-credits";
 import { ItemHero, type ItemMetadataField } from "@/components/item-hero";
 import { ItemReviews } from "@/components/item-reviews";
@@ -257,8 +256,6 @@ export default async function ItemDetailPage({
       />
 
       <ItemReviews type={type} slug={slug} />
-
-      <ActivityLogWidget type={type} slug={slug} />
 
       <ItemCredits
         credits={getCredits(item)}
