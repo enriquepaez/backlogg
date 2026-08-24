@@ -459,6 +459,105 @@ async def test_search_fallback_one_ingest_failure_does_not_abort_others(client, 
     refresh_mock.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# Punctuation normalization (issue #13) — searching without punctuation
+# still finds titles that contain it, and vice versa, without duplicates.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def punctuation_seeded_db(db):
+    """Seed movies with punctuated titles, then refresh the materialized view."""
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("spider-man-homecoming-2017-search-test")
+        | {"title": "Spider-Man: Homecoming", "original_title": "Spider-Man: Homecoming"},
+    )
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("marvels-spider-man-2018-search-test")
+        | {"title": "Marvel's Spider-Man", "original_title": "Marvel's Spider-Man"},
+    )
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("swat-2003-search-test") | {"title": "S.W.A.T.", "original_title": "S.W.A.T."},
+    )
+    await series_repo.upsert_series(
+        db,
+        _series_dict("x-men-97-2024-search-test")
+        | {"title": "X-Men '97", "original_title": "X-Men '97"},
+    )
+    await db.flush()
+    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
+    return db
+
+
+async def test_search_no_punctuation_finds_hyphenated_title(client, punctuation_seeded_db):
+    """GET /search?q=Spiderman finds 'Spider-Man: Homecoming' (hyphenated title)."""
+    response = await client.get("/v1/search?q=Spiderman")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "spider-man-homecoming-2017-search-test" in slugs
+
+
+async def test_search_no_punctuation_finds_apostrophe_title(client, punctuation_seeded_db):
+    """GET /search?q=xmen finds \"X-Men '97\" (apostrophe + hyphen in title)."""
+    response = await client.get("/v1/search?q=xmen")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "x-men-97-2024-search-test" in slugs
+
+
+async def test_search_no_punctuation_finds_possessive_title(client, punctuation_seeded_db):
+    """GET /search?q=marvels finds \"Marvel's Spider-Man\" (possessive apostrophe)."""
+    response = await client.get("/v1/search?q=marvels")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "marvels-spider-man-2018-search-test" in slugs
+
+
+async def test_search_no_punctuation_finds_abbreviation_title(client, punctuation_seeded_db):
+    """GET /search?q=swat finds \"S.W.A.T.\" (dotted abbreviation)."""
+    response = await client.get("/v1/search?q=swat")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "swat-2003-search-test" in slugs
+
+
+async def test_search_punctuated_query_still_finds_punctuated_title(client, punctuation_seeded_db):
+    """No regression — querying WITH the original punctuation still matches."""
+    response = await client.get("/v1/search?q=Spider-Man")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "spider-man-homecoming-2017-search-test" in slugs
+    assert "marvels-spider-man-2018-search-test" in slugs
+
+
+async def test_search_no_duplicate_results_for_punctuated_title(client, punctuation_seeded_db):
+    """Each matching row appears exactly once — the extra normalized lexemes
+    live in the same search_vector, not a duplicated row."""
+    response = await client.get("/v1/search?q=Spiderman")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert slugs.count("spider-man-homecoming-2017-search-test") == 1
+
+
+async def test_search_existing_plain_title_still_works(client, punctuation_seeded_db, seeded_db):
+    """No regression — a plain (punctuation-free) title still matches as before."""
+    response = await client.get("/v1/search?q=inception")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "inception-2010-search-test" in slugs
+    assert slugs.count("inception-2010-search-test") == 1
+
+
 async def test_search_fallback_returns_ingested_items(client, db):
     """After ingestion, items appear in search results (end-to-end with real ingest)."""
     # Pre-seed a movie that will be "found" by the external fallback
