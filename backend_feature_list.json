@@ -1225,6 +1225,79 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 61,
+      "name": "avatar_r2_orphan_cleanup",
+      "title": "Borrar el objeto R2 del avatar anterior al re-subir o al borrar la cuenta",
+      "description": "Motivado por el audit3 de producción (2026-08-24): upload_avatar genera una key nueva por cada subida y sobrescribe avatar_url, pero nunca borra el objeto R2 de la key anterior (a diferencia de delete_avatar, que sí lo hace). delete_current_user (borrado de cuenta) tampoco borra el avatar en R2 antes de eliminar la fila de usuario. Cada re-upload o borrado de cuenta deja un objeto binario huérfano permanente en el bucket, sin ninguna referencia en la DB que permita limpiarlo después.",
+      "depends_on": [
+        51,
+        41
+      ],
+      "acceptance": [
+        "upload_avatar captura la key anterior antes de sobrescribir avatar_url y la borra de R2 tras la subida exitosa (best-effort: un fallo al borrar no bloquea la respuesta)",
+        "delete_current_user borra el objeto R2 del avatar (si existe) antes o junto al borrado de la fila de usuario, con el mismo patrón try/except-log-continue que ya usa delete_avatar",
+        "Test: re-subir un avatar dos veces deja borrado el objeto de la key anterior (mock de R2)",
+        "Test: borrar una cuenta con avatar subido dispara el borrado del objeto R2 correspondiente",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 62,
+      "name": "rating_aggregate_recalc_batching",
+      "title": "Batchear recalculate_item_aggregates en ban/unban y borrado de cuenta (mismo patrón que la 57)",
+      "description": "Motivado por el audit3 de producción (2026-08-24): set_user_banned (ban y unban) y delete_current_user recorren rated_items en un bucle secuencial, llamando a recalculate_item_aggregates (un SELECT + escritura) una vez por item. Para un usuario con muchas valoraciones, banearlo/desbanearlo o borrar su cuenta dispara N round-trips secuenciales a Neon antes de poder hacer commit — la misma categoría de riesgo (Render free tier, CPU compartida) que motivó batchear el fan-out de notificaciones en la feature 57, sin corregir aquí.",
+      "depends_on": [
+        57,
+        43,
+        41
+      ],
+      "acceptance": [
+        "set_user_banned (ban y unban) recalcula los agregados de todos los items afectados en una sola consulta agregada (GROUP BY + UPDATE, o equivalente) en vez de N round-trips secuenciales",
+        "delete_current_user aplica el mismo batching al recalcular los items afectados por el borrado de sus ratings",
+        "Test: banear/desbanear o borrar la cuenta de un usuario con muchas ratings no aumenta linealmente el número de queries ejecutadas",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 63,
+      "name": "admin_action_audit_log",
+      "title": "Tabla de auditoría persistida para acciones admin/moderación",
+      "description": "Motivado por el audit3 de producción (2026-08-24): las acciones de alto privilegio (hide/unhide review, ban/unban user, resolve report, sync manual, grant/revoke-admin) están gateadas por X-API-Key o is_superadmin, pero ninguna se persiste en una tabla de auditoría — el único rastro es el log JSON efímero de stdout, no consultable ni con garantías de retención en Render. No hay forma de responder después 'quién baneó a este usuario y cuándo'.",
+      "depends_on": [
+        18,
+        43,
+        47
+      ],
+      "acceptance": [
+        "Nueva tabla admin_actions (actor_id nullable FK a users, action, target_type, target_id, created_at) vía migración Alembic reversible",
+        "Poblada desde un helper común invocado en: hide/unhide review, ban/unban user, resolve report, grant/revoke-admin (actor capturado cuando la ruta tiene identidad Bearer; nullable cuando solo hay X-API-Key)",
+        "GET /admin/actions paginado (mismo gate que el resto de /admin/*) para consultar el histórico",
+        "docs/schema.md y docs/api.md actualizados",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 64,
+      "name": "remove_activity_log_domain",
+      "title": "Eliminar por completo el dominio de activity log (library_logs)",
+      "description": "Decisión de producto del usuario (2026-08-24): el activity log (feature 52, logs fechados de rewatch/replay/reread separados de la review única) añade complejidad que no aporta suficiente valor. Se elimina por completo, no se oculta ni se simplifica: tabla, endpoints, módulo de código y documentación asociada.",
+      "depends_on": [
+        52
+      ],
+      "acceptance": [
+        "Nueva migración Alembic (no se edita 0023_library_logs.py) que hace DROP TABLE library_logs en upgrade(), con downgrade() que la recrea igual que la migración original",
+        "Rutas POST/GET .../{type}/{slug}/log, GET /users/{username}/log y DELETE /log/{id} eliminadas de los 4 routers de contenido y del router de library_logs; router ya no se monta en backlogg/main.py",
+        "Módulo backlogg/library_logs/ y sus tests eliminados; sin imports rotos",
+        "docs/schema.md y docs/api.md actualizados quitando la tabla y los endpoints",
+        "No se toca UserRating ni la tabla de ratings — el activity log era independiente de las reviews, que se mantienen intactas",
+        "bash init.sh termina en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
