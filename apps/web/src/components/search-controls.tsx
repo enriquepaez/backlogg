@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { SlidersHorizontal } from "lucide-react";
+import { Loader2, SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,6 +121,15 @@ export function SearchControls({
   const t = useTranslations("Search");
   const [value, setValue] = useState(initialQuery);
 
+  // `router.replace` here is imperative (debounced typing, the type
+  // `<select>`, the advanced filters), not a `<Link>` click — `useLinkStatus`
+  // (used by `SearchPagination`'s prev/next `Link`s) doesn't apply to it, so
+  // there was previously no feedback at all while a new query (or the first
+  // query, which can hit the external fan-out — `backlogg/search/service.py`)
+  // was in flight. `useTransition` is React's mechanism for exactly this:
+  // pending state around a navigation triggered outside a `Link`.
+  const [isPending, startTransition] = useTransition();
+
   // The URL is the source of truth: if it changes underneath us (filter
   // change, pagination, back/forward, or a shared link), sync the visible
   // input to match rather than let it drift. Adjusted during render (React's
@@ -186,7 +195,9 @@ export function SearchControls({
   const committedAdvancedKey = JSON.stringify(committedAdvanced);
 
   function navigate({ q, type }: { q: string; type?: CatalogType }) {
-    router.replace({ pathname: "/search", query: buildQuery(q, type, pendingAdvanced) });
+    startTransition(() => {
+      router.replace({ pathname: "/search", query: buildQuery(q, type, pendingAdvanced) });
+    });
   }
 
   useEffect(() => {
@@ -231,9 +242,11 @@ export function SearchControls({
     setDateToInput("");
     setRatingExternalMinInput("");
     setRatingExternalMaxInput("");
-    router.replace({
-      pathname: "/search",
-      query: buildQuery(value.trim(), initialType, {}),
+    startTransition(() => {
+      router.replace({
+        pathname: "/search",
+        query: buildQuery(value.trim(), initialType, {}),
+      });
     });
   }
 
@@ -243,134 +256,160 @@ export function SearchControls({
   const advancedFilterCount = [dateGroupActive, ratingExternalGroupActive].filter(Boolean).length;
 
   return (
-    <div className="flex flex-wrap items-end gap-4">
-      <div className="flex min-w-48 flex-1 flex-col gap-1">
-        <label htmlFor="search-q" className="text-sm font-medium">
-          {t("inputLabel")}
-        </label>
-        <Input
-          id="search-q"
-          type="search"
-          placeholder={t("placeholder")}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-        />
-      </div>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex min-w-48 flex-1 flex-col gap-1">
+          <label htmlFor="search-q" className="text-sm font-medium">
+            {t("inputLabel")}
+          </label>
+          <Input
+            id="search-q"
+            type="search"
+            placeholder={t("placeholder")}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="search-type" className="text-sm font-medium">
-          {t("filters.typeLabel")}
-        </label>
-        <select
-          id="search-type"
-          className={SELECT_CLASSNAME}
-          value={initialType ?? ""}
-          onChange={(event) =>
-            navigate({
-              q: value.trim(),
-              type: (event.target.value || undefined) as CatalogType | undefined,
-            })
-          }
-        >
-          <option value="" className={OPTION_CLASSNAME}>
-            {t("filters.all")}
-          </option>
-          {CATALOG_TYPES.map((type) => (
-            <option key={type} value={type} className={OPTION_CLASSNAME}>
-              {t(`filters.${type}`)}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="search-type" className="text-sm font-medium">
+            {t("filters.typeLabel")}
+          </label>
+          <select
+            id="search-type"
+            className={SELECT_CLASSNAME}
+            value={initialType ?? ""}
+            onChange={(event) =>
+              navigate({
+                q: value.trim(),
+                type: (event.target.value || undefined) as CatalogType | undefined,
+              })
+            }
+          >
+            <option value="" className={OPTION_CLASSNAME}>
+              {t("filters.all")}
             </option>
-          ))}
-        </select>
+            {CATALOG_TYPES.map((type) => (
+              <option key={type} value={type} className={OPTION_CLASSNAME}>
+                {t(`filters.${type}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5">
+              <SlidersHorizontal className="h-4 w-4" />
+              {t("filters.moreFilters")}
+              {advancedFilterCount > 0 ? (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-xs text-primary-foreground">
+                  {advancedFilterCount}
+                </span>
+              ) : null}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-end gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="search-date-from">{t("filters.dateFromLabel")}</Label>
+                    <Input
+                      id="search-date-from"
+                      type="date"
+                      className="w-36"
+                      value={dateFromInput}
+                      onChange={(event) => setDateFromInput(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="search-date-to">{t("filters.dateToLabel")}</Label>
+                    <Input
+                      id="search-date-to"
+                      type="date"
+                      className="w-36"
+                      value={dateToInput}
+                      onChange={(event) => setDateToInput(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {dateRangeInvalid ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {t("filters.dateRangeInvalid")}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-end gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="search-rating-external-min">
+                      {t("filters.ratingExternalMinLabel")}
+                    </Label>
+                    <Input
+                      id="search-rating-external-min"
+                      type="number"
+                      step="0.1"
+                      className="w-24"
+                      value={ratingExternalMinInput}
+                      onChange={(event) => setRatingExternalMinInput(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="search-rating-external-max">
+                      {t("filters.ratingExternalMaxLabel")}
+                    </Label>
+                    <Input
+                      id="search-rating-external-max"
+                      type="number"
+                      step="0.1"
+                      className="w-24"
+                      value={ratingExternalMaxInput}
+                      onChange={(event) => setRatingExternalMaxInput(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {ratingExternalRangeInvalid ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {t("filters.ratingExternalRangeInvalid")}
+                  </p>
+                ) : null}
+              </div>
+
+              {advancedFilterCount > 0 ? (
+                <Button type="button" variant="ghost" size="sm" onClick={handleClearAdvancedFilters}>
+                  {t("filters.clearFilters")}
+                </Button>
+              ) : null}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5">
-            <SlidersHorizontal className="h-4 w-4" />
-            {t("filters.moreFilters")}
-            {advancedFilterCount > 0 ? (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-xs text-primary-foreground">
-                {advancedFilterCount}
-              </span>
-            ) : null}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-80 p-4">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-end gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="search-date-from">{t("filters.dateFromLabel")}</Label>
-                  <Input
-                    id="search-date-from"
-                    type="date"
-                    className="w-36"
-                    value={dateFromInput}
-                    onChange={(event) => setDateFromInput(event.target.value)}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="search-date-to">{t("filters.dateToLabel")}</Label>
-                  <Input
-                    id="search-date-to"
-                    type="date"
-                    className="w-36"
-                    value={dateToInput}
-                    onChange={(event) => setDateToInput(event.target.value)}
-                  />
-                </div>
-              </div>
-
-              {dateRangeInvalid ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {t("filters.dateRangeInvalid")}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-end gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="search-rating-external-min">{t("filters.ratingExternalMinLabel")}</Label>
-                  <Input
-                    id="search-rating-external-min"
-                    type="number"
-                    step="0.1"
-                    className="w-24"
-                    value={ratingExternalMinInput}
-                    onChange={(event) => setRatingExternalMinInput(event.target.value)}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="search-rating-external-max">{t("filters.ratingExternalMaxLabel")}</Label>
-                  <Input
-                    id="search-rating-external-max"
-                    type="number"
-                    step="0.1"
-                    className="w-24"
-                    value={ratingExternalMaxInput}
-                    onChange={(event) => setRatingExternalMaxInput(event.target.value)}
-                  />
-                </div>
-              </div>
-
-              {ratingExternalRangeInvalid ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {t("filters.ratingExternalRangeInvalid")}
-                </p>
-              ) : null}
-            </div>
-
-            {advancedFilterCount > 0 ? (
-              <Button type="button" variant="ghost" size="sm" onClick={handleClearAdvancedFilters}>
-                {t("filters.clearFilters")}
-              </Button>
-            ) : null}
-          </div>
-        </PopoverContent>
-      </Popover>
+      {/*
+       * Fixed line-height reserved regardless of `isPending` (same "reserve
+       * space, toggle content" approach as `SearchPaginationStatus`) so the
+       * results grid below doesn't jump when this appears/disappears.
+       */}
+      <p
+        role="status"
+        aria-live="polite"
+        className="flex min-h-4 items-center gap-1.5 text-xs text-muted-foreground"
+      >
+        {isPending ? (
+          <>
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+            {t("searching")}
+          </>
+        ) : (
+          ""
+        )}
+      </p>
     </div>
   );
 }

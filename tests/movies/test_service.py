@@ -68,7 +68,7 @@ async def test_get_movie_found_in_db(db):
 
 async def test_get_movie_fallback_to_tmdb(db):
     """When movie is not in DB, service calls TMDB, persists and returns it."""
-    search_result = {"id": 27205}
+    search_result = [{"id": 27205}]
     detail = _make_tmdb_detail(tmdb_id=27205)
 
     with (
@@ -108,7 +108,7 @@ async def test_get_movie_not_found_anywhere(db):
 
 async def test_get_movie_fallback_passes_year_from_slug(db):
     """When slug contains a year suffix, search_movie is called with that year."""
-    search_result = {"id": 78}
+    search_result = [{"id": 78}]
     detail = _make_tmdb_detail(tmdb_id=78)
 
     with (

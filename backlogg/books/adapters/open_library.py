@@ -156,8 +156,9 @@ def _normalize_edition_as_work(edition: dict) -> dict:
 
 
 class OpenLibraryClient:
-    async def search_book(self, title: str) -> dict | None:
-        """Search Open Library by title and return the first result.
+    @_ol_search_retry
+    async def search_book(self, title: str, page: int = 1, limit: int = 1) -> list[dict]:
+        """Search Open Library by title and return up to *limit* results for *page*.
 
         Not affected by the Issue #10 redirect bug: this hits the
         ``/search.json`` query endpoint (same as ``_fetch_popular_page``),
@@ -165,6 +166,12 @@ class OpenLibraryClient:
         ``/authors/{id}.json`` — a search query has no OLID to be the wrong
         record type for, so it never receives the routing-mismatch 301.
         ``follow_redirects`` is deliberately left out.
+
+        Defaults to ``limit=1`` (top hit only) for the on-demand single-item
+        fallback callers (``books/service.py``); the search fan-out
+        (``search/service.py``) passes an explicit ``page``/``limit`` to walk
+        further pages. Retried via ``_ol_search_retry`` like the other
+        ``search.json`` caller in this module.
         """
         async with httpx.AsyncClient(headers=_OL_HEADERS, timeout=_OL_TIMEOUT) as client:
             response = await client.get(
@@ -172,13 +179,13 @@ class OpenLibraryClient:
                 params={
                     "title": title,
                     "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
-                    "limit": 1,
+                    "limit": limit,
+                    "page": page,
                 },
             )
             response.raise_for_status()
             data = response.json()
-            docs = data.get("docs", [])
-            return docs[0] if docs else None
+            return data.get("docs", [])
 
     @_ol_search_retry
     async def _fetch_popular_page(self, per_page: int, offset: int) -> dict:

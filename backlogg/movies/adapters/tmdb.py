@@ -46,8 +46,14 @@ class TMDBClient:
         }
 
     @_tmdb_retry
-    async def search_movie(self, query: str, year: int | None = None) -> dict | None:
-        params: dict = {"query": query}
+    async def search_movie(self, query: str, year: int | None = None, page: int = 1) -> list[dict]:
+        """Search TMDB for movies matching *query* and return the given *page*.
+
+        TMDB's ``/search/movie`` returns ~20 results per page natively via
+        the ``page`` param. Returns the full page of results (not just the
+        top hit) so callers can ingest more than one match per search.
+        """
+        params: dict = {"query": query, "page": page}
         if year is not None:
             params["primary_release_year"] = year
         async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
@@ -58,8 +64,7 @@ class TMDBClient:
             )
             response.raise_for_status()
             data = response.json()
-            results = data.get("results", [])
-            return results[0] if results else None
+            return data.get("results", [])
 
     @_tmdb_retry
     async def get_movie_detail(self, tmdb_id: int) -> dict | None:

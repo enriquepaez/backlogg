@@ -40,9 +40,18 @@ class SearchRepository:
         the count of matching rows (before pagination).
 
         When ``q`` is provided, uses plainto_tsquery so callers do not need to
-        escape the query string, and results are ordered by ts_rank descending
-        (most relevant first). When ``q`` is ``None`` this is a pure filter
-        query (``date_from``/``date_to``/``rating_external_min/max``) — the
+        escape the query string, and results are ordered by
+        ``rating_external DESC NULLS LAST`` first (best-rated matches surface
+        above unrated/lower-rated ones, even when their ts_rank is lower),
+        then by ts_rank descending as a tie-breaker among items with the same
+        rating (including grouping all NULL-rating items together, ordered
+        among themselves by text relevance), and finally by ``id`` as the
+        last tie-breaker for pagination stability (issue #14). ts_rank alone
+        is not a reliable primary sort key: distinct titles rarely produce
+        identical ts_rank, so a rank-first order effectively never lets
+        rating_external decide (issue #14 follow-up). When ``q`` is
+        ``None`` this is a pure filter query
+        (``date_from``/``date_to``/``rating_external_min/max``) — the
         full-text clause is omitted entirely (there is nothing to match
         against) and results are ordered by ``rating_external DESC NULLS
         LAST`` instead, since there is no rank to sort by.
@@ -74,14 +83,32 @@ class SearchRepository:
         # Fetch paginated results
         offset = (page - 1) * limit
         if q is not None:
-            # ts_rank requires a raw text expression
+            # ts_rank requires a raw text expression. rating_external is the
+            # primary sort key: ts_rank varies with title length/structure
+            # even among equally relevant matches, so ordering by ts_rank
+            # first means rating_external almost never gets a chance to act
+            # as a tie-breaker in practice (issue #14 follow-up). ``id`` is
+            # the final sort key so OFFSET/LIMIT pagination is stable across
+            # requests even when rows are inserted between pages (e.g. by
+            # the search fan-out).
             rank_expr = text(
                 "ts_rank(search_vector, plainto_tsquery('simple', :q_rank))"
             ).bindparams(q_rank=q)
-            ranked_stmt = base_stmt.order_by(desc(rank_expr)).offset(offset).limit(limit)
+            ranked_stmt = (
+                base_stmt.order_by(
+                    CatalogSearchEntry.rating_external.desc().nulls_last(),
+                    desc(rank_expr),
+                    CatalogSearchEntry.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
         else:
             ranked_stmt = (
-                base_stmt.order_by(CatalogSearchEntry.rating_external.desc().nulls_last())
+                base_stmt.order_by(
+                    CatalogSearchEntry.rating_external.desc().nulls_last(),
+                    CatalogSearchEntry.id,
+                )
                 .offset(offset)
                 .limit(limit)
             )

@@ -68,7 +68,7 @@ async def test_get_series_found_in_db(db):
 
 async def test_get_series_fallback_to_tmdb(db):
     """When series is not in DB, service calls TMDB, persists and returns it."""
-    search_result = {"id": 1396}
+    search_result = [{"id": 1396}]
     detail = _make_tmdb_detail(tmdb_id=1396)
 
     with (

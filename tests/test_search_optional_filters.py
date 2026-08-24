@@ -27,6 +27,29 @@ _INGEST_PATCHES = (
 )
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _no_real_fanout_by_default():
+    """Prevent accidental real external-API calls for tests that don't opt in.
+
+    Same rationale as ``tests/test_search.py::_no_real_fanout_by_default``:
+    issue #14 widened the fallback trigger from "0 local results" to "local
+    page shorter than limit", so any test in this module hitting
+    ``q=...`` without seeding >= ``limit`` (default 20) rows would otherwise
+    silently fan out to the real TMDB/Open Library/IGDB APIs. Tests that
+    specifically exercise the fallback patch these same targets themselves
+    inside a nested ``with``, which takes precedence for the duration of
+    that block.
+    """
+    with (
+        patch(_INGEST_PATCHES[0], new=AsyncMock(return_value=None)),
+        patch(_INGEST_PATCHES[1], new=AsyncMock(return_value=None)),
+        patch(_INGEST_PATCHES[2], new=AsyncMock(return_value=None)),
+        patch(_INGEST_PATCHES[3], new=AsyncMock(return_value=None)),
+        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
+    ):
+        yield
+
+
 def _movie_dict(slug: str, title: str, rel: date, rext: float) -> dict:
     return {
         "title": title,
@@ -225,7 +248,7 @@ async def test_search_fanout_requery_reapplies_date_filter(client, db):
     final response must only contain the one inside the range.
     """
 
-    async def fake_ingest_movies(q):
+    async def fake_ingest_movies(q, page, limit):
         await _seed(db, "faf-date-inrange-2020", "Faf Date Reapply", date(2020, 6, 1), 5.0)
         await _seed(db, "faf-date-outrange-2010", "Faf Date Reapply", date(2010, 6, 1), 5.0)
         await db.flush()
@@ -253,7 +276,7 @@ async def test_search_fanout_requery_reapplies_date_filter(client, db):
 async def test_search_fanout_requery_reapplies_rating_external_filter(client, db):
     """Same scenario, but with a rating_external range active instead of dates."""
 
-    async def fake_ingest_movies(q):
+    async def fake_ingest_movies(q, page, limit):
         await _seed(db, "faf-rating-inrange-2020", "Faf Rating Reapply", date(2020, 1, 1), 9.0)
         await _seed(db, "faf-rating-outrange-2020", "Faf Rating Reapply", date(2020, 1, 1), 2.0)
         await db.flush()

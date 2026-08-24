@@ -59,6 +59,19 @@ materialized view backing this endpoint has no `rating_internal` column.
 fan-out described below never fires when `q` is absent, regardless of how
 many (or few) local results the filters match.
 
+**With `q`, the fallback fires whenever the requested page comes back
+partially populated** — fewer local results than `limit`, which includes
+(but is not limited to) zero results. This lets the catalog fill in
+gradually as a user pages through a query whose local catalog is still
+incomplete, e.g. a franchise with only some of its titles synced locally.
+**It also fires on page 1 of any `q` search at least once per cache TTL even
+when that page is already fully populated locally** — a broad, popular query
+can have more than enough local rows to fill page after page without ever
+coming back short, so the "incomplete page" trigger alone would never check
+the external APIs again for it. Identical page-1 requests within the TTL are
+deduplicated so a hot term does not hammer the external APIs on every
+request.
+
 Response:
 ```json
 {
@@ -79,17 +92,35 @@ Response:
 }
 ```
 
-**External fallback**: si `q` está presente y la consulta devuelve 0
-resultados locales, el servicio hace fan-out en paralelo a las APIs externas
-(TMDB, Open Library, IGDB — solo la correspondiente si se filtra por `type`),
-ingesta los top hits y re-consulta la vista local antes de responder. Un
-fallo en una API externa no aborta las demás ni devuelve error al cliente.
-Si `q` está ausente (consulta de filtro puro), el fallback **nunca** se
-dispara, sin importar cuántos resultados locales haya.
+**External fallback**: si `q` está presente y la página local solicitada
+devuelve **menos resultados que `limit`** (esto incluye, pero no se limita
+a, 0 resultados locales — cualquier página parcialmente poblada dispara el
+mismo camino, incluida la página 1), o si es la **página 1 de cualquier
+búsqueda con `q`** y no se ha comprobado esa misma combinación `q`/`type` en
+los últimos `_FANOUT_QUERY_CACHE_TTL_SECONDS` (10 min, vía `core/cache`) —
+esto último cubre queries amplias y populares con sobra de resultados
+locales para llenar cualquier página, que de otro modo nunca dispararían el
+fan-out por "página incompleta"— el servicio hace fan-out en paralelo a
+las APIs externas (TMDB, Open Library, IGDB — solo la correspondiente si se
+filtra por `type`), ingesta **hasta `limit` hits** de la página externa
+mapeada (no solo el top hit — solo tantos como se van a mostrar en esta
+página, con las llamadas de detalle por ítem de movies/series/books
+paralelizadas y acotadas a 5 peticiones concurrentes) y re-consulta la vista
+local antes de responder. La
+página externa se deriva de forma determinista a partir de `page`/`limit` —
+no hay cursor ni estado persistido nuevo, así que páginas sucesivas de una
+misma búsqueda siguen completando el catálogo mientras sigan llegando cortas.
+Un fallo en una API externa no aborta las demás ni devuelve error al
+cliente. Si `q` está ausente (consulta de filtro puro), el fallback
+**nunca** se dispara, sin importar cuántos resultados locales haya.
 
 El fallback externo está **rate-limited por IP** (`RATE_LIMIT_SEARCH_FALLBACK`):
 superar el límite devuelve `429` con header `Retry-After` **sin** llamar a las
-APIs externas. Las consultas servidas desde el catálogo local no consumen cupo.
+APIs externas. Una página parcialmente poblada consume cupo siempre, aunque
+tenga algún resultado local; una página ya completamente poblada solo
+consume cupo cuando es la página 1 y la combinación `q`/`type` no se había
+comprobado externamente dentro del TTL de la caché — pasado ese chequeo (o
+en páginas >1 ya completas) no consume cupo.
 
 ### List endpoints (los 4 tipos)
 

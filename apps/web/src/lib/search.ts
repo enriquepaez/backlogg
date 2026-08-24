@@ -50,8 +50,15 @@ export type SearchResult =
   | { status: "rate-limited"; retryAfterSeconds: number | null }
   | { status: "error" };
 
-/** Page size for the search results grid — matches `BROWSE_PAGE_SIZE` (`./catalog.ts`) for a consistent grid layout. */
-export const SEARCH_PAGE_SIZE = 24;
+/**
+ * Page size for the search results grid. Deliberately smaller than
+ * `BROWSE_PAGE_SIZE` (`./catalog.ts`, 24) — a smaller page keeps each
+ * external-fallback fan-out trip (issue #14, `backlogg/search/service.py`)
+ * a cheap, incremental unit of catalog completion as the user pages
+ * further, rather than one large batch. Still divides evenly into the
+ * results grid's column counts (2/3/4/6, `search/page.tsx`).
+ */
+export const SEARCH_PAGE_SIZE = 12;
 
 /**
  * Cross-type search, `GET /v1/search?q=&type=&page=&limit=&date_from=&date_to=&rating_external_min=&rating_external_max=`.

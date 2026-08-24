@@ -19,8 +19,12 @@ router = APIRouter(tags=["search"])
         "Cross-type search. `q` is optional (min_length=1 when present, 422 if empty); "
         "also supports `date_from`/`date_to`/`rating_external_min`/`rating_external_max` "
         "range filters (inclusive), independently optional and combinable with `q`. "
-        "Rate-limited external fallback fires only on zero local hits AND when `q` is "
-        "present — external APIs are never queried by date/rating filters alone."
+        "Rate-limited external fallback fires whenever the requested page comes back "
+        "with fewer local hits than `limit` (this includes, but is not limited to, zero "
+        "hits) AND `q` is present, and additionally on page 1 of any `q` search at "
+        "least once per cache TTL even when the page is already full — external APIs "
+        "are never queried by date/rating filters alone. Up to `limit` hits from the "
+        "externally-mapped page are ingested, not just the top one."
     ),
 )
 async def search_catalog(
@@ -37,9 +41,13 @@ async def search_catalog(
     - date_from / date_to: inclusive range on release_date
     - rating_external_min / rating_external_max: inclusive range on rating_external
 
-    The external fallback (fired only when there are no local results AND `q`
-    is present) is rate limited per client IP; exceeding it returns 429 with a
-    ``Retry-After`` header.
+    The external fallback (fired when the local page comes back with fewer
+    than `limit` results AND `q` is present — not only when there are zero
+    local results — and additionally on page 1 of any `q` search at least
+    once per cache TTL even when that page is already full) is rate limited
+    per client IP; exceeding it returns 429 with a ``Retry-After`` header.
+    Up to `limit` hits from the externally-mapped page are ingested, not
+    just the top one.
     """
     svc = SearchService(db)
     results, total = await svc.search(

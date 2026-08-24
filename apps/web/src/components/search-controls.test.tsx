@@ -46,6 +46,12 @@ describe("SearchControls", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("renders an empty status region (no pending navigation) by default", () => {
+    render(<SearchControls initialQuery="dune" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
   it("debounces navigation while typing, firing once after the pause", () => {
     render(<SearchControls initialQuery="" />);
 

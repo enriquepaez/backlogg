@@ -71,7 +71,7 @@ async def test_get_book_fallback_to_open_library(db):
             service._ol_client,
             "search_book",
             new_callable=AsyncMock,
-            return_value=search_doc,
+            return_value=[search_doc],
         ),
         patch.object(
             service._ol_client,

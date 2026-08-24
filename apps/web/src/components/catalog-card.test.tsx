@@ -26,6 +26,34 @@ describe("CatalogCard", () => {
     expect(screen.getByRole("img", { name: "Dune" })).toBeInTheDocument();
   });
 
+  it("appends the year in parentheses to the title and alt text when provided", () => {
+    render(
+      <CatalogCard
+        title="Batman"
+        year={1989}
+        posterUrl="https://image.tmdb.org/t/p/w500/batman.jpg"
+        ratingExternal={7.6}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Batman (1989)" })).toBeInTheDocument();
+    expect(screen.getByText("Batman (1989)")).toBeInTheDocument();
+  });
+
+  it("omits the parentheses entirely when year is null or unset", () => {
+    render(
+      <CatalogCard
+        title="Batman"
+        year={null}
+        posterUrl="https://image.tmdb.org/t/p/w500/batman.jpg"
+        ratingExternal={7.6}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Batman" })).toBeInTheDocument();
+    expect(screen.queryByText(/\(/)).not.toBeInTheDocument();
+  });
+
   it("renders the rating rounded to one decimal", () => {
     render(
       <CatalogCard

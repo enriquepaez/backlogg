@@ -135,6 +135,59 @@ async def test_get_movie_credits_raises_after_exhausting_retries():
 
 
 @pytest.mark.asyncio
+async def test_search_movie_returns_full_results_list():
+    """search_movie returns the whole page of results, not just the top hit (Issue #14)."""
+    payload = {
+        "page": 1,
+        "results": [{"id": 1}, {"id": 2}, {"id": 3}],
+        "total_pages": 1,
+    }
+    captured: dict = {}
+
+    async def fake_get(*args, **kwargs):  # noqa: ARG001
+        captured["params"] = kwargs.get("params")
+        return _mock_response(200, payload)
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        client = TMDBClient()
+        results = await client.search_movie("spiderman")
+
+    assert results == [{"id": 1}, {"id": 2}, {"id": 3}]
+    assert captured["params"]["page"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_movie_returns_empty_list_when_no_matches():
+    """search_movie returns [] (not None) when TMDB has no matches."""
+
+    async def fake_get(*args, **kwargs):  # noqa: ARG001
+        return _mock_response(200, {"page": 1, "results": [], "total_pages": 1})
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        client = TMDBClient()
+        results = await client.search_movie("xxxxxxxxxxxxxxxxxxx_no_match")
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_movie_forwards_page_param():
+    """search_movie forwards an explicit page to TMDB's native pagination."""
+    captured: dict = {}
+
+    async def fake_get(*args, **kwargs):  # noqa: ARG001
+        captured["params"] = kwargs.get("params")
+        return _mock_response(200, {"page": 3, "results": [{"id": 99}], "total_pages": 5})
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        client = TMDBClient()
+        results = await client.search_movie("spiderman", page=3)
+
+    assert results == [{"id": 99}]
+    assert captured["params"]["page"] == 3
+
+
+@pytest.mark.asyncio
 async def test_get_movie_detail_non_retryable_4xx_raises_immediately():
     """A non-404 4xx (e.g. 400) is not transient — it must raise without retry."""
     call_count = 0

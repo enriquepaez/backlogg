@@ -77,7 +77,12 @@ async def test_search_fallback_rate_limited_returns_429(client, monkeypatch):
 
 
 async def test_search_with_local_results_does_not_consume_quota(client, db, monkeypatch):
-    """A query served from the local catalog never consumes the fallback quota."""
+    """A query whose page is fully populated locally never consumes the fallback quota.
+
+    ``limit=1`` matches the single seeded row so the page is complete (issue
+    #14 changed the trigger from "0 results" to "page shorter than limit" —
+    this must still hold for a fully-populated page).
+    """
     monkeypatch.setattr(config.settings, "RATE_LIMIT_SEARCH_FALLBACK", "2/60")
     await movies_repo.upsert_movie(db, _movie_dict("inception-2010-rl-test"))
     await db.flush()
@@ -87,6 +92,31 @@ async def test_search_with_local_results_does_not_consume_quota(client, db, monk
     with p1, p2, p3, p4, p5:
         # Many local-hit queries — well beyond the fallback limit of 2.
         for _ in range(5):
-            resp = await client.get("/v1/search?q=inception")
+            resp = await client.get("/v1/search?q=inception&limit=1")
             assert resp.status_code == 200
             assert resp.json()["total"] > 0
+
+
+async def test_search_with_partial_local_page_does_consume_quota(client, db, monkeypatch):
+    """A query with some (but not enough) local results still consumes the quota.
+
+    Only 1 local row is seeded but the default page size (20) is requested,
+    so the page is incomplete and the fan-out fires — this must count
+    against the same rate limit as a zero-result query (issue #14: "página
+    completa" is now the bar for skipping the fallback, not "algún
+    resultado").
+    """
+    monkeypatch.setattr(config.settings, "RATE_LIMIT_SEARCH_FALLBACK", "2/60")
+    await movies_repo.upsert_movie(db, _movie_dict("inception-2010-rl-partial-test"))
+    await db.flush()
+    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
+
+    p1, p2, p3, p4, p5 = _fallback_patches()
+    with p1, p2, p3, p4, p5:
+        # Two partial-page queries trigger the fan-out and consume quota.
+        for _ in range(2):
+            resp = await client.get("/v1/search?q=inception")
+            assert resp.status_code == 200
+        # The third from the same IP is rejected before any external call.
+        resp = await client.get("/v1/search?q=inception")
+    assert resp.status_code == 429
