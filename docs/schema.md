@@ -742,41 +742,6 @@ and then `status` within each branch of the repository's `UNION ALL` —
 flagged by production audit2 (2026-08-19) as uncovered by the existing
 single-column indexes.
 
-### `library_logs`
-
-One row per **logged session** (rewatch/replay/reread) of a movie/series/
-book/game — a dated activity entry, deliberately decoupled from
-`user_ratings` (feature 28): a log has no `score`/`review_text` of its own,
-that keeps living exclusively on `user_ratings`. Polymorphic `item_type` +
-`item_id` (same pattern as `user_ratings`/`library_entries`), no real FK to
-the content tables. Unlike `user_ratings`/`library_entries`, there is
-**no unique constraint** on `(user_id, item_type, item_id)` — a user can log
-the same item multiple times (e.g. two separate rewatches, each with its own
-date). Creating a log is always a plain INSERT, never an upsert.
-
-```sql
-CREATE TABLE library_logs (
-    id          BIGSERIAL PRIMARY KEY,
-    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    item_type   VARCHAR(20) NOT NULL,   -- 'MOVIE' | 'SERIES' | 'BOOK' | 'GAME'
-    item_id     BIGINT NOT NULL,
-    logged_on   DATE NOT NULL,
-    rewatch     BOOLEAN NOT NULL DEFAULT false,
-    note        TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_library_logs_item ON library_logs (item_type, item_id);
-CREATE INDEX idx_library_logs_user ON library_logs (user_id);
-```
-
-`logged_on` defaults to the current date when omitted from the request
-(resolved in `backlogg/library_logs/service.py`) and is rejected by the
-`LogIn` Pydantic schema when it is in the future. `GET /{type}/{slug}/log`
-and `GET /users/{username}/log` both order by `logged_on DESC` (ties broken
-by `id DESC`), not `created_at` — the log's own date is the natural sort key
-for an activity history.
-
 ## Notifications
 
 ### `notifications`
@@ -909,7 +874,7 @@ name and the target being acted on.
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`,
-`library_logs`, `activity_events`, `notifications` (target_type/target_id),
+`activity_events`, `notifications` (target_type/target_id),
 `admin_actions` (target_type/target_id) use polymorphic references
 (`item_type`/`target_type` + `item_id`/`target_id`) with no real FK.
 Referential integrity is enforced at the application layer, typically in the

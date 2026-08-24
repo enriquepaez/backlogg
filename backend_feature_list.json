@@ -1297,7 +1297,7 @@
         "No se toca UserRating ni la tabla de ratings — el activity log era independiente de las reviews, que se mantienen intactas",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
