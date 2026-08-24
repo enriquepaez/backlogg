@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import Image from "next/image";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -41,8 +42,6 @@ export function AvatarUploadField({
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<FieldError>(null);
-
-  const displayUrl = preview ?? avatarUrl;
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -170,11 +169,25 @@ export function AvatarUploadField({
       <span className="text-sm font-medium">{t("heading")}</span>
 
       <div className="flex items-center gap-3">
-        {displayUrl ? (
-          // Same rationale as `user-nav.tsx`: avatar hosts (own upload or an
-          // arbitrary pasted URL) aren't in `next/image`'s remotePatterns.
+        {preview ? (
+          // `preview` is always a `blob:` object URL from `createObjectURL`
+          // (see `upload` above) — a local, same-origin URL `next/image`'s
+          // remote loader cannot fetch/optimize (and shouldn't need to, for a
+          // transient client-side-only preview), so this one case stays a
+          // plain `<img>`. The already-uploaded case right below (`avatarUrl`,
+          // a real remote URL) is `next/image`, same as every other avatar
+          // call site (`user-nav.tsx`, `/u/{username}`'s `ProfileHeader`,
+          // etc.).
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={displayUrl} alt="" className="size-14 rounded-full object-cover" />
+          <img src={preview} alt="" className="size-14 rounded-full object-cover" />
+        ) : avatarUrl ? (
+          <Image
+            src={avatarUrl}
+            alt=""
+            width={56}
+            height={56}
+            className="size-14 rounded-full object-cover"
+          />
         ) : (
           <span
             aria-hidden="true"

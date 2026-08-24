@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { CatalogCard } from "@/components/catalog-card";
@@ -194,13 +195,11 @@ function ProfileHeader({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           {profile.avatar_url ? (
-            // Avatar hosts aren't configured in next/image's remotePatterns yet
-            // (catalog-image scope, later features) — same rationale as
-            // `ReviewAuthor` in `item-reviews.tsx`.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={profile.avatar_url}
               alt=""
+              width={64}
+              height={64}
               className="size-16 rounded-full object-cover"
             />
           ) : (

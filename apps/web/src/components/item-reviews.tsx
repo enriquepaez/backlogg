@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -325,11 +326,13 @@ function ReviewAuthor({ user }: { user: RatingAuthor }) {
   return (
     <Link href={`/u/${user.username}`} className="flex w-fit items-center gap-2">
       {user.avatar_url ? (
-        // Avatar hosts aren't configured in next/image's remotePatterns yet
-        // (catalog-image scope, later features) — same rationale as
-        // `RaterIdentity` in `rating-widget.tsx`.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={user.avatar_url} alt="" className="size-6 rounded-full object-cover" />
+        <Image
+          src={user.avatar_url}
+          alt=""
+          width={24}
+          height={24}
+          className="size-6 rounded-full object-cover"
+        />
       ) : (
         <span
           aria-hidden="true"

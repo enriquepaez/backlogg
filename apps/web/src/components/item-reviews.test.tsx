@@ -131,7 +131,14 @@ describe("ItemReviews", () => {
     const { container } = renderReviews();
 
     await screen.findByText("alice");
-    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.com/alice.png");
+    // `next/image` (FE-49/FE-51) rewrites `src` to
+    // `/_next/image?url=<encoded>&w=...&q=...` rather than passing the
+    // original URL through verbatim — same assertion shape as
+    // `rating-widget.test.tsx`'s equivalent avatar test.
+    const img = container.querySelector("img");
+    expect(img).toBeInTheDocument();
+    const rewrittenSrc = new URL(img!.getAttribute("src")!, "http://localhost");
+    expect(rewrittenSrc.searchParams.get("url")).toBe("https://example.com/alice.png");
   });
 
   it("does not render review text when review_text is null", async () => {
