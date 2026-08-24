@@ -7,6 +7,16 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -349,6 +359,19 @@ export function ActivityLogWidget({ type, slug }: ActivityLogWidgetProps) {
 
 type ActivityLogTranslator = ReturnType<typeof useTranslations<"ItemDetail.activityLog">>;
 
+/**
+ * FE-50: deleting a log entry now requires confirming in a dialog first,
+ * same shadcn/Radix `Dialog` pattern as `DeleteAccountDialog` (see that
+ * component's doc comment) — but simpler, since a log entry isn't sensitive
+ * enough to warrant a "type to confirm" text field: just a heading,
+ * description and Cancel/Confirm buttons. `open` is local to each card (not
+ * lifted to the parent) since only one card's dialog can be relevant at a
+ * time and each card already tracks its own `deleting` state independently.
+ * Confirming closes the dialog immediately and fires the same `onDelete`
+ * the trigger used to call directly on click — the card itself then reflects
+ * the in-flight delete via its already-disabled, "deleting…"-labelled
+ * trigger button, same as before this change.
+ */
 function LogEntryCard({
   entry,
   locale,
@@ -362,6 +385,13 @@ function LogEntryCard({
   onDelete: () => void;
   t: ActivityLogTranslator;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  function handleConfirm() {
+    setConfirmOpen(false);
+    onDelete();
+  }
+
   return (
     <Card>
       <CardContent className="flex flex-wrap items-center justify-between gap-3">
@@ -372,9 +402,29 @@ function LogEntryCard({
             <p className="max-w-2xl text-sm leading-6 whitespace-pre-wrap text-foreground">{entry.note}</p>
           ) : null}
         </div>
-        <Button type="button" variant="destructive" size="sm" disabled={deleting} onClick={onDelete}>
-          {deleting ? t("deleting") : t("delete")}
-        </Button>
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogTrigger asChild>
+            <Button type="button" variant="destructive" size="sm" disabled={deleting}>
+              {deleting ? t("deleting") : t("delete")}
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("deleteDialogHeading")}</DialogTitle>
+              <DialogDescription>{t("deleteDialogDescription")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline">
+                  {t("deleteDialogCancel")}
+                </Button>
+              </DialogClose>
+              <Button type="button" variant="destructive" onClick={handleConfirm}>
+                {t("deleteDialogConfirm")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

@@ -955,7 +955,7 @@
         "Borrar una entrada del activity log pide confirmación (mismo patrón de diálogo que delete-account-dialog.tsx, adaptado al contexto)",
         "i18n; typecheck+lint+test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

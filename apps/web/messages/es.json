@@ -706,6 +706,10 @@
       "deleting": "Eliminando…",
       "deleteSuccess": "Tu entrada de registro se ha eliminado.",
       "deleteError": "No se pudo eliminar tu entrada de registro. Inténtalo de nuevo.",
+      "deleteDialogHeading": "¿Eliminar esta entrada de registro?",
+      "deleteDialogDescription": "Esto eliminará permanentemente esta entrada de registro. Esta acción no se puede deshacer.",
+      "deleteDialogCancel": "Cancelar",
+      "deleteDialogConfirm": "Eliminar entrada",
       "errors": {
         "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo.",
         "validation": "La fecha no puede ser futura.",
