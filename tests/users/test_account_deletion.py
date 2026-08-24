@@ -272,6 +272,50 @@ async def test_delete_user_recomputes_item_aggregates(db):
     assert refreshed.rating_count_internal == 1
 
 
+# ── Aggregate recompute query batching (feature 62) ───────────────────────
+
+
+async def _delete_execute_call_count(db, *, rated_item_count: int, suffix: str) -> int:
+    """Register a fresh user who has rated ``rated_item_count`` distinct items,
+    delete their account, and return how many ``AsyncSession.execute`` calls it
+    took end to end."""
+    leaver = await create_user(
+        db,
+        {
+            "username": f"del-batch-user-{suffix}",
+            "email": f"del-batch-user-{suffix}@example.com",
+            "password_hash": "hash",
+            "display_name": "Leaver",
+        },
+    )
+    for i in range(rated_item_count):
+        movie = await upsert_movie(db, _movie_data(f"del-batch-movie-{suffix}-{i}"))
+        db.add(UserRating(user_id=leaver.id, item_type="MOVIE", item_id=movie.id, score=3))
+    await db.flush()
+
+    calls = 0
+    original_execute = db.execute
+
+    async def counting_execute(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await original_execute(*args, **kwargs)
+
+    db.execute = counting_execute
+    try:
+        await service.delete_current_user(db, leaver)
+    finally:
+        db.execute = original_execute
+    return calls
+
+
+async def test_delete_current_user_query_count_does_not_scale_with_rated_item_count(db):
+    few_calls = await _delete_execute_call_count(db, rated_item_count=2, suffix="few")
+    many_calls = await _delete_execute_call_count(db, rated_item_count=25, suffix="many")
+
+    assert few_calls == many_calls
+
+
 # ── R2 avatar cleanup on deletion (feature 61) ────────────────────────────
 
 
