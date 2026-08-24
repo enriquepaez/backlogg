@@ -1,4 +1,5 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { AdminUserActionsPanel } from "@/components/admin-user-actions-panel";
@@ -104,12 +105,11 @@ export default async function AdminUserDetailPage({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             {profile.avatar_url ? (
-              // Same rationale as `/u/{username}`'s own `ProfileHeader`: avatar
-              // hosts aren't in next/image's remotePatterns yet.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={profile.avatar_url}
                 alt=""
+                width={64}
+                height={64}
                 className="size-16 rounded-full object-cover"
               />
             ) : (

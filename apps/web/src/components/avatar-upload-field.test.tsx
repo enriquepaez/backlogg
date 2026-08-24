@@ -42,7 +42,15 @@ describe("AvatarUploadField", () => {
       <AvatarUploadField avatarUrl="https://example.com/a.png" onUpdated={vi.fn()} />,
     );
 
-    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.com/a.png");
+    // The already-uploaded avatar (no local `blob:` preview in play) renders
+    // via `next/image` (FE-51), which rewrites `src` to
+    // `/_next/image?url=<encoded>&w=...&q=...` rather than passing the
+    // original URL through verbatim — same assertion shape as
+    // `rating-widget.test.tsx`'s equivalent avatar test.
+    const img = container.querySelector("img");
+    expect(img).toBeInTheDocument();
+    const rewrittenSrc = new URL(img!.getAttribute("src")!, "http://localhost");
+    expect(rewrittenSrc.searchParams.get("url")).toBe("https://example.com/a.png");
     expect(screen.getByRole("button", { name: "changeFile" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "remove" })).toBeInTheDocument();
   });

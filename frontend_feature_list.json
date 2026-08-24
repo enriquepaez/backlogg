@@ -972,7 +972,7 @@
         "avatar-upload-field.tsx sigue usando <img> solo para el preview local (blob: URL de createObjectURL), con el resto de casos (avatar ya subido) migrado a next/image",
         "typecheck+lint+build en verde; verificación visual de que los avatares siguen cargando en dev"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 51,

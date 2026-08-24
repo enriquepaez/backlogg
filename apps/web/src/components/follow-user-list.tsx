@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import type { components } from "@backlogg/api-client";
 
 import { Link } from "@/i18n/navigation";
@@ -28,11 +30,13 @@ export function FollowUserList({ users }: FollowUserListProps) {
               className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50"
             >
               {user.avatar_url ? (
-                // Avatar hosts aren't configured in next/image's remotePatterns yet
-                // (catalog-image scope, later features) — same rationale as
-                // `ReviewAuthor` in `item-reviews.tsx`.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.avatar_url} alt="" className="size-10 rounded-full object-cover" />
+                <Image
+                  src={user.avatar_url}
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="size-10 rounded-full object-cover"
+                />
               ) : (
                 <span
                   aria-hidden="true"
