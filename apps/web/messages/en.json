@@ -706,6 +706,10 @@
       "deleting": "Deleting…",
       "deleteSuccess": "Your log entry has been deleted.",
       "deleteError": "Couldn't delete your log entry. Please try again.",
+      "deleteDialogHeading": "Delete this log entry?",
+      "deleteDialogDescription": "This will permanently delete this log entry. This action cannot be undone.",
+      "deleteDialogCancel": "Cancel",
+      "deleteDialogConfirm": "Delete entry",
       "errors": {
         "unauthorized": "Your session has expired. Please log in again.",
         "validation": "The date can't be in the future.",

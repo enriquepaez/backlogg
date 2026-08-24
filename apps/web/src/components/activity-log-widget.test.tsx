@@ -165,7 +165,59 @@ describe("ActivityLogWidget", () => {
     expect(await screen.findByText("validation")).toBeInTheDocument();
   });
 
-  it("deletes a log entry and removes it from the history on success", async () => {
+  it("opens a confirmation dialog on delete click without calling the delete request yet", async () => {
+    server.use(
+      http.get("/api/movie/dune-2021/log", () =>
+        HttpResponse.json({ authenticated: true, mine: [entryOne], items: [], total: 0, page: 1, limit: 20 }),
+      ),
+    );
+    const deleteCall = vi.fn();
+    server.use(
+      http.delete("/api/log/1", () => {
+        deleteCall();
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderWidget();
+    await screen.findByText("First watch");
+
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("deleteDialogHeading")).toBeInTheDocument();
+    expect(deleteCall).not.toHaveBeenCalled();
+    expect(screen.getByText("First watch")).toBeInTheDocument();
+  });
+
+  it("cancelling the confirmation dialog closes it without deleting the entry", async () => {
+    server.use(
+      http.get("/api/movie/dune-2021/log", () =>
+        HttpResponse.json({ authenticated: true, mine: [entryOne], items: [], total: 0, page: 1, limit: 20 }),
+      ),
+    );
+    const deleteCall = vi.fn();
+    server.use(
+      http.delete("/api/log/1", () => {
+        deleteCall();
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderWidget();
+    await screen.findByText("First watch");
+
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    await screen.findByRole("dialog");
+
+    fireEvent.click(screen.getByRole("button", { name: "deleteDialogCancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(deleteCall).not.toHaveBeenCalled();
+    expect(screen.getByText("First watch")).toBeInTheDocument();
+  });
+
+  it("confirming the dialog deletes a log entry and removes it from the history on success", async () => {
     server.use(
       http.get("/api/movie/dune-2021/log", () =>
         HttpResponse.json({
@@ -189,8 +241,11 @@ describe("ActivityLogWidget", () => {
     renderWidget();
     await screen.findByText("First watch");
 
+    fireEvent.click(screen.getAllByRole("button", { name: "delete" })[0]);
+    await screen.findByRole("dialog");
+
     await act(async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: "delete" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "deleteDialogConfirm" }));
     });
 
     await waitFor(() => expect(screen.queryByText("First watch")).not.toBeInTheDocument());
@@ -198,7 +253,7 @@ describe("ActivityLogWidget", () => {
     expect(toastSuccess).toHaveBeenCalledWith("deleteSuccess");
   });
 
-  it("shows an error toast and keeps the entry when delete fails", async () => {
+  it("shows an error toast and keeps the entry when delete fails after confirming", async () => {
     server.use(
       http.get("/api/movie/dune-2021/log", () =>
         HttpResponse.json({ authenticated: true, mine: [entryOne], items: [], total: 0, page: 1, limit: 20 }),
@@ -209,8 +264,11 @@ describe("ActivityLogWidget", () => {
     renderWidget();
     await screen.findByText("First watch");
 
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    await screen.findByRole("dialog");
+
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "delete" }));
+      fireEvent.click(screen.getByRole("button", { name: "deleteDialogConfirm" }));
     });
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("deleteError"));
