@@ -233,9 +233,9 @@ async def test_search_fanout_increments_external_counter():
 
     get_metrics().reset()
     with patch.object(
-        service._tmdb_movies, "search_movie", new_callable=AsyncMock, return_value=None
+        service._tmdb_movies, "search_movie", new_callable=AsyncMock, return_value=[]
     ):
-        await service._ingest_movies("some query")
+        await service._ingest_movies("some query", page=1, limit=20)
 
     samples = _parse_samples(get_metrics().render())
     assert samples['backlogg_external_fanout_total{source="movie"}'] == 1

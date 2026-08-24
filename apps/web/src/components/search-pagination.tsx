@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { buttonVariants } from "@/components/ui/button";
+import { SearchPaginationStatus } from "@/components/search-pagination-status";
 import { Link } from "@/i18n/navigation";
 import type { CatalogType } from "@/lib/catalog-types";
 import { cn } from "@/lib/utils";
@@ -78,10 +79,14 @@ export async function SearchPagination({
   const hasNext = page < totalPages;
 
   return (
-    <nav aria-label={t("nav")} className="flex items-center justify-between gap-4 pt-2">
+    <nav
+      aria-label={t("nav")}
+      className="relative flex items-center justify-between gap-4 pt-2"
+    >
       {hasPrevious ? (
         <Link href={hrefFor(page - 1)} className={cn(buttonVariants({ variant: "outline" }))}>
           {t("previous")}
+          <SearchPaginationStatus label={t("loadingMore")} />
         </Link>
       ) : (
         <span
@@ -97,6 +102,7 @@ export async function SearchPagination({
       {hasNext ? (
         <Link href={hrefFor(page + 1)} className={cn(buttonVariants({ variant: "outline" }))}>
           {t("next")}
+          <SearchPaginationStatus label={t("loadingMore")} />
         </Link>
       ) : (
         <span

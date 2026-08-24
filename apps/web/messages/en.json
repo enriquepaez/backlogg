@@ -154,6 +154,7 @@
     "inputLabel": "Search",
     "placeholder": "Search movies, series, books and games…",
     "prompt": "Start typing to search.",
+    "searching": "Searching…",
     "untitled": "Untitled",
     "empty": "No results for \"{query}\".",
     "invalidQuery": "The search query can't be empty.",
@@ -183,7 +184,8 @@
       "nav": "Pagination",
       "previous": "Previous",
       "next": "Next",
-      "pageStatus": "Page {page} of {totalPages}"
+      "pageStatus": "Page {page} of {totalPages}",
+      "loadingMore": "Searching for more results…"
     }
   },
   "Library": {

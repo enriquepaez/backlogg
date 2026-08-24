@@ -182,7 +182,8 @@ async def get_series(db: AsyncSession, slug: str, viewer_id: int | None = None) 
     if series is None:
         # 2. Derive a search title from the slug and query TMDB
         query = _title_from_slug(slug)
-        search_result = await _tmdb.search_series(query)
+        search_results = await _tmdb.search_series(query)
+        search_result = search_results[0] if search_results else None
         if search_result is None:
             raise HTTPException(status_code=404, detail="Series not found")
 

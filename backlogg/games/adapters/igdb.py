@@ -7,6 +7,7 @@ import unicodedata
 from datetime import UTC, date, datetime
 
 import httpx
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from backlogg.core.config import settings
 
@@ -15,6 +16,27 @@ _IGDB_BASE = "https://api.igdb.com/v4"
 
 # Delay between paginated requests — IGDB allows at most 4 req/s
 _PAGE_THROTTLE_S = 0.3
+
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    """True for transient IGDB failures: 429/5xx, timeouts and transport errors.
+
+    Never retries 404 or other 4xx client errors — same policy as
+    ``backlogg.movies.adapters.tmdb._is_retryable_error``.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE_STATUS_CODES
+    return isinstance(exc, httpx.TimeoutException | httpx.TransportError)
+
+
+_igdb_retry = retry(
+    retry=retry_if_exception(_is_retryable_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True,
+)
 
 # Map IGDB game_type integer to descriptive string
 _GAME_TYPE_MAP: dict[int, str] = {
@@ -106,8 +128,14 @@ class IGDBClient:
         results = await self._post("games", query)
         return results[0] if results else None
 
-    async def search_games(self, query: str, limit: int = 5) -> list[dict]:
-        """Search IGDB games by name and return up to ``limit`` results."""
+    @_igdb_retry
+    async def search_games(self, query: str, limit: int = 5, offset: int = 0) -> list[dict]:
+        """Search IGDB games by name and return up to ``limit`` results starting at ``offset``.
+
+        ``offset`` follows the same ``offset N;`` clause pattern used by
+        ``get_top_games`` — the search fan-out (``search/service.py``) maps
+        it from the requested search page to walk further pages of matches.
+        """
         escaped = query.replace('"', '\\"')
         igdb_query = (
             "fields name,slug,summary,cover.*,first_release_date,rating,rating_count,"
@@ -116,6 +144,7 @@ class IGDBClient:
             "involved_companies.developer,involved_companies.publisher;"
             f' search "{escaped}";'
             f" limit {limit};"
+            f" offset {offset};"
         )
         return await self._post("games", igdb_query)
 

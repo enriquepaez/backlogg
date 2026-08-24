@@ -24,6 +24,16 @@ function parseType(value: RawParam): CatalogType | undefined {
   return raw && isCatalogType(raw) ? raw : undefined;
 }
 
+/**
+ * `item.release_date` is a guaranteed `YYYY-MM-DD` ISO string when present
+ * (backend `date`, `docs/api.md`) — sliced directly rather than parsed
+ * through `Date` to avoid a UTC/local timezone off-by-one on the year for
+ * dates near Dec 31/Jan 1.
+ */
+function releaseYear(releaseDate: string | null): number | null {
+  return releaseDate ? Number(releaseDate.slice(0, 4)) : null;
+}
+
 function parsePage(value: RawParam): number {
   const raw = firstValue(value);
   const parsed = raw ? Number.parseInt(raw, 10) : 1;
@@ -162,6 +172,7 @@ export default async function SearchPage({
                 <CatalogCard
                   key={`${item.item_type}-${item.slug}`}
                   title={item.title ?? t("untitled")}
+                  year={releaseYear(item.release_date)}
                   posterUrl={item.poster_url}
                   ratingExternal={item.rating_external}
                   typeLabel={itemType ? tType(`heading.${itemType}`) : item.item_type}

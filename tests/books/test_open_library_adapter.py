@@ -350,6 +350,155 @@ async def test_get_popular_books_parses_docs_list():
 
 
 # ---------------------------------------------------------------------------
+# search_book — page/limit and retry (Issue #14)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_book_returns_full_docs_list():
+    """search_book returns the whole page of docs, not just the top hit (Issue #14)."""
+    fake_docs = [
+        {"key": "/works/OL1W", "title": "Dune"},
+        {"key": "/works/OL2W", "title": "Dune Messiah"},
+    ]
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            captured["params"] = params
+            return _mock_response(200, _search_payload(fake_docs))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
+        client = OpenLibraryClient()
+        result = await client.search_book("dune", page=1, limit=20)
+
+    assert result == fake_docs
+    assert captured["params"]["limit"] == 20
+    assert captured["params"]["page"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_book_returns_empty_list_when_no_matches():
+    """search_book returns [] (not None) when Open Library has no matches."""
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            return _mock_response(200, _search_payload([]))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
+        client = OpenLibraryClient()
+        result = await client.search_book("xxxxxxxxxxxxxxxxxxx_no_match")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_search_book_defaults_to_top_hit_only():
+    """The on-demand fallback default (limit=1) is preserved for backward compatibility."""
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            captured["params"] = params
+            return _mock_response(200, _search_payload([{"key": "/works/OL1W"}]))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
+        client = OpenLibraryClient()
+        await client.search_book("dune")
+
+    assert captured["params"]["limit"] == 1
+    assert captured["params"]["page"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_book_retries_5xx_and_succeeds_on_second_attempt():
+    """search_book is retried via _ol_search_retry on transient 5xx responses."""
+    fake_docs = [{"key": "/works/OL1W", "title": "Dune"}]
+    call_count = 0
+
+    class FlakyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_response(500)
+            return _mock_response(200, _search_payload(fake_docs))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FlakyClient):
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            client = OpenLibraryClient()
+            result = await client.search_book("dune")
+
+    assert result == fake_docs
+    assert call_count == 2
+    mock_sleep.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_search_book_raises_on_403_without_retry():
+    """A 4xx must raise immediately — no retry, no [] masking."""
+    call_count = 0
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal call_count
+            call_count += 1
+            return _mock_response(403)
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
+        client = OpenLibraryClient()
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.search_book("dune")
+
+    assert call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # get_author retry tests
 # ---------------------------------------------------------------------------
 

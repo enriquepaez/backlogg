@@ -46,17 +46,22 @@ class TMDBSeriesClient:
         }
 
     @_tmdb_retry
-    async def search_series(self, query: str) -> dict | None:
+    async def search_series(self, query: str, page: int = 1) -> list[dict]:
+        """Search TMDB for series matching *query* and return the given *page*.
+
+        TMDB's ``/search/tv`` returns ~20 results per page natively via the
+        ``page`` param. Returns the full page of results (not just the top
+        hit) so callers can ingest more than one match per search.
+        """
         async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/search/tv",
                 headers=self._headers,
-                params={"query": query},
+                params={"query": query, "page": page},
             )
             response.raise_for_status()
             data = response.json()
-            results = data.get("results", [])
-            return results[0] if results else None
+            return data.get("results", [])
 
     @_tmdb_retry
     async def get_series_detail(self, tmdb_id: int) -> dict | None:

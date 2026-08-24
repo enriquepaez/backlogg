@@ -154,6 +154,7 @@
     "inputLabel": "Buscar",
     "placeholder": "Busca películas, series, libros y juegos…",
     "prompt": "Escribe algo para empezar a buscar.",
+    "searching": "Buscando…",
     "untitled": "Sin título",
     "empty": "Ningún resultado para «{query}».",
     "invalidQuery": "La búsqueda no puede estar vacía.",
@@ -183,7 +184,8 @@
       "nav": "Paginación",
       "previous": "Anterior",
       "next": "Siguiente",
-      "pageStatus": "Página {page} de {totalPages}"
+      "pageStatus": "Página {page} de {totalPages}",
+      "loadingMore": "Buscando más resultados…"
     }
   },
   "Library": {

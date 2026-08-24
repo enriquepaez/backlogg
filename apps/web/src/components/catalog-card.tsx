@@ -10,6 +10,16 @@ import { cn } from "@/lib/utils";
 export type CatalogCardProps = {
   /** Item title. Catalog content is never translated (see `apps/web/AGENTS.md` / i18n note). */
   title: string;
+  /**
+   * Release year, appended to the title as "Title (Year)" when present —
+   * disambiguates grids with several items sharing the same title (e.g.
+   * search results for a long-running franchise). Omitted (no parentheses
+   * at all) when the caller has no year, rather than showing an empty
+   * "()" — most callers pre-derive this from a type-specific date field
+   * (`release_date`/`first_air_date`/`first_publish_date`) since this
+   * presentational component has no notion of item type.
+   */
+  year?: number | null;
   posterUrl: string | null;
   ratingExternal: number | null;
   /**
@@ -63,6 +73,7 @@ export type CatalogCardProps = {
  */
 export function CatalogCard({
   title,
+  year,
   posterUrl,
   ratingExternal,
   typeLabel,
@@ -71,13 +82,14 @@ export function CatalogCard({
   href,
   footer,
 }: CatalogCardProps) {
+  const displayTitle = year ? `${title} (${year})` : title;
   const card = (
     <Card size="sm" className="w-full">
       <div className="relative aspect-2/3 w-full bg-muted">
         {posterUrl ? (
           <Image
             src={posterUrl}
-            alt={title}
+            alt={displayTitle}
             fill
             sizes="(max-width: 640px) 45vw, (max-width: 1024px) 22vw, 180px"
             className="object-cover"
@@ -85,7 +97,7 @@ export function CatalogCard({
         ) : (
           <div
             role="img"
-            aria-label={title}
+            aria-label={displayTitle}
             className="flex h-full w-full items-center justify-center text-muted-foreground"
           >
             <ImageOff aria-hidden className="size-8" />
@@ -122,8 +134,8 @@ export function CatalogCard({
          * height across a grid (issue #12) while `line-clamp-2` still
          * truncates longer titles.
          */}
-        <p className="line-clamp-2 min-h-10 text-sm font-medium" title={title}>
-          {title}
+        <p className="line-clamp-2 min-h-10 text-sm font-medium" title={displayTitle}>
+          {displayTitle}
         </p>
         {footer}
       </CardContent>

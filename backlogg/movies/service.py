@@ -181,7 +181,8 @@ async def get_movie(db: AsyncSession, slug: str, viewer_id: int | None = None) -
         # 2. Derive a search title and optional year from the slug and query TMDB
         query = _title_from_slug(slug)
         year = _year_from_slug(slug)
-        search_result = await _tmdb.search_movie(query, year=year)
+        search_results = await _tmdb.search_movie(query, year=year)
+        search_result = search_results[0] if search_results else None
         if search_result is None:
             raise HTTPException(status_code=404, detail="Movie not found")
 

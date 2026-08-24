@@ -200,7 +200,7 @@ async def test_get_book_calls_author_persistence(db):
             service._ol_client,
             "search_book",
             new_callable=AsyncMock,
-            return_value=search_doc,
+            return_value=[search_doc],
         ),
         patch.object(
             service._ol_client,
