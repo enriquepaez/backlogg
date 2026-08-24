@@ -74,6 +74,11 @@ export async function generateMetadata({
   return {
     title,
     description,
+    // Autocanonical (FE-53): this page has no query params to strip (unlike
+    // `browse/[type]`), but still needs an explicit canonical — without one,
+    // the same profile would be indexable per-locale with no declared
+    // preferred URL.
+    alternates: { canonical: `/${locale}/u/${username}` },
     openGraph: {
       title,
       description,

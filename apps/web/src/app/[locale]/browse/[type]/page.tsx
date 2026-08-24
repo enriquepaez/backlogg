@@ -65,6 +65,12 @@ export async function generateMetadata({
   return {
     title,
     description,
+    // Autocanonical (FE-53), deliberately WITHOUT `genre`/`sort`/`page` —
+    // same "describes the type-level list" reasoning as ignoring
+    // `searchParams` above: every filtered/sorted/paginated view of
+    // `/browse/{type}` canonicalizes to this one URL rather than being
+    // indexed as its own distinct page.
+    alternates: { canonical: `/${locale}/browse/${type}` },
     openGraph: { title, description, type: "website" },
   };
 }

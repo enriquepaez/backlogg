@@ -1010,7 +1010,7 @@
         "[type]/[slug]/page.tsx renderiza JSON-LD (schema.org Movie/TVSeries/Book/VideoGame según type) con rating agregado, imagen y fecha",
         "typecheck+lint+build en verde; verificación manual de que el JSON-LD generado es válido (p.ej. Rich Results Test o validador offline equivalente)"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 53,
