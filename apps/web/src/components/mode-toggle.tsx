@@ -1,10 +1,19 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun, SunMoon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const options = [
   { value: "light", label: "Light", icon: Sun },
@@ -56,5 +65,46 @@ export function ModeToggle() {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Dropdown-menu variant of `ModeToggle`, for FE-55 "navbar decluttering":
+ * nested inside a parent `DropdownMenu` (`UserNav`'s when there is a
+ * session, `GuestSettingsMenu`'s otherwise) instead of its own
+ * always-visible row of buttons — see `LanguageMenuItem`'s doc comment
+ * (`language-switcher.tsx`) for the same rationale, which this mirrors.
+ * `ModeToggle` itself is untouched and keeps its existing standalone usage
+ * (`/showcase`'s kitchen sink).
+ *
+ * Unlike `ModeToggle`, this doesn't need the `mounted`/`useSyncExternalStore`
+ * hydration guard: `DropdownMenuSubContent` (like `DropdownMenuContent`) is
+ * only mounted into the DOM once the menu is opened, which can only happen
+ * after hydration — there is no server-rendered markup for `theme` to
+ * mismatch against here.
+ */
+export function ThemeMenuItem() {
+  const t = useTranslations("ThemeMenu");
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <SunMoon aria-hidden="true" />
+        {t("label")}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent>
+          <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
+            {options.map(({ value, icon: Icon }) => (
+              <DropdownMenuRadioItem key={value} value={value}>
+                <Icon aria-hidden="true" />
+                {t(value)}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
   );
 }

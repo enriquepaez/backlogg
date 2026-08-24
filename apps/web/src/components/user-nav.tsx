@@ -14,6 +14,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Link } from "@/i18n/navigation";
+import { LanguageMenuItem } from "@/components/language-switcher";
+import { ThemeMenuItem } from "@/components/mode-toggle";
 import { useLogout } from "@/lib/auth/use-logout";
 import { useResendVerification } from "@/lib/auth/use-resend-verification";
 
@@ -46,7 +48,10 @@ function initials(user: NavUser): string {
  * adds the "my profile" entry linking to `/u/{username}`, the public
  * profile page that previously had no header entry point; FE-36 adds the
  * "library" entry linking to `/u/{username}/library`, which also had no
- * nav entry point).
+ * nav entry point; FE-55 adds the `LanguageMenuItem`/`ThemeMenuItem`
+ * `DropdownMenuSub` entries, moving language/theme here from their own
+ * always-visible controls in the header — see `language-switcher.tsx`'s
+ * doc comment for why).
  *
  * A Radix `DropdownMenu` (shadcn/ui primitives, `src/components/ui/dropdown-
  * menu.tsx`) rather than the previous inline avatar+name+button: it is the
@@ -111,6 +116,10 @@ export function UserNav({ user }: { user: NavUser }) {
             {t("settings")}
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <LanguageMenuItem />
+        <ThemeMenuItem />
+        <DropdownMenuSeparator />
         {!user.emailVerified ? (
           <>
             <DropdownMenuItem disabled={resending} onSelect={resend}>
