@@ -686,37 +686,6 @@
       },
       "remove": "Remove from library",
       "error": "Couldn't update your library. Please try again."
-    },
-    "activityLog": {
-      "heading": "Activity log",
-      "description": "Log a rewatch, replay or reread with its own date, separate from your rating.",
-      "loading": "Loading your activity log…",
-      "loadError": "Couldn't load your activity log. Please try again.",
-      "anonymousPrompt": "Log in to track your rewatches, replays and rereads.",
-      "anonymousLoginLink": "Log in",
-      "dateLabel": "Date",
-      "rewatchLabel": "This was a rewatch",
-      "noteLabel": "Note (optional)",
-      "addEntry": "Add entry",
-      "saving": "Saving…",
-      "saveSuccess": "Your log entry has been saved.",
-      "historyHeading": "Your history for this title",
-      "historyEmpty": "No log entries yet.",
-      "rewatchYes": "Rewatch",
-      "rewatchNo": "First time",
-      "delete": "Delete",
-      "deleting": "Deleting…",
-      "deleteSuccess": "Your log entry has been deleted.",
-      "deleteError": "Couldn't delete your log entry. Please try again.",
-      "deleteDialogHeading": "Delete this log entry?",
-      "deleteDialogDescription": "This will permanently delete this log entry. This action cannot be undone.",
-      "deleteDialogCancel": "Cancel",
-      "deleteDialogConfirm": "Delete entry",
-      "errors": {
-        "unauthorized": "Your session has expired. Please log in again.",
-        "validation": "The date can't be in the future.",
-        "save": "Couldn't save your log entry. Please try again."
-      }
     }
   },
   "Auth": {

@@ -1068,7 +1068,7 @@
         "Ninguna otra superficie (rating widget, feed, notificaciones) pierde funcionalidad — el activity log era independiente del rating/review",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

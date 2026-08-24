@@ -11,8 +11,8 @@ function makeQueryClient(): QueryClient {
         // client right after a Server Component already fetched fresh data.
         staleTime: 60 * 1000,
         // FE-48: every "personal widget" query (rating, library status,
-        // activity log, notifications, profile library counts) is a thin
-        // proxy over a BFF route that itself proxies `/v1` — a failure there
+        // notifications, profile library counts) is a thin proxy over a
+        // BFF route that itself proxies `/v1` — a failure there
         // is either a genuine backend error or "no session", neither of
         // which gets better on its own. The 4 widgets this powers all
         // pre-dated TanStack Query and fetched exactly once with no retry,
@@ -25,9 +25,9 @@ function makeQueryClient(): QueryClient {
         // Same rationale, the other half of it: none of those widgets ever
         // silently refetched on window refocus before (each only fetched
         // once, on mount) — several of them hold in-progress form state
-        // (`RatingWidget`'s score/review composer, `ActivityLogWidget`'s
-        // create form) that a background refetch has no way to distinguish
-        // from a stale read, so a refocus-triggered refetch could otherwise
+        // (`RatingWidget`'s score/review composer) that a background
+        // refetch has no way to distinguish from a stale read, so a
+        // refocus-triggered refetch could otherwise
         // clobber `queryClient.setQueryData` writes those widgets make
         // right after a successful mutation. Explicit invalidation (FE-48's
         // cross-widget `library_counts` case) still refetches normally —

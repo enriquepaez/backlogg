@@ -4,8 +4,8 @@ import type { ReactElement, ReactNode } from "react";
 
 /**
  * Test-only `QueryClient` for the widgets migrated to TanStack Query (FE-48:
- * `rating-widget.tsx`, `viewer-status-slot.tsx`, `activity-log-widget.tsx`,
- * `notification-bell.tsx`, `library-status-counts.tsx`). Mirrors
+ * `rating-widget.tsx`, `viewer-status-slot.tsx`, `notification-bell.tsx`,
+ * `library-status-counts.tsx`). Mirrors
  * `query-provider.tsx`'s real `retry: false`/`refetchOnWindowFocus: false`
  * defaults (same reasoning: a mocked MSW failure response should surface
  * immediately as the component's own error state, not after retries/backoff
