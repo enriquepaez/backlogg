@@ -426,7 +426,11 @@ S3-compatible (`backlogg/users/adapters/r2_storage.py`) con key
 nunca del nombre de archivo del cliente) y la URL pública resultante
 (`R2_PUBLIC_BASE_URL` + key) sobrescribe `avatar_url`, sin importar si el
 valor previo venía de una subida anterior o de un `PATCH /v1/users/me` con una
-URL externa. El proveedor se selecciona vía `R2_ENDPOINT_URL`: MinIO en
+URL externa. Una vez confirmada la nueva `avatar_url`, si el valor previo
+apuntaba a un objeto propio en el storage, se borra en segundo plano
+(best-effort, mismo patrón que `DELETE /v1/users/me/avatar`: un fallo al
+borrar no afecta la respuesta) para no dejar objetos huérfanos en el bucket
+en cada re-subida. El proveedor se selecciona vía `R2_ENDPOINT_URL`: MinIO en
 desarrollo local (`docker-compose.yml`, sin cuenta externa), Supabase Storage
 o Cloudflare R2 real en producción — el código de negocio no cambia entre
 proveedores, solo el endpoint y las credenciales (`R2_*` en `.env`). Si el
@@ -451,6 +455,10 @@ DELETE /v1/users/me
 → 204  Cuenta borrada
 → 401  Sin token / token inválido o expirado
 ```
+
+Si la cuenta tenía un avatar alojado en el storage propio, su objeto se borra
+también (best-effort, mismo patrón que `DELETE /v1/users/me/avatar`) para no
+dejarlo huérfano en el bucket tras el borrado de la fila de usuario.
 
 Borra la cuenta del usuario autenticado (higiene GDPR). El borrado elimina en
 cascada (DB `ON DELETE CASCADE`) todos sus datos asociados: ratings,

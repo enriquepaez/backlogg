@@ -8,6 +8,7 @@ deleted user had rated.
 """
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -269,3 +270,63 @@ async def test_delete_user_recomputes_item_aggregates(db):
     await db.refresh(refreshed)
     assert float(refreshed.rating_internal) == 2.0
     assert refreshed.rating_count_internal == 1
+
+
+# ── R2 avatar cleanup on deletion (feature 61) ────────────────────────────
+
+
+def _configure_r2(monkeypatch) -> None:
+    from backlogg.core.config import settings
+
+    monkeypatch.setattr(settings, "R2_ENDPOINT_URL", "")
+    monkeypatch.setattr(settings, "R2_ACCOUNT_ID", "test-account")
+    monkeypatch.setattr(settings, "R2_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setattr(settings, "R2_SECRET_ACCESS_KEY", "test-secret-key")
+    monkeypatch.setattr(settings, "R2_BUCKET_NAME", "test-bucket")
+    monkeypatch.setattr(settings, "R2_PUBLIC_BASE_URL", "https://avatars.example.com")
+
+
+async def test_delete_current_user_deletes_avatar_r2_object(db, monkeypatch):
+    _configure_r2(monkeypatch)
+    user = await create_user(
+        db,
+        {
+            "username": "del-avatar-user",
+            "email": "del-avatar-user@example.com",
+            "password_hash": "hash",
+            "display_name": "Avatar Owner",
+            "avatar_url": "https://avatars.example.com/avatars/1/existing.png",
+        },
+    )
+
+    with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+        await service.delete_current_user(db, user)
+
+    mock_delete.assert_called_once_with(key="avatars/1/existing.png")
+    assert await count_user(db, "del-avatar-user") == 0
+
+
+async def test_delete_current_user_without_avatar_does_not_attempt_delete(db, monkeypatch):
+    _configure_r2(monkeypatch)
+    user = await create_user(
+        db,
+        {
+            "username": "del-no-avatar-user",
+            "email": "del-no-avatar-user@example.com",
+            "password_hash": "hash",
+            "display_name": "No Avatar",
+        },
+    )
+    assert user.avatar_url is None
+
+    with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+        await service.delete_current_user(db, user)
+
+    mock_delete.assert_not_called()
+    assert await count_user(db, "del-no-avatar-user") == 0
+
+
+async def count_user(db, username: str) -> int:
+    stmt = select(func.count()).select_from(User).where(User.username == username)
+    result = await db.execute(stmt)
+    return result.scalar_one()

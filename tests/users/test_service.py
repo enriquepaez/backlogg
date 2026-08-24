@@ -481,3 +481,74 @@ async def test_delete_avatar_already_null_is_idempotent(db, monkeypatch):
         await service.delete_avatar(db, user)
 
     mock_delete.assert_not_called()
+
+
+# ── upload_avatar R2 orphan cleanup (feature 61) ────────────────────────────
+
+
+async def test_upload_avatar_reupload_deletes_previous_r2_object(db, monkeypatch):
+    """Re-uploading a second time deletes the object behind the previous key."""
+    _configure_r2(monkeypatch)
+    user = await _make_avatar_test_user(db, "avatar-user-reupload")
+    first_file = _make_upload_file(b"first-png-bytes", "image/png")
+    first_url = "https://avatars.example.com/avatars/1/first.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=first_url):
+        with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+            await service.upload_avatar(db, user, first_file)
+
+    mock_delete.assert_not_called()
+
+    from backlogg.users.repository import get_user_by_username
+
+    user = await get_user_by_username(db, "avatar-user-reupload")
+    second_file = _make_upload_file(b"second-png-bytes", "image/webp")
+    second_url = "https://avatars.example.com/avatars/1/second.webp"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=second_url):
+        with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+            result = await service.upload_avatar(db, user, second_file)
+
+    mock_delete.assert_called_once_with(key="avatars/1/first.png")
+    assert result.avatar_url == second_url
+
+
+async def test_upload_avatar_first_upload_does_not_attempt_delete(db, monkeypatch):
+    """No previous avatar_url -> no delete call is attempted, and it never fails."""
+    _configure_r2(monkeypatch)
+    user = await _make_avatar_test_user(db, "avatar-user-first-upload")
+    assert user.avatar_url is None
+    file = _make_upload_file(b"fake-png-bytes", "image/png")
+    fake_url = "https://avatars.example.com/avatars/1/fake-uuid.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=fake_url):
+        with patch.object(service._r2, "delete", new_callable=AsyncMock) as mock_delete:
+            result = await service.upload_avatar(db, user, file)
+
+    mock_delete.assert_not_called()
+    assert result.avatar_url == fake_url
+
+
+async def test_upload_avatar_reupload_does_not_fail_when_r2_delete_errors(db, monkeypatch):
+    """A failure deleting the previous object is best-effort: the response still succeeds."""
+    _configure_r2(monkeypatch)
+    user = await _make_avatar_test_user(db, "avatar-user-reupload-delete-fails")
+    first_file = _make_upload_file(b"first-png-bytes", "image/png")
+    first_url = "https://avatars.example.com/avatars/1/first.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=first_url):
+        await service.upload_avatar(db, user, first_file)
+
+    from backlogg.users.repository import get_user_by_username
+
+    user = await get_user_by_username(db, "avatar-user-reupload-delete-fails")
+    second_file = _make_upload_file(b"second-png-bytes", "image/png")
+    second_url = "https://avatars.example.com/avatars/1/second.png"
+
+    with patch.object(service._r2, "upload", new_callable=AsyncMock, return_value=second_url):
+        with patch.object(
+            service._r2, "delete", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+        ):
+            result = await service.upload_avatar(db, user, second_file)
+
+    assert result.avatar_url == second_url
