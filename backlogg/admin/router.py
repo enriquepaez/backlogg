@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.admin import service as admin_service
 from backlogg.admin.auth import verify_api_key
 from backlogg.admin.schemas import (
+    AdminActionListOut,
     AdminUserListOut,
     AdminUserOut,
     CatalogEditIn,
@@ -114,6 +115,28 @@ async def list_users(
 async def get_user(username: str, db: AsyncSession = Depends(get_db)) -> AdminUserOut:
     """Return the admin-facing detail of a single user, by username."""
     return await admin_service.get_user(db, username)
+
+
+@router.get(
+    "/actions",
+    response_model=AdminActionListOut,
+    summary="Admin action audit log",
+    description=(
+        "Paginated audit trail of high-privilege admin/moderation actions — "
+        "hide/unhide review, ban/unban user, resolve report, grant/revoke-admin — "
+        "newest first. `actor_id` is the caller's user id for actions performed "
+        "through a Bearer-authenticated route (grant-admin/revoke-admin only); "
+        "`null` for every other action, gated solely by X-API-Key with no caller "
+        "identity to record. Requires `X-API-Key`."
+    ),
+)
+async def list_admin_actions(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    db: AsyncSession = Depends(get_db),
+) -> AdminActionListOut:
+    """Return the paginated, newest-first admin action audit log."""
+    return await admin_service.list_admin_actions(db, page=page, limit=limit)
 
 
 @router.patch(

@@ -6,8 +6,11 @@ import unicodedata
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.admin import audit
 from backlogg.admin import repository as admin_repo
 from backlogg.admin.schemas import (
+    AdminActionListOut,
+    AdminActionOut,
     AdminUserListOut,
     AdminUserOut,
     CatalogEditIn,
@@ -117,6 +120,11 @@ async def set_user_admin_role(
     their own (or another superadmin's) ``is_admin`` is losing access to the
     frontend `/admin` dashboard, which is recoverable the same way it was
     granted: by hand in the DB.
+
+    Feature 63: records an ``admin_actions`` audit row (``grant_admin`` /
+    ``revoke_admin``) with ``actor_id=caller.id`` — this is the one audited
+    action family where the caller's identity is known server-side (a valid
+    Bearer token, checked above), unlike the X-API-Key-only moderation routes.
     """
     if not caller.is_superadmin:
         raise HTTPException(status_code=403, detail="Superadmin privileges required")
@@ -126,6 +134,13 @@ async def set_user_admin_role(
         raise HTTPException(status_code=404, detail="User not found")
 
     await users_repo.set_user_admin(db, target, is_admin)
+    await audit.record_admin_action(
+        db,
+        actor_id=caller.id,
+        action=audit.ACTION_GRANT_ADMIN if is_admin else audit.ACTION_REVOKE_ADMIN,
+        target_type=audit.TARGET_USER,
+        target_id=target.id,
+    )
     await db.commit()
     return RoleGrantOut(username=target.username, is_admin=is_admin)
 
@@ -233,3 +248,10 @@ async def edit_catalog_item(
         locked_fields=item.locked_fields,
         **{date_field: getattr(item, date_field)},
     )
+
+
+async def list_admin_actions(db: AsyncSession, page: int, limit: int) -> AdminActionListOut:
+    """Admin audit log (feature 63): paginated ``admin_actions`` rows, newest first."""
+    actions, total = await admin_repo.list_admin_actions(db, page=page, limit=limit)
+    items = [AdminActionOut.model_validate(a) for a in actions]
+    return AdminActionListOut(items=items, total=total, page=page, limit=limit)

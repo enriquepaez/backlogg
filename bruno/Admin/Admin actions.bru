@@ -1,0 +1,32 @@
+meta {
+  name: Admin actions
+  type: http
+  seq: 30
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/actions?page=1&limit=20
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  limit: 20
+}
+
+headers {
+  X-API-Key: {{adminApiKey}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  Paginated admin action audit log (feature 63), newest first. Covers
+  hide/unhide review, ban/unban user, resolve report and grant/revoke-admin.
+  Requires the X-API-Key header.
+}
