@@ -205,7 +205,26 @@ describe("ViewerStatusSlot", () => {
     expect(screen.getByRole("button", { name: "status.completed" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("rolls back and toasts an error when a status change fails", async () => {
+  it("rolls back and toasts a generic error when a status change fails with a non-401 status", async () => {
+    server.use(
+      http.get("/api/movie/dune-2021/library", () =>
+        HttpResponse.json({ authenticated: true, status: null }),
+      ),
+    );
+    server.use(http.put("/api/movie/dune-2021/library", () => new HttpResponse(null, { status: 500 })));
+
+    renderSlot();
+    await (await statusGroup()).findAllByRole("button");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "status.want" }));
+    });
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("error"));
+    expect(screen.getByRole("button", { name: "status.want" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("rolls back and shows the session-expired copy (not the generic error) on a 401", async () => {
     server.use(
       http.get("/api/movie/dune-2021/library", () =>
         HttpResponse.json({ authenticated: true, status: null }),
@@ -220,8 +239,30 @@ describe("ViewerStatusSlot", () => {
       fireEvent.click(screen.getByRole("button", { name: "status.want" }));
     });
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("error"));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("unauthorized"));
+    expect(toastError).not.toHaveBeenCalledWith("error");
     expect(screen.getByRole("button", { name: "status.want" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("rolls back and shows the session-expired copy on a 401 when removing a status", async () => {
+    server.use(
+      http.get("/api/movie/dune-2021/library", () =>
+        HttpResponse.json({ authenticated: true, status: "completed" }),
+      ),
+    );
+    server.use(http.delete("/api/movie/dune-2021/library", () => new HttpResponse(null, { status: 401 })));
+
+    renderSlot();
+    await screen.findByRole("button", { name: "remove" });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "remove" }));
+    });
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("unauthorized"));
+    expect(toastError).not.toHaveBeenCalledWith("error");
+    expect(screen.getByRole("button", { name: "status.completed" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "remove" })).toBeInTheDocument();
   });
 
   it("ignores a second click while a mutation is still pending (no double-submit)", async () => {

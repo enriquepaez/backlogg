@@ -5,6 +5,7 @@ import { Bell, CheckCircle2, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import {
   DropdownMenu,
@@ -28,8 +29,9 @@ type ListState = "idle" | "loading" | "loaded" | "error";
 
 type UnreadCountResponse = { unread_count: number };
 type NotificationsListResponse = { items: NotificationItem[] };
-type DeleteNotificationResult = { status: "deleted" } | { status: "failed" };
-type MarkAllReadResult = { status: "ok" } | { status: "failed" };
+/** FE-54: `"unauthorized"` added, mirroring `SaveRatingResult` in `rating-widget.tsx` — `handleDelete` branches on it to show a session-expired toast instead of the generic log-only failure path (see that function's own comment). */
+type DeleteNotificationResult = { status: "deleted" } | { status: "unauthorized" } | { status: "failed" };
+type MarkAllReadResult = { status: "ok" } | { status: "unauthorized" } | { status: "failed" };
 
 async function fetchUnreadCount(): Promise<UnreadCountResponse> {
   const response = await fetch("/api/notifications/unread_count");
@@ -49,12 +51,16 @@ async function fetchNotificationsList(page: number, limit: number): Promise<Noti
 
 async function deleteNotificationRequest(id: number): Promise<DeleteNotificationResult> {
   const response = await fetch(`/api/notifications/${id}`, { method: "DELETE" });
-  return response.status === 204 ? { status: "deleted" } : { status: "failed" };
+  if (response.status === 204) return { status: "deleted" };
+  if (response.status === 401) return { status: "unauthorized" };
+  return { status: "failed" };
 }
 
 async function markAllReadRequest(): Promise<MarkAllReadResult> {
   const response = await fetch("/api/notifications/read", { method: "POST" });
-  return response.status === 204 ? { status: "ok" } : { status: "failed" };
+  if (response.status === 204) return { status: "ok" };
+  if (response.status === 401) return { status: "unauthorized" };
+  return { status: "failed" };
 }
 
 /**
@@ -185,6 +191,15 @@ export function NotificationBell() {
     // about what the backend actually did.
     try {
       const result = await deleteMutation.mutateAsync(id);
+      // FE-54: a 401 gets its own session-expired toast, same copy/pattern as
+      // `RatingWidget`'s `SaveRatingResult`/`ViewerStatusSlot`'s
+      // `LibraryMutationResult` — every other non-"deleted" outcome (a 500, a
+      // network failure) falls through to the generic log-only `catch` below,
+      // unchanged from before this feature.
+      if (result.status === "unauthorized") {
+        toast.error(t("unauthorized"));
+        return;
+      }
       if (result.status !== "deleted") {
         throw new Error("delete failed");
       }
@@ -215,6 +230,11 @@ export function NotificationBell() {
     event.preventDefault();
     try {
       const result = await markAllReadMutation.mutateAsync();
+      // FE-54: same 401-specific toast as `handleDelete` above.
+      if (result.status === "unauthorized") {
+        toast.error(t("unauthorized"));
+        return;
+      }
       if (result.status !== "ok") {
         throw new Error("mark-all-read failed");
       }

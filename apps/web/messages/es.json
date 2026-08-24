@@ -329,7 +329,8 @@
     "reviewLike": "A {name} le ha gustado tu reseña.",
     "userCompleted": "{name} ha marcado algo como completado.",
     "generic": "{name} ha interactuado contigo.",
-    "deleteAriaLabel": "Eliminar notificación"
+    "deleteAriaLabel": "Eliminar notificación",
+    "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo."
   },
   "Admin": {
     "heading": "Admin",
@@ -685,7 +686,8 @@
         "dropped": "Abandonado"
       },
       "remove": "Quitar de la biblioteca",
-      "error": "No se pudo actualizar tu biblioteca. Inténtalo de nuevo."
+      "error": "No se pudo actualizar tu biblioteca. Inténtalo de nuevo.",
+      "unauthorized": "Tu sesión ha caducado. Inicia sesión de nuevo."
     }
   },
   "Auth": {

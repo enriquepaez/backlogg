@@ -1026,7 +1026,7 @@
         "viewer-status-slot.tsx y notification-bell.tsx distinguen 401 de otros errores, mismo patrón/copy que rating-widget.tsx y activity-log-widget.tsx",
         "i18n de la copy reutilizada; typecheck+lint+test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 54,
