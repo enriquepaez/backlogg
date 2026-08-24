@@ -129,30 +129,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/movies/{slug}/log": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List movie log entries
-         * @description Public, paginated log entries for a movie, newest logged_on first.
-         */
-        get: operations["list_movie_log_v1_movies__slug__log_get"];
-        put?: never;
-        /**
-         * Log a movie session
-         * @description Create a dated log entry (rewatch/session) for this movie; never upserts. Auth.
-         */
-        post: operations["log_movie_v1_movies__slug__log_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/movies/{slug}": {
         parameters: {
             query?: never;
@@ -276,30 +252,6 @@ export interface paths {
          * @description Delete the caller's library entry for this series. Requires auth.
          */
         delete: operations["delete_series_library_v1_series__slug__library_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/series/{slug}/log": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List series log entries
-         * @description Public, paginated log entries for a series, newest logged_on first.
-         */
-        get: operations["list_series_log_v1_series__slug__log_get"];
-        put?: never;
-        /**
-         * Log a series session
-         * @description Create a dated log entry (rewatch/session) for this series; never upserts. Auth.
-         */
-        post: operations["log_series_v1_series__slug__log_post"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -433,30 +385,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/books/{slug}/log": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List book log entries
-         * @description Public, paginated log entries for a book, newest logged_on first.
-         */
-        get: operations["list_book_log_v1_books__slug__log_get"];
-        put?: never;
-        /**
-         * Log a book session
-         * @description Create a dated log entry (reread/session) for this book; never upserts. Auth.
-         */
-        post: operations["log_book_v1_books__slug__log_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/books/{slug}": {
         parameters: {
             query?: never;
@@ -585,30 +513,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/games/{slug}/log": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List game log entries
-         * @description Public, paginated log entries for a game, newest logged_on first.
-         */
-        get: operations["list_game_log_v1_games__slug__log_get"];
-        put?: never;
-        /**
-         * Log a game session
-         * @description Create a dated log entry (replay/session) for this game; never upserts. Auth.
-         */
-        post: operations["log_game_v1_games__slug__log_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/games/{slug}": {
         parameters: {
             query?: never;
@@ -658,7 +562,7 @@ export interface paths {
         };
         /**
          * Search the catalog
-         * @description Cross-type search. `q` is optional (min_length=1 when present, 422 if empty); also supports `date_from`/`date_to`/`rating_external_min`/`rating_external_max` range filters (inclusive), independently optional and combinable with `q`. Rate-limited external fallback fires only on zero local hits AND when `q` is present — external APIs are never queried by date/rating filters alone.
+         * @description Cross-type search. `q` is optional (min_length=1 when present, 422 if empty); also supports `date_from`/`date_to`/`rating_external_min`/`rating_external_max` range filters (inclusive), independently optional and combinable with `q`. Rate-limited external fallback fires whenever the requested page comes back with fewer local hits than `limit` (this includes, but is not limited to, zero hits) AND `q` is present, and additionally on page 1 of any `q` search at least once per cache TTL even when the page is already full — external APIs are never queried by date/rating filters alone. Up to `limit` hits from the externally-mapped page are ingested, not just the top one.
          */
         get: operations["search_catalog_v1_search_get"];
         put?: never;
@@ -741,6 +645,26 @@ export interface paths {
          * @description Admin-facing detail for a single user, by username. Never includes `email` (PII minimization). Unknown username -> 404. Requires `X-API-Key`.
          */
         get: operations["get_user_v1_admin_users__username__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin action audit log
+         * @description Paginated audit trail of high-privilege admin/moderation actions — hide/unhide review, ban/unban user, resolve report, grant/revoke-admin — newest first. `actor_id` is the caller's user id for actions performed through a Bearer-authenticated route (grant-admin/revoke-admin only); `null` for every other action, gated solely by X-API-Key with no caller identity to record. Requires `X-API-Key`.
+         */
+        get: operations["list_admin_actions_v1_admin_actions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -860,7 +784,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh tokens
-         * @description Rotate the refresh token and issue a fresh pair. Reuse revokes all sessions.
+         * @description Rotate the refresh token and issue a fresh pair. Reuse revokes all sessions. Rate-limited per IP.
          */
         post: operations["refresh_v1_auth_refresh_post"];
         delete?: never;
@@ -900,7 +824,7 @@ export interface paths {
         put?: never;
         /**
          * Request email verification
-         * @description Send an email-verification link to the caller (logged in dev). Requires auth.
+         * @description Send an email-verification link to the caller (logged in dev). Requires auth. Rate-limited per IP.
          */
         post: operations["request_email_verification_v1_auth_verify_request_post"];
         delete?: never;
@@ -920,7 +844,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm email verification
-         * @description Consume a single-use verification token; marks the email verified. Requires auth.
+         * @description Consume a single-use verification token; marks the email verified. Requires auth. Rate-limited per IP.
          */
         post: operations["confirm_email_verification_v1_auth_verify_confirm_post"];
         delete?: never;
@@ -940,7 +864,7 @@ export interface paths {
         put?: never;
         /**
          * Request password reset
-         * @description Send a reset link if the email exists. Identical response either way.
+         * @description Send a reset link if the email exists. Identical response either way. Rate-limited per IP.
          */
         post: operations["forgot_password_v1_auth_password_forgot_post"];
         delete?: never;
@@ -960,7 +884,7 @@ export interface paths {
         put?: never;
         /**
          * Reset password
-         * @description Consume a single-use reset token; changes password and revokes all sessions.
+         * @description Consume a single-use reset token; changes password and revokes all sessions. Rate-limited per IP.
          */
         post: operations["reset_password_v1_auth_password_reset_post"];
         delete?: never;
@@ -1181,46 +1105,6 @@ export interface paths {
          * @description Public, paginated, cross-type backlog for a user; optional status/type filters.
          */
         get: operations["get_user_library_v1_users__username__library_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/log/{log_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete own log entry
-         * @description Remove the caller's own log entry. 404 if missing or owned by another user. Auth.
-         */
-        delete: operations["delete_log_v1_log__log_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/{username}/log": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get a user's log history
-         * @description Public, paginated, cross-type log history for a user, newest logged_on first.
-         */
-        get: operations["get_user_log_v1_users__username__log_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1533,6 +1417,43 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminActionListOut */
+        AdminActionListOut: {
+            /** Items */
+            items: components["schemas"]["AdminActionOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Limit */
+            limit: number;
+        };
+        /**
+         * AdminActionOut
+         * @description A single row in the admin action audit log (feature 63).
+         *
+         *     ``actor_id`` is the caller's user id for actions performed through a
+         *     Bearer-authenticated route (grant-admin/revoke-admin only); ``null`` for
+         *     every other audited action, which is gated solely by X-API-Key with no
+         *     caller identity to record.
+         */
+        AdminActionOut: {
+            /** Id */
+            id: number;
+            /** Actor Id */
+            actor_id: number | null;
+            /** Action */
+            action: string;
+            /** Target Type */
+            target_type: string;
+            /** Target Id */
+            target_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** AdminUserListOut */
         AdminUserListOut: {
             /** Items */
@@ -2123,64 +2044,6 @@ export interface components {
          * @enum {string}
          */
         LibraryTypeFilter: "movie" | "series" | "book" | "game";
-        /**
-         * LogIn
-         * @description Request body for POST /{type}/{slug}/log.
-         *
-         *     ``logged_on`` defaults to the current date (resolved in the service) when
-         *     omitted. A future date is rejected here — at the schema layer, not in the
-         *     route or service — same as every other request-shape validation in the
-         *     codebase (Pydantic v2 models as the single source of truth for input
-         *     constraints).
-         */
-        LogIn: {
-            /** Logged On */
-            logged_on?: string | null;
-            /**
-             * Rewatch
-             * @default false
-             */
-            rewatch: boolean;
-            /** Note */
-            note?: string | null;
-        };
-        /** LogListOut */
-        LogListOut: {
-            /** Items */
-            items: components["schemas"]["LogOut"][];
-            /** Total */
-            total: number;
-            /** Page */
-            page: number;
-            /** Limit */
-            limit: number;
-        };
-        /**
-         * LogOut
-         * @description Response of POST /{type}/{slug}/log and each item of GET .../log.
-         */
-        LogOut: {
-            /** Id */
-            id: number;
-            /** Item Type */
-            item_type: string;
-            /** Slug */
-            slug: string;
-            /**
-             * Logged On
-             * Format: date
-             */
-            logged_on: string;
-            /** Rewatch */
-            rewatch: boolean;
-            /** Note */
-            note: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** LogoutRequest */
         LogoutRequest: {
             /** Refresh Token */
@@ -2413,12 +2276,19 @@ export interface components {
          * NotificationTargetOut
          * @description Polymorphic target of the notification (null for new_follower).
          *
-         *     ``item_type``/``slug`` resolve the review's target item (movie/series/
-         *     book/game) so a client can link directly to it without a separate
-         *     ``GET /v1/ratings/{id}`` lookup — there is none. Populated only when
-         *     ``target_type == "review"``; ``null`` otherwise (including
-         *     ``new_follower``). ``item_type`` is uppercase (``"MOVIE"``, ``"SERIES"``,
-         *     ``"BOOK"``, ``"GAME"``) — same convention as the feed endpoints.
+         *     ``item_type``/``slug`` resolve the notification's target item (movie/
+         *     series/book/game) so a client can link directly to it without a separate
+         *     lookup. Resolved for two target flavors:
+         *
+         *     - ``review_like`` (``target_type == "review"``, ``target_id`` = the
+         *       ``user_ratings.id``): resolves via the rating's item.
+         *     - ``user_completed`` (``target_type`` = the item's ``item_type``
+         *       uppercase, ``target_id`` = the item id): resolves directly, no rating
+         *       involved.
+         *
+         *     ``null`` for types with no target (``new_follower``). ``item_type`` is
+         *     uppercase (``"MOVIE"``, ``"SERIES"``, ``"BOOK"``, ``"GAME"``) — same
+         *     convention as the feed endpoints.
          */
         NotificationTargetOut: {
             /** Target Type */
@@ -2940,48 +2810,6 @@ export interface components {
             /** Display Name */
             display_name?: string | null;
         };
-        /** UserLogItemOut */
-        UserLogItemOut: {
-            /** Item Type */
-            item_type: string;
-            /** Title */
-            title: string;
-            /** Slug */
-            slug: string;
-            /** Poster Url */
-            poster_url: string | null;
-        };
-        /** UserLogListOut */
-        UserLogListOut: {
-            /** Items */
-            items: components["schemas"]["UserLogOut"][];
-            /** Total */
-            total: number;
-            /** Page */
-            page: number;
-            /** Limit */
-            limit: number;
-        };
-        /** UserLogOut */
-        UserLogOut: {
-            /** Id */
-            id: number;
-            item: components["schemas"]["UserLogItemOut"];
-            /**
-             * Logged On
-             * Format: date
-             */
-            logged_on: string;
-            /** Rewatch */
-            rewatch: boolean;
-            /** Note */
-            note: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** UserLogin */
         UserLogin: {
             /** Username */
@@ -3436,77 +3264,6 @@ export interface operations {
             };
         };
     };
-    list_movie_log_v1_movies__slug__log_get: {
-        parameters: {
-            query?: {
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogListOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    log_movie_v1_movies__slug__log_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_movie_v1_movies__slug__get: {
         parameters: {
             query?: never;
@@ -3773,77 +3530,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_series_log_v1_series__slug__log_get: {
-        parameters: {
-            query?: {
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogListOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    log_series_v1_series__slug__log_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogOut"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -4134,77 +3820,6 @@ export interface operations {
             };
         };
     };
-    list_book_log_v1_books__slug__log_get: {
-        parameters: {
-            query?: {
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogListOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    log_book_v1_books__slug__log_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_book_v1_books__slug__get: {
         parameters: {
             query?: never;
@@ -4483,77 +4098,6 @@ export interface operations {
             };
         };
     };
-    list_game_log_v1_games__slug__log_get: {
-        parameters: {
-            query?: {
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogListOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    log_game_v1_games__slug__log_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LogOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_game_v1_games__slug__get: {
         parameters: {
             query?: never;
@@ -4788,6 +4332,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_actions_v1_admin_actions_get: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+            };
+            header?: {
+                "x-api-key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminActionListOut"];
                 };
             };
             /** @description Validation Error */
@@ -5592,71 +5172,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryListOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_log_v1_log__log_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                log_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_log_v1_users__username__log_get: {
-        parameters: {
-            query?: {
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                username: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserLogListOut"];
                 };
             };
             /** @description Validation Error */

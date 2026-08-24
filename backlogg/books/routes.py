@@ -8,8 +8,6 @@ from backlogg.books.schemas import BookListOut, BookListParams, BookOut, Similar
 from backlogg.core.database import get_db
 from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
-from backlogg.library_logs import service as library_logs_service
-from backlogg.library_logs.schemas import LogIn, LogListOut, LogOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
 from backlogg.users.auth import get_current_user, get_current_user_optional
@@ -137,41 +135,6 @@ async def delete_book_library(
     db: AsyncSession = Depends(get_db),
 ):
     await library_service.remove_library_entry(db, item_type="BOOK", slug=slug, user=current_user)
-
-
-@router.post(
-    "/{slug}/log",
-    response_model=LogOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Log a book session",
-    description="Create a dated log entry (reread/session) for this book; never upserts. Auth.",
-)
-async def log_book(
-    slug: str,
-    payload: LogIn,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    return await library_logs_service.create_log_entry(
-        db, item_type="BOOK", slug=slug, payload=payload, user=current_user
-    )
-
-
-@router.get(
-    "/{slug}/log",
-    response_model=LogListOut,
-    summary="List book log entries",
-    description="Public, paginated log entries for a book, newest logged_on first.",
-)
-async def list_book_log(
-    slug: str,
-    page: int = Query(default=1, ge=1, description="Page number"),
-    limit: int = Query(default=20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_db),
-):
-    return await library_logs_service.list_item_log(
-        db, item_type="BOOK", slug=slug, page=page, limit=limit
-    )
 
 
 @router.get(
