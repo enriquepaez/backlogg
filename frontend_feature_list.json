@@ -991,7 +991,7 @@
         "loading.tsx con skeleton añadido a /search, /feed, /u/[username], /admin y /admin/users, siguiendo el mismo patrón que [type]/[slug]/loading.tsx",
         "typecheck+lint+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 52,
