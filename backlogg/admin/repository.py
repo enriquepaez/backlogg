@@ -6,6 +6,7 @@ Only this file imports and uses SQLAlchemy for the admin domain.
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.admin.models import AdminAction
 from backlogg.books.models import Book
 from backlogg.games.models import Game
 from backlogg.movies.models import Movie
@@ -77,4 +78,38 @@ async def list_users(
         .limit(limit)
     )
     result = await db.execute(paged_stmt)
+    return list(result.scalars().all()), total
+
+
+async def insert_admin_action(
+    db: AsyncSession, *, actor_id: int | None, action: str, target_type: str, target_id: int
+) -> AdminAction:
+    """Persist one audit row (feature 63 — admin_action_audit_log).
+
+    Flushes but does not commit — the caller commits together with the state
+    change this action describes, so both land in the same transaction (see
+    ``backlogg.admin.audit.record_admin_action``).
+    """
+    record = AdminAction(
+        actor_id=actor_id, action=action, target_type=target_type, target_id=target_id
+    )
+    db.add(record)
+    await db.flush()
+    return record
+
+
+async def list_admin_actions(
+    db: AsyncSession, page: int, limit: int
+) -> tuple[list[AdminAction], int]:
+    """Paginated admin audit log, newest first (``created_at`` desc, ``id`` desc)."""
+    count_result = await db.execute(select(func.count()).select_from(AdminAction))
+    total = count_result.scalar_one()
+
+    stmt = (
+        select(AdminAction)
+        .order_by(AdminAction.created_at.desc(), AdminAction.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
     return list(result.scalars().all()), total

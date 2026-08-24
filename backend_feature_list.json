@@ -1279,7 +1279,7 @@
         "docs/schema.md y docs/api.md actualizados",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 64,

@@ -1188,6 +1188,82 @@ Response (`AdminUserOut`, mismo shape que cada `item` de "Admin users list"):
 **Auth**: misma protección `X-API-Key` que "Admin users list" (`401`/`503`).
 Sin Bearer.
 
+### Admin action audit log (feature 63)
+
+```
+GET /v1/admin/actions?page=&limit=
+→ 200
+```
+
+Histórico paginado de acciones admin/moderación de alto privilegio, más
+reciente primero. Motivado por el audit de producción de 2026-08-24: hasta
+ahora el único rastro de "quién baneó a este usuario y cuándo" era el log
+JSON efímero de stdout, sin garantías de retención en Render ni forma de
+consultarlo después. `backlogg/admin/audit.py::record_admin_action` es el
+único punto de escritura, invocado dentro de la misma transacción que el
+cambio de estado que describe (justo antes de su `db.commit()`), así que una
+fila de auditoría y la acción que registra siempre confirman — o se revierten
+— juntas.
+
+- `page` / `limit` — paginación estándar (ver "Conventions" arriba).
+- Orden: `created_at DESC, id DESC` (más reciente primero, con desempate
+  estable dentro del mismo timestamp).
+
+Response (`AdminActionListOut`):
+```json
+{
+  "items": [
+    {
+      "id": 42,
+      "actor_id": 7,
+      "action": "grant_admin",
+      "target_type": "user",
+      "target_id": 15,
+      "created_at": "2026-08-24T02:03:12Z"
+    },
+    {
+      "id": 41,
+      "actor_id": null,
+      "action": "ban_user",
+      "target_type": "user",
+      "target_id": 9,
+      "created_at": "2026-08-24T01:58:44Z"
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "limit": 20
+}
+```
+
+`action` ∈ `{hide_review, unhide_review, ban_user, unban_user, resolve_report,
+grant_admin, revoke_admin}`. `target_type` ∈ `{review, user, report}`;
+`target_id` es el id de la fila correspondiente (`user_ratings.id`,
+`users.id` o `review_reports.id`). `actor_id` es el `users.id` del caller
+cuando la ruta que disparó la acción tiene identidad Bearer verificada
+server-side — hoy solo `grant-admin`/`revoke-admin` (feature 47, exigen
+además `is_superadmin`); `null` en el resto (`hide`/`unhide` review,
+`ban`/`unban` user, `resolve` report), que están gateadas únicamente por
+`X-API-Key` sin identidad de caller que registrar. Nunca se persiste ni se
+devuelve material sensible (el valor de `X-API-Key`, tokens de acceso/refresh)
+— solo el actor, el nombre de la acción y el target.
+
+Se escribe una fila por cada invocación de las 4 acciones auditadas —
+incluidas las repeticiones idempotentes (p.ej. ocultar una review ya oculta
+también genera una fila; cada llamada a la acción admin es en sí misma digna
+de auditoría):
+
+- `POST /v1/admin/reviews/{id}/hide` / `/unhide` → `hide_review` /
+  `unhide_review`.
+- `POST /v1/admin/users/{username}/ban` / `/unban` → `ban_user` / `unban_user`.
+- `POST /v1/admin/reports/{id}/resolve` → `resolve_report`.
+- `POST /v1/admin/users/{username}/grant-admin` / `/revoke-admin` →
+  `grant_admin` / `revoke_admin`.
+
+**Auth**: misma protección `X-API-Key` que el resto de `/v1/admin/*` de solo
+lectura (`401` sin header o con uno incorrecto; `503` si `ADMIN_API_KEY` no
+está configurada). Sin Bearer.
+
 ## Metrics
 
 ```

@@ -92,6 +92,32 @@ class CatalogEditIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AdminActionOut(BaseModel):
+    """A single row in the admin action audit log (feature 63).
+
+    ``actor_id`` is the caller's user id for actions performed through a
+    Bearer-authenticated route (grant-admin/revoke-admin only); ``null`` for
+    every other audited action, which is gated solely by X-API-Key with no
+    caller identity to record.
+    """
+
+    id: int
+    actor_id: int | None
+    action: str
+    target_type: str
+    target_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminActionListOut(BaseModel):
+    items: list[AdminActionOut]
+    total: int
+    page: int
+    limit: int
+
+
 class CatalogEditOut(BaseModel):
     """Result of a catalog manual edit — the item's current editable state."""
 

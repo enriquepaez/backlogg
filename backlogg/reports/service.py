@@ -8,6 +8,7 @@ the same review twice returns the existing report instead of creating a second.
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backlogg.admin import audit
 from backlogg.ratings import repository as ratings_repo
 from backlogg.reports import repository as repo
 from backlogg.reports.schemas import ReportListOut, ReportOut
@@ -43,11 +44,24 @@ async def list_reports(
 
 
 async def resolve_report(db: AsyncSession, report_id: int) -> ReportOut:
-    """Mark a report resolved. Raises 404 if the report does not exist. Idempotent."""
+    """Mark a report resolved. Raises 404 if the report does not exist. Idempotent.
+
+    Feature 63: records an ``admin_actions`` audit row (``resolve_report``) in
+    the same transaction, every call — including idempotent repeats.
+    ``actor_id`` is always ``None``: this route is gated solely by X-API-Key,
+    with no caller identity to record.
+    """
     report = await repo.get_report_by_id(db, report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
 
     resolved = await repo.resolve_report(db, report)
+    await audit.record_admin_action(
+        db,
+        actor_id=None,
+        action=audit.ACTION_RESOLVE_REPORT,
+        target_type=audit.TARGET_REPORT,
+        target_id=resolved.id,
+    )
     await db.commit()
     return ReportOut.model_validate(resolved)

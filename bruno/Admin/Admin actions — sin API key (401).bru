@@ -1,0 +1,17 @@
+meta {
+  name: Admin actions — sin API key (401)
+  type: http
+  seq: 31
+}
+
+get {
+  url: {{baseUrl}}/v1/admin/actions
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

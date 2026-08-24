@@ -837,10 +837,80 @@ the item type. Each join's `ON` clause simply `OR`s the two match conditions,
 so `slug`/`item_type` COALESCE out in one round-trip regardless of target
 flavor.
 
+## Admin action audit log
+
+### `admin_actions`
+
+Feature 63. A persisted, queryable trail of high-privilege admin/moderation
+actions — before this table, the only record of "who banned this user and
+when" was the ephemeral stdout JSON log line, with no retention guarantee on
+Render and no way to query it after the fact. `backlogg/admin/audit.py`'s
+`record_admin_action` is the single write path, called from the same DB
+transaction as the state change it describes, right before that transaction's
+`db.commit()` — so an audit row and the action it records always commit (or
+roll back) together.
+
+`actor_id` is nullable and FKs to `users` with `ON DELETE SET NULL` (not
+CASCADE — the audit trail must survive the actor's account being deleted
+later). Most audited routes are gated solely by the shared `X-API-Key` secret
+with no caller identity, so `actor_id` is `NULL` for them; only
+grant-admin/revoke-admin (`POST /v1/admin/users/{username}/grant-admin` /
+`/revoke-admin`) also require a Bearer-authenticated `is_superadmin` caller
+(feature 47), so those two set `actor_id` to that caller's `users.id`. `action`
+and `target_type` are enum-like plain strings constrained by a CHECK — same
+modelling as `review_reports.status`/`activity_events.event_type` — no
+PostgreSQL ENUM type. `target_id` is a polymorphic reference (same pattern as
+`user_ratings.item_type`/`item_id`, see "Notes on polymorphic references"
+below): a `user_ratings.id` when `target_type = 'review'`, a `users.id` when
+`'user'`, a `review_reports.id` when `'report'` — no real FK, so a target row
+being deleted later never blocks or cascades into this table.
+
+```sql
+CREATE TABLE admin_actions (
+    id          BIGSERIAL PRIMARY KEY,
+    actor_id    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    action      VARCHAR(30) NOT NULL,
+    target_type VARCHAR(20) NOT NULL,
+    target_id   BIGINT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_admin_actions_action
+        CHECK (action IN ('hide_review', 'unhide_review', 'ban_user', 'unban_user',
+                           'resolve_report', 'grant_admin', 'revoke_admin')),
+    CONSTRAINT ck_admin_actions_target_type
+        CHECK (target_type IN ('review', 'user', 'report'))
+);
+
+CREATE INDEX idx_admin_actions_created_at ON admin_actions (created_at);
+```
+
+Populated from four call sites, one `record_admin_action` call per action,
+every invocation (including idempotent repeats — hiding an already-hidden
+review still writes a row, since each call to the admin action is itself
+worth auditing):
+
+- `backlogg/moderation/service.py::set_review_hidden` — `hide_review` /
+  `unhide_review`, `target_type='review'`, `target_id` = the `user_ratings.id`.
+- `backlogg/moderation/service.py::set_user_banned` — `ban_user` /
+  `unban_user`, `target_type='user'`, `target_id` = the banned/unbanned
+  `users.id`.
+- `backlogg/reports/service.py::resolve_report` — `resolve_report`,
+  `target_type='report'`, `target_id` = the `review_reports.id`.
+- `backlogg/admin/service.py::set_user_admin_role` — `grant_admin` /
+  `revoke_admin`, `target_type='user'`, `target_id` = the target `users.id`,
+  `actor_id` = the calling superadmin's `users.id`.
+
+**Read side / `GET /v1/admin/actions`.** Paginated, `created_at DESC, id DESC`
+(newest first, stable tiebreak within the same timestamp), same `X-API-Key`
+gate as the rest of `/v1/admin/*`. Never persists or returns secret material
+(the `X-API-Key` value, access/refresh tokens) — only the actor id, the action
+name and the target being acted on.
+
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`,
-`library_logs`, `activity_events`, `notifications` (target_type/target_id) use
-polymorphic references (`item_type`/`target_type` + `item_id`/`target_id`)
-with no real FK. Referential integrity is enforced at the application layer,
-typically in the use case that persists the item.
+`library_logs`, `activity_events`, `notifications` (target_type/target_id),
+`admin_actions` (target_type/target_id) use polymorphic references
+(`item_type`/`target_type` + `item_id`/`target_id`) with no real FK.
+Referential integrity is enforced at the application layer, typically in the
+use case that persists the item.
