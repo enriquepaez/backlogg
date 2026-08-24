@@ -1260,7 +1260,7 @@
         "Test: banear/desbanear o borrar la cuenta de un usuario con muchas ratings no aumenta linealmente el número de queries ejecutadas",
         "bash init.sh termina en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 63,

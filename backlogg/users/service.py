@@ -340,6 +340,11 @@ async def delete_current_user(db: AsyncSession, user: User) -> None:
     reads ``user_ratings`` with the user's rows already gone. The final commit
     persists both the deletion and the refreshed aggregates atomically.
 
+    The recompute is batched (``recalculate_item_aggregates_batch``, feature
+    62) into a constant number of queries per content type instead of one
+    SELECT+write per item — an account with many ratings would otherwise force
+    N sequential round-trips before this could commit.
+
     The avatar's R2 object (if any) has no row referencing it, so it isn't
     touched by the cascade — it's deleted best-effort, same as
     ``delete_avatar``, so account deletion doesn't leak an orphaned object.
@@ -347,8 +352,7 @@ async def delete_current_user(db: AsyncSession, user: User) -> None:
     avatar_url = user.avatar_url
     rated_items = await ratings_repo.get_distinct_rated_items_for_user(db, user.id)
     await repo.delete_user(db, user)
-    for item_type, item_id in rated_items:
-        await ratings_repo.recalculate_item_aggregates(db, item_type, item_id)
+    await ratings_repo.recalculate_item_aggregates_batch(db, rated_items)
     await db.commit()
 
     await _delete_r2_object_best_effort(avatar_url)

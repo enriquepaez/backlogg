@@ -43,6 +43,11 @@ async def set_user_banned(db: AsyncSession, username: str, banned: bool) -> User
     captured first (``get_distinct_rated_items_for_user``, reused from account
     deletion) and recomputed after the flag flips. The flag change plus all
     recomputes commit atomically, mirroring the account-deletion flow.
+
+    The recompute is batched (``recalculate_item_aggregates_batch``, feature
+    62) into a constant number of queries per content type instead of one
+    SELECT+write per item — a user with many ratings would otherwise force N
+    sequential round-trips before this could commit.
     """
     user = await users_repo.get_user_by_username(db, username)
     if user is None:
@@ -50,7 +55,6 @@ async def set_user_banned(db: AsyncSession, username: str, banned: bool) -> User
 
     rated_items = await ratings_repo.get_distinct_rated_items_for_user(db, user.id)
     await users_repo.set_user_banned(db, user, banned)
-    for item_type, item_id in rated_items:
-        await ratings_repo.recalculate_item_aggregates(db, item_type, item_id)
+    await ratings_repo.recalculate_item_aggregates_batch(db, rated_items)
     await db.commit()
     return UserModerationOut(username=user.username, is_banned=banned)

@@ -8,7 +8,7 @@ precedent as ``backlogg/admin/repository.py``.
 
 from typing import Any
 
-from sqlalchemy import String, exists, func, literal, select, union_all
+from sqlalchemy import String, exists, func, literal, select, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -170,6 +170,72 @@ async def recalculate_item_aggregates(db: AsyncSession, item_type: str, item_id:
 
     item.rating_internal = round(avg_score, 2) if avg_score is not None else None
     item.rating_count_internal = count_score or 0
+    await db.flush()
+
+
+async def recalculate_item_aggregates_batch(db: AsyncSession, items: list[tuple[str, int]]) -> None:
+    """Batched version of ``recalculate_item_aggregates`` for many items at once.
+
+    Same semantics (average/count over visible, scored ratings only — see
+    ``visible_review_filters``) but a constant number of queries instead of a
+    SELECT+write per item: at most two ``UPDATE`` statements per distinct
+    ``item_type`` present in ``items`` (feature 62 — used by ``set_user_banned``
+    and ``delete_current_user``, where a single user action can affect many
+    items at once).
+
+    For each content type:
+    1. Every affected item is first reset to ``(rating_internal=None,
+       rating_count_internal=0)``. This is needed because an item that ends up
+       with zero visible scored ratings (e.g. its only rating just got hidden
+       by a ban) would otherwise be skipped entirely by the aggregate query
+       below, which only ever touches item ids that still have at least one
+       matching row.
+    2. A single ``UPDATE ... FROM`` against a ``GROUP BY item_id`` aggregate
+       subquery overwrites the reset value for items that still have visible
+       scored ratings.
+    """
+    if not items:
+        return
+
+    ids_by_type: dict[str, list[int]] = {}
+    for item_type, item_id in items:
+        ids_by_type.setdefault(item_type, []).append(item_id)
+
+    for item_type, item_ids in ids_by_type.items():
+        model = ITEM_MODELS[item_type]
+
+        await db.execute(
+            update(model)
+            .where(model.id.in_(item_ids))
+            .values(rating_internal=None, rating_count_internal=0)
+        )
+
+        agg_subq = (
+            select(
+                UserRating.item_id.label("item_id"),
+                func.avg(UserRating.score).label("avg_score"),
+                func.count(UserRating.score).label("count_score"),
+            )
+            .join(User, UserRating.user_id == User.id)
+            .where(
+                UserRating.item_type == item_type,
+                UserRating.item_id.in_(item_ids),
+                UserRating.score.is_not(None),
+                *visible_review_filters(),
+            )
+            .group_by(UserRating.item_id)
+            .subquery()
+        )
+
+        await db.execute(
+            update(model)
+            .where(model.id == agg_subq.c.item_id)
+            .values(
+                rating_internal=func.round(agg_subq.c.avg_score, 2),
+                rating_count_internal=agg_subq.c.count_score,
+            )
+        )
+
     await db.flush()
 
 

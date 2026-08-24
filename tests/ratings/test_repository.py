@@ -20,10 +20,12 @@ from backlogg.ratings.repository import (
     list_ratings_for_item,
     list_user_reviews,
     recalculate_item_aggregates,
+    recalculate_item_aggregates_batch,
+    set_rating_hidden,
     upsert_rating,
 )
 from backlogg.series.repository import upsert_series
-from backlogg.users.repository import create_user
+from backlogg.users.repository import create_user, set_user_banned
 
 
 def _movie_data(slug: str, title: str = "Repo Rating Movie") -> dict:
@@ -232,6 +234,113 @@ async def test_recalculate_item_aggregates_resets_when_all_ratings_removed(db):
     refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-movie-6")
     assert refreshed.rating_count_internal == 0
     assert refreshed.rating_internal is None
+
+
+# ── recalculate_item_aggregates_batch (feature 62) ───────────────────────
+
+
+async def test_recalculate_item_aggregates_batch_computes_avg_and_count_across_types(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-batch-movie-1"))
+    series = await upsert_series(db, _series_data("repo-rating-batch-series-1"))
+    user_a = await _make_user(db, "rating-repo-batch-user-1")
+    user_b = await _make_user(db, "rating-repo-batch-user-2")
+
+    await upsert_rating(
+        db, user_id=user_a, item_type="MOVIE", item_id=movie.id, score=4, review_text=None
+    )
+    await upsert_rating(
+        db, user_id=user_b, item_type="MOVIE", item_id=movie.id, score=2, review_text=None
+    )
+    await upsert_rating(
+        db, user_id=user_a, item_type="SERIES", item_id=series.id, score=5, review_text=None
+    )
+
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie.id), ("SERIES", series.id)])
+
+    refreshed_movie = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-1")
+    assert refreshed_movie.rating_count_internal == 2
+    assert float(refreshed_movie.rating_internal) == 3.0
+
+    refreshed_series = await get_item_by_slug(db, "SERIES", "repo-rating-batch-series-1")
+    assert refreshed_series.rating_count_internal == 1
+    assert float(refreshed_series.rating_internal) == 5.0
+
+
+async def test_recalculate_item_aggregates_batch_matches_per_item_result(db):
+    """Batched result must equal calling recalculate_item_aggregates per item."""
+    movie_a = await upsert_movie(db, _movie_data("repo-rating-batch-movie-2"))
+    movie_b = await upsert_movie(db, _movie_data("repo-rating-batch-movie-3"))
+    user_a = await _make_user(db, "rating-repo-batch-user-3")
+    user_b = await _make_user(db, "rating-repo-batch-user-4")
+
+    await upsert_rating(
+        db, user_id=user_a, item_type="MOVIE", item_id=movie_a.id, score=3.5, review_text=None
+    )
+    await upsert_rating(
+        db, user_id=user_b, item_type="MOVIE", item_id=movie_b.id, score=1, review_text=None
+    )
+
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie_a.id), ("MOVIE", movie_b.id)])
+
+    refreshed_a = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-2")
+    refreshed_b = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-3")
+    assert float(refreshed_a.rating_internal) == 3.5
+    assert refreshed_a.rating_count_internal == 1
+    assert float(refreshed_b.rating_internal) == 1.0
+    assert refreshed_b.rating_count_internal == 1
+
+
+async def test_recalculate_item_aggregates_batch_resets_items_with_no_visible_ratings(db):
+    """An item whose only rating just became invisible must reset to null/0,
+    not be silently skipped by the GROUP BY aggregate (it produces no row for
+    items with zero matching ratings)."""
+    movie = await upsert_movie(db, _movie_data("repo-rating-batch-movie-4"))
+    user_id = await _make_user(db, "rating-repo-batch-user-5")
+
+    rating = await upsert_rating(
+        db, user_id=user_id, item_type="MOVIE", item_id=movie.id, score=4, review_text=None
+    )
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie.id)])
+    refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-4")
+    assert refreshed.rating_count_internal == 1
+
+    await set_rating_hidden(db, rating, True)
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie.id)])
+
+    refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-4")
+    assert refreshed.rating_count_internal == 0
+    assert refreshed.rating_internal is None
+
+
+async def test_recalculate_item_aggregates_batch_excludes_banned_author(db):
+    movie = await upsert_movie(db, _movie_data("repo-rating-batch-movie-5"))
+    author = await create_user(
+        db,
+        {
+            "username": "rating-repo-batch-author-1",
+            "email": "rating-repo-batch-author-1@example.com",
+            "password_hash": "hash",
+            "display_name": "Author",
+        },
+    )
+    await upsert_rating(
+        db, user_id=author.id, item_type="MOVIE", item_id=movie.id, score=5, review_text=None
+    )
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie.id)])
+    refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-5")
+    assert refreshed.rating_count_internal == 1
+
+    await set_user_banned(db, author, True)
+    await recalculate_item_aggregates_batch(db, [("MOVIE", movie.id)])
+
+    refreshed = await get_item_by_slug(db, "MOVIE", "repo-rating-batch-movie-5")
+    assert refreshed.rating_count_internal == 0
+    assert refreshed.rating_internal is None
+
+
+async def test_recalculate_item_aggregates_batch_empty_list_is_noop(db):
+    # Must not raise on an empty affected-items list (e.g. a user with no ratings).
+    await recalculate_item_aggregates_batch(db, [])
 
 
 # ── list_ratings_for_item ────────────────────────────────────────────────
