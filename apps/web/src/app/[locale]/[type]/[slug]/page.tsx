@@ -7,6 +7,7 @@ import { ItemHero, type ItemMetadataField } from "@/components/item-hero";
 import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
+import { env } from "@/lib/env";
 import {
   getItemDetail,
   getSimilarItems,
@@ -18,6 +19,35 @@ import {
   type MovieDetail,
   type SeriesDetail,
 } from "@/lib/catalog";
+
+/**
+ * schema.org `@type` per catalog type (FE-53 acceptance criteria) —
+ * movie/series/book/game map 1:1 onto Movie/TVSeries/Book/VideoGame, all
+ * `CreativeWork` subtypes, which is what lets {@link buildJsonLd} use the
+ * single `datePublished`/`aggregateRating` shape below for all four instead
+ * of branching per schema.org type as well as per {@link CatalogType}.
+ */
+const SCHEMA_TYPE_BY_CATALOG_TYPE: Record<CatalogType, string> = {
+  movie: "Movie",
+  series: "TVSeries",
+  book: "Book",
+  game: "VideoGame",
+};
+
+/**
+ * `user_ratings.score` range (`ck_user_ratings_score_range`, `docs/schema.md`)
+ * — the scale `rating_internal` (its per-item average) lives on. Also
+ * schema.org's own implicit default for `AggregateRating` when
+ * `bestRating`/`worstRating` are omitted, but set explicitly below so the
+ * JSON-LD doesn't silently break if that default ever changes upstream.
+ */
+const RATING_INTERNAL_MIN = 1;
+const RATING_INTERNAL_MAX = 5;
+
+/** Autocanonical path for one item detail page — no query params, ever (FE-53). */
+function itemPath(locale: string, type: CatalogType, slug: string): string {
+  return `/${locale}/${type}/${slug}`;
+}
 
 type ItemDetailTranslator = Awaited<ReturnType<typeof getTranslations<"ItemDetail">>>;
 
@@ -116,6 +146,66 @@ function buildFields(
 }
 
 /**
+ * schema.org `datePublished` per catalog type (FE-53) — the same
+ * release-date field {@link buildFields} surfaces first for each type
+ * (`release_date`/`first_air_date`/`first_publish_date`/`release_date`), via
+ * the same per-type `as` narrowing since `ItemDetail` is a union. `null`
+ * when the underlying value is absent — external data is frequently partial,
+ * same reasoning as {@link buildFields}.
+ */
+function itemDatePublished(type: CatalogType, item: ItemDetail): string | null {
+  switch (type) {
+    case "movie":
+      return (item as MovieDetail).release_date;
+    case "series":
+      return (item as SeriesDetail).first_air_date;
+    case "book":
+      return (item as BookDetail).first_publish_date;
+    case "game":
+      return (item as GameDetail).release_date;
+  }
+}
+
+/**
+ * JSON-LD payload for the item detail page (FE-53) — rendered as a
+ * `<script type="application/ld+json">` by the page component below, per
+ * Next's own documented pattern (`node_modules/next/dist/docs/.../json-ld.md`).
+ * `aggregateRating` is only included once there is at least one visible
+ * rating (`rating_count_internal > 0`): Google's structured data guidelines
+ * reject a `ratingCount` of 0, and `rating_internal` itself is `null` until
+ * then anyway (`docs/schema.md`).
+ */
+function buildJsonLd(type: CatalogType, item: ItemDetail, url: string): Record<string, unknown> {
+  const jsonLd: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": SCHEMA_TYPE_BY_CATALOG_TYPE[type],
+    name: item.title,
+    url,
+  };
+
+  if (item.poster_url) {
+    jsonLd.image = item.poster_url;
+  }
+
+  const datePublished = itemDatePublished(type, item);
+  if (datePublished) {
+    jsonLd.datePublished = datePublished;
+  }
+
+  if (item.rating_internal !== null && item.rating_count_internal > 0) {
+    jsonLd.aggregateRating = {
+      "@type": "AggregateRating",
+      ratingValue: item.rating_internal,
+      ratingCount: item.rating_count_internal,
+      bestRating: RATING_INTERNAL_MAX,
+      worstRating: RATING_INTERNAL_MIN,
+    };
+  }
+
+  return jsonLd;
+}
+
+/**
  * `credits[]` exists on all four detail shapes (`docs/api.md`) — movies/
  * series/games expose cast & crew, books expose the author(s) as a credit
  * with `role: "AUTHOR"`. `ItemCredits`' heading/empty copy is a single
@@ -179,6 +269,7 @@ export async function generateMetadata({
   return {
     title,
     description,
+    alternates: { canonical: itemPath(locale, rawType, slug) },
     openGraph: {
       title,
       description,
@@ -223,9 +314,23 @@ export default async function ItemDetailPage({
   }
 
   const item = result.item;
+  const jsonLd = buildJsonLd(type, item, `${env.SITE_URL}${itemPath(locale, type, slug)}`);
 
   return (
     <div className="flex flex-col">
+      {/*
+        Structured data (FE-53): a plain `<script>`, not `next/script`, per
+        Next's own guidance — JSON-LD is data, not executable code
+        (`node_modules/next/dist/docs/.../json-ld.md`). `JSON.stringify` +
+        the `<` escape (same doc) is applied even though `jsonLd`'s strings
+        come from catalog sync, not user input: an external title/overview
+        containing a literal `<` would otherwise close the script tag early.
+      */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+      />
+
       <ItemHero
         title={item.title}
         originalTitle={item.original_title}
