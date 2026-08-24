@@ -68,12 +68,33 @@ Config: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_STARTTLS=true`,
 cuenta). Límite ~500 envíos/día. Para producción con dominio propio, basta con
 cambiar las variables `SMTP_*` — el código no cambia.
 
+## Configuración del frontend (`apps/web`)
+
+No se despliega en Render (solo la API). Sea cual sea el hosting elegido,
+las env vars de `apps/web/.env.example` deben fijarse ahí explícitamente —
+todas caen a un default silencioso de desarrollo si se dejan vacías:
+
+| Env var | Default si falta | Efecto en producción |
+|---|---|---|
+| `API_INTERNAL_URL` | `http://localhost:8000` | El frontend no llega a la API real |
+| `SITE_URL` | `http://localhost:3000` | `metadataBase`/OG/canonical apuntan a localhost |
+| `ADMIN_API_KEY` | (vacío) | Sección admin del frontend responde 503 (debe igualar el `ADMIN_API_KEY` del backend) |
+| `AVATAR_PUBLIC_BASE_URL` | (vacío) | Avatares no se optimizan vía `next/image` (no rompe, solo se sirven sin optimizar) |
+
+Y en el backend, `CORS_ORIGINS` (ver tabla arriba) debe incluir el origen
+real de este despliegue del frontend, o las peticiones desde producción
+serán bloqueadas por CORS.
+
 ### Rate limiting (feature 37)
 
 Límites por IP en endpoints sensibles, configurables por env con formato
 `count/segundos`:
 
-- `RATE_LIMIT_AUTH` (`10/60`) — `POST /v1/auth/login` y `POST /v1/auth/register`.
+- `RATE_LIMIT_AUTH` (`10/60`) — los 7 endpoints de `backlogg/users/routes.py`
+  que dependen de `rate_limit_auth`: `POST /v1/auth/register`, `/login`,
+  `/logout`, `/verify-email` (request + confirm) y `/forgot-password`/
+  `/reset-password` (feature 56, recuperación de cuenta incluida desde
+  audit2).
 - `RATE_LIMIT_SEARCH_FALLBACK` (`20/60`) — fan-out externo de `/v1/search` (solo
   cuando no hay resultados locales; las consultas servidas localmente no
   consumen cupo).
