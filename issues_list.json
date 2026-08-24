@@ -187,6 +187,18 @@
       ],
       "verification": "Confirmado con Playwright que el warning es exclusivo de pnpm dev (aparece tras cargar /es y cambiar de idioma con el LanguageSwitcher) y NO aparece en pnpm build + next start con el mismo flujo exacto — React elimina estos console.error de DEV del bundle de producción. Confirmado que el theme toggle (claro/oscuro) y el script anti-flash siguen funcionando con normalidad (sin código nuevo): localStorage se actualiza, la clase dark/light se aplica antes de hidratar en un reload. typecheck/lint/test (1057 tests)/build en verde, sin cambios en el árbol de trabajo.",
       "notes": "No relacionado con FE-49 (avatar_next_image, rama feat/avatar_next_image) ni con ninguna otra feature en curso — theme-provider.tsx no forma parte de ningún diff activo. Investigar y resolver en su propia rama fix/theme_provider_script_tag_warning (worktree separado), sin mezclar con trabajo de features en curso. Revisitar cuando next-themes publique un release con el fix de PR #386 (bump de versión sería la solución correcta entonces, sin código propio que desmantelar)."
+    },
+    {
+      "id": 12,
+      "title": "CatalogCard: la altura de la card cambia según si el título ocupa 1 o 2 líneas, rompiendo la alineación del grid",
+      "area": "frontend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-08-24",
+      "symptom": "Reportado por el usuario navegando la app: en cualquier grid de catálogo (browse, search, trending, genres, library grid view), las cards con un título de una sola línea son más bajas que las cards con un título que ocupa 2 líneas — las cards no tienen una altura uniforme dentro de la misma fila del grid.",
+      "cause": "apps/web/src/components/catalog-card.tsx:117 ya usa `line-clamp-2` en el `<p>` del título, así que el texto nunca desborda más de 2 líneas — pero ese elemento no reserva altura fija para 2 líneas cuando el título real ocupa solo 1, así que la card completa se encoge. Falta un `min-height` (o `h-[Nrem]`/`line-height` explícito equivalente a 2 líneas) en el contenedor del título para que todas las cards reserven el mismo espacio, tengan 1 o 2 líneas de texto.",
+      "solution": [],
+      "notes": "El usuario propuso dos alternativas válidas: (a) fijar la altura de la card para que quepan siempre 2 líneas (con truncado a 2 líneas, que es lo que ya hace line-clamp-2 — solo falta la altura mínima), o (b) truncar a 1 línea. Se eligió (a) por defecto al redactar la solución porque conserva más información del título y ya existe la mitad del trabajo (line-clamp-2); si el usuario prefiere (b) en QA, es un cambio de una clase (`line-clamp-1` + ajustar min-height a 1 línea)."
     }
   ]
 }

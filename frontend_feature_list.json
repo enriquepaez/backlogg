@@ -956,6 +956,119 @@
         "i18n; typecheck+lint+test en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 50,
+      "code": "FE-51",
+      "milestone": "M3",
+      "name": "avatar_next_image_remaining_sites",
+      "title": "Terminar la migración de avatares a next/image en los sitios restantes",
+      "description": "Motivado por el audit3 de producción (2026-08-24): FE-49 configuró remotePatterns para avatares y migró 4 sitios, pero quedan 4-5 sitios más renderizando avatares con <img> plano cuyos comentarios inline citan como rationale sitios que ya SÍ están migrados (perfil hero en u/[username], detalle de usuario en admin, follow-user-list, ReviewAuthor en item-reviews). Los comentarios se citan entre sí y ya no son ciertos — riesgo de que un cambio futuro confíe en el comentario en vez de verificar el estado real.",
+      "depends_on": [
+        48
+      ],
+      "acceptance": [
+        "u/[username]/page.tsx (hero de perfil), admin/users/[username]/page.tsx, follow-user-list.tsx e item-reviews.tsx (ReviewAuthor) migrados de <img> a next/image",
+        "avatar-upload-field.tsx sigue usando <img> solo para el preview local (blob: URL de createObjectURL), con el resto de casos (avatar ya subido) migrado a next/image",
+        "typecheck+lint+build en verde; verificación visual de que los avatares siguen cargando en dev"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 51,
+      "code": "FE-52",
+      "milestone": "M3",
+      "name": "loading_states_remaining_routes",
+      "title": "loading.tsx con skeleton para /search, /feed, /u/[username] y /admin/*",
+      "description": "Motivado por el audit3 de producción (2026-08-24): browse/[type], genres, recommendations, trending y [type]/[slug] tienen loading.tsx, pero /search, /feed, /u/[username], /admin y /admin/users (todas Server Components async con fetch a la API) no tienen ninguno — durante la resolución del fetch no hay feedback visual, inconsistente con el patrón ya establecido en el resto del catálogo/SSR. Search y feed son además rutas de alto tráfico.",
+      "depends_on": [
+        12,
+        24,
+        22,
+        27
+      ],
+      "acceptance": [
+        "loading.tsx con skeleton añadido a /search, /feed, /u/[username], /admin y /admin/users, siguiendo el mismo patrón que [type]/[slug]/loading.tsx",
+        "typecheck+lint+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 52,
+      "code": "FE-53",
+      "milestone": "M3",
+      "name": "seo_canonical_structured_data",
+      "title": "Canonical tags + JSON-LD (structured data) en catálogo y perfiles",
+      "description": "Motivado por el audit3 de producción (2026-08-24): sitemap.ts (FE-46) ya genera alternates.languages a nivel de sitemap, pero ninguna página exporta alternates.canonical — rutas con query params (browse/{type}?genre=&sort=&page=, search?q=...) son indexables como URLs distintas sin canónica declarada. Tampoco hay JSON-LD (schema.org Movie/TVSeries/Book/VideoGame) en el detalle de item, perdiendo rich snippets (rating, poster, fecha) en resultados de búsqueda pese a que el catálogo está explícitamente diseñado para SEO (docs/frontend-plan.md §6).",
+      "depends_on": [
+        11,
+        44,
+        45
+      ],
+      "acceptance": [
+        "generateMetadata de [type]/[slug], u/[username] y browse/[type] incluye alternates.canonical (URL autocanónica, sin query params)",
+        "[type]/[slug]/page.tsx renderiza JSON-LD (schema.org Movie/TVSeries/Book/VideoGame según type) con rating agregado, imagen y fecha",
+        "typecheck+lint+build en verde; verificación manual de que el JSON-LD generado es válido (p.ej. Rich Results Test o validador offline equivalente)"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 53,
+      "code": "FE-54",
+      "milestone": "M3",
+      "name": "widget_401_handling_consistency",
+      "title": "Unificar el manejo de 401 (sesión expirada) en los 4 widgets personales",
+      "description": "Motivado por el audit3 de producción (2026-08-24): tras FE-48, rating-widget.tsx y activity-log-widget.tsx mapean explícitamente un 401 a un estado 'unauthorized' con copy propio ('tu sesión expiró'), pero viewer-status-slot.tsx y notification-bell.tsx solo distinguen éxito de 'failed' genérico — un 401 real cae en el mismo toast de error que un fallo de red o un 500. La migración a TanStack Query (FE-48) fue la oportunidad natural de unificarlo y no lo hizo. Nota (2026-08-24): si remove_activity_log_ui (FE-56) se completa antes que esta, activity-log-widget.tsx ya no existe — el patrón de referencia para el manejo de 401 pasa a ser solo rating-widget.tsx.",
+      "depends_on": [
+        47
+      ],
+      "acceptance": [
+        "viewer-status-slot.tsx y notification-bell.tsx distinguen 401 de otros errores, mismo patrón/copy que rating-widget.tsx y activity-log-widget.tsx",
+        "i18n de la copy reutilizada; typecheck+lint+test en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 54,
+      "code": "FE-55",
+      "milestone": "M3",
+      "name": "navbar_decluttering",
+      "title": "Reducir el navbar: mover idioma/tema a un menú y recortar los enlaces primarios",
+      "description": "Feedback directo del usuario (2026-08-24, con seguimiento el mismo día): el header tiene demasiadas cosas visibles a la vez. site-header.tsx hoy renderiza 8 enlaces de nav (home/search/trending/genres/showcase + feed/recommendations/library si hay sesión) más LanguageSwitcher, ModeToggle, NotificationBell y UserNav/login, todo en la misma barra. Diseño final acordado con el usuario tras revisar el código: `Home` se quita del nav porque duplica el logo `Backlogg` (que ya enlaza a `/`); `Showcase` se quita porque es una página interna de kitchen-sink de componentes (no traducida, ya excluida de sitemap.ts/robots.ts), no contenido real de producto — la página puede seguir existiendo, solo desaparece el link público. `Trending` + `Genres` se fusionan en un dropdown 'Explorar'. `Feed` + `For you` (recommendations) se fusionan en un dropdown 'Actividad' (solo con sesión). `Search` se deja fuera de 'Explorar', como link/icono propio siempre visible — es una acción de alta frecuencia (el usuario ya sabe qué quiere escribir) a diferencia de Trending/Genres (descubrimiento sin intención concreta), meterlo en un dropdown le añadiría un clic extra a la acción más usada del navbar. `Library` se deja como link propio (solo con sesión), no se fusiona con nada.",
+      "depends_on": [],
+      "acceptance": [
+        "El link 'Home' desaparece del nav (el logo Backlogg sigue enlazando a '/')",
+        "El link 'Showcase' desaparece del nav público; la ruta /showcase puede seguir existiendo para desarrollo, solo se retira el <Link> del header",
+        "Dropdown 'Explorar' con Trending y Genres (label i18n, no necesariamente literal 'Explorar' si se decide otro término en QA)",
+        "Search se mantiene como link/icono propio, fuera del dropdown 'Explorar'",
+        "Dropdown 'Actividad' (o label equivalente) con Feed y For you (recommendations), visible solo con sesión — mismo gate que hoy",
+        "Library se mantiene como link propio, visible solo con sesión, sin fusionarse con el dropdown de Actividad",
+        "LanguageSwitcher y ModeToggle dejan de ser controles siempre visibles; se mueven dentro de un menú (el dropdown de UserNav si hay sesión; para el visitante sin sesión, un menú/botón de settings compacto equivalente) — no se eliminan, solo se agrupan",
+        "El header resultante tiene visiblemente menos elementos a la vista de forma simultánea que la versión actual (4 destinos de nav + logo, en vez de 8 enlaces sueltos), verificable a simple vista en desktop y mobile",
+        "Los dropdowns son accesibles por teclado (mismos primitivos Radix que el resto de la app) y anidan bien en el nav responsive existente",
+        "i18n de las labels nuevas (triggers de los dropdowns); typecheck+lint+test+build en verde",
+        "QA manual: el usuario revisa el resultado visual antes de darlo por bueno"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 55,
+      "code": "FE-56",
+      "milestone": "M3",
+      "name": "remove_activity_log_ui",
+      "title": "Eliminar el widget y la UI del activity log",
+      "description": "Decisión de producto del usuario (2026-08-24), contraparte frontend de la eliminación backend (remove_activity_log_domain): el activity log (FE-41 activity_log_ui, con su confirmación de borrado FE-50 y su migración a TanStack Query en FE-48) se elimina por completo de la UI. Aplicar después de (o junto con) la eliminación de los endpoints en el backend, regenerando el cliente tipado desde /openapi.json para que deje de referenciar las rutas de log.",
+      "depends_on": [
+        40
+      ],
+      "acceptance": [
+        "ActivityLogWidget (activity-log-widget.tsx) y su montaje en la página de item detail se eliminan, junto con sus tests",
+        "Las claves i18n del namespace de activity log (en messages/en.json y es.json) se eliminan",
+        "El cliente tipado ya no referencia los endpoints de log una vez regenerado desde el backend sin esas rutas",
+        "Ninguna otra superficie (rating widget, feed, notificaciones) pierde funcionalidad — el activity log era independiente del rating/review",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
