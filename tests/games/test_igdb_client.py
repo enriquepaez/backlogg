@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from backlogg.games.adapters.igdb import IGDBClient
+from backlogg.games.constants import ALLOWED_GAME_CATEGORY_IDS, ALLOWED_GAME_TYPES
 
 
 @pytest.fixture
@@ -246,3 +247,48 @@ def test_game_to_dict_dlc_type(client):
     }
     result = client.game_to_dict(raw)
     assert result["game_type"] == "DLC_ADDON"
+
+
+# ── Feature 65: game_category_allowlist ────────────────────────────────────
+
+
+async def test_get_top_games_query_filters_allowed_categories(client):
+    """get_top_games' IGDB query filters on all 8 allowed categories, not just MAIN_GAME."""
+    with patch.object(client, "_post", new_callable=AsyncMock, return_value=[]) as mock_post:
+        await client.get_top_games(limit=10, offset=0)
+
+    mock_post.assert_awaited_once()
+    body = mock_post.call_args.args[1]
+    assert "where game_type = (0,1,2,4,6,7,8,9) & rating > 0;" in body
+    # None of the excluded categories leak into the filter clause.
+    filter_ids = body.split("game_type = (")[1].split(")")[0].split(",")
+    assert set(filter_ids) == {str(i) for i in ALLOWED_GAME_CATEGORY_IDS}
+
+
+@pytest.mark.parametrize(
+    "category_id",
+    sorted(ALLOWED_GAME_CATEGORY_IDS),
+)
+def test_game_to_dict_no_false_negatives_for_allowed_categories(client, category_id):
+    """Every one of the 8 allowed IGDB categories maps to a game_type in ALLOWED_GAME_TYPES."""
+    raw = {
+        "id": 100 + category_id,
+        "name": f"Allowed Category Game {category_id}",
+        "slug": f"allowed-category-game-{category_id}",
+        "game_type": category_id,
+    }
+    result = client.game_to_dict(raw)
+    assert result["game_type"] in ALLOWED_GAME_TYPES
+
+
+@pytest.mark.parametrize("category_id", [3, 5, 10, 11, 12, 13, 14])
+def test_game_to_dict_excluded_categories_not_in_allowlist(client, category_id):
+    """Excluded IGDB categories map to a game_type outside ALLOWED_GAME_TYPES."""
+    raw = {
+        "id": 200 + category_id,
+        "name": f"Excluded Category Game {category_id}",
+        "slug": f"excluded-category-game-{category_id}",
+        "game_type": category_id,
+    }
+    result = client.game_to_dict(raw)
+    assert result["game_type"] not in ALLOWED_GAME_TYPES

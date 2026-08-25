@@ -72,6 +72,16 @@
     "similar games" relation (id, name, slug, ...), used by
     `GET /games/{slug}/similar` (feature 45) instead of a local genre-overlap
     heuristic.
+  - **Category allowlist** (feature 65): `get_top_games`'s query filters
+    `game_type = (0,1,2,4,6,7,8,9)` — the 8 allowed IGDB categories, defined
+    once in `backlogg/games/constants.py`. The other three ingestion paths
+    (`get_game_by_slug`/`get_similar_games` in `backlogg/games/service.py`
+    and `_ingest_games` in `backlogg/search/service.py`) cannot filter at the
+    IGDB query level (single-slug lookups, or IGDB's free-text `search`
+    endpoint has no `where` clause) so they check the mapped `game_type`
+    against the same allowlist after `game_to_dict` and skip persisting
+    (`upsert_game`) anything outside it. See `docs/schema.md`'s "Category
+    allowlist" note for the full list and the excluded categories.
   - `POST /covers` — cover art
   - `POST /companies` — developer/publisher for company_credits
   - `POST /involved_companies` — join between games and companies

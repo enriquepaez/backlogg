@@ -50,6 +50,7 @@ from backlogg.core.metrics import get_metrics
 from backlogg.core.rate_limit import enforce_search_fallback
 from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
+from backlogg.games.constants import ALLOWED_GAME_TYPES
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.search.repository import SearchRepository
@@ -320,6 +321,9 @@ async def _ingest_games(q: str, page: int, limit: int) -> None:
                         if not igdb_id:
                             continue
                         game_data = _igdb_client.game_to_dict(raw)
+                        if game_data["game_type"] not in ALLOWED_GAME_TYPES:
+                            # Disallowed category (feature 65) — never ingested.
+                            continue
                         async with db.begin_nested():  # savepoint per game
                             game = await games_repo.upsert_game(db, game_data)
                             await upsert_external_id(db, "GAME", game.id, "IGDB", str(igdb_id))

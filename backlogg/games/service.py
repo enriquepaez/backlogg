@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.games import repository as repo
 from backlogg.games.adapters.igdb import IGDBClient
+from backlogg.games.constants import ALLOWED_GAME_TYPES
 from backlogg.games.schemas import (
     GameGenreOut,
     GameListItemOut,
@@ -73,8 +74,12 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
         if raw is None:
             raise HTTPException(status_code=404, detail="Game not found")
 
-        # 3. Convert and persist
+        # 3. Convert and persist — but only if the category is allowed
+        # (feature 65: game_category_allowlist). A disallowed category is
+        # treated the same as "no external result".
         game_data = _igdb_client.game_to_dict(raw)
+        if game_data["game_type"] not in ALLOWED_GAME_TYPES:
+            raise HTTPException(status_code=404, detail="Game not found")
         igdb_id = str(raw.get("id", ""))
         game = await repo.upsert_game(db, game_data)
 
@@ -145,6 +150,10 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
             if detail is None:
                 continue
             game_data = _igdb_client.game_to_dict(detail)
+            if game_data["game_type"] not in ALLOWED_GAME_TYPES:
+                # Disallowed category (feature 65) — skip, don't persist or
+                # include it among the recommendations.
+                continue
             sim_game = await repo.upsert_game(db, game_data)
             sim_igdb_id = str(detail.get("id", ""))
             if sim_igdb_id:

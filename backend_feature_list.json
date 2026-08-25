@@ -1314,7 +1314,7 @@
         "Tests cubriendo los 4 call sites: categoría permitida se persiste, categoría no permitida se descarta, sin falsos negativos en las 8 permitidas",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 66,

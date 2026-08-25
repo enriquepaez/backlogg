@@ -105,7 +105,7 @@ CREATE TABLE games (
     slug                    VARCHAR(255) NOT NULL UNIQUE,
     overview                TEXT,
     release_date            DATE,
-    game_type               VARCHAR(30) NOT NULL,     -- MAIN_GAME, DLC, EXPANSION, ...
+    game_type               VARCHAR(30) NOT NULL,     -- MAIN_GAME, DLC_ADDON, EXPANSION, ... (see allowlist note below)
     original_language       VARCHAR(10),
     poster_url              VARCHAR(1000),
     backdrop_url            VARCHAR(1000),
@@ -123,6 +123,18 @@ CREATE INDEX idx_games_release_date ON games (release_date);
 CREATE INDEX idx_games_game_type ON games (game_type);
 CREATE INDEX idx_games_last_synced_at ON games (last_synced_at);
 ```
+
+**Category allowlist** (feature 65 — `game_category_allowlist`, product
+decision 2026-08-25): IGDB's raw `game_type`/`category` field has 14 values;
+only 8 are ingested — `MAIN_GAME`, `DLC_ADDON`, `EXPANSION`,
+`STANDALONE_EXPANSION`, `EPISODE`, `SEASON`, `REMAKE`, `REMASTER`. Excluded:
+`BUNDLE`, `MOD`, `EXPANDED_GAME`, `PORT`, `FORK`, `PACK`, `UPDATE`. The
+allowlist is defined once in `backlogg/games/constants.py` and enforced by
+every ingestion path (seed/nightly sync, on-demand fallback by slug,
+similar-games, search fan-out). Rows persisted before this feature shipped
+that fall outside the allowlist are **not** purged automatically — see
+`progress/history.md` (feature 65) for the documented row counts and the
+decision on whether/when to purge them.
 
 ### `locked_fields` (feature 49 — catalog_manual_edit)
 
