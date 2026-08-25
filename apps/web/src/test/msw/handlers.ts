@@ -232,6 +232,12 @@ export const hadesFixture: GameOut = {
       billing_order: 0,
     },
   ],
+  // Feature 67 (`game_developer_publisher_exposure`) / FE-61: same studio,
+  // self-published — one row per role, per `CompanyCreditOut`'s doc comment.
+  companies: [
+    { id: 1, name: "Supergiant Games", slug: "supergiant-games", role: "DEVELOPER" },
+    { id: 1, name: "Supergiant Games", slug: "supergiant-games", role: "PUBLISHER" },
+  ],
   viewer_status: null,
 };
 
