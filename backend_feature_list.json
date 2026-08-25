@@ -1350,6 +1350,25 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 68,
+      "name": "trending_books_games",
+      "title": "Trending — incluir books y games (hoy solo movies/series vía TMDB)",
+      "description": "Levantado por el usuario (2026-08-25) durante el trabajo de la feature 66 (rating_display_internal_only): GET /trending (feature 20) solo mezcla movies y series porque está construido sobre el endpoint Trending nativo de TMDB — Open Library e IGDB no exponen un equivalente ('trending esta semana'). Para incluir books/games hace falta una heurística de popularidad calculada localmente, no un fan-out a una API externa que no existe para esos dos tipos. Candidatos a evaluar en implementación: rating_count_internal/rating_count_external recientes, volumen de nuevas library_entries/user_ratings en la ventana del período (day/week), o un proxy más simple (rating_external DESC NULLS LAST sobre items sincronizados recientemente) si el volumen de actividad interna todavía es bajo. Decisión de diseño explícita a tomar en implementación y documentar: qué señal se usa, y si movies/series mantienen su fuente actual (TMDB trending) sin cambios mientras books/games usan la heurística local, o si se unifica todo bajo el mismo criterio.",
+      "depends_on": [
+        20
+      ],
+      "acceptance": [
+        "GET /trending?type=book y GET /trending?type=game devuelven hasta 20 items usando la heurística de popularidad local decidida en implementación (documentada en docs/api.md y docs/external-apis.md)",
+        "GET /trending sin type devuelve mix de los 4 tipos (o se documenta explícitamente por qué se mantiene solo movies/series si así se decide, con motivo técnico real, no omisión)",
+        "movies/series mantienen su comportamiento actual (TMDB trending) salvo que la implementación justifique unificar el criterio — decisión explícita, no accidental",
+        "GET /trending?period=day y ?period=week siguen funcionando para los tipos nuevos si la heurística soporta ventana temporal; si no la soporta, se documenta la limitación",
+        "Cada resultado sigue el mismo contrato: item_type, title, slug, poster_url, release_date, rating_external",
+        "Tests de servicio para books/games con la heurística mockeada/seedeada",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

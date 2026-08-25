@@ -43,6 +43,15 @@ juego) antes de pulir UI que depende de esos datos; luego los pares
 backend→frontend por dependencia real; luego el resto de frontend
 independiente, ordenado de mayor a menor tamaño de trabajo.
 
+## Añadido durante la sesión (2026-08-25)
+
+10. **Backend 68** — `trending_books_games`. Surgido durante el trabajo de
+    la feature 66: GET /trending hoy solo mezcla movies/series (vía TMDB
+    trending, sin equivalente en Open Library/IGDB). Sin frontend pareja
+    todavía — se añadirá cuando exista. No reordenado dentro de la lista
+    original; se ejecuta después del punto 9 salvo que el usuario decida
+    lo contrario.
+
 ## Cierre
 
 Cuando el punto 9 (o el último que quede pendiente de esta lista) pase a
