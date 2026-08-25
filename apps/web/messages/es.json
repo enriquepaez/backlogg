@@ -607,7 +607,9 @@
       "episodes": "Episodios",
       "firstPublishDate": "Primera publicación",
       "gameType": "Tipo",
-      "platforms": "Plataformas"
+      "platforms": "Plataformas",
+      "developer": "Desarrollador",
+      "publisher": "Distribuidora"
     },
     "credits": {
       "heading": "Créditos",

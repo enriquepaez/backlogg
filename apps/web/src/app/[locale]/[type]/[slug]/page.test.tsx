@@ -36,8 +36,14 @@ vi.mock("@/lib/catalog", () => ({
 // `AdminUserActionsPanel`/`UserReviewCard`), stubbed to keep this file
 // focused on `generateMetadata`'s `alternates.canonical` and the JSON-LD
 // `<script>` (FE-53).
+// `fields` is exposed via `data-props` (same pattern as
+// `admin/users/[username]/page.test.tsx`'s `AdminUserActionsPanel` mock) so
+// `buildFields`' game developer/publisher rows (FE-61) can be asserted on
+// without duplicating `ItemHero`'s own rendering tests.
 vi.mock("@/components/item-hero", () => ({
-  ItemHero: () => <div data-testid="item-hero" />,
+  ItemHero: (props: { fields: { label: string; value: string }[] }) => (
+    <div data-testid="item-hero" data-props={JSON.stringify({ fields: props.fields })} />
+  ),
 }));
 vi.mock("@/components/item-credits", () => ({
   ItemCredits: () => <div data-testid="item-credits" />,
@@ -74,6 +80,28 @@ const movieItem = {
   rating_count_internal: 12,
   genres: [],
   credits: [],
+  viewer_status: null,
+};
+
+const gameItem = {
+  id: 10,
+  title: "Hades",
+  original_title: null,
+  slug: "hades",
+  overview: "A roguelike dungeon crawler.",
+  release_date: "2020-09-17",
+  game_type: "main_game",
+  original_language: null,
+  poster_url: "https://images.example/hades.jpg",
+  backdrop_url: null,
+  rating_external: 9.3,
+  rating_count_external: 500,
+  rating_internal: null,
+  rating_count_internal: 0,
+  genres: [],
+  platforms: [],
+  credits: [],
+  companies: [],
   viewer_status: null,
 };
 
@@ -209,5 +237,92 @@ describe("ItemDetailPage — JSON-LD", () => {
 
     expect(container.querySelector('script[type="application/ld+json"]')).toBeNull();
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+});
+
+describe("ItemDetailPage — game developer/publisher fields (FE-61)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function fieldsFromDom(container: HTMLElement): { label: string; value: string }[] {
+    const hero = container.querySelector('[data-testid="item-hero"]');
+    expect(hero).not.toBeNull();
+    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
+    return props.fields;
+  }
+
+  it("shows developer and publisher as distinct fields when both are present", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...gameItem,
+        companies: [
+          { id: 1, name: "Supergiant Games", slug: "supergiant-games", role: "DEVELOPER" },
+          { id: 1, name: "Supergiant Games", slug: "supergiant-games", role: "PUBLISHER" },
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({ label: "fields.developer", value: "Supergiant Games" });
+    expect(fields).toContainEqual({ label: "fields.publisher", value: "Supergiant Games" });
+  });
+
+  it("joins multiple companies with the same role instead of dropping any", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...gameItem,
+        companies: [
+          { id: 1, name: "Nintendo EPD", slug: "nintendo-epd", role: "DEVELOPER" },
+          { id: 2, name: "Nintendo", slug: "nintendo", role: "PUBLISHER" },
+          { id: 3, name: "The Pokémon Company", slug: "the-pokemon-company", role: "PUBLISHER" },
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({ label: "fields.developer", value: "Nintendo EPD" });
+    expect(fields).toContainEqual({
+      label: "fields.publisher",
+      value: "Nintendo, The Pokémon Company",
+    });
+  });
+
+  it("shows only the developer field when there's no publisher", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...gameItem,
+        companies: [
+          { id: 1, name: "Indie Studio", slug: "indie-studio", role: "DEVELOPER" },
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({ label: "fields.developer", value: "Indie Studio" });
+    expect(fields.some((field) => field.label === "fields.publisher")).toBe(false);
+  });
+
+  it("omits both fields when the game has no known companies", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...gameItem, companies: [] },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    const fields = fieldsFromDom(container);
+    expect(fields.some((field) => field.label === "fields.developer")).toBe(false);
+    expect(fields.some((field) => field.label === "fields.publisher")).toBe(false);
   });
 });

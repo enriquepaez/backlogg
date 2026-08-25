@@ -1153,7 +1153,7 @@
         "Consistente con el resto de metadata del detail page (mismo patrón visual que el resto de 'fields', salvo que el equipo decida integrarlo en la fila de badges junto a plataformas — a criterio de implementación)",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 61,

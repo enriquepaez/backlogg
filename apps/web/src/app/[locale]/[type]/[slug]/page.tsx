@@ -52,6 +52,28 @@ function itemPath(locale: string, type: CatalogType, slug: string): string {
 type ItemDetailTranslator = Awaited<ReturnType<typeof getTranslations<"ItemDetail">>>;
 
 /**
+ * Joins the names of `GameOut.companies` (feature 67, `CompanyCreditOut[]`)
+ * matching `role` ("DEVELOPER" or "PUBLISHER" per the IGDB adapter) into a
+ * single comma-separated string, or `null` when there's none — same
+ * "omit an absent optional field" contract {@link buildFields} already
+ * follows for `platforms` below. A game can have several companies with the
+ * same role (e.g. two publishers, one per region); all are kept, not just
+ * the first, per FE-61's acceptance criteria. Developer and publisher are
+ * deliberately two separate `buildFields` entries (own label each) rather
+ * than one merged field, so they stay visually distinguishable in
+ * `ItemHero`'s `dl` — never concatenated into one string across roles.
+ */
+function companiesByRole(
+  companies: GameDetail["companies"] | undefined,
+  role: "DEVELOPER" | "PUBLISHER",
+): string | null {
+  const names = (companies ?? [])
+    .filter((company) => company.role === role)
+    .map((company) => company.name);
+  return names.length > 0 ? names.join(", ") : null;
+}
+
+/**
  * Type-specific metadata rows (release date, runtime, seasons, platforms,
  * ...) for `ItemHero`'s `fields` prop. `item`'s shape is guaranteed to
  * correspond to `type` — both always come from the very same
@@ -134,6 +156,14 @@ function buildFields(
           label: t("fields.platforms"),
           value: game.platforms.map((platform) => platform.name).join(", "),
         });
+      }
+      const developers = companiesByRole(game.companies, "DEVELOPER");
+      if (developers) {
+        fields.push({ label: t("fields.developer"), value: developers });
+      }
+      const publishers = companiesByRole(game.companies, "PUBLISHER");
+      if (publishers) {
+        fields.push({ label: t("fields.publisher"), value: publishers });
       }
       if (game.original_language) {
         fields.push({ label: t("fields.originalLanguage"), value: game.original_language });
