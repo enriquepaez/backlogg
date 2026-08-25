@@ -897,6 +897,62 @@ async def test_search_distinct_rank_orders_by_rating_external_over_ts_rank(
     assert rated_idx < unrated_idx
 
 
+# ---------------------------------------------------------------------------
+# Regression (feature 66 — rating_display_internal_only): SearchRepository
+# .search() is the explicit exception that keeps ordering by rating_external
+# DESC NULLS LAST — catalog_search has no rating_internal column, and even
+# where the underlying row *does* have one, /search must never consult it.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def rating_internal_present_seeded_db(db):
+    """Two movies matching the same query: one has a rating_internal set, the
+    other doesn't — /search must still rank purely by rating_external, since
+    rating_internal never enters the SearchRepository.search() query at all
+    (feature 66 explicitly leaves this repository untouched)."""
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("f66-low-external-high-internal-search-test")
+        | {
+            "title": "Feature Sixtysix Regression Movie",
+            "original_title": "Feature Sixtysix Regression Movie",
+            "rating_external": 1.0,
+            "rating_internal": 4.9,
+        },
+    )
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("f66-high-external-no-internal-search-test")
+        | {
+            "title": "Feature Sixtysix Regression Movie",
+            "original_title": "Feature Sixtysix Regression Movie",
+            "rating_external": 9.0,
+            "rating_internal": None,
+        },
+    )
+    await db.flush()
+    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
+    return db
+
+
+async def test_search_still_orders_by_rating_external_regardless_of_rating_internal(
+    client, rating_internal_present_seeded_db
+):
+    """A high rating_internal never outranks a higher rating_external in /search."""
+    response = await client.get("/v1/search?q=Feature Sixtysix Regression Movie")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [r["slug"] for r in body["results"]]
+    assert "f66-high-external-no-internal-search-test" in slugs
+    assert "f66-low-external-high-internal-search-test" in slugs
+    high_ext_idx = slugs.index("f66-high-external-no-internal-search-test")
+    low_ext_idx = slugs.index("f66-low-external-high-internal-search-test")
+    assert high_ext_idx < low_ext_idx
+    # rating_internal is not even part of the response contract for /search.
+    assert "rating_internal" not in body["results"][0]
+
+
 async def test_search_fallback_returns_ingested_items(client, db):
     """After ingestion, items appear in search results (end-to-end with real ingest)."""
     # Pre-seed a movie that will be "found" by the external fallback

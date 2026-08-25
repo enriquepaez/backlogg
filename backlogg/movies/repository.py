@@ -43,19 +43,28 @@ async def list_movies(
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
 
-    # Sorting
+    # Sorting. rating_desc/rating_asc order by rating_internal (the community's
+    # own rating, feature 66) first — rating_external is only an internal
+    # tie-break for items whose rating_internal is still NULL or tied, never
+    # the primary/visible sort criterion.
     if sort == MovieSortEnum.rating_desc:
-        order_col = Movie.rating_external.desc().nulls_last()
+        order_cols = (
+            Movie.rating_internal.desc().nulls_last(),
+            Movie.rating_external.desc().nulls_last(),
+        )
     elif sort == MovieSortEnum.rating_asc:
-        order_col = Movie.rating_external.asc().nulls_last()
+        order_cols = (
+            Movie.rating_internal.asc().nulls_last(),
+            Movie.rating_external.desc().nulls_last(),
+        )
     elif sort == MovieSortEnum.date_desc:
-        order_col = Movie.release_date.desc().nulls_last()
+        order_cols = (Movie.release_date.desc().nulls_last(),)
     elif sort == MovieSortEnum.date_asc:
-        order_col = Movie.release_date.asc().nulls_last()
+        order_cols = (Movie.release_date.asc().nulls_last(),)
     else:  # title_asc
-        order_col = Movie.title.asc()
+        order_cols = (Movie.title.asc(),)
 
-    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    base_query = base_query.order_by(*order_cols).offset((page - 1) * limit).limit(limit)
     result = await db.execute(base_query)
     items = list(result.scalars().unique().all())
 

@@ -183,6 +183,99 @@ async def test_get_similar_series_uses_local_if_already_present(db):
     assert result.results[0].slug == "recommended-series-local-2015"
 
 
+# ── Feature 66: rating_display_internal_only ────────────────────────────────
+
+
+async def test_get_similar_series_orders_by_rating_internal_over_external(db):
+    """Results are re-ordered by rating_internal desc, not TMDB's own order.
+
+    TMDB's recommendations list the low-rating_internal series first — the
+    response must still surface the high-rating_internal series first, even
+    though it has a lower rating_external.
+    """
+    series = await repo.upsert_series(
+        db, _make_source_series_dict("similar-series-test-source-order-2008")
+    )
+    await upsert_external_id(db, "SERIES", series.id, "TMDB", "9999804")
+
+    # Pre-seed both candidates locally with an already-computed rating_internal
+    # (feature 62) so the ranking signal comes from the persisted local row.
+    low_internal_high_external = {
+        "title": "Similar Series Order Low Internal",
+        "original_title": "Similar Series Order Low Internal",
+        "slug": "similar-series-order-low-internal-2015",
+        "overview": "",
+        "first_air_date": date(2015, 2, 8),
+        "last_air_date": None,
+        "number_of_seasons": 1,
+        "number_of_episodes": 10,
+        "status": "Ended",
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": 9.5,
+        "rating_count_external": 5000,
+        "rating_internal": 2.0,
+        "rating_count_internal": 3,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+    high_internal_low_external = {
+        "title": "Similar Series Order High Internal",
+        "original_title": "Similar Series Order High Internal",
+        "slug": "similar-series-order-high-internal-2016",
+        "overview": "",
+        "first_air_date": date(2016, 3, 1),
+        "last_air_date": None,
+        "number_of_seasons": 1,
+        "number_of_episodes": 10,
+        "status": "Ended",
+        "original_language": "en",
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": 1.0,
+        "rating_count_external": 5000,
+        "rating_internal": 4.5,
+        "rating_count_internal": 8,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+    await repo.upsert_series(db, low_internal_high_external)
+    await repo.upsert_series(db, high_internal_low_external)
+
+    # TMDB's own recommendations order lists the low-rating_internal series first.
+    rec_items = [
+        {
+            "id": 9999960,
+            "name": "Similar Series Order Low Internal",
+            "first_air_date": "2015-02-08",
+        },
+        {
+            "id": 9999961,
+            "name": "Similar Series Order High Internal",
+            "first_air_date": "2016-03-01",
+        },
+    ]
+
+    with (
+        patch.object(
+            service._tmdb,
+            "get_series_recommendations",
+            new_callable=AsyncMock,
+            return_value=rec_items,
+        ),
+        patch.object(service._tmdb, "get_series_detail", new_callable=AsyncMock) as mock_detail,
+    ):
+        result = await service.get_similar_series(db, "similar-series-test-source-order-2008")
+
+    mock_detail.assert_not_called()
+    slugs = [r.slug for r in result.results]
+    assert slugs == [
+        "similar-series-order-high-internal-2016",
+        "similar-series-order-low-internal-2015",
+    ]
+
+
 async def test_get_similar_series_limits_to_10(db):
     """Only up to 10 results are returned even if TMDB returns more."""
     series = await repo.upsert_series(

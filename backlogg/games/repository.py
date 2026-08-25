@@ -54,19 +54,28 @@ async def list_games(
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
 
-    # Sorting
+    # Sorting. rating_desc/rating_asc order by rating_internal (the community's
+    # own rating, feature 66) first — rating_external is only an internal
+    # tie-break for items whose rating_internal is still NULL or tied, never
+    # the primary/visible sort criterion.
     if sort == GameSortEnum.rating_desc:
-        order_col = Game.rating_external.desc().nulls_last()
+        order_cols = (
+            Game.rating_internal.desc().nulls_last(),
+            Game.rating_external.desc().nulls_last(),
+        )
     elif sort == GameSortEnum.rating_asc:
-        order_col = Game.rating_external.asc().nulls_last()
+        order_cols = (
+            Game.rating_internal.asc().nulls_last(),
+            Game.rating_external.desc().nulls_last(),
+        )
     elif sort == GameSortEnum.date_desc:
-        order_col = Game.release_date.desc().nulls_last()
+        order_cols = (Game.release_date.desc().nulls_last(),)
     elif sort == GameSortEnum.date_asc:
-        order_col = Game.release_date.asc().nulls_last()
+        order_cols = (Game.release_date.asc().nulls_last(),)
     else:  # title_asc
-        order_col = Game.title.asc()
+        order_cols = (Game.title.asc(),)
 
-    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    base_query = base_query.order_by(*order_cols).offset((page - 1) * limit).limit(limit)
     result = await db.execute(base_query)
     items = list(result.scalars().unique().all())
 
