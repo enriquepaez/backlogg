@@ -21,6 +21,7 @@ class SimilarSeriesOut(BaseModel):
     poster_url: str | None
     release_date: date | None
     rating_external: float | None
+    rating_internal: float | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +86,7 @@ class SeriesListItemOut(BaseModel):
     poster_url: str | None
     release_date: date | None
     rating_external: float | None
+    rating_internal: float | None
     genres: list[str]
 
     model_config = ConfigDict(from_attributes=True)

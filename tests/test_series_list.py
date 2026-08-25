@@ -122,6 +122,39 @@ async def test_list_series_filter_by_genre(client, db):
     assert body["total"] == 1
 
 
+async def test_list_series_response_includes_rating_internal(client, db):
+    """GET /series items include rating_internal — with a value and with null (feature 69)."""
+    genre = {"name": "sr-rating-internal-name", "slug": "sr-rating-internal-slug"}
+    await repo.upsert_series(
+        db,
+        _make_series(
+            slug="sr-rating-internal-set-2021",
+            title="Series With Internal Rating",
+            rating=7.0,
+            first_air_date=date(2021, 1, 1),
+            genres=[genre],
+        )
+        | {"rating_internal": 3.75},
+    )
+    await repo.upsert_series(
+        db,
+        _make_series(
+            slug="sr-rating-internal-null-2021",
+            title="Series Without Internal Rating",
+            rating=6.0,
+            first_air_date=date(2021, 1, 1),
+            genres=[genre],
+        ),
+    )
+
+    response = await client.get("/v1/series?genre=sr-rating-internal-slug")
+    assert response.status_code == 200
+    body = response.json()
+    by_slug = {item["slug"]: item for item in body["items"]}
+    assert by_slug["sr-rating-internal-set-2021"]["rating_internal"] == 3.75
+    assert by_slug["sr-rating-internal-null-2021"]["rating_internal"] is None
+
+
 async def test_list_series_sort_date_desc_uses_first_air_date(client, db):
     """GET /series?sort=date_desc sorts by first_air_date descending."""
     genre = {"name": "sr-date-genre-name", "slug": "sr-date-genre-slug"}

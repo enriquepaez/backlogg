@@ -52,7 +52,8 @@ GET /v1/search?q=&type=&page=&limit=
 independently optional and combinable with `q` and with each other.
 `date_from > date_to` or `rating_external_min > rating_external_max` returns
 `422`. There is no `rating_internal_*` filter here — the `catalog_search`
-materialized view backing this endpoint has no `rating_internal` column.
+materialized view exposes `rating_internal` on each result (feature 69) but
+it is not a filterable range on this endpoint.
 
 **Without `q`, there is no external fallback**: the four external APIs
 (TMDB, Open Library, IGDB) all require a text term to search against, so the
@@ -83,7 +84,8 @@ Response:
       "overview": "...",
       "poster_url": "https://...",
       "release_date": "2021-10-22",
-      "rating_external": 7.8
+      "rating_external": 7.8,
+      "rating_internal": 4.2
     }
   ],
   "total": 42,
@@ -172,6 +174,7 @@ Response:
       "poster_url": "https://...",
       "release_date": "2021-10-22",
       "rating_external": 7.8,
+      "rating_internal": 4.2,
       "genres": ["science-fiction", "adventure"]
     }
   ],
@@ -180,6 +183,11 @@ Response:
   "limit": 20
 }
 ```
+
+`rating_internal` (feature 69) viaja en cada item de la lista/grid de los 4
+tipos, poblado desde la columna ya existente en la tabla base — lectura
+directa, sin cálculo nuevo. Puede ser `null` si el item todavía no tiene
+ninguna puntuación de la comunidad.
 
 ### Movies
 
@@ -206,10 +214,11 @@ GET /v1/movies/{slug}/similar
 ```
 
 Response: `{"results": [...]}` — cada item: `title`, `slug`, `poster_url`,
-`release_date`, `rating_external`. Los items nuevos se persisten en la DB local.
-Orden: el propio orden de relevancia de TMDB (no reordenado por rating —
-a diferencia de `/v1/series/{slug}/similar` y `/v1/games/{slug}/similar`,
-este endpoint queda fuera del alcance explícito de la feature 66).
+`release_date`, `rating_external`, `rating_internal` (feature 69). Los items
+nuevos se persisten en la DB local. Orden: el propio orden de relevancia de
+TMDB (no reordenado por rating — a diferencia de `/v1/series/{slug}/similar`
+y `/v1/games/{slug}/similar`, este endpoint queda fuera del alcance explícito
+de la feature 66).
 
 ### Series
 
@@ -255,8 +264,9 @@ GET /v1/books/{slug}/similar
 
 Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`:
 cada item incluye `title`, `slug`, `poster_url`, `release_date`
-(`first_publish_date` del libro), `rating_external`. **A diferencia de
-`GET /v1/recommendations`, no incluye un campo `reason`.**
+(`first_publish_date` del libro), `rating_external`, `rating_internal`
+(feature 69). **A diferencia de `GET /v1/recommendations`, no incluye un
+campo `reason`.**
 
 Ranking: prioriza libros que comparten autor con el libro base (vía
 `people`/`credits` con `role: "AUTHOR"`, feature 19) sobre el resto; para
@@ -292,7 +302,8 @@ GET /v1/games/{slug}/similar
 
 Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`
 y `/v1/series/{slug}/similar`: cada item incluye `title`, `slug`, `poster_url`,
-`release_date`, `rating_external`. Los juegos nuevos se persisten en la DB local.
+`release_date`, `rating_external`, `rating_internal` (feature 69). Los juegos
+nuevos se persisten en la DB local.
 Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
 NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
 no por el orden curado de relaciones que devuelve IGDB.
@@ -854,9 +865,10 @@ Cómo se generan los candidatos:
 Se excluyen los items que el usuario ya ha puntuado o tiene en su library.
 
 Response: `{"results": [...], "page": , "limit": }` — cada resultado:
-`item_type`, `title`, `slug`, `poster_url`, `release_date`, `rating_external` y
-`reason` (motivo legible, p.ej. `"Because you rated <title>"`,
-`"Because <title> is in your library"`, `"Popular right now"`).
+`item_type`, `title`, `slug`, `poster_url`, `release_date`, `rating_external`,
+`rating_internal` (feature 69) y `reason` (motivo legible, p.ej.
+`"Because you rated <title>"`, `"Because <title> is in your library"`,
+`"Popular right now"`).
 
 ### Library (backlog por usuario)
 
@@ -900,8 +912,9 @@ reverse-chronological por `created_at`.
 
 Response: `{"items": [...], "total": , "page": , "limit": }` — cada entrada:
 `item` (`item_type`, `title`, `slug`, `poster_url`, `release_date`,
-`rating_external`) y `status`, `created_at`, `updated_at`. `release_date` usa
-`first_air_date` para series y `first_publish_date` para libros.
+`rating_external`, `rating_internal` — feature 69) y `status`, `created_at`,
+`updated_at`. `release_date` usa `first_air_date` para series y
+`first_publish_date` para libros.
 
 ### People
 
@@ -937,8 +950,8 @@ GET /v1/trending?type=movie|series&period=day|week
 
 Sin `type` devuelve mix de movies y series. `period` default: `week`.
 Response: `{"results": [...]}` — cada item: `item_type`, `title`, `slug`,
-`poster_url`, `release_date`, `rating_external`. Los items nuevos se
-persisten en la DB local.
+`poster_url`, `release_date`, `rating_external`, `rating_internal` (feature
+69). Los items nuevos se persisten en la DB local.
 
 ### Admin (sync trigger)
 

@@ -196,6 +196,40 @@ async def test_list_movies_sort_date_desc(client, db):
     assert new_idx < old_idx
 
 
+async def test_list_movies_response_includes_rating_internal(client, db):
+    """GET /movies items include rating_internal — with a value and with null (feature 69)."""
+    genre = {"name": "mv-rating-internal-name", "slug": "mv-rating-internal-slug"}
+    await repo.upsert_movie(
+        db,
+        _make_movie(
+            slug="mv-rating-internal-set-2021",
+            title="Movie With Internal Rating",
+            rating=7.0,
+            release_date=date(2021, 1, 1),
+            genres=[genre],
+        )
+        | {"rating_internal": 4.25},
+    )
+    await repo.upsert_movie(
+        db,
+        _make_movie(
+            slug="mv-rating-internal-null-2021",
+            title="Movie Without Internal Rating",
+            rating=6.0,
+            release_date=date(2021, 1, 1),
+            genres=[genre],
+        ),
+    )
+
+    response = await client.get("/v1/movies?genre=mv-rating-internal-slug")
+    assert response.status_code == 200
+    body = response.json()
+    by_slug = {item["slug"]: item for item in body["items"]}
+    assert "rating_internal" in by_slug["mv-rating-internal-set-2021"]
+    assert by_slug["mv-rating-internal-set-2021"]["rating_internal"] == 4.25
+    assert by_slug["mv-rating-internal-null-2021"]["rating_internal"] is None
+
+
 async def test_list_movies_pagination(client, db):
     """GET /movies?page=2&limit=1 paginates correctly."""
     genre = {"name": "mv-page-genre-name", "slug": "mv-page-genre-slug"}

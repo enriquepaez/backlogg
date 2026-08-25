@@ -117,6 +117,39 @@ async def test_list_books_filter_by_genre(client, db):
     assert body["total"] == 1
 
 
+async def test_list_books_response_includes_rating_internal(client, db):
+    """GET /books items include rating_internal — with a value and with null (feature 69)."""
+    genre = {"name": "bk-rating-internal-name", "slug": "bk-rating-internal-slug"}
+    await repo.upsert_book(
+        db,
+        _make_book(
+            slug="bk-rating-internal-set-2021",
+            title="Book With Internal Rating",
+            rating=4.0,
+            first_publish_date=date(2021, 1, 1),
+            genres=[genre],
+        )
+        | {"rating_internal": 4.9},
+    )
+    await repo.upsert_book(
+        db,
+        _make_book(
+            slug="bk-rating-internal-null-2021",
+            title="Book Without Internal Rating",
+            rating=3.0,
+            first_publish_date=date(2021, 1, 1),
+            genres=[genre],
+        ),
+    )
+
+    response = await client.get("/v1/books?genre=bk-rating-internal-slug")
+    assert response.status_code == 200
+    body = response.json()
+    by_slug = {item["slug"]: item for item in body["items"]}
+    assert by_slug["bk-rating-internal-set-2021"]["rating_internal"] == 4.9
+    assert by_slug["bk-rating-internal-null-2021"]["rating_internal"] is None
+
+
 async def test_list_books_sort_date_desc_uses_first_publish_date(client, db):
     """GET /books?sort=date_desc sorts by first_publish_date descending."""
     genre = {"name": "bk-date-genre-name", "slug": "bk-date-genre-slug"}

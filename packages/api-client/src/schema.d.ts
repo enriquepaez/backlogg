@@ -1520,6 +1520,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
             /** Genres */
             genres: string[];
         };
@@ -1788,6 +1790,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
             /** Genres */
             genres: string[];
         };
@@ -1969,6 +1973,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /**
          * LibraryListOut
@@ -1980,6 +1986,7 @@ export interface components {
          *             "item_type": "MOVIE",
          *             "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
          *             "rating_external": 7.8,
+         *             "rating_internal": 4.2,
          *             "release_date": "2021-10-22",
          *             "slug": "dune-2021",
          *             "title": "Dune"
@@ -2082,6 +2089,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
             /** Genres */
             genres: string[];
         };
@@ -2097,6 +2106,7 @@ export interface components {
          *           "id": 1,
          *           "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
          *           "rating_external": 7.8,
+         *           "rating_internal": 4.2,
          *           "release_date": "2021-10-22",
          *           "slug": "dune-2021",
          *           "title": "Dune"
@@ -2390,6 +2400,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
             /** Reason */
             reason: string;
         };
@@ -2409,6 +2421,7 @@ export interface components {
          *           "item_type": "MOVIE",
          *           "poster_url": "https://image.tmdb.org/t/p/w500/br2049.jpg",
          *           "rating_external": 8,
+         *           "rating_internal": 4.5,
          *           "reason": "Because you rated Dune",
          *           "release_date": "2017-10-06",
          *           "slug": "blade-runner-2049",
@@ -2556,6 +2569,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /** SeriesGenreOut */
         SeriesGenreOut: {
@@ -2580,6 +2595,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
             /** Genres */
             genres: string[];
         };
@@ -2657,6 +2674,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /** SimilarBooksOut */
         SimilarBooksOut: {
@@ -2680,6 +2699,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /** SimilarMovieOut */
         SimilarMovieOut: {
@@ -2693,6 +2714,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /** SimilarMoviesOut */
         SimilarMoviesOut: {
@@ -2716,6 +2739,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /** StatsResponse */
         StatsResponse: {
@@ -2774,6 +2799,8 @@ export interface components {
             release_date: string | null;
             /** Rating External */
             rating_external: number | null;
+            /** Rating Internal */
+            rating_internal: number | null;
         };
         /**
          * TrendingOut
@@ -2783,6 +2810,7 @@ export interface components {
          *           "item_type": "MOVIE",
          *           "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
          *           "rating_external": 7.8,
+         *           "rating_internal": 4.2,
          *           "release_date": "2021-10-22",
          *           "slug": "dune-2021",
          *           "title": "Dune"

@@ -160,6 +160,8 @@ async def test_get_similar_games_persists_and_returns(db):
     assert item.poster_url is not None
     assert item.release_date == date(2008, 7, 18)
     assert item.rating_external == 9.0
+    # Feature 69: a freshly-persisted IGDB item has no community rating yet.
+    assert item.rating_internal is None
 
     # Verify it was persisted
     persisted = await repo.get_game_by_slug(db, "recommended-game-2008")
@@ -399,6 +401,10 @@ async def test_get_similar_games_orders_by_rating_internal_over_external(db):
         "similar-order-high-internal-2009",
         "similar-order-low-internal-2008",
     ]
+    # Feature 69: rating_internal travels in the response, with the correct
+    # value per item (not just used internally to compute the order).
+    assert result.results[0].rating_internal == 4.5
+    assert result.results[1].rating_internal == 2.0
 
 
 async def test_get_similar_games_limits_to_10(db):

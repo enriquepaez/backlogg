@@ -27,9 +27,16 @@ descripciones).
    movies hasta agotar). No compite por el slot de "una feature a la vez"
    (no es código) — puede dispararse en paralelo con cualquier otro punto
    de esta lista, previa confirmación del usuario (acción sobre producción).
-4. **Backend 66 → Frontend FE-59** — `rating_display_internal_only` /
-   `rating_badge_internal_only`. Pareja con dependencia real; backend
-   primero.
+4. **Backend 66 → Backend 69 → Frontend FE-59** — `rating_display_internal_only` /
+   `rating_internal_list_exposure` / `rating_badge_internal_only`. Backend 66
+   done. Al empezar la implementación de FE-59 (2026-08-25) el implementer se
+   bloqueó: los schemas de lista/grid (movies/series/books/games list items,
+   trending, search, library, recommendations, similar items) nunca
+   exponían `rating_internal`, solo los 4 schemas de detalle — feature 66 no
+   lo cubrió. Se añadió **Backend 69** (`rating_internal_list_exposure`,
+   depends_on: [66]) para cerrar ese hueco, incluyendo el gap de
+   `catalog_search` (vista materializada de `/search`, sin columna
+   `rating_internal` hoy). FE-59 queda bloqueada hasta que 69 esté `done`.
 5. **Backend 67 → Frontend FE-61** — `game_developer_publisher_exposure` /
    `game_developer_publisher_display`. Misma lógica.
 6. **Frontend FE-57** — `catalog_card_type_visual_coding`. Independiente.

@@ -167,6 +167,7 @@ async def list_movies(
             poster_url=m.poster_url,
             release_date=m.release_date,
             rating_external=float(m.rating_external) if m.rating_external is not None else None,
+            rating_internal=float(m.rating_internal) if m.rating_internal is not None else None,
             genres=[g.slug for g in m.genres],
         )
         for m in items
@@ -292,6 +293,11 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
                 rating_external=(
                     float(rec_movie.rating_external)
                     if rec_movie.rating_external is not None
+                    else None
+                ),
+                rating_internal=(
+                    float(rec_movie.rating_internal)
+                    if rec_movie.rating_internal is not None
                     else None
                 ),
             )

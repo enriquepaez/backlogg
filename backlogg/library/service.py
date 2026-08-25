@@ -158,6 +158,9 @@ async def get_user_library(
                 rating_external=(
                     float(row.rating_external) if row.rating_external is not None else None
                 ),
+                rating_internal=(
+                    float(row.rating_internal) if row.rating_internal is not None else None
+                ),
             ),
             status=row.status,
             created_at=row.created_at,

@@ -72,6 +72,9 @@ async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut
         poster_url=poster_url,
         release_date=movie.release_date,
         rating_external=rating_external,
+        rating_internal=(
+            float(movie.rating_internal) if movie.rating_internal is not None else None
+        ),
     )
 
 
@@ -123,6 +126,9 @@ async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOu
         poster_url=poster_url,
         release_date=series.first_air_date,
         rating_external=rating_external,
+        rating_internal=(
+            float(series.rating_internal) if series.rating_internal is not None else None
+        ),
     )
 
 

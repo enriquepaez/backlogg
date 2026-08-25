@@ -98,6 +98,35 @@ async def test_seed_from_high_rating_movie(db):
     assert cand.reason == "Because you rated Rec Seed Movie 1"
     assert cand.item_type == "MOVIE"
     assert cand.poster_url is not None
+    # Feature 69: local genre-overlap candidates carry rating_internal too.
+    assert cand.rating_internal is None
+
+
+async def test_genre_overlap_candidate_includes_rating_internal(db):
+    """Feature 69: rating_internal on a genre-overlap candidate is the
+    candidate's own value, populated from the base table (not None)."""
+    genre = [{"name": "Rec Internal Overlap", "slug": "rec-internal-overlap-1"}]
+    seed = await upsert_movie(
+        db, _movie_data("rec-seed-movie-internal-1", genre, "Rec Seed Movie Internal 1")
+    )
+    candidate_data = dict(
+        _movie_data("rec-cand-movie-internal-1", genre, "Rec Cand Movie Internal 1", rating=7.0)
+    )
+    candidate_data["rating_internal"] = 4.3
+    await upsert_movie(db, candidate_data)
+    user = await _make_user(db, "rec-user-internal-1")
+    await upsert_rating(db, user.id, "MOVIE", seed.id, 5, None)
+
+    with patch.object(
+        movies_service._tmdb,
+        "get_movie_recommendations",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        out = await service.get_recommendations(db, user, "movie", page=1, limit=20)
+
+    cand = next(r for r in out.results if r.slug == "rec-cand-movie-internal-1")
+    assert cand.rating_internal == 4.3
 
 
 # ── Seeding from the library ─────────────────────────────────────────────
@@ -184,6 +213,10 @@ async def test_fallback_popular_prioritizes_internal_rating_over_external(db):
 
     slugs = [r.slug for r in out.results]
     assert slugs.index("rec-pop-high-internal-1") < slugs.index("rec-pop-low-internal-1")
+    # Feature 69: rating_internal itself travels in the response.
+    by_slug = {r.slug: r for r in out.results}
+    assert by_slug["rec-pop-high-internal-1"].rating_internal == 4.5
+    assert by_slug["rec-pop-low-internal-1"].rating_internal is None
 
 
 # ── ?type= filter ────────────────────────────────────────────────────────
@@ -286,3 +319,6 @@ async def test_external_fanout_when_local_candidates_insufficient(db):
     assert "external-rec-movie-2015" in slugs
     ext = next(r for r in out.results if r.slug == "external-rec-movie-2015")
     assert ext.reason == "Because you rated Rec Seed Movie 5"
+    # Feature 69: field travels through from the external similar-items path
+    # too; a freshly-persisted TMDB item has no community rating yet.
+    assert ext.rating_internal is None

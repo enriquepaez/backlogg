@@ -5247,6 +5247,17 @@
             ],
             "title": "Rating External"
           },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -5263,6 +5274,7 @@
           "poster_url",
           "release_date",
           "rating_external",
+          "rating_internal",
           "genres"
         ],
         "title": "BookListItemOut"
@@ -6041,6 +6053,17 @@
             ],
             "title": "Rating External"
           },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -6057,6 +6080,7 @@
           "poster_url",
           "release_date",
           "rating_external",
+          "rating_internal",
           "genres"
         ],
         "title": "GameListItemOut"
@@ -6515,6 +6539,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -6524,7 +6559,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "LibraryItemOut"
       },
@@ -6566,6 +6602,7 @@
                 "item_type": "MOVIE",
                 "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
                 "rating_external": 7.8,
+                "rating_internal": 4.2,
                 "release_date": "2021-10-22",
                 "slug": "dune-2021",
                 "title": "Dune"
@@ -6740,6 +6777,17 @@
             ],
             "title": "Rating External"
           },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -6756,6 +6804,7 @@
           "poster_url",
           "release_date",
           "rating_external",
+          "rating_internal",
           "genres"
         ],
         "title": "MovieListItemOut"
@@ -6800,6 +6849,7 @@
               "id": 1,
               "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
               "rating_external": 7.8,
+              "rating_internal": 4.2,
               "release_date": "2021-10-22",
               "slug": "dune-2021",
               "title": "Dune"
@@ -7520,6 +7570,17 @@
             ],
             "title": "Rating External"
           },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
+          },
           "reason": {
             "type": "string",
             "title": "Reason"
@@ -7533,6 +7594,7 @@
           "poster_url",
           "release_date",
           "rating_external",
+          "rating_internal",
           "reason"
         ],
         "title": "RecommendationOut"
@@ -7581,6 +7643,7 @@
               "item_type": "MOVIE",
               "poster_url": "https://image.tmdb.org/t/p/w500/br2049.jpg",
               "rating_external": 8.0,
+              "rating_internal": 4.5,
               "reason": "Because you rated Dune",
               "release_date": "2017-10-06",
               "slug": "blade-runner-2049",
@@ -7896,6 +7959,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -7907,7 +7981,8 @@
           "overview",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "SearchResultItem"
       },
@@ -7982,6 +8057,17 @@
             ],
             "title": "Rating External"
           },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -7998,6 +8084,7 @@
           "poster_url",
           "release_date",
           "rating_external",
+          "rating_internal",
           "genres"
         ],
         "title": "SeriesListItemOut"
@@ -8300,6 +8387,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -8308,7 +8406,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "SimilarBookOut"
       },
@@ -8387,6 +8486,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -8395,7 +8505,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "SimilarGameOut"
       },
@@ -8442,6 +8553,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -8450,7 +8572,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "SimilarMovieOut"
       },
@@ -8529,6 +8652,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -8537,7 +8671,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "SimilarSeriesOut"
       },
@@ -8678,6 +8813,17 @@
               }
             ],
             "title": "Rating External"
+          },
+          "rating_internal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Internal"
           }
         },
         "type": "object",
@@ -8687,7 +8833,8 @@
           "slug",
           "poster_url",
           "release_date",
-          "rating_external"
+          "rating_external",
+          "rating_internal"
         ],
         "title": "TrendingItemOut"
       },
@@ -8712,6 +8859,7 @@
               "item_type": "MOVIE",
               "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
               "rating_external": 7.8,
+              "rating_internal": 4.2,
               "release_date": "2021-10-22",
               "slug": "dune-2021",
               "title": "Dune"

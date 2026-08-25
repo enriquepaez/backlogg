@@ -27,3 +27,4 @@ class CatalogSearchEntry(Base):
     poster_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     rating_external: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
+    rating_internal: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)

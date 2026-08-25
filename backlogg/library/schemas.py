@@ -57,6 +57,7 @@ class LibraryItemOut(BaseModel):
     poster_url: str | None
     release_date: date | None
     rating_external: float | None
+    rating_internal: float | None
 
 
 class LibraryEntryOut(BaseModel):
@@ -84,6 +85,7 @@ class LibraryListOut(BaseModel):
                             "poster_url": "https://image.tmdb.org/t/p/w500/dune.jpg",
                             "release_date": "2021-10-22",
                             "rating_external": 7.8,
+                            "rating_internal": 4.2,
                         },
                         "status": "completed",
                         "created_at": "2026-05-25T18:04:11Z",

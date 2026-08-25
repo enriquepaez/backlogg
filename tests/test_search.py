@@ -269,9 +269,81 @@ async def test_search_result_fields(client, seeded_db):
         "poster_url",
         "release_date",
         "rating_external",
+        "rating_internal",
     )
     for field in expected_fields:
         assert field in item
+
+
+@pytest_asyncio.fixture
+async def rating_internal_seeded_db(db):
+    """One item of each type, one with rating_internal set and one without,
+    then a REFRESH — regression coverage for the recreated catalog_search
+    materialized view (feature 69, rating_internal_list_exposure)."""
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("f69-movie-with-internal-search-test")
+        | {
+            "title": "F69 Rating Internal Movie",
+            "original_title": "F69 Rating Internal Movie",
+            "rating_internal": 4.5,
+        },
+    )
+    await movies_repo.upsert_movie(
+        db,
+        _movie_dict("f69-movie-without-internal-search-test")
+        | {
+            "title": "F69 Rating Internal Movie",
+            "original_title": "F69 Rating Internal Movie",
+            "rating_internal": None,
+        },
+    )
+    await series_repo.upsert_series(
+        db,
+        _series_dict("f69-series-with-internal-search-test") | {"rating_internal": 3.2},
+    )
+    await books_repo.upsert_book(
+        db,
+        _book_dict("f69-book-with-internal-search-test") | {"rating_internal": 2.8},
+    )
+    await games_repo.upsert_game(
+        db,
+        _game_dict("f69-game-with-internal-search-test") | {"rating_internal": 4.9},
+    )
+    await db.flush()
+    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
+    return db
+
+
+async def test_search_catalog_search_view_exposes_rating_internal_per_type(
+    client, rating_internal_seeded_db
+):
+    """After the migration recreates catalog_search + a REFRESH, every item
+    type surfaces its own rating_internal value (or null).
+
+    Movies are checked via full-text ``q`` (two movies sharing a title, one
+    with a value and one without); series/books/games are checked via the
+    ``type`` filter with no ``q`` (pure-filter query path) to avoid title
+    collisions with the shared ``_series_dict``/``_book_dict``/``_game_dict``
+    fixture titles used elsewhere in this module.
+    """
+    response = await client.get("/v1/search?q=F69+Rating+Internal+Movie")
+    assert response.status_code == 200
+    by_slug = {r["slug"]: r for r in response.json()["results"]}
+    assert by_slug["f69-movie-with-internal-search-test"]["rating_internal"] == 4.5
+    assert by_slug["f69-movie-without-internal-search-test"]["rating_internal"] is None
+
+    series_only = await client.get("/v1/search?type=series&rating_external_min=0")
+    series_by_slug = {r["slug"]: r for r in series_only.json()["results"]}
+    assert series_by_slug["f69-series-with-internal-search-test"]["rating_internal"] == 3.2
+
+    book_only = await client.get("/v1/search?type=book&rating_external_min=0")
+    book_by_slug = {r["slug"]: r for r in book_only.json()["results"]}
+    assert book_by_slug["f69-book-with-internal-search-test"]["rating_internal"] == 2.8
+
+    game_only = await client.get("/v1/search?type=game&rating_external_min=0")
+    game_by_slug = {r["slug"]: r for r in game_only.json()["results"]}
+    assert game_by_slug["f69-game-with-internal-search-test"]["rating_internal"] == 4.9
 
 
 # ---------------------------------------------------------------------------
@@ -898,10 +970,11 @@ async def test_search_distinct_rank_orders_by_rating_external_over_ts_rank(
 
 
 # ---------------------------------------------------------------------------
-# Regression (feature 66 — rating_display_internal_only): SearchRepository
-# .search() is the explicit exception that keeps ordering by rating_external
-# DESC NULLS LAST — catalog_search has no rating_internal column, and even
-# where the underlying row *does* have one, /search must never consult it.
+# Regression (feature 66 — rating_display_internal_only, updated by feature
+# 69 — rating_internal_list_exposure): SearchRepository.search() is the
+# explicit exception that keeps ordering by rating_external DESC NULLS LAST
+# even though catalog_search now exposes a rating_internal column (feature
+# 69) on every row — the ORDER BY itself must never consult it.
 # ---------------------------------------------------------------------------
 
 
@@ -909,8 +982,9 @@ async def test_search_distinct_rank_orders_by_rating_external_over_ts_rank(
 async def rating_internal_present_seeded_db(db):
     """Two movies matching the same query: one has a rating_internal set, the
     other doesn't — /search must still rank purely by rating_external, since
-    rating_internal never enters the SearchRepository.search() query at all
-    (feature 66 explicitly leaves this repository untouched)."""
+    rating_internal never enters the SearchRepository.search() ORDER BY at
+    all (feature 66 explicitly leaves that ordering untouched; feature 69
+    only adds the field to the response, not to the sort)."""
     await movies_repo.upsert_movie(
         db,
         _movie_dict("f66-low-external-high-internal-search-test")
@@ -939,7 +1013,12 @@ async def rating_internal_present_seeded_db(db):
 async def test_search_still_orders_by_rating_external_regardless_of_rating_internal(
     client, rating_internal_present_seeded_db
 ):
-    """A high rating_internal never outranks a higher rating_external in /search."""
+    """A high rating_internal never outranks a higher rating_external in /search.
+
+    rating_internal DOES travel in the response (feature 69), but it must
+    have zero influence over the ORDER BY — that stays rating_external DESC
+    NULLS LAST (feature 66's fixed exception for this repository).
+    """
     response = await client.get("/v1/search?q=Feature Sixtysix Regression Movie")
     assert response.status_code == 200
     body = response.json()
@@ -949,8 +1028,9 @@ async def test_search_still_orders_by_rating_external_regardless_of_rating_inter
     high_ext_idx = slugs.index("f66-high-external-no-internal-search-test")
     low_ext_idx = slugs.index("f66-low-external-high-internal-search-test")
     assert high_ext_idx < low_ext_idx
-    # rating_internal is not even part of the response contract for /search.
-    assert "rating_internal" not in body["results"][0]
+    by_slug = {r["slug"]: r for r in body["results"]}
+    assert by_slug["f66-low-external-high-internal-search-test"]["rating_internal"] == 4.9
+    assert by_slug["f66-high-external-no-internal-search-test"]["rating_internal"] is None
 
 
 async def test_search_fallback_returns_ingested_items(client, db):
