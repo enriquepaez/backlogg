@@ -130,7 +130,7 @@ export default async function BrowsePage({
                 key={item.slug}
                 title={item.title}
                 posterUrl={item.poster_url}
-                ratingExternal={item.rating_external}
+                ratingInternal={item.rating_internal}
                 href={`/${type}/${item.slug}`}
               />
             ))}

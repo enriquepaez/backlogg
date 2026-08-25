@@ -304,7 +304,7 @@ export function RatingWidget({
   }
 
   const aggregateText =
-    aggregate.ratingInternal === null
+    aggregate.ratingInternal == null
       ? t("noRatings")
       : `${aggregate.ratingInternal.toFixed(1)} (${aggregate.ratingCountInternal})`;
 

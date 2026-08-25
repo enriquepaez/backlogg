@@ -21,7 +21,15 @@ export type CatalogCardProps = {
    */
   year?: number | null;
   posterUrl: string | null;
-  ratingExternal: number | null;
+  /**
+   * The community's own average rating (`rating_internal`, `docs/schema.md`)
+   * — the only rating shown to end users (FE-59/backend `rating_display_
+   * internal_only`), never `rating_external` (TMDB/Open Library/IGDB).
+   * `null` until at least one user has rated the item, which is expected to
+   * be common early on; the badge is simply omitted in that case rather than
+   * falling back to the external rating or a placeholder.
+   */
+  ratingInternal: number | null;
   /**
    * Small badge over the poster (e.g. the localized type name). Used by the
    * trending grid, which mixes movies and series, to disambiguate items —
@@ -75,7 +83,7 @@ export function CatalogCard({
   title,
   year,
   posterUrl,
-  ratingExternal,
+  ratingInternal,
   typeLabel,
   libraryStatus,
   libraryStatusLabel,
@@ -108,10 +116,10 @@ export function CatalogCard({
             {typeLabel}
           </span>
         ) : null}
-        {ratingExternal !== null ? (
+        {ratingInternal != null ? (
           <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-xs font-medium text-foreground shadow-sm">
             <Star aria-hidden className="size-3 fill-current" />
-            {ratingExternal.toFixed(1)}
+            {ratingInternal.toFixed(1)}
           </span>
         ) : null}
         {libraryStatus && libraryStatusLabel ? (

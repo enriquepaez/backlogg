@@ -20,10 +20,8 @@ const baseProps: ItemHeroProps = {
   overview: "Paul Atreides unites with the Fremen of Arrakis.",
   posterUrl: "https://image.tmdb.org/t/p/w500/dune.jpg",
   backdropUrl: "https://image.tmdb.org/t/p/w780/dune-bd.jpg",
-  ratingExternal: 7.8,
-  ratingCountExternal: 9231,
-  ratingInternal: null,
-  ratingCountInternal: 0,
+  ratingInternal: 7.8,
+  ratingCountInternal: 9231,
   genres: ["Science Fiction"],
   fields: [{ label: "Release date", value: "2021-10-22" }],
   viewerStatus: null,
@@ -31,7 +29,6 @@ const baseProps: ItemHeroProps = {
   slug: "dune-2021",
   originalTitleLabel: "Original title",
   genresLabel: "Genres",
-  ratingExternalLabel: "External rating",
   ratingInternalLabel: "Backlogg rating",
   noRatingsLabel: "No ratings yet",
 };
@@ -63,15 +60,30 @@ describe("ItemHero", () => {
     expect(screen.getByText("Adventure")).toBeInTheDocument();
   });
 
-  it("renders the external rating rounded to one decimal, with the count", () => {
-    render(<ItemHero {...baseProps} ratingExternal={7.756} ratingCountExternal={9231} />);
+  it("renders the internal rating rounded to one decimal, with the count", () => {
+    render(<ItemHero {...baseProps} ratingInternal={7.756} ratingCountInternal={9231} />);
 
     expect(screen.getByText("7.8")).toBeInTheDocument();
     expect(screen.getByText("(9231)")).toBeInTheDocument();
   });
 
+  it("renders exactly one rating badge — rating_external is never shown to end users (FE-59)", () => {
+    render(<ItemHero {...baseProps} ratingInternal={7.8} ratingCountInternal={9231} />);
+
+    expect(screen.getByText("Backlogg rating")).toBeInTheDocument();
+    expect(screen.getAllByText("7.8")).toHaveLength(1);
+  });
+
   it("shows the no-ratings fallback when a rating is null", () => {
     render(<ItemHero {...baseProps} ratingInternal={null} />);
+
+    expect(screen.getByText("No ratings yet")).toBeInTheDocument();
+  });
+
+  it("shows the no-ratings fallback (without crashing) when rating_internal is undefined at runtime — a stale Next.js Data Cache entry from before the field existed (`getItem`'s cached JSON predating backend feature 69) can carry an `undefined` value here despite the `number | null` prop type", () => {
+    const props = { ...baseProps, ratingInternal: undefined } as unknown as ItemHeroProps;
+
+    render(<ItemHero {...props} />);
 
     expect(screen.getByText("No ratings yet")).toBeInTheDocument();
   });

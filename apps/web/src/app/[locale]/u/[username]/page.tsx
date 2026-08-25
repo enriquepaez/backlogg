@@ -285,7 +285,7 @@ function LibrarySummary({
                 key={`${entry.item.item_type}-${entry.item.slug}`}
                 title={entry.item.title}
                 posterUrl={entry.item.poster_url}
-                ratingExternal={entry.item.rating_external}
+                ratingInternal={entry.item.rating_internal}
                 typeLabel={itemType ? tType(`heading.${itemType}`) : entry.item.item_type}
                 href={itemType ? `/${itemType}/${entry.item.slug}` : undefined}
               />

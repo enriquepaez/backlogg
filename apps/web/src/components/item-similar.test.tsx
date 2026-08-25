@@ -51,7 +51,7 @@ describe("ItemSimilar", () => {
             slug: "arrival-2016",
             poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
             release_date: "2016-11-11",
-            rating_external: 7.9,
+            rating_internal: 7.9,
           },
         ]}
         heading="You might also like"
@@ -74,7 +74,7 @@ describe("ItemSimilar", () => {
             slug: "the-last-of-us",
             poster_url: null,
             release_date: "2023-01-15",
-            rating_external: 8.7,
+            rating_internal: 8.7,
           },
         ]}
         heading="You might also like"
@@ -95,7 +95,7 @@ describe("ItemSimilar", () => {
             slug: "OL893416W",
             poster_url: null,
             release_date: "1969-10-01",
-            rating_external: 4.1,
+            rating_internal: 4.1,
           },
         ]}
         heading="You might also like"
@@ -116,7 +116,7 @@ describe("ItemSimilar", () => {
             slug: "bastion",
             poster_url: null,
             release_date: "2011-07-20",
-            rating_external: 8.7,
+            rating_internal: 8.7,
           },
         ]}
         heading="You might also like"

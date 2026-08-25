@@ -335,6 +335,26 @@ describe("RatingWidget", () => {
     expect(screen.getByText(/^aggregateLabel:/)).toHaveTextContent("4.0 (1)");
   });
 
+  it("shows the no-ratings fallback (without crashing) when initialRatingInternal is undefined at runtime — a stale Next.js Data Cache entry from before the field existed (`getItem`'s cached JSON predating backend feature 69) can carry an `undefined` value here despite the `number | null` prop type", async () => {
+    server.use(
+      http.get("/api/movie/dune-2021/rating", () =>
+        HttpResponse.json({ authenticated: true, rating: null }),
+      ),
+    );
+
+    renderWithQuery(
+      <RatingWidget
+        type="movie"
+        slug="dune-2021"
+        initialRatingInternal={undefined as unknown as number | null}
+        initialRatingCountInternal={0}
+      />,
+    );
+
+    await screen.findByRole("group", { name: "scoreLabel" });
+    expect(screen.getByText(/^aggregateLabel:/)).toHaveTextContent("noRatings");
+  });
+
   it("toggles a star off (clears the score) when clicked twice", async () => {
     server.use(
       http.get("/api/movie/dune-2021/rating", () =>

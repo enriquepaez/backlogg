@@ -12,6 +12,7 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 const { CatalogCard } = await import("./catalog-card");
+type CatalogCardProps = React.ComponentProps<typeof CatalogCard>;
 
 describe("CatalogCard", () => {
   it("renders the poster image with the title as alt text", () => {
@@ -19,7 +20,7 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Dune"
         posterUrl="https://image.tmdb.org/t/p/w500/dune.jpg"
-        ratingExternal={7.8}
+        ratingInternal={7.8}
       />,
     );
 
@@ -32,7 +33,7 @@ describe("CatalogCard", () => {
         title="Batman"
         year={1989}
         posterUrl="https://image.tmdb.org/t/p/w500/batman.jpg"
-        ratingExternal={7.6}
+        ratingInternal={7.6}
       />,
     );
 
@@ -46,7 +47,7 @@ describe("CatalogCard", () => {
         title="Batman"
         year={null}
         posterUrl="https://image.tmdb.org/t/p/w500/batman.jpg"
-        ratingExternal={7.6}
+        ratingInternal={7.6}
       />,
     );
 
@@ -59,24 +60,35 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Dune"
         posterUrl="https://image.tmdb.org/t/p/w500/dune.jpg"
-        ratingExternal={7.756}
+        ratingInternal={7.756}
       />,
     );
 
     expect(screen.getByText("7.8")).toBeInTheDocument();
   });
 
-  it("omits the rating badge when rating_external is null", () => {
+  it("omits the rating badge when rating_internal is null", () => {
     render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} />,
     );
+
+    expect(screen.queryByText(/\d\.\d/)).not.toBeInTheDocument();
+  });
+
+  it("omits the rating badge (without crashing) when rating_internal is undefined at runtime — a stale Next.js Data Cache entry from before the field existed, e.g. `getFeatured()`/`getTrending()`'s cached JSON predating backend feature 69, can carry an `undefined` value here despite the `number | null` prop type", () => {
+    const props = {
+      title: "Dune",
+      posterUrl: null,
+    } as unknown as CatalogCardProps;
+
+    render(<CatalogCard {...props} />);
 
     expect(screen.queryByText(/\d\.\d/)).not.toBeInTheDocument();
   });
 
   it("falls back to a placeholder (no <img>, but still an accessible role=img) when poster_url is null", () => {
     const { container } = render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} />,
     );
 
     expect(container.querySelector("img")).not.toBeInTheDocument();
@@ -88,7 +100,7 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Chernobyl"
         posterUrl={null}
-        ratingExternal={null}
+        ratingInternal={null}
         typeLabel="Series"
       />,
     );
@@ -98,7 +110,7 @@ describe("CatalogCard", () => {
 
   it("renders the title text visibly", () => {
     render(
-      <CatalogCard title="Hades" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Hades" posterUrl={null} ratingInternal={null} />,
     );
 
     expect(screen.getByText("Hades")).toBeInTheDocument();
@@ -106,7 +118,7 @@ describe("CatalogCard", () => {
 
   it("reserves a 2-line minimum height on the title so 1-line and 2-line titles align across a grid (issue #12)", () => {
     render(
-      <CatalogCard title="Hades" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Hades" posterUrl={null} ratingInternal={null} />,
     );
 
     expect(screen.getByText("Hades")).toHaveClass("line-clamp-2", "min-h-10");
@@ -117,7 +129,7 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Dune"
         posterUrl={null}
-        ratingExternal={null}
+        ratingInternal={null}
         href="/movie/dune-2021"
       />,
     );
@@ -127,7 +139,7 @@ describe("CatalogCard", () => {
 
   it("renders as a plain (non-link) tile when href is omitted", () => {
     render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} />,
     );
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
@@ -138,7 +150,7 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Dune"
         posterUrl={null}
-        ratingExternal={null}
+        ratingInternal={null}
         footer={<p>Because you rated Blade Runner 2049</p>}
       />,
     );
@@ -148,7 +160,7 @@ describe("CatalogCard", () => {
 
   it("omits the footer entirely when not provided", () => {
     const { container } = render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} />,
     );
 
     expect(container.querySelector('[data-slot="card-content"]')?.children).toHaveLength(1);
@@ -159,7 +171,7 @@ describe("CatalogCard", () => {
       <CatalogCard
         title="Dune"
         posterUrl={null}
-        ratingExternal={null}
+        ratingInternal={null}
         libraryStatus="in_progress"
         libraryStatusLabel="In progress"
       />,
@@ -171,7 +183,7 @@ describe("CatalogCard", () => {
 
   it("omits the library status badge when libraryStatus is not provided", () => {
     render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} libraryStatusLabel="In progress" />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} libraryStatusLabel="In progress" />,
     );
 
     expect(screen.queryByText("In progress")).not.toBeInTheDocument();
@@ -179,7 +191,7 @@ describe("CatalogCard", () => {
 
   it("omits the library status badge when libraryStatusLabel is not provided", () => {
     render(
-      <CatalogCard title="Dune" posterUrl={null} ratingExternal={null} libraryStatus="in_progress" />,
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} libraryStatus="in_progress" />,
     );
 
     expect(screen.queryByText("In progress")).not.toBeInTheDocument();

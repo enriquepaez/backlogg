@@ -49,6 +49,13 @@ export type CatalogListItem = {
   poster_url: string | null;
   release_date: string | null;
   rating_external: number | null;
+  /**
+   * The community's own average rating — the only one shown to end users
+   * (FE-59/backend `rating_display_internal_only`); `rating_external` above
+   * stays for admin filtering/sorting only (`admin-catalog-filters.tsx`,
+   * `/search`'s ordering).
+   */
+  rating_internal: number | null;
   genres: string[];
 };
 

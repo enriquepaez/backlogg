@@ -59,6 +59,7 @@ const items = [
     poster_url: null,
     release_date: "2021-10-22",
     rating_external: 7.8,
+    rating_internal: 4.2,
     genres: ["science-fiction"],
   },
   {
@@ -68,6 +69,7 @@ const items = [
     poster_url: null,
     release_date: null,
     rating_external: null,
+    rating_internal: null,
     genres: [],
   },
 ];
@@ -82,6 +84,17 @@ describe("AdminCatalogTable — rows", () => {
     expect(screen.getByText("2021-10-22")).toBeInTheDocument();
     expect(screen.getByText("7.8")).toBeInTheDocument();
     expect(screen.getByText("Release date")).toBeInTheDocument();
+  });
+
+  it("shows the placeholder (without crashing) when rating_external is undefined at runtime — a stale Next.js Data Cache entry from before the field existed (`listCatalog`'s cached JSON predating backend feature 69) can carry an `undefined` value here despite the `number | null` field type", () => {
+    const itemsWithUndefinedRating = [
+      { ...items[0], rating_external: undefined },
+    ] as unknown as typeof items;
+
+    render(<AdminCatalogTable type="movie" items={itemsWithUndefinedRating} dateLabel="Release date" />);
+
+    expect(screen.getByText("emptyValue")).toBeInTheDocument();
+    expect(screen.queryByText("7.8")).not.toBeInTheDocument();
   });
 
   it("shows a placeholder for missing genres/date/rating", () => {

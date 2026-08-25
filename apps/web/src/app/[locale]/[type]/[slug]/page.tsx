@@ -337,8 +337,6 @@ export default async function ItemDetailPage({
         overview={item.overview}
         posterUrl={item.poster_url}
         backdropUrl={getBackdropUrl(type, item)}
-        ratingExternal={item.rating_external}
-        ratingCountExternal={item.rating_count_external}
         ratingInternal={item.rating_internal}
         ratingCountInternal={item.rating_count_internal}
         genres={(item.genres ?? []).map((genre) => genre.name)}
@@ -348,7 +346,6 @@ export default async function ItemDetailPage({
         slug={slug}
         originalTitleLabel={t("originalTitleLabel")}
         genresLabel={t("genresLabel")}
-        ratingExternalLabel={t("ratingExternalLabel")}
         ratingInternalLabel={t("ratingInternalLabel")}
         noRatingsLabel={t("noRatings")}
       />

@@ -174,7 +174,7 @@ export default async function SearchPage({
                   title={item.title ?? t("untitled")}
                   year={releaseYear(item.release_date)}
                   posterUrl={item.poster_url}
-                  ratingExternal={item.rating_external}
+                  ratingInternal={item.rating_internal}
                   typeLabel={itemType ? tType(`heading.${itemType}`) : item.item_type}
                   href={itemType ? `/${itemType}/${item.slug}` : undefined}
                 />
