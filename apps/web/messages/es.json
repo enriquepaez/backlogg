@@ -612,6 +612,24 @@
       "publisher": "Distribuidora",
       "notAvailable": "No disponible"
     },
+    "gameTypes": {
+      "MAIN_GAME": "Juego principal",
+      "DLC_ADDON": "DLC",
+      "EXPANSION": "Expansión",
+      "BUNDLE": "Paquete",
+      "STANDALONE_EXPANSION": "Expansión independiente",
+      "MOD": "Mod",
+      "EPISODE": "Episodio",
+      "SEASON": "Temporada",
+      "REMAKE": "Remake",
+      "REMASTER": "Remasterización",
+      "EXPANDED_GAME": "Edición ampliada",
+      "PORT": "Adaptación",
+      "FORK": "Versión derivada",
+      "PACK": "Paquete de contenido",
+      "UPDATE": "Actualización",
+      "other": "Otro"
+    },
     "credits": {
       "heading": "Créditos",
       "empty": "No hay información de créditos disponible."
