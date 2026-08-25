@@ -18,4 +18,8 @@ tests {
   test("credits field is an array", function() {
     expect(res.body.credits).to.be.an("array");
   });
+
+  test("companies field is an array", function() {
+    expect(res.body.companies).to.be.an("array");
+  });
 }

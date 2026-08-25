@@ -1634,6 +1634,25 @@ export interface components {
             /** Locked Fields */
             locked_fields: string[];
         };
+        /**
+         * CompanyCreditOut
+         * @description A company credit (feature 67): a company plus the role it played.
+         *
+         *     ``role`` is ``DEVELOPER`` or ``PUBLISHER`` (see IGDB adapter). A single
+         *     company can appear twice with different roles (e.g. self-published
+         *     developer) — each role is its own entry, matching the underlying
+         *     ``company_credits`` row per (item, company, role).
+         */
+        CompanyCreditOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /** Role */
+            role: string;
+        };
         /** ContentStats */
         ContentStats: {
             /** Count */
@@ -1845,6 +1864,11 @@ export interface components {
              * @default []
              */
             credits: components["schemas"]["backlogg__shared__schemas__CreditOut"][];
+            /**
+             * Companies
+             * @default []
+             */
+            companies: components["schemas"]["CompanyCreditOut"][];
             /** Viewer Status */
             viewer_status?: string | null;
         };
