@@ -1102,7 +1102,7 @@
         "Valor no reconocido (por si IGDB añade una categoría nueva en el futuro) no rompe el render — fallback razonable en vez de crash o texto vacío",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 58,

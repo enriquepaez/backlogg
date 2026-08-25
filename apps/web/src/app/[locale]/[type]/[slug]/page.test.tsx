@@ -96,7 +96,7 @@ const gameItem = {
   slug: "hades",
   overview: "A roguelike dungeon crawler.",
   release_date: "2020-09-17",
-  game_type: "main_game",
+  game_type: "MAIN_GAME",
   original_language: null,
   poster_url: "https://images.example/hades.jpg",
   backdrop_url: null,
@@ -337,6 +337,78 @@ describe("ItemDetailPage — game developer/publisher fields (FE-61)", () => {
     });
     expect(fields).toContainEqual({
       label: "fields.publisher",
+      value: "fields.notAvailable",
+    });
+  });
+});
+
+describe("ItemDetailPage — game_type translated to a human label, not the raw IGDB enum name (FE-58)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function fieldsFromDom(container: HTMLElement): { label: string; value: string }[] {
+    const hero = container.querySelector('[data-testid="item-hero"]');
+    expect(hero).not.toBeNull();
+    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
+    return props.fields;
+  }
+
+  it.each([
+    "MAIN_GAME",
+    "DLC_ADDON",
+    "EXPANSION",
+    "BUNDLE",
+    "STANDALONE_EXPANSION",
+    "MOD",
+    "EPISODE",
+    "SEASON",
+    "REMAKE",
+    "REMASTER",
+    "EXPANDED_GAME",
+    "PORT",
+    "FORK",
+    "PACK",
+    "UPDATE",
+  ])("looks up ItemDetail.gameTypes.%s instead of showing the raw code", async (code) => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...gameItem, game_type: code },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.gameType",
+      value: `gameTypes.${code}`,
+    });
+  });
+
+  it("falls back to gameTypes.other for a category outside the known 15 (e.g. a future IGDB addition) instead of crashing or showing the raw value", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...gameItem, game_type: "SPINOFF" },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.gameType",
+      value: "gameTypes.other",
+    });
+  });
+
+  it("still shows the not-available placeholder (not gameTypes.other) when game_type itself is absent", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...gameItem, game_type: null },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.gameType",
       value: "fields.notAvailable",
     });
   });

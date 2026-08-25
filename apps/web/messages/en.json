@@ -612,6 +612,24 @@
       "publisher": "Publisher",
       "notAvailable": "Not available"
     },
+    "gameTypes": {
+      "MAIN_GAME": "Main Game",
+      "DLC_ADDON": "DLC",
+      "EXPANSION": "Expansion",
+      "BUNDLE": "Bundle",
+      "STANDALONE_EXPANSION": "Standalone Expansion",
+      "MOD": "Mod",
+      "EPISODE": "Episode",
+      "SEASON": "Season",
+      "REMAKE": "Remake",
+      "REMASTER": "Remaster",
+      "EXPANDED_GAME": "Expanded Edition",
+      "PORT": "Port",
+      "FORK": "Fork",
+      "PACK": "Content Pack",
+      "UPDATE": "Update",
+      "other": "Other"
+    },
     "credits": {
       "heading": "Credits",
       "empty": "No credit information available."

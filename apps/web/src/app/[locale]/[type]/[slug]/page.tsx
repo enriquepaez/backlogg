@@ -8,6 +8,7 @@ import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
 import { env } from "@/lib/env";
+import { gameTypeLabel } from "@/lib/game-type-labels";
 import {
   getItemDetail,
   getSimilarItems,
@@ -182,7 +183,19 @@ function buildFields(
     case "game": {
       const game = item as GameDetail;
       fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(game.release_date, t) });
-      fields.push({ label: t("fields.gameType"), value: orNotAvailable(game.game_type, t) });
+      fields.push({
+        label: t("fields.gameType"),
+        // `orNotAvailable` alone isn't enough here (FE-58): unlike every
+        // other field in this switch, a *present* `game_type` still needs
+        // translating (raw IGDB enum names like "MAIN_GAME"/"DLC_ADDON" are
+        // never shown to the user) before falling into the shared
+        // placeholder for the (defensive-only — `GameOut.game_type` is a
+        // required string) null/undefined case.
+        value:
+          game.game_type != null
+            ? gameTypeLabel(game.game_type, t)
+            : t("fields.notAvailable"),
+      });
       fields.push({
         label: t("fields.developer"),
         value: orNotAvailable(companiesByRole(game.companies, "DEVELOPER"), t),
