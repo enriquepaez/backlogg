@@ -591,6 +591,7 @@
     "error": "Something went wrong loading this title. Please try again.",
     "originalTitleLabel": "Original title",
     "genresLabel": "Genres",
+    "platformsLabel": "Platforms",
     "ratingExternalLabel": "External rating",
     "ratingInternalLabel": "Backlogg rating",
     "ratingCount": "({count})",
@@ -607,7 +608,6 @@
       "episodes": "Episodes",
       "firstPublishDate": "First published",
       "gameType": "Type",
-      "platforms": "Platforms",
       "developer": "Developer",
       "publisher": "Publisher",
       "notAvailable": "Not available"

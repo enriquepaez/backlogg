@@ -29,6 +29,7 @@ const baseProps: ItemHeroProps = {
   slug: "dune-2021",
   originalTitleLabel: "Original title",
   genresLabel: "Genres",
+  platformsLabel: "Platforms",
   ratingInternalLabel: "Backlogg rating",
   noRatingsLabel: "No ratings yet",
 };
@@ -130,5 +131,51 @@ describe("ItemHero", () => {
     render(<ItemHero {...baseProps} type="series" slug="chernobyl" />);
 
     expect(screen.getByTestId("viewer-status-slot")).toHaveTextContent("series:chernobyl");
+  });
+
+  describe("platforms row (FE-60)", () => {
+    it("omits the row entirely when platforms is empty or undefined", () => {
+      const { rerender } = render(<ItemHero {...baseProps} type="game" platforms={[]} />);
+      expect(screen.queryByLabelText("Platforms")).not.toBeInTheDocument();
+
+      rerender(<ItemHero {...baseProps} type="game" platforms={undefined} />);
+      expect(screen.queryByLabelText("Platforms")).not.toBeInTheDocument();
+    });
+
+    it("renders one badge per platform, each carrying its family color class", () => {
+      render(
+        <ItemHero
+          {...baseProps}
+          type="game"
+          platforms={[
+            { id: 1, name: "PlayStation 5", slug: "ps5" },
+            { id: 2, name: "Xbox Series X|S", slug: "series-x-s" },
+            { id: 3, name: "Nintendo Switch", slug: "switch" },
+            { id: 4, name: "PC (Microsoft Windows)", slug: "win" },
+          ]}
+        />,
+      );
+
+      const row = screen.getByLabelText("Platforms");
+      expect(screen.getByText("PlayStation 5")).toHaveClass("bg-platform-playstation");
+      expect(screen.getByText("Xbox Series X|S")).toHaveClass("bg-platform-xbox");
+      expect(screen.getByText("Nintendo Switch")).toHaveClass("bg-platform-nintendo");
+      expect(screen.getByText("PC (Microsoft Windows)")).toHaveClass("bg-platform-pc");
+      expect(row).toBeInTheDocument();
+    });
+
+    it("falls back to the neutral genre-pill style for an unrecognized platform, never an uncolored/broken badge", () => {
+      render(
+        <ItemHero
+          {...baseProps}
+          type="game"
+          platforms={[{ id: 5, name: "Atari 2600", slug: "atari2600" }]}
+        />,
+      );
+
+      const badge = screen.getByText("Atari 2600");
+      expect(badge).toHaveClass("bg-muted", "text-muted-foreground");
+      expect(badge.className).not.toMatch(/bg-platform-/);
+    });
   });
 });

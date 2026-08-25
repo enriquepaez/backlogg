@@ -1137,7 +1137,7 @@
         "Accesible: el color no es el único medio de distinguir plataformas (el nombre sigue siendo texto legible dentro o junto al badge, no solo un icono/color)",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 60,
