@@ -591,6 +591,7 @@
     "error": "Algo salió mal al cargar este título. Inténtalo de nuevo.",
     "originalTitleLabel": "Título original",
     "genresLabel": "Géneros",
+    "platformsLabel": "Plataformas",
     "ratingExternalLabel": "Puntuación externa",
     "ratingInternalLabel": "Puntuación en backlogg",
     "ratingCount": "({count})",
@@ -607,7 +608,6 @@
       "episodes": "Episodios",
       "firstPublishDate": "Primera publicación",
       "gameType": "Tipo",
-      "platforms": "Plataformas",
       "developer": "Desarrollador",
       "publisher": "Distribuidora",
       "notAvailable": "No disponible"

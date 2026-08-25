@@ -41,8 +41,14 @@ vi.mock("@/lib/catalog", () => ({
 // `buildFields`' game developer/publisher rows (FE-61) can be asserted on
 // without duplicating `ItemHero`'s own rendering tests.
 vi.mock("@/components/item-hero", () => ({
-  ItemHero: (props: { fields: { label: string; value: string }[] }) => (
-    <div data-testid="item-hero" data-props={JSON.stringify({ fields: props.fields })} />
+  ItemHero: (props: {
+    fields: { label: string; value: string }[];
+    platforms?: { id: number; name: string; slug: string }[];
+  }) => (
+    <div
+      data-testid="item-hero"
+      data-props={JSON.stringify({ fields: props.fields, platforms: props.platforms })}
+    />
   ),
 }));
 vi.mock("@/components/item-credits", () => ({
@@ -477,19 +483,15 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     });
   });
 
-  it("game: shows the actual value when present and the placeholder when absent", async () => {
+  it("game: shows the actual value when present and the placeholder when absent (gameType/originalLanguage — platforms is no longer one of these label/value rows, see FE-60 below)", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
-      item: {
-        ...gameItem,
-        platforms: [{ id: 1, name: "PC", slug: "pc" }],
-      },
+      item: { ...gameItem, platforms: [{ id: 1, name: "PC", slug: "pc" }] },
     });
     const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
-    expect(fieldsFromDom(container)).toContainEqual({
-      label: "fields.platforms",
-      value: "PC",
-    });
+    expect(fieldsFromDom(container)).not.toContainEqual(
+      expect.objectContaining({ label: "fields.platforms" }),
+    );
 
     vi.clearAllMocks();
     getSimilarItems.mockResolvedValue([]);
@@ -499,11 +501,46 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     });
     const { container: container2 } = render(await ItemDetailPage(buildProps("game", "hades")));
     const fields = fieldsFromDom(container2);
-    expect(fields).toContainEqual({ label: "fields.platforms", value: "fields.notAvailable" });
     expect(fields).toContainEqual({ label: "fields.gameType", value: "fields.notAvailable" });
     expect(fields).toContainEqual({
       label: "fields.originalLanguage",
       value: "fields.notAvailable",
     });
+  });
+});
+
+describe("ItemDetailPage — platforms forwarded to ItemHero as its own prop, not a fields row (FE-60)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function platformsFromDom(
+    container: HTMLElement,
+  ): { id: number; name: string; slug: string }[] | undefined {
+    const hero = container.querySelector('[data-testid="item-hero"]');
+    expect(hero).not.toBeNull();
+    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
+    return props.platforms;
+  }
+
+  it("forwards GameOut.platforms verbatim for a game", async () => {
+    const platforms = [
+      { id: 1, name: "PlayStation 5", slug: "ps5" },
+      { id: 2, name: "Nintendo Switch", slug: "switch" },
+    ];
+    getItemDetail.mockResolvedValue({ status: "ok", item: { ...gameItem, platforms } });
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    expect(platformsFromDom(container)).toEqual(platforms);
+  });
+
+  it("is undefined for a movie — only GameOut has a platforms field", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(platformsFromDom(container)).toBeUndefined();
   });
 });

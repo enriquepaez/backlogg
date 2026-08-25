@@ -88,15 +88,20 @@ function orNotAvailable(value: string | null | undefined, t: ItemDetailTranslato
 }
 
 /**
- * Type-specific metadata rows (release date, runtime, seasons, platforms,
- * ...) for `ItemHero`'s `fields` prop. `item`'s shape is guaranteed to
- * correspond to `type` — both always come from the very same
- * `getItemDetail(type, slug)` call below — but `ItemDetail` itself is a
- * union (the four `*Out` response shapes genuinely differ), so each branch
- * narrows with a plain `as` cast rather than threading a generic through the
- * whole page.
+ * Type-specific metadata rows (release date, runtime, seasons, ...) for
+ * `ItemHero`'s `fields` prop. `item`'s shape is guaranteed to correspond to
+ * `type` — both always come from the very same `getItemDetail(type, slug)`
+ * call below — but `ItemDetail` itself is a union (the four `*Out` response
+ * shapes genuinely differ), so each branch narrows with a plain `as` cast
+ * rather than threading a generic through the whole page.
  *
- * Every optional field is always pushed (FE-63) — external data is
+ * `GameDetail.platforms` is deliberately NOT pushed here (FE-60) — unlike
+ * every other field, it needed a per-item color (console-maker brand), which
+ * this plain label/value `dl` has no room for, so it's threaded straight
+ * from `item.platforms` into `ItemHero`'s own `platforms` prop below instead,
+ * rendered as its own badge row (see that component).
+ *
+ * Every other optional field is always pushed (FE-63) — external data is
  * frequently partial (e.g. Open Library rarely has `original_language`) but
  * the row itself must stay visible with a "Not available" placeholder
  * ({@link orNotAvailable}) rather than disappearing, so the metadata `dl`
@@ -178,13 +183,6 @@ function buildFields(
       const game = item as GameDetail;
       fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(game.release_date, t) });
       fields.push({ label: t("fields.gameType"), value: orNotAvailable(game.game_type, t) });
-      fields.push({
-        label: t("fields.platforms"),
-        value:
-          game.platforms && game.platforms.length > 0
-            ? game.platforms.map((platform) => platform.name).join(", ")
-            : t("fields.notAvailable"),
-      });
       fields.push({
         label: t("fields.developer"),
         value: orNotAvailable(companiesByRole(game.companies, "DEVELOPER"), t),
@@ -292,6 +290,19 @@ function getBackdropUrl(type: CatalogType, item: ItemDetail): string | null {
     return null;
   }
   return (item as MovieDetail | SeriesDetail | GameDetail).backdrop_url;
+}
+
+/**
+ * `GameDetail.platforms` (FE-60) — the only type with a `platforms` field
+ * (`docs/api.md`), so `ItemHero`'s `platforms` prop is `undefined` for
+ * movies/series/books and that row simply doesn't render (see its own doc
+ * comment).
+ */
+function getPlatforms(type: CatalogType, item: ItemDetail): GameDetail["platforms"] | undefined {
+  if (type !== "game") {
+    return undefined;
+  }
+  return (item as GameDetail).platforms;
 }
 
 /**
@@ -403,6 +414,8 @@ export default async function ItemDetailPage({
         ratingInternal={item.rating_internal}
         ratingCountInternal={item.rating_count_internal}
         genres={(item.genres ?? []).map((genre) => genre.name)}
+        platforms={getPlatforms(type, item)}
+        platformsLabel={t("platformsLabel")}
         fields={buildFields(type, item, t)}
         viewerStatus={item.viewer_status}
         type={type}
