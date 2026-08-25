@@ -609,7 +609,8 @@
       "gameType": "Tipo",
       "platforms": "Plataformas",
       "developer": "Desarrollador",
-      "publisher": "Distribuidora"
+      "publisher": "Distribuidora",
+      "notAvailable": "No disponible"
     },
     "credits": {
       "heading": "Créditos",

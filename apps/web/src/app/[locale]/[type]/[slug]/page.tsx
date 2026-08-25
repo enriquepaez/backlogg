@@ -54,14 +54,15 @@ type ItemDetailTranslator = Awaited<ReturnType<typeof getTranslations<"ItemDetai
 /**
  * Joins the names of `GameOut.companies` (feature 67, `CompanyCreditOut[]`)
  * matching `role` ("DEVELOPER" or "PUBLISHER" per the IGDB adapter) into a
- * single comma-separated string, or `null` when there's none — same
- * "omit an absent optional field" contract {@link buildFields} already
- * follows for `platforms` below. A game can have several companies with the
- * same role (e.g. two publishers, one per region); all are kept, not just
- * the first, per FE-61's acceptance criteria. Developer and publisher are
- * deliberately two separate `buildFields` entries (own label each) rather
- * than one merged field, so they stay visually distinguishable in
- * `ItemHero`'s `dl` — never concatenated into one string across roles.
+ * single comma-separated string, or `null` when there's none — `buildFields`
+ * turns that `null` into the shared "not available" placeholder (FE-63)
+ * rather than omitting the row, same as every other optional field below. A
+ * game can have several companies with the same role (e.g. two publishers,
+ * one per region); all are kept, not just the first, per FE-61's acceptance
+ * criteria. Developer and publisher are deliberately two separate
+ * `buildFields` entries (own label each) rather than one merged field, so
+ * they stay visually distinguishable in `ItemHero`'s `dl` — never
+ * concatenated into one string across roles.
  */
 function companiesByRole(
   companies: GameDetail["companies"] | undefined,
@@ -74,15 +75,36 @@ function companiesByRole(
 }
 
 /**
+ * `value ?? t("fields.notAvailable")` for the common case of a plain
+ * optional string field (release/air/publish dates, status, original
+ * language, game type, and the developer/publisher strings {@link
+ * companiesByRole} already collapses to `null`). Kept as a helper so all 14
+ * of those `buildFields` rows share the exact same placeholder wording
+ * (FE-63 acceptance: one generic text, not per-field copy) instead of each
+ * inlining its own `?? t(...)`.
+ */
+function orNotAvailable(value: string | null | undefined, t: ItemDetailTranslator): string {
+  return value ?? t("fields.notAvailable");
+}
+
+/**
  * Type-specific metadata rows (release date, runtime, seasons, platforms,
  * ...) for `ItemHero`'s `fields` prop. `item`'s shape is guaranteed to
  * correspond to `type` — both always come from the very same
  * `getItemDetail(type, slug)` call below — but `ItemDetail` itself is a
  * union (the four `*Out` response shapes genuinely differ), so each branch
  * narrows with a plain `as` cast rather than threading a generic through the
- * whole page. Only pushes a field when the underlying value is present —
- * external data is frequently partial (e.g. Open Library rarely has
- * `original_language`).
+ * whole page.
+ *
+ * Every optional field is always pushed (FE-63) — external data is
+ * frequently partial (e.g. Open Library rarely has `original_language`) but
+ * the row itself must stay visible with a "Not available" placeholder
+ * ({@link orNotAvailable}) rather than disappearing, so the metadata `dl`
+ * has a stable, predictable shape across items instead of shrinking per
+ * item. `runtime`/`number_of_seasons`/`number_of_episodes` are numeric and
+ * checked with `!= null` rather than truthiness, since a real `0` (e.g. an
+ * upcoming series with zero aired episodes yet) is a legitimate value, not
+ * an absent one, and must not be swallowed into the placeholder.
  */
 function buildFields(
   type: CatalogType,
@@ -94,80 +116,87 @@ function buildFields(
   switch (type) {
     case "movie": {
       const movie = item as MovieDetail;
-      if (movie.release_date) {
-        fields.push({ label: t("fields.releaseDate"), value: movie.release_date });
-      }
-      if (movie.runtime) {
-        fields.push({
-          label: t("fields.runtime"),
-          value: t("fields.runtimeValue", { minutes: movie.runtime }),
-        });
-      }
-      if (movie.status) {
-        fields.push({ label: t("fields.status"), value: movie.status });
-      }
-      if (movie.original_language) {
-        fields.push({ label: t("fields.originalLanguage"), value: movie.original_language });
-      }
+      fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(movie.release_date, t) });
+      fields.push({
+        label: t("fields.runtime"),
+        value:
+          movie.runtime != null
+            ? t("fields.runtimeValue", { minutes: movie.runtime })
+            : t("fields.notAvailable"),
+      });
+      fields.push({ label: t("fields.status"), value: orNotAvailable(movie.status, t) });
+      fields.push({
+        label: t("fields.originalLanguage"),
+        value: orNotAvailable(movie.original_language, t),
+      });
       break;
     }
     case "series": {
       const series = item as SeriesDetail;
-      if (series.first_air_date) {
-        fields.push({ label: t("fields.firstAirDate"), value: series.first_air_date });
-      }
-      if (series.last_air_date) {
-        fields.push({ label: t("fields.lastAirDate"), value: series.last_air_date });
-      }
-      if (series.number_of_seasons) {
-        fields.push({ label: t("fields.seasons"), value: String(series.number_of_seasons) });
-      }
-      if (series.number_of_episodes) {
-        fields.push({ label: t("fields.episodes"), value: String(series.number_of_episodes) });
-      }
-      if (series.status) {
-        fields.push({ label: t("fields.status"), value: series.status });
-      }
-      if (series.original_language) {
-        fields.push({ label: t("fields.originalLanguage"), value: series.original_language });
-      }
+      fields.push({
+        label: t("fields.firstAirDate"),
+        value: orNotAvailable(series.first_air_date, t),
+      });
+      fields.push({
+        label: t("fields.lastAirDate"),
+        value: orNotAvailable(series.last_air_date, t),
+      });
+      fields.push({
+        label: t("fields.seasons"),
+        value:
+          series.number_of_seasons != null
+            ? String(series.number_of_seasons)
+            : t("fields.notAvailable"),
+      });
+      fields.push({
+        label: t("fields.episodes"),
+        value:
+          series.number_of_episodes != null
+            ? String(series.number_of_episodes)
+            : t("fields.notAvailable"),
+      });
+      fields.push({ label: t("fields.status"), value: orNotAvailable(series.status, t) });
+      fields.push({
+        label: t("fields.originalLanguage"),
+        value: orNotAvailable(series.original_language, t),
+      });
       break;
     }
     case "book": {
       const book = item as BookDetail;
-      if (book.first_publish_date) {
-        fields.push({ label: t("fields.firstPublishDate"), value: book.first_publish_date });
-      }
-      if (book.original_language) {
-        fields.push({ label: t("fields.originalLanguage"), value: book.original_language });
-      }
+      fields.push({
+        label: t("fields.firstPublishDate"),
+        value: orNotAvailable(book.first_publish_date, t),
+      });
+      fields.push({
+        label: t("fields.originalLanguage"),
+        value: orNotAvailable(book.original_language, t),
+      });
       break;
     }
     case "game": {
       const game = item as GameDetail;
-      if (game.release_date) {
-        fields.push({ label: t("fields.releaseDate"), value: game.release_date });
-      }
-      if (game.game_type) {
-        fields.push({ label: t("fields.gameType"), value: game.game_type });
-      }
-      if (game.platforms && game.platforms.length > 0) {
-        fields.push({
-          label: t("fields.platforms"),
-          value: game.platforms.map((platform) => platform.name).join(", "),
-        });
-      }
-      const developers = companiesByRole(game.companies, "DEVELOPER");
-      if (developers) {
-        fields.push({ label: t("fields.developer"), value: developers });
-      }
-      const publishers = companiesByRole(game.companies, "PUBLISHER");
-      if (publishers) {
-        fields.push({ label: t("fields.publisher"), value: publishers });
-      }
-      if (game.original_language) {
-        fields.push({ label: t("fields.originalLanguage"), value: game.original_language });
-      }
+      fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(game.release_date, t) });
+      fields.push({ label: t("fields.gameType"), value: orNotAvailable(game.game_type, t) });
+      fields.push({
+        label: t("fields.platforms"),
+        value:
+          game.platforms && game.platforms.length > 0
+            ? game.platforms.map((platform) => platform.name).join(", ")
+            : t("fields.notAvailable"),
+      });
+      fields.push({
+        label: t("fields.developer"),
+        value: orNotAvailable(companiesByRole(game.companies, "DEVELOPER"), t),
+      });
+      fields.push({
+        label: t("fields.publisher"),
+        value: orNotAvailable(companiesByRole(game.companies, "PUBLISHER"), t),
+      });
+      fields.push({
+        label: t("fields.originalLanguage"),
+        value: orNotAvailable(game.original_language, t),
+      });
       break;
     }
   }
