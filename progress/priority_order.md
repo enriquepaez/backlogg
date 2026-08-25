@@ -38,7 +38,16 @@ descripciones).
    `catalog_search` (vista materializada de `/search`, sin columna
    `rating_internal` hoy). FE-59 queda bloqueada hasta que 69 esté `done`.
 5. **Backend 67 → Frontend FE-61** — `game_developer_publisher_exposure` /
-   `game_developer_publisher_display`. Misma lógica.
+   `game_developer_publisher_display`. Ambas `done`, mergeadas (PR #170,
+   #171).
+5b. **Frontend FE-63** — `item_detail_fields_not_available_placeholder`.
+   Surgida durante la QA de FE-61 (2026-08-25): el usuario pidió invertir el
+   comportamiento "omitir si falta" de TODOS los campos opcionales de
+   `buildFields` (los 4 tipos de producto, no solo developer/publisher) por
+   un placeholder "no disponible" — ver detalle completo en
+   `frontend_feature_list.json` id=62. Se ejecuta justo después del punto 5
+   por ser una continuación directa de ese mismo trabajo, antes de seguir
+   con el resto de la lista original.
 6. **Frontend FE-57** — `catalog_card_type_visual_coding`. Independiente.
 7. **Frontend FE-60** — `game_platform_brand_badges`. Independiente, la más
    grande de diseño (agrupar 60+ plataformas IGDB por familia de marca).
