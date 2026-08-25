@@ -92,7 +92,14 @@ export default async function BrowsePage({
   const sort = parseSort(query.sort);
   const page = parsePage(query.page);
 
-  const t = await getTranslations("Browse");
+  const [t, tBadge] = await Promise.all([
+    getTranslations("Browse"),
+    // FE-57: the type badge's singular label ("Movie") lives in `Home.
+    // typeBadge` — reused here (rather than `Browse.heading`, which holds
+    // the plural page heading, "Movies") so the badge text matches every
+    // other grid's type badge exactly.
+    getTranslations("Home"),
+  ]);
 
   const [result, genres] = await Promise.all([
     listCatalog(type, { genre, sort, page }),
@@ -131,6 +138,8 @@ export default async function BrowsePage({
                 title={item.title}
                 posterUrl={item.poster_url}
                 ratingInternal={item.rating_internal}
+                typeLabel={tBadge(`typeBadge.${type}`)}
+                itemType={type}
                 href={`/${type}/${item.slug}`}
               />
             ))}

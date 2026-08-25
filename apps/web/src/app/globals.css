@@ -35,6 +35,14 @@
   --color-status-completed-foreground: var(--status-completed-foreground);
   --color-status-dropped: var(--status-dropped);
   --color-status-dropped-foreground: var(--status-dropped-foreground);
+  --color-type-movie: var(--type-movie);
+  --color-type-movie-foreground: var(--type-movie-foreground);
+  --color-type-series: var(--type-series);
+  --color-type-series-foreground: var(--type-series-foreground);
+  --color-type-book: var(--type-book);
+  --color-type-book-foreground: var(--type-book-foreground);
+  --color-type-game: var(--type-game);
+  --color-type-game-foreground: var(--type-game-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-hover: var(--accent-hover);
   --color-accent: var(--accent);
@@ -178,22 +186,84 @@
    * Verified the same way as prior rounds: OKLCH -> OKLab -> LMS -> linear
    * sRGB (Björn Ottosson's matrices), checking each channel lands in [0, 1]
    * (in-gamut, no clipping) and computing the WCAG relative-luminance
-   * contrast ratio for bg/fg. Target this round: AAA (>= 7:1) where
-   * reachable without giving up meaningful chroma; AA (>= 4.5:1) as the hard
-   * floor everywhere. 7 of the 8 pairs clear AAA (7.30-14.80:1); the 8th
-   * (`--status-dropped` in dark theme) intentionally stays at AA (4.99:1) —
-   * see the dark-theme comment for why. Full numeric derivation (per-hue
-   * gamut sweep, exact contrast ratios, hex previews) lives in
-   * progress/impl_library_status_colors.md, not just eyeballed.
+   * contrast ratio for bg/fg.
+   *
+   * Round 5 (2026-08-25, alongside FE-57's type-color re-derivation below)
+   * nudges all four hues slightly (258 -> 262.9, 100 -> 91.9, 145 -> 150.1,
+   * 25 -> 27.3) as part of a full 9-color re-derivation (4 status + 4 type +
+   * accent) done together this time instead of type being fit into gaps left
+   * by an already-fixed status set — see `docs/design-tokens.md` for the
+   * complete rationale, hue-wheel distribution process, exact hex/OKLCH
+   * values and the CVD-simulation trade-offs accepted (Machado-Oliveira-
+   * Fernandes 2009 protanopia/deuteranopia matrices, not just WCAG). The
+   * canonical mapping (blue/yellow/green/red) and the round-4 reasoning above
+   * still apply; only the precise hue angle and the light-theme L/C per hue
+   * changed to fit the wider 9-color layout. `--status-dropped` keeps
+   * round 4's dark-theme trade-off (AA-only, near-absolute chroma ceiling)
+   * for the same reason: its hue is still close to `--destructive`'s, so
+   * "bright bg + dark text" would still collide with it in appearance — see
+   * the dark-theme comment below.
    */
-  --status-want: oklch(0.45 0.164 258);
+  --status-want: oklch(0.546 0.215 262.9);
   --status-want-foreground: oklch(0.985 0 0);
-  --status-in-progress: oklch(0.9 0.184 100);
+  --status-in-progress: oklch(0.861 0.173 91.9);
   --status-in-progress-foreground: oklch(0.145 0 0);
-  --status-completed: oklch(0.42 0.129 145);
+  --status-completed: oklch(0.527 0.137 150.1);
   --status-completed-foreground: oklch(0.985 0 0);
-  --status-dropped: oklch(0.44 0.176 25);
+  --status-dropped: oklch(0.577 0.215 27.3);
   --status-dropped-foreground: oklch(0.985 0 0);
+  /*
+   * Catalog type colors (FE-57): one hue per item type (movie/series/book/
+   * game), so `CatalogCard`'s type badge carries a color signal instead of
+   * the flat neutral `bg-background/90` it used before this feature.
+   *
+   * Round 2 (2026-08-25, this palette): round 1's hues (movie H 220, series
+   * H 335, book H 65, game H 185, all sharing light theme's L 0.42) were
+   * rejected by the user before shipping - movie and game (both cyan-leaning
+   * teals only 35 degrees apart) read as near-identical, and game also
+   * collided visually with `--status-completed`. Full re-derivation with
+   * daltonism simulation (protanopia/deuteranopia, Machado-Oliveira-Fernandes
+   * 2009 matrices) and an explicit hue-wheel gap analysis across all 9 tokens
+   * at once (4 status + 4 type + accent), not just nearest-neighbor checks -
+   * see `docs/design-tokens.md` for the full rationale, the exact hex/OKLCH
+   * table, the two accepted texture/CVD trade-offs, and the process for
+   * retouching this palette in the future. Summary: `--accent` and
+   * `--status-*` keep their existing hues (canonical brand violet + the four
+   * status meanings are non-negotiable); the four type hues were placed in
+   * the real remaining gaps on the 360-degree wheel: movie teal H 186.4,
+   * series magenta H 340.0, book terracotta H 40.0, game cyan H 221.7 (moved
+   * off its round-1 spot, now 76 degrees from `--status-want` and clearly
+   * separated from movie).
+   *
+   * `--type-game-foreground` changes from white to **black** in this round -
+   * cyan's max-in-gamut chroma at a lightness dark enough for legible white
+   * text is too low to read as vivid (confirmed by gamut sweep), so game
+   * joins `--status-in-progress` as the only two tokens using dark text (see
+   * "Excepciones de texto" in the design-tokens doc). The other three type
+   * hues keep white text as before.
+   *
+   * Method unchanged from round 1 / the `--status-*` block above: OKLCH ->
+   * OKLab -> LMS -> linear sRGB (Bjorn Ottosson's matrices), near-max
+   * in-gamut chroma at each hue/lightness (minus a small safety margin),
+   * solid/vivid backgrounds rather than pastel tints, WCAG contrast checked
+   * against the paired foreground. Light theme values are exact
+   * `docs/design-tokens.md` table values (L 0.45-0.86 depending on hue, one
+   * lightness per hue rather than a shared band, since forcing a single L
+   * across hues this spread out on the wheel was round 1's chroma-ceiling
+   * mistake for the blue-cyan-green range) - contrast against paired
+   * foreground 4.63-9.25:1 (AA floor 4.5:1 met by all; AAA 7:1 met by
+   * book/game, want/completed/dropped/movie/series stay AA by design so
+   * chroma isn't sacrificed for a contrast number nobody asked for beyond
+   * "readable").
+   */
+  --type-movie: oklch(0.511 0.086 186.4);
+  --type-movie-foreground: oklch(0.985 0 0);
+  --type-series: oklch(0.501 0.206 340);
+  --type-series-foreground: oklch(0.985 0 0);
+  --type-book: oklch(0.45 0.127 40);
+  --type-book-foreground: oklch(0.985 0 0);
+  --type-game: oklch(0.751 0.131 221.7);
+  --type-game-foreground: oklch(0.145 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: var(--accent);
@@ -234,37 +304,62 @@
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  /* See the `:root` block above for the round 4 rationale (solid vivid
-     backgrounds, canonical red/yellow/green/blue hues — pivot away from
-     round 3's pastel "soft badge"). `want`/`in_progress`/`completed` mirror
-     the light theme structurally: a *bright*, near-max-chroma background
-     with dark text, so the badge still stands out against the dark page
-     background (`--background: oklch(0.145 0 0)`) instead of blending into
-     it the way a dark-tinted background would. `--status-dropped` breaks
-     that mirroring on purpose: a bright, bg-with-dark-text red in this
-     lightness band (L ~= 0.70, matching the other three) lands almost
-     exactly on `--destructive`'s dark-theme value (L 0.704, C 0.191,
-     H 22.216, ~#ff6467 — a light coral-red), which would make the two
-     indistinguishable. Instead `--status-dropped` here uses the hue's
-     near-absolute chroma ceiling in sRGB gamut (L 0.63, C 0.252, ~#fe0d2d —
-     a saturated "stop-sign" red, clearly more intense/less washed-out than
+  /* See the `:root` block above for the round 4/5 rationale (solid vivid
+     backgrounds, canonical red/yellow/green/blue hues). Re-derived for
+     round 5's slightly shifted hues (258 -> 262.9, 100 -> 91.9, 145 -> 150.1,
+     25 -> 27.3; see `docs/design-tokens.md`), same method and structure as
+     round 4: `want`/`in_progress`/`completed` mirror the light theme
+     structurally with a *bright*, near-max-chroma background and dark text,
+     so the badge stands out against the dark page background
+     (`--background: oklch(0.145 0 0)`) instead of blending into it the way a
+     dark-tinted background would. `--status-dropped` breaks that mirroring
+     on purpose, same as round 4: a bright, bg-with-dark-text red at
+     L ~= 0.70-0.71 (the lightness that would clear AAA here) lands within a
+     few hue-degrees of `--destructive`'s dark-theme value (L 0.704, C 0.191,
+     H 22.216, ~#ff6467, a light coral-red) and would read as the same color.
+     Instead `--status-dropped` stays at the hue's near-absolute chroma
+     ceiling at low lightness (L 0.63, C 0.247, ~#fc1c24 — a saturated
+     "stop-sign" red, clearly more intense/less washed-out than
      `--destructive`'s coral) with dark text, which only clears WCAG AA
-     (4.99:1) rather than AAA — reaching AAA here would mean sliding the
-     background lightness toward `--destructive`'s band and giving up most
-     of the chroma, i.e. trading away the exact two things (distinctness,
-     vividness) this round exists to fix. `in_progress` (yellow) reuses the
-     identical light-theme value in both themes: yellow's max-chroma-in-gamut
-     point is inherently a high, near-white lightness (~0.90-0.91) regardless
-     of surrounding theme, so there is no light/dark lightness trade-off to
-     make for that hue the way there is for the other three. */
-  --status-want: oklch(0.7 0.155 258);
+     (5.01:1) rather than AAA - reaching AAA would mean sliding toward
+     `--destructive`'s band and giving up the chroma/distinctness this
+     exception exists to protect. `in_progress` (yellow) again reuses the
+     identical light-theme value in both themes (contrast 12.94:1) - yellow's
+     max-chroma-in-gamut point is inherently a high, near-white lightness
+     regardless of surrounding theme, so there's no light/dark trade-off to
+     make for that hue. */
+  --status-want: oklch(0.7 0.148 262.9);
   --status-want-foreground: oklch(0.145 0 0);
-  --status-in-progress: oklch(0.9 0.184 100);
+  --status-in-progress: oklch(0.861 0.173 91.9);
   --status-in-progress-foreground: oklch(0.145 0 0);
-  --status-completed: oklch(0.68 0.211 145);
+  --status-completed: oklch(0.7 0.184 150.1);
   --status-completed-foreground: oklch(0.145 0 0);
-  --status-dropped: oklch(0.63 0.252 25);
+  --status-dropped: oklch(0.63 0.247 27.3);
   --status-dropped-foreground: oklch(0.145 0 0);
+  /*
+   * See the `:root` block above for the round 2 FE-57 rationale (hue picks,
+   * why `game` moved and gained a dark-text light-theme foreground, contrast
+   * method, `docs/design-tokens.md` reference). Dark theme mirrors the
+   * `--status-*` block's structure: a *bright* near-max-chroma background
+   * with dark text for **all four** type hues here (unlike light theme,
+   * where only `in_progress`-style exceptions apply) - the same
+   * bright-bg-on-dark-page reasoning as `--status-*` above, re-verified per
+   * hue via the same OKLCH gamut sweep rather than assumed to carry over
+   * from round 1's dark values (round 1's hues, and therefore its dark L/C
+   * picks, no longer apply). `want`/`completed`/`movie`/`game` clear AAA at
+   * L 0.70 (7.31-7.98:1); `series` (magenta, H 340) needs L 0.75 to clear
+   * AAA (8.10:1 vs 6.52:1 at L 0.70), same per-hue lightness trade-off the
+   * `--status-*` comment above describes for yellow/red; `book` (terracotta,
+   * H 40) needs L 0.72 for the same reason (7.47:1 vs 6.88:1 at L 0.70).
+   */
+  --type-movie: oklch(0.7 0.114 186.4);
+  --type-movie-foreground: oklch(0.145 0 0);
+  --type-series: oklch(0.75 0.198 340);
+  --type-series-foreground: oklch(0.145 0 0);
+  --type-book: oklch(0.72 0.172 40);
+  --type-book-foreground: oklch(0.145 0 0);
+  --type-game: oklch(0.7 0.121 221.7);
+  --type-game-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: var(--accent);

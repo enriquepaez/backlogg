@@ -425,6 +425,7 @@ export default async function UserLibraryPage({
                   posterUrl={entry.item.poster_url}
                   ratingInternal={entry.item.rating_internal}
                   typeLabel={itemType ? tType(`heading.${itemType}`) : entry.item.item_type}
+                  itemType={itemType}
                   libraryStatus={entryStatus}
                   libraryStatusLabel={entryStatus ? t(`statusTabs.${entryStatus}`) : undefined}
                   href={itemType ? `/${itemType}/${entry.item.slug}` : undefined}

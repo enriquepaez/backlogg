@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { TYPE_COLOR_CLASSES, type CatalogType } from "@/lib/catalog-types";
 import { STATUS_COLOR_CLASSES, type LibraryStatusValue } from "@/lib/library-types";
 import { cn } from "@/lib/utils";
 
@@ -31,11 +32,43 @@ export type CatalogCardProps = {
    */
   ratingInternal: number | null;
   /**
-   * Small badge over the poster (e.g. the localized type name). Used by the
-   * trending grid, which mixes movies and series, to disambiguate items —
-   * omitted for the per-type "featured" grids where it would be redundant.
+   * Small badge over the poster: the localized type name (e.g. "Movie").
+   * Prior to FE-57 this was only passed by grids that mix types (trending,
+   * search, recommendations, library) — the per-type grids (browse/{type},
+   * home's "featured" sections, item detail's "similar" section) omitted it
+   * entirely, assuming the surrounding context already made the type
+   * obvious. FE-57 (user report: "poca evidencia visual" of type) reverses
+   * that — every caller now passes both this and {@link itemType}, so the
+   * badge (and its color, see that prop's doc comment) always renders.
+   * Still optional at the type level so tests unrelated to type don't need
+   * to thread it through.
    */
   typeLabel?: string;
+  /**
+   * Drives the type badge's color (FE-57, `TYPE_COLOR_CLASSES` /
+   * `--type-<type>` in `globals.css`) — same paired-token pattern as
+   * {@link libraryStatus} below. Kept as a separate prop from
+   * {@link typeLabel} (rather than folding color into the label prop, or
+   * deriving it from the label text) because the label is caller-translated
+   * free text while the color must key off the untranslated `CatalogType`
+   * union.
+   *
+   * Design decision (FE-57 acceptance: "perceptible sin depender solo del
+   * texto"): recolor the *existing* type badge from its flat neutral
+   * `bg-background/90` to a solid, type-specific color, rather than adding a
+   * poster border/ring or a separate icon. This reuses the exact
+   * `STATUS_COLOR_CLASSES` pattern already established two props below for
+   * `libraryStatus` (colored badge, text kept alongside for the label and
+   * for colorblind users) instead of introducing a second visual language on
+   * the same card — a poster-edge accent would have added a new UI surface
+   * for one signal while this card already has a proven "colored badge"
+   * slot for exactly this purpose. When {@link typeLabel} is set but this is
+   * omitted (only possible for callers that predate FE-57, e.g. unit tests
+   * exercising unrelated props) the badge falls back to the old neutral
+   * style rather than a default color, since a wrong/arbitrary color would
+   * be worse than no color.
+   */
+  itemType?: CatalogType;
   /**
    * The viewer's own backlog status for this item (FE-37), when known —
    * drives the color of the small status badge rendered over the poster
@@ -76,7 +109,8 @@ export type CatalogCardProps = {
 /**
  * Presentational poster card shared by the home page's trending and
  * "featured" sections (FE-8), the `/browse/{type}` grid (FE-9), and the item
- * detail page's "similar" section (FE-10). Wrapped in a `Link` to
+ * detail page's "similar" section (FE-10), among every other grid in the app
+ * (search, recommendations, library, public profile). Wrapped in a `Link` to
  * `/{type}/{slug}` whenever a caller passes `href`.
  */
 export function CatalogCard({
@@ -85,6 +119,7 @@ export function CatalogCard({
   posterUrl,
   ratingInternal,
   typeLabel,
+  itemType,
   libraryStatus,
   libraryStatusLabel,
   href,
@@ -112,7 +147,12 @@ export function CatalogCard({
           </div>
         )}
         {typeLabel ? (
-          <span className="absolute left-2 top-2 rounded-md bg-background/90 px-1.5 py-0.5 text-xs font-medium text-foreground shadow-sm">
+          <span
+            className={cn(
+              "absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-xs font-medium shadow-sm",
+              itemType ? TYPE_COLOR_CLASSES[itemType] : "bg-background/90 text-foreground",
+            )}
+          >
             {typeLabel}
           </span>
         ) : null}

@@ -349,10 +349,14 @@ export default async function ItemDetailPage({
   }
   const type = rawType;
 
-  const [result, similar, t] = await Promise.all([
+  const [result, similar, t, tBadge] = await Promise.all([
     getItemDetail(type, slug),
     getSimilarItems(type, slug),
     getTranslations("ItemDetail"),
+    // FE-57: `Home.typeBadge` holds the singular type label ("Movie") used
+    // by every `CatalogCard` type badge — reused here for `ItemSimilar`'s
+    // grid so it matches every other grid's badge text.
+    getTranslations("Home"),
   ]);
 
   // Only a backend-confirmed 404 is a real "not found" — see
@@ -429,6 +433,7 @@ export default async function ItemDetailPage({
         items={similar}
         heading={t("similar.heading")}
         emptyMessage={t("similar.empty")}
+        typeLabel={tBadge(`typeBadge.${type}`)}
       />
     </div>
   );

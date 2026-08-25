@@ -108,6 +108,49 @@ describe("CatalogCard", () => {
     expect(screen.getByText("Series")).toBeInTheDocument();
   });
 
+  it("falls back to the neutral badge style when typeLabel is given without itemType", () => {
+    render(
+      <CatalogCard
+        title="Chernobyl"
+        posterUrl={null}
+        ratingInternal={null}
+        typeLabel="Series"
+      />,
+    );
+
+    expect(screen.getByText("Series")).toHaveClass("bg-background/90", "text-foreground");
+  });
+
+  it.each([
+    ["movie", "Movie", "bg-type-movie", "text-type-movie-foreground"],
+    ["series", "Series", "bg-type-series", "text-type-series-foreground"],
+    ["book", "Book", "bg-type-book", "text-type-book-foreground"],
+    ["game", "Game", "bg-type-game", "text-type-game-foreground"],
+  ] as const)(
+    "colors the type badge with the %s token when itemType is %s (FE-57)",
+    (itemType, label, bgClass, fgClass) => {
+      render(
+        <CatalogCard
+          title="Dune"
+          posterUrl={null}
+          ratingInternal={null}
+          typeLabel={label}
+          itemType={itemType}
+        />,
+      );
+
+      expect(screen.getByText(label)).toHaveClass(bgClass, fgClass);
+    },
+  );
+
+  it("omits the type badge entirely when typeLabel is not provided, even if itemType is set", () => {
+    render(
+      <CatalogCard title="Dune" posterUrl={null} ratingInternal={null} itemType="movie" />,
+    );
+
+    expect(screen.queryByText("Movie")).not.toBeInTheDocument();
+  });
+
   it("renders the title text visibly", () => {
     render(
       <CatalogCard title="Hades" posterUrl={null} ratingInternal={null} />,

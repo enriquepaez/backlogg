@@ -29,6 +29,7 @@
 | `docs/schema.md`               | Esquema completo de la base de datos                        | Al diseñar modelos    |
 | `docs/api.md`                  | Contratos de los endpoints REST                             | Al implementar rutas  |
 | `docs/external-apis.md`        | Referencia de TMDB, Open Library e IGDB                    | Al implementar adapters |
+| `docs/design-tokens.md`        | Paleta de colores de status/type (hex + OKLCH), rationale y trade-offs | Al tocar colores de badges en `apps/web` |
 | `CHECKPOINTS.md`               | Criterios objetivos de "estado final correcto"              | Para auto-evaluarte   |
 | `.claude/agents/`              | Definiciones de subagentes (leader, implementer, reviewer)  | Si orquestas trabajo  |
 | `backlogg/`                    | Código fuente de la aplicación                              | Para implementar      |
