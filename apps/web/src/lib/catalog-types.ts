@@ -38,6 +38,21 @@ export function isCatalogType(value: string): value is CatalogType {
 }
 
 /**
+ * Tailwind classes for each catalog type's design-system color pair (FE-57,
+ * `--type-<type>`/`--type-<type>-foreground` in `globals.css`). Same
+ * colocation convention as `library-types.ts`'s `STATUS_COLOR_CLASSES` (kept
+ * next to the type union it colors) so `CatalogCard`'s type badge - the only
+ * call site today - and any future one stay in sync instead of hardcoding
+ * class names ad hoc.
+ */
+export const TYPE_COLOR_CLASSES: Record<CatalogType, string> = {
+  movie: "bg-type-movie text-type-movie-foreground",
+  series: "bg-type-series text-type-series-foreground",
+  book: "bg-type-book text-type-book-foreground",
+  game: "bg-type-game text-type-game-foreground",
+};
+
+/**
  * Shape shared by `MovieListItemOut` / `SeriesListItemOut` / `BookListItemOut`
  * / `GameListItemOut` — all four `/v1/{type}s` list endpoints return
  * identical fields, so callers can render any of them with one component.

@@ -87,6 +87,7 @@ export default async function TrendingPage({
                 posterUrl={item.poster_url}
                 ratingInternal={item.rating_internal}
                 typeLabel={tBadge(`typeBadge.${itemType}`)}
+                itemType={itemType}
                 href={`/${itemType}/${item.slug}`}
               />
             );

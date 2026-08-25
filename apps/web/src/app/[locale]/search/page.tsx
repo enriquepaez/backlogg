@@ -176,6 +176,7 @@ export default async function SearchPage({
                   posterUrl={item.poster_url}
                   ratingInternal={item.rating_internal}
                   typeLabel={itemType ? tType(`heading.${itemType}`) : item.item_type}
+                  itemType={itemType}
                   href={itemType ? `/${itemType}/${item.slug}` : undefined}
                 />
               );

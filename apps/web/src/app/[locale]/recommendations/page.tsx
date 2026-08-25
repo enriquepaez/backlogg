@@ -133,6 +133,7 @@ export default async function RecommendationsPage({
                   posterUrl={item.poster_url}
                   ratingInternal={item.rating_internal}
                   typeLabel={tBadge(`typeBadge.${itemType}`)}
+                  itemType={itemType}
                   href={`/${itemType}/${item.slug}`}
                   // `item.reason` comes straight from the backend, always in
                   // English (`docs/api.md`: "Because you rated <title>",

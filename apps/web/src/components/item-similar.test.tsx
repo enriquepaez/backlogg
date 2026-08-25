@@ -20,6 +20,7 @@ describe("ItemSimilar", () => {
         items={[]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Movie"
       />,
     );
 
@@ -35,6 +36,7 @@ describe("ItemSimilar", () => {
         items={[]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Movie"
       />,
     );
 
@@ -56,12 +58,35 @@ describe("ItemSimilar", () => {
         ]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Movie"
       />,
     );
 
     expect(screen.getByText("Arrival")).toBeInTheDocument();
     expect(screen.getByRole("link")).toHaveAttribute("href", "/movie/arrival-2016");
     expect(screen.queryByText("No similar titles yet.")).not.toBeInTheDocument();
+  });
+
+  it("colors the type badge with the type-specific token (FE-57)", () => {
+    render(
+      <ItemSimilar
+        type="movie"
+        items={[
+          {
+            title: "Arrival",
+            slug: "arrival-2016",
+            poster_url: null,
+            release_date: "2016-11-11",
+            rating_internal: 7.9,
+          },
+        ]}
+        heading="You might also like"
+        emptyMessage="No similar titles yet."
+        typeLabel="Movie"
+      />,
+    );
+
+    expect(screen.getByText("Movie")).toHaveClass("bg-type-movie", "text-type-movie-foreground");
   });
 
   it("builds series hrefs under /series/{slug}", () => {
@@ -79,6 +104,7 @@ describe("ItemSimilar", () => {
         ]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Series"
       />,
     );
 
@@ -100,6 +126,7 @@ describe("ItemSimilar", () => {
         ]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Book"
       />,
     );
 
@@ -121,6 +148,7 @@ describe("ItemSimilar", () => {
         ]}
         heading="You might also like"
         emptyMessage="No similar titles yet."
+        typeLabel="Game"
       />,
     );
 

@@ -12,12 +12,22 @@ export type ItemSimilarItem = {
 export type ItemSimilarProps = {
   /**
    * All four catalog types now have a `similar` endpoint (`docs/api.md`,
-   * FE-32) — only used here to build each card's `href` (`/${type}/${slug}`).
+   * FE-32) — used to build each card's `href` (`/${type}/${slug}`) and,
+   * since FE-57, its `itemType` (every similar item shares the current
+   * item's type, so this one value covers the whole grid).
    */
   type: CatalogType;
   items: ItemSimilarItem[];
   heading: string;
   emptyMessage: string;
+  /**
+   * Localized type name for the {@link CatalogCard} type badge (FE-57, e.g.
+   * `Home.typeBadge.movie` -> "Movie") — pre-translated by the caller, same
+   * house style as `heading`/`emptyMessage` since this component has no i18n
+   * context of its own. Every item in `items` gets the same label, since
+   * they all share `type`.
+   */
+  typeLabel: string;
 };
 
 /**
@@ -28,7 +38,7 @@ export type ItemSimilarProps = {
  * pages. Purely presentational, like `CatalogCard`/`CatalogSection` —
  * `heading`/`emptyMessage` come pre-translated from the page.
  */
-export function ItemSimilar({ type, items, heading, emptyMessage }: ItemSimilarProps) {
+export function ItemSimilar({ type, items, heading, emptyMessage, typeLabel }: ItemSimilarProps) {
   return (
     <section className="mx-auto w-full max-w-6xl px-6 py-8">
       <h2 className="text-xl font-medium">{heading}</h2>
@@ -42,6 +52,8 @@ export function ItemSimilar({ type, items, heading, emptyMessage }: ItemSimilarP
               title={item.title}
               posterUrl={item.poster_url}
               ratingInternal={item.rating_internal}
+              typeLabel={typeLabel}
+              itemType={type}
               href={`/${type}/${item.slug}`}
             />
           ))}

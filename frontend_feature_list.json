@@ -1085,7 +1085,7 @@
         "El mismo código de color se reutiliza en cualquier otro sitio de la app que ya distinga tipo visualmente (si lo hay), para no crear un segundo sistema de color paralelo al de status",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 57,

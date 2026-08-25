@@ -287,6 +287,7 @@ function LibrarySummary({
                 posterUrl={entry.item.poster_url}
                 ratingInternal={entry.item.rating_internal}
                 typeLabel={itemType ? tType(`heading.${itemType}`) : entry.item.item_type}
+                itemType={itemType}
                 href={itemType ? `/${itemType}/${entry.item.slug}` : undefined}
               />
             );
