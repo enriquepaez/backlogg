@@ -1171,6 +1171,26 @@
         "typecheck+lint+test+build en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 62,
+      "code": "FE-63",
+      "milestone": "M3",
+      "name": "item_detail_fields_not_available_placeholder",
+      "title": "Mostrar 'no disponible' en vez de omitir campos de metadata ausentes (los 4 tipos de producto)",
+      "description": "Pedido por el usuario (2026-08-25) durante la QA/review de FE-61 (game_developer_publisher_display): al ver que developer/publisher se omitían cuando el dato faltaba (mismo patrón que el resto de buildFields), el usuario pidió invertir ese comportamiento para TODOS los campos opcionales de metadata en apps/web/src/app/[locale]/[type]/[slug]/page.tsx::buildFields, no solo developer/publisher — deben mostrarse siempre, con un placeholder ('Not available'/'No disponible') en vez de desaparecer cuando falta el dato. Alcance completo por tipo: movie (release_date, runtime, status, original_language), series (first_air_date, last_air_date, number_of_seasons, number_of_episodes, status, original_language), book (first_publish_date, original_language), game (release_date, game_type, platforms, developer, publisher, original_language). FE-61 se mergeó tal cual (omite si falta, decisión explícita del usuario para no bloquear esa PR ya en verde, PR #171) — esta feature es la que introduce el nuevo comportamiento, incluyendo revertir el 'omitir' de developer/publisher que dejó FE-61.",
+      "depends_on": [
+        60
+      ],
+      "acceptance": [
+        "Cada campo listado en la descripción se añade siempre a `fields` en `buildFields`, para los 4 tipos de producto (movie/series/book/game) — nunca se omite por valor ausente",
+        "Cuando el valor subyacente falta (null/undefined/vacío/array vacío según el campo), el `value` mostrado es un placeholder i18n nuevo (p.ej. `ItemDetail.fields.notAvailable`) en `messages/en.json` y `messages/es.json`, consistente con el resto del namespace `ItemDetail.fields.*`",
+        "El placeholder es genérico y reutilizable entre los 18 casos (un solo texto 'Not available'/'No disponible'), no un texto distinto por campo",
+        "developer/publisher (introducidos por FE-61) pasan del comportamiento 'se omite si no hay companies' al nuevo comportamiento uniforme — mismo placeholder que el resto",
+        "Tests actualizados/nuevos por tipo (movie/series/book/game) cubriendo al menos un campo con valor y el mismo campo sin valor mostrando el placeholder, para los 4 tipos",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
