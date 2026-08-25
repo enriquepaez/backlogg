@@ -187,6 +187,41 @@ async def test_get_game_persists_every_allowed_category(db, game_type):
     assert persisted is not None
 
 
+# ── Feature 67: game_developer_publisher_exposure ────────────────────────────
+
+
+async def test_get_game_includes_companies(db):
+    """get_game exposes developer/publisher companies from company_credits."""
+    data = _make_game_dict()
+    data["slug"] = "companies-in-detail-game"
+    data["companies"] = [
+        {"name": "CD Projekt Red", "slug": "cd-projekt-red-detail", "role": "DEVELOPER"},
+        {"name": "CD Projekt", "slug": "cd-projekt-detail", "role": "PUBLISHER"},
+    ]
+    await repo.upsert_game(db, data)
+
+    with patch.object(service._igdb_client, "get_game_by_slug", new_callable=AsyncMock) as mock_get:
+        result = await service.get_game(db, "companies-in-detail-game")
+
+    mock_get.assert_not_called()
+    assert len(result.companies) == 2
+    roles = {c.role: c.name for c in result.companies}
+    assert roles["DEVELOPER"] == "CD Projekt Red"
+    assert roles["PUBLISHER"] == "CD Projekt"
+
+
+async def test_get_game_companies_empty_when_none(db):
+    """get_game returns companies=[] (not null) when the game has no company credits."""
+    data = _make_game_dict()
+    data["slug"] = "no-companies-detail-game"
+    data["companies"] = []
+    await repo.upsert_game(db, data)
+
+    result = await service.get_game(db, "no-companies-detail-game")
+
+    assert result.companies == []
+
+
 async def test_get_game_title_search_fallback(db):
     """When get_game_by_slug returns None, search_games fallback is used."""
     raw = _make_raw_igdb()

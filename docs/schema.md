@@ -301,6 +301,11 @@ CREATE INDEX idx_company_credits_company ON company_credits (company_id);
 CREATE INDEX idx_company_credits_item ON company_credits (item_type, item_id);
 ```
 
+Read via `backlogg.games.repository.get_company_credits_for_item` (feature 67 —
+same join pattern as `credits`/`people`'s `get_credits_for_item`), exposed as
+`companies[]` in `GET /v1/games/{slug}` (see `docs/api.md`). MOVIE/SERIES
+rows are still reserved for v2 and have no reader yet.
+
 ## Search
 
 Materialized view used for cross-type full-text search.

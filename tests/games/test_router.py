@@ -118,6 +118,40 @@ async def test_get_game_credits_empty(client, db):
     assert body["credits"] == []
 
 
+async def test_get_game_companies_present(client, db):
+    """GET /games/{slug} includes companies[] with developer and publisher."""
+    game_dict = _make_game_dict("companies-endpoint-game")
+    game_dict["companies"] = [
+        {"name": "Indie Studio", "slug": "indie-studio-endpoint", "role": "DEVELOPER"},
+        {"name": "Big Publisher", "slug": "big-publisher-endpoint", "role": "PUBLISHER"},
+    ]
+    await repo.upsert_game(db, game_dict)
+
+    response = await client.get("/v1/games/companies-endpoint-game")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert "companies" in body
+    assert len(body["companies"]) == 2
+    roles = {c["role"]: c["name"] for c in body["companies"]}
+    assert roles["DEVELOPER"] == "Indie Studio"
+    assert roles["PUBLISHER"] == "Big Publisher"
+    for company in body["companies"]:
+        assert "id" in company
+        assert "slug" in company
+
+
+async def test_get_game_companies_empty(client, db):
+    """GET /games/{slug} returns companies as [] when the game has none."""
+    await repo.upsert_game(db, _make_game_dict("companies-empty-game"))
+
+    response = await client.get("/v1/games/companies-empty-game")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["companies"] == []
+
+
 async def test_get_similar_games_returns_200(client, db):
     """GET /games/{slug}/similar returns 200 with results[] for a seeded game."""
     game = await repo.upsert_game(db, _make_game_dict("similar-router-source-1993"))

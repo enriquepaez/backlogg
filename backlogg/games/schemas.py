@@ -23,6 +23,23 @@ class GamePlatformOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CompanyCreditOut(BaseModel):
+    """A company credit (feature 67): a company plus the role it played.
+
+    ``role`` is ``DEVELOPER`` or ``PUBLISHER`` (see IGDB adapter). A single
+    company can appear twice with different roles (e.g. self-published
+    developer) — each role is its own entry, matching the underlying
+    ``company_credits`` row per (item, company, role).
+    """
+
+    id: int
+    name: str
+    slug: str
+    role: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class GameOut(BaseModel):
     id: int
     title: str
@@ -41,6 +58,7 @@ class GameOut(BaseModel):
     genres: list[GameGenreOut]
     platforms: list[GamePlatformOut]
     credits: list[CreditOut] = []
+    companies: list[CompanyCreditOut] = []
     viewer_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

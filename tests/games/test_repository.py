@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from backlogg.games.repository import get_game_by_slug, upsert_game
+from backlogg.games.repository import get_company_credits_for_item, get_game_by_slug, upsert_game
 
 
 def _game_data(slug: str, title: str = "Test Game") -> dict:
@@ -129,6 +129,54 @@ async def test_upsert_game_updates_unlocked_field(db):
 
     assert game2.title == "Original Title"
     assert float(game2.rating_external) == 5.0
+
+
+# ── Feature 67: game_developer_publisher_exposure ────────────────────────────
+
+
+async def test_get_company_credits_developer_and_publisher(db):
+    """A game with distinct developer and publisher companies returns both."""
+    data = _game_data("company-credits-dev-pub-game")
+    data["companies"] = [
+        {"name": "CD Projekt Red", "slug": "cd-projekt-red-devpub", "role": "DEVELOPER"},
+        {"name": "CD Projekt", "slug": "cd-projekt-devpub", "role": "PUBLISHER"},
+    ]
+    game = await upsert_game(db, data)
+
+    credits = await get_company_credits_for_item(db, "GAME", game.id)
+
+    assert len(credits) == 2
+    by_role = {c.role: c for c in credits}
+    assert by_role["DEVELOPER"].name == "CD Projekt Red"
+    assert by_role["DEVELOPER"].slug == "cd-projekt-red-devpub"
+    assert by_role["PUBLISHER"].name == "CD Projekt"
+    assert by_role["PUBLISHER"].slug == "cd-projekt-devpub"
+
+
+async def test_get_company_credits_developer_only(db):
+    """A game with only a developer credit does not fabricate a publisher entry."""
+    data = _game_data("company-credits-dev-only-game")
+    data["companies"] = [
+        {"name": "Indie Studio", "slug": "indie-studio-devonly", "role": "DEVELOPER"},
+    ]
+    game = await upsert_game(db, data)
+
+    credits = await get_company_credits_for_item(db, "GAME", game.id)
+
+    assert len(credits) == 1
+    assert credits[0].role == "DEVELOPER"
+    assert credits[0].name == "Indie Studio"
+
+
+async def test_get_company_credits_none(db):
+    """A game with no company credits returns an empty list, not None."""
+    data = _game_data("company-credits-none-game")
+    data["companies"] = []
+    game = await upsert_game(db, data)
+
+    credits = await get_company_credits_for_item(db, "GAME", game.id)
+
+    assert credits == []
 
 
 async def test_upsert_game_skips_locked_genres(db):

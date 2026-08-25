@@ -14,7 +14,7 @@ from backlogg.games.models import (
     game_genres_join,
     game_platforms_join,
 )
-from backlogg.games.schemas import GameSortEnum
+from backlogg.games.schemas import CompanyCreditOut, GameSortEnum
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
@@ -80,6 +80,31 @@ async def list_games(
     items = list(result.scalars().unique().all())
 
     return items, total
+
+
+async def get_company_credits_for_item(
+    db: AsyncSession, item_type: str, item_id: int
+) -> list[CompanyCreditOut]:
+    """Return company credits (developer/publisher) for an item.
+
+    Same read pattern as ``backlogg.shared.credits.get_credits_for_item``
+    (join the credit row to its related entity, filter by item_type/item_id)
+    applied to ``company_credits``/``companies`` instead of ``credits``/
+    ``people`` — feature 67. Ordered by company name for a stable,
+    human-friendly order (unlike person credits, company credits have no
+    ``billing_order`` column). Empty list if the item has no company credits.
+    """
+    result = await db.execute(
+        select(CompanyCredit, Company)
+        .join(Company, CompanyCredit.company_id == Company.id)
+        .where(CompanyCredit.item_type == item_type, CompanyCredit.item_id == item_id)
+        .order_by(Company.name.asc())
+    )
+    rows = result.all()
+    return [
+        CompanyCreditOut(id=company.id, name=company.name, slug=company.slug, role=credit.role)
+        for credit, company in rows
+    ]
 
 
 async def get_game_by_slug(db: AsyncSession, slug: str) -> Game | None:

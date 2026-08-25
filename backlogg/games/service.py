@@ -91,6 +91,7 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
         await db.commit()
 
     credits = await get_credits_for_item(db, "GAME", game.id)
+    companies = await repo.get_company_credits_for_item(db, "GAME", game.id)
     viewer_status = await library_service.get_viewer_status(db, "GAME", game.id, viewer_id)
     return GameOut(
         id=game.id,
@@ -110,6 +111,7 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
         genres=[GameGenreOut(id=g.id, name=g.name, slug=g.slug) for g in game.genres],
         platforms=[GamePlatformOut(id=p.id, name=p.name, slug=p.slug) for p in game.platforms],
         credits=credits,
+        companies=companies,
         viewer_status=viewer_status,
     )
 

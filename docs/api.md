@@ -291,7 +291,14 @@ GET /v1/games/{slug}
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `release_date`,
 `game_type`, `original_language`, `poster_url`, `backdrop_url`, `rating_external`,
 `rating_count_external`, `rating_internal`, `rating_count_internal`, `genres[]`,
-`platforms[]`, `credits[]`, `viewer_status` (ver Movies)
+`platforms[]`, `credits[]`, `companies[]`, `viewer_status` (ver Movies)
+
+**`companies[]`** (feature 67, solo games — `company_credits` está reservado
+para MOVIE/SERIES en v2 pero aún sin lector): cada entrada incluye `id`,
+`name`, `slug`, `role` (`DEVELOPER` o `PUBLISHER`, desde `involved_companies`
+de IGDB). Ordenadas por `name` ascendente (no hay `billing_order` en
+`company_credits`). Una misma compañía puede aparecer dos veces con roles
+distintos (p.ej. developer autopublicado). Array vacío si no hay.
 
 ```
 GET /v1/games/{slug}/similar
@@ -311,6 +318,9 @@ no por el orden curado de relaciones que devuelve IGDB.
 **`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
 `billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
+No confundir con `companies[]` (solo en games, ver arriba): `credits[]` son
+personas (`people`/`credits`), `companies[]` son estudios/publishers
+(`companies`/`company_credits`).
 
 ### Auth & Users
 
