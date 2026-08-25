@@ -24,6 +24,7 @@ function entry(overrides: {
       poster_url: null,
       release_date: overrides.releaseDate ?? null,
       rating_external: null,
+      rating_internal: null,
     },
     status: "want",
     created_at: "2026-01-01T00:00:00Z",

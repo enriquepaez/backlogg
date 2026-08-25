@@ -67,6 +67,7 @@ const resultItem = {
   poster_url: null,
   release_date: "2021-10-22",
   rating_external: 7.8,
+  rating_internal: null,
 };
 
 beforeEach(() => {
