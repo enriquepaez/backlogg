@@ -132,7 +132,7 @@ GET /v1/movies | /v1/series | /v1/books | /v1/games
 | Param                    | Required | Description |
 |--------------------------|----------|-------------|
 | `genre`                  | No       | Filtro por slug de género (p.ej. `action`) |
-| `sort`                   | No       | `rating_desc` (default), `rating_asc`, `date_desc`, `date_asc`, `title_asc` |
+| `sort`                   | No       | `rating_desc` (default, ver nota abajo), `rating_asc`, `date_desc`, `date_asc`, `title_asc` |
 | `page`                   | No       | Página, 1-based (default: 1) |
 | `limit`                  | No       | Items por página (default: 20, max: 100) |
 | `search`                 | No       | Substring case-insensitive sobre `title` (`ILIKE`) |
@@ -149,6 +149,17 @@ opcionales y combinables entre sí y con `genre`/`sort`/`page`/`limit` (AND
 lógico). `date_from`/`date_to` con formato inválido o `date_from > date_to` →
 `422`; lo mismo para `rating_internal_min > rating_internal_max` o
 `rating_external_min > rating_external_max`.
+
+**`sort=rating_desc`/`rating_asc` (feature 66):** ordena por `rating_internal`
+— el rating de la propia comunidad de backlogg (agregado desde
+`user_ratings`, feature 62) — `DESC`/`ASC` con `NULLS LAST`. `rating_external`
+(TMDB/Open Library/IGDB) **no** decide el orden; solo se usa como desempate
+interno de segundo nivel (`DESC NULLS LAST`, siempre, independientemente de
+si el sort es `_desc` o `_asc`) para los items cuyo `rating_internal` todavía
+es `NULL` o está empatado — algo frecuente mientras la base de usuarios que
+puntúa es pequeña. Ese desempate nunca se expone como "la razón" del orden;
+ambos campos (`rating_external` y `rating_internal`) siguen viajando en la
+respuesta para que el frontend decida qué mostrar.
 
 Response:
 ```json
@@ -196,6 +207,9 @@ GET /v1/movies/{slug}/similar
 
 Response: `{"results": [...]}` — cada item: `title`, `slug`, `poster_url`,
 `release_date`, `rating_external`. Los items nuevos se persisten en la DB local.
+Orden: el propio orden de relevancia de TMDB (no reordenado por rating —
+a diferencia de `/v1/series/{slug}/similar` y `/v1/games/{slug}/similar`,
+este endpoint queda fuera del alcance explícito de la feature 66).
 
 ### Series
 
@@ -215,6 +229,10 @@ GET /v1/series/{slug}/similar
 → 200  Hasta 10 series similares (mismo contrato que /v1/movies/{slug}/similar)
 → 404  Slug no encontrado
 ```
+
+Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
+NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
+no por el orden de relevancia que devuelve TMDB.
 
 ### Books
 
@@ -243,8 +261,11 @@ cada item incluye `title`, `slug`, `poster_url`, `release_date`
 Ranking: prioriza libros que comparten autor con el libro base (vía
 `people`/`credits` con `role: "AUTHOR"`, feature 19) sobre el resto; para
 completar hasta 10 resultados (o si no hay coincidencia de autor) usa
-solapamiento de género, con `rating_external` descendente como desempate
-en ambos niveles. El propio libro nunca aparece en sus resultados. No se
+solapamiento de género, con `rating_internal DESC NULLS LAST` como desempate
+en ambos niveles (feature 66 — el rating de la propia comunidad) y
+`rating_external DESC NULLS LAST` como desempate interno de segundo nivel
+para libros cuyo `rating_internal` todavía es `NULL` o está empatado. El
+propio libro nunca aparece en sus resultados. No se
 hace ninguna llamada a Open Library ni se crean `external_ids` nuevos — el
 ranking se calcula enteramente desde datos ya persistidos localmente (ver
 investigación en `backend_feature_list.json`, feature 46).
@@ -272,6 +293,9 @@ GET /v1/games/{slug}/similar
 Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`
 y `/v1/series/{slug}/similar`: cada item incluye `title`, `slug`, `poster_url`,
 `release_date`, `rating_external`. Los juegos nuevos se persisten en la DB local.
+Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
+NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
+no por el orden curado de relaciones que devuelve IGDB.
 
 **`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
@@ -822,8 +846,10 @@ Cómo se generan los candidatos:
   `get_similar_movies`/`get_similar_series`). No se dispara fan-out externo
   cuando ya hay suficientes candidatos locales.
 - **Books/games:** solapamiento por género (sin API externa de similares).
-- **Sin semillas:** fallback a populares/trending locales (por `rating_external`
-  desc); lista no vacía cuando hay catálogo.
+- **Sin semillas:** fallback a populares/trending locales, ordenado por
+  `rating_internal DESC NULLS LAST` (feature 66 — el rating de la propia
+  comunidad) con `rating_external DESC NULLS LAST` como desempate interno;
+  lista no vacía cuando hay catálogo.
 
 Se excluyen los items que el usuario ya ha puntuado o tiene en su library.
 

@@ -46,19 +46,28 @@ async def list_books(
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
 
-    # Sorting
+    # Sorting. rating_desc/rating_asc order by rating_internal (the community's
+    # own rating, feature 66) first — rating_external is only an internal
+    # tie-break for items whose rating_internal is still NULL or tied, never
+    # the primary/visible sort criterion.
     if sort == BookSortEnum.rating_desc:
-        order_col = Book.rating_external.desc().nulls_last()
+        order_cols = (
+            Book.rating_internal.desc().nulls_last(),
+            Book.rating_external.desc().nulls_last(),
+        )
     elif sort == BookSortEnum.rating_asc:
-        order_col = Book.rating_external.asc().nulls_last()
+        order_cols = (
+            Book.rating_internal.asc().nulls_last(),
+            Book.rating_external.desc().nulls_last(),
+        )
     elif sort == BookSortEnum.date_desc:
-        order_col = Book.first_publish_date.desc().nulls_last()
+        order_cols = (Book.first_publish_date.desc().nulls_last(),)
     elif sort == BookSortEnum.date_asc:
-        order_col = Book.first_publish_date.asc().nulls_last()
+        order_cols = (Book.first_publish_date.asc().nulls_last(),)
     else:  # title_asc
-        order_col = Book.title.asc()
+        order_cols = (Book.title.asc(),)
 
-    base_query = base_query.order_by(order_col).offset((page - 1) * limit).limit(limit)
+    base_query = base_query.order_by(*order_cols).offset((page - 1) * limit).limit(limit)
     result = await db.execute(base_query)
     items = list(result.scalars().unique().all())
 
@@ -231,8 +240,10 @@ async def get_books_by_same_authors(
 ) -> list[Book]:
     """Return other books credited to any of ``person_ids`` as AUTHOR.
 
-    Excludes the source book itself. Ordered by ``rating_external`` descending
-    (the tie-break used across all "similar" priority tiers).
+    Excludes the source book itself. Ordered by ``rating_internal`` descending
+    (feature 66 — the community's own rating), with ``rating_external``
+    descending as an internal tie-break — the ranking used across all
+    "similar" priority tiers.
     """
     if not person_ids:
         return []
@@ -247,7 +258,10 @@ async def get_books_by_same_authors(
         )
         .options(selectinload(Book.genres))
         .distinct()
-        .order_by(Book.rating_external.desc().nulls_last())
+        .order_by(
+            Book.rating_internal.desc().nulls_last(),
+            Book.rating_external.desc().nulls_last(),
+        )
         .limit(limit)
     )
     result = await db.execute(stmt)
@@ -265,7 +279,8 @@ async def get_books_by_genre_overlap(
 
     Excludes the source book and anything already picked by the caller
     (e.g. author matches). Ordered by number of shared genres descending,
-    then ``rating_external`` descending.
+    then ``rating_internal`` descending (feature 66), then ``rating_external``
+    descending as an internal tie-break.
     """
     if not genre_ids:
         return []
@@ -280,7 +295,11 @@ async def get_books_by_genre_overlap(
         .where(Book.id.notin_(excluded) if excluded else literal(True))
         .options(selectinload(Book.genres))
         .group_by(Book.id)
-        .order_by(overlap.desc(), Book.rating_external.desc().nulls_last())
+        .order_by(
+            overlap.desc(),
+            Book.rating_internal.desc().nulls_last(),
+            Book.rating_external.desc().nulls_last(),
+        )
         .limit(limit)
     )
     result = await db.execute(stmt)

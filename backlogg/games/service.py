@@ -20,6 +20,7 @@ from backlogg.library import service as library_service
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
+from backlogg.shared.rating_sort import rating_desc_sort_key
 
 _igdb_client = IGDBClient()
 
@@ -132,8 +133,12 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
 
     similar_raw = raw.get("similar_games") or []
 
-    # 4. Persist any new games and collect up to 10 results
-    results: list[SimilarGameOut] = []
+    # 4. Persist any new games and collect up to 10 results. IGDB's
+    # similar_games order reflects its own curated relations, not rating —
+    # results are re-sorted below by rating_internal desc / rating_external
+    # desc tie-break (feature 66) so the community's own rating decides what
+    # the user sees first, not IGDB's ordering or rating_external.
+    results: list[tuple[float | None, float | None, SimilarGameOut]] = []
     for sim in similar_raw[:10]:
         if not isinstance(sim, dict):
             continue
@@ -160,18 +165,25 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
                 await upsert_external_id(db, "GAME", sim_game.id, "IGDB", sim_igdb_id)
             await db.commit()
 
+        rating_internal = (
+            float(sim_game.rating_internal) if sim_game.rating_internal is not None else None
+        )
+        rating_external = (
+            float(sim_game.rating_external) if sim_game.rating_external is not None else None
+        )
         results.append(
-            SimilarGameOut(
-                title=sim_game.title,
-                slug=sim_game.slug,
-                poster_url=sim_game.poster_url,
-                release_date=sim_game.release_date,
-                rating_external=(
-                    float(sim_game.rating_external)
-                    if sim_game.rating_external is not None
-                    else None
+            (
+                rating_internal,
+                rating_external,
+                SimilarGameOut(
+                    title=sim_game.title,
+                    slug=sim_game.slug,
+                    poster_url=sim_game.poster_url,
+                    release_date=sim_game.release_date,
+                    rating_external=rating_external,
                 ),
             )
         )
 
-    return SimilarGameListOut(results=results)
+    ordered = sorted(results, key=lambda r: rating_desc_sort_key(r[0], r[1]))
+    return SimilarGameListOut(results=[out for _, _, out in ordered])

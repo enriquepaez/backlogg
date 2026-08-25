@@ -313,6 +313,94 @@ async def test_get_similar_games_keeps_allowed_and_drops_disallowed(db):
     assert await repo.get_game_by_slug(db, "disallowed-rec-game") is None
 
 
+# ── Feature 66: rating_display_internal_only ────────────────────────────────
+
+
+async def test_get_similar_games_orders_by_rating_internal_over_external(db):
+    """Results are re-ordered by rating_internal desc, not IGDB's own order.
+
+    IGDB's ``similar_games`` field lists the low-rating_internal game first —
+    the response must still surface the high-rating_internal game first,
+    even though it has a lower rating_external.
+    """
+    game = await repo.upsert_game(db, _make_source_game_dict("similar-test-source-order-2010"))
+    await upsert_external_id(db, "GAME", game.id, "IGDB", "9999908")
+
+    # Pre-seed both candidates locally with an already-computed rating_internal
+    # (feature 62) — IGDB detail fetches always report rating_internal=None,
+    # so the ranking signal must come from the already-persisted local row.
+    low_internal_high_external = {
+        "title": "Low Internal High External",
+        "original_title": None,
+        "slug": "similar-order-low-internal-2008",
+        "overview": "",
+        "release_date": date(2008, 7, 18),
+        "game_type": "MAIN_GAME",
+        "original_language": None,
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": 9.5,
+        "rating_count_external": 5000,
+        "rating_internal": 2.0,
+        "rating_count_internal": 3,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+        "platforms": [],
+        "companies": [],
+    }
+    high_internal_low_external = {
+        "title": "High Internal Low External",
+        "original_title": None,
+        "slug": "similar-order-high-internal-2009",
+        "overview": "",
+        "release_date": date(2009, 3, 1),
+        "game_type": "MAIN_GAME",
+        "original_language": None,
+        "poster_url": None,
+        "backdrop_url": None,
+        "rating_external": 1.0,
+        "rating_count_external": 5000,
+        "rating_internal": 4.5,
+        "rating_count_internal": 8,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+        "platforms": [],
+        "companies": [],
+    }
+    await repo.upsert_game(db, low_internal_high_external)
+    await repo.upsert_game(db, high_internal_low_external)
+
+    # IGDB's own similar_games order lists the low-rating_internal game first.
+    sim_entries = [
+        {
+            "id": 9999950,
+            "name": "Low Internal High External",
+            "slug": "similar-order-low-internal-2008",
+        },
+        {
+            "id": 9999951,
+            "name": "High Internal Low External",
+            "slug": "similar-order-high-internal-2009",
+        },
+    ]
+    source_raw = _make_source_raw_with_similar(sim_entries)
+    source_raw["slug"] = "similar-test-source-order-2010"
+
+    with patch.object(
+        service._igdb_client,
+        "get_game_by_slug",
+        new_callable=AsyncMock,
+        return_value=source_raw,
+    ):
+        result = await service.get_similar_games(db, "similar-test-source-order-2010")
+
+    slugs = [r.slug for r in result.results]
+    assert slugs == [
+        "similar-order-high-internal-2009",
+        "similar-order-low-internal-2008",
+    ]
+
+
 async def test_get_similar_games_limits_to_10(db):
     """Only up to 10 results are returned even if IGDB returns more."""
     game = await repo.upsert_game(db, _make_source_game_dict("similar-test-source-limit-2010"))

@@ -22,6 +22,7 @@ from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
+from backlogg.shared.rating_sort import rating_desc_sort_key
 
 _tmdb = TMDBSeriesClient()
 
@@ -255,8 +256,12 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
     # 3. Fetch recommendations from TMDB (page 1 only)
     raw_results = await _tmdb.get_series_recommendations(tmdb_id)
 
-    # 4. Persist any new series and collect up to 10 results
-    results: list[SimilarSeriesOut] = []
+    # 4. Persist any new series and collect up to 10 results. TMDB's
+    # recommendations order reflects its own relevance ranking, not rating —
+    # results are re-sorted below by rating_internal desc / rating_external
+    # desc tie-break (feature 66) so the community's own rating decides what
+    # the user sees first, not TMDB's ordering or rating_external.
+    results: list[tuple[float | None, float | None, SimilarSeriesOut]] = []
     for raw in raw_results[:10]:
         rec_tmdb_id = raw.get("id")
         if not rec_tmdb_id:
@@ -289,18 +294,25 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
             await upsert_external_id(db, "SERIES", rec_series.id, "TMDB", str(rec_tmdb_id))
             await db.commit()
 
+        rating_internal = (
+            float(rec_series.rating_internal) if rec_series.rating_internal is not None else None
+        )
+        rating_external = (
+            float(rec_series.rating_external) if rec_series.rating_external is not None else None
+        )
         results.append(
-            SimilarSeriesOut(
-                title=rec_series.title,
-                slug=rec_series.slug,
-                poster_url=rec_series.poster_url,
-                release_date=rec_series.first_air_date,
-                rating_external=(
-                    float(rec_series.rating_external)
-                    if rec_series.rating_external is not None
-                    else None
+            (
+                rating_internal,
+                rating_external,
+                SimilarSeriesOut(
+                    title=rec_series.title,
+                    slug=rec_series.slug,
+                    poster_url=rec_series.poster_url,
+                    release_date=rec_series.first_air_date,
+                    rating_external=rating_external,
                 ),
             )
         )
 
-    return SimilarSeriesListOut(results=results)
+    ordered = sorted(results, key=lambda r: rating_desc_sort_key(r[0], r[1]))
+    return SimilarSeriesListOut(results=[out for _, _, out in ordered])

@@ -155,8 +155,35 @@ async def test_fallback_popular_when_no_seeds(db):
     slugs = {r.slug for r in out.results}
     assert "rec-pop-book-1" in slugs
     assert all(r.reason == "Popular right now" for r in out.results)
-    # Highest external rating first.
+    # Both have rating_internal=None (tied) — rating_external decides as a
+    # tie-break, so the higher-rating_external one still comes first.
     assert out.results[0].slug == "rec-pop-book-1"
+
+
+async def test_fallback_popular_prioritizes_internal_rating_over_external(db):
+    """Feature 66: rating_internal decides the order, rating_external only ties.
+
+    A low-rating_external/high-rating_internal item must outrank a
+    high-rating_external item that has no rating_internal yet.
+    """
+    low_internal_high_external = dict(
+        _book_data("rec-pop-low-internal-1", [], "Low Internal High External", rating=9.5)
+    )
+    low_internal_high_external["rating_internal"] = None
+    await upsert_book(db, low_internal_high_external)
+
+    high_internal_low_external = dict(
+        _book_data("rec-pop-high-internal-1", [], "High Internal Low External", rating=1.0)
+    )
+    high_internal_low_external["rating_internal"] = 4.5
+    await upsert_book(db, high_internal_low_external)
+
+    user = await _make_user(db, "rec-user-8")
+
+    out = await service.get_recommendations(db, user, "book", page=1, limit=20)
+
+    slugs = [r.slug for r in out.results]
+    assert slugs.index("rec-pop-high-internal-1") < slugs.index("rec-pop-low-internal-1")
 
 
 # ── ?type= filter ────────────────────────────────────────────────────────

@@ -1334,7 +1334,7 @@
         "Tests actualizados/nuevos que verifiquen el nuevo ORDER BY en los 4 dominios + similar items + recomendaciones, y un test de regresión que confirme que SearchRepository.search() sigue intacto",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 67,

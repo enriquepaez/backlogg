@@ -219,10 +219,17 @@ async def get_popular_items(
     excluded_item_ids: set[tuple[str, int]],
     limit: int,
 ) -> list[Any]:
-    """Cross-type popular fallback: highest external rating first.
+    """Cross-type popular fallback: highest community (internal) rating first.
 
-    Used when the user has no seeds. Excludes items the user has already seen.
-    Returns rows with item_type/title/slug/poster_url/release_date/rating_external.
+    Used when the user has no seeds. Excludes items the user has already
+    seen. ``rating_internal`` decides the order (feature 66 — the
+    community's own rating); ``rating_external`` is only an internal
+    tie-break for items whose ``rating_internal`` is still NULL or tied.
+    The pre-existing ``rating_external IS NOT NULL`` filter is unchanged —
+    it still requires *some* rating signal to qualify as "popular" among
+    items with no ratings at all yet, it does not decide the order.
+    Returns rows with
+    item_type/title/slug/poster_url/release_date/rating_external.
     """
     queries = []
     for item_type in item_types:
@@ -235,6 +242,7 @@ async def get_popular_items(
             model.slug.label("slug"),
             model.poster_url.label("poster_url"),
             release_col.label("release_date"),
+            model.rating_internal.label("rating_internal"),
             model.rating_external.label("rating_external"),
         ).where(model.rating_external.is_not(None))
         if excluded_ids:
@@ -243,6 +251,13 @@ async def get_popular_items(
 
     combined = union_all(*queries) if len(queries) > 1 else queries[0]
     subq = combined.subquery()
-    stmt = select(subq).order_by(subq.c.rating_external.desc().nulls_last()).limit(limit)
+    stmt = (
+        select(subq)
+        .order_by(
+            subq.c.rating_internal.desc().nulls_last(),
+            subq.c.rating_external.desc().nulls_last(),
+        )
+        .limit(limit)
+    )
     result = await db.execute(stmt)
     return list(result.all())
