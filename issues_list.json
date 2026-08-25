@@ -262,14 +262,14 @@
       "title": "Las descripciones (overview) de los 4 tipos de producto se muestran sin saltos de línea",
       "area": "frontend",
       "severity": "medium",
-      "status": "open",
+      "status": "resolved",
       "discovered": "2026-08-25",
-      "resolved": null,
-      "resolution_ref": null,
+      "resolved": "2026-08-25",
+      "resolution_ref": "rama fix/overview-whitespace-pre-line (PR pendiente)",
       "symptom": "Reportado por el usuario: la descripción de cualquier item (película/serie/libro/juego) se ve como un bloque de texto plano, sin párrafos, aunque el texto original sí los tenga.",
       "cause": "Confirmado en DB local: el texto SÍ trae saltos de línea reales en origen — series (id 18, One Piece) y games (id 1, Dune II) traen '\\n\\n' entre párrafos, books (id 2, The Hobbit) trae '\\r\\n\\r\\n' (estilo Windows, Open Library). Solo en la muestra de movies no apareció ningún '\\n' (452 overviews sin newline), probablemente porque TMDB suele dar sinopsis de un solo párrafo para películas, no que el bug no les afecte. apps/web/src/components/item-hero.tsx:184-188 renderiza overview dentro de un <p> sin ninguna clase whitespace-*; el CSS por defecto (white-space: normal) colapsa cualquier '\\n'/'\\r\\n' a un solo espacio. ItemHero es el componente de hero compartido por los 4 tipos de producto (un solo sitio, un solo fix cubre los 4).",
       "solution": "Añadir whitespace-pre-line (Tailwind) a la clase del <p> de overview en item-hero.tsx:185 — preserva saltos de línea y colapsa espacios/tabs repetidos, y normaliza '\\r\\n' igual que '\\n' en el render de navegadores modernos. No requiere cambios de backend (el dato ya llega correcto) ni tocar los otros 3 tipos por separado.",
-      "verification": null,
+      "verification": "Confirmado por el reviewer: diff de una sola línea en item-hero.tsx (clase whitespace-pre-line añadida al <p> de overview, sin tocar otras clases), overview solo se renderiza en ese sitio del archivo, bash init.sh en verde (987 tests). Pendiente QA manual visual del usuario (párrafos separados en un item de cada tipo) antes de merge.",
       "notes": "No es una feature nueva, es un fix de una clase CSS en un componente ya existente — cambio puntual fuera del backlog formal (AGENTS.md sección 4: sin progress/review_<id>.md, veredicto del reviewer solo como texto)."
     }
   ]
