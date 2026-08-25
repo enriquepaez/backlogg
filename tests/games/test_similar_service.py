@@ -223,6 +223,96 @@ async def test_get_similar_games_uses_local_if_already_present(db):
     assert result.results[0].slug == "recommended-game-local-2008"
 
 
+# ── Feature 65: game_category_allowlist ────────────────────────────────────
+
+_DISALLOWED_IGDB_ID = "9999906"
+
+
+async def test_get_similar_games_skips_disallowed_category(db):
+    """A similar-games hit whose category is not allowed is not persisted or returned."""
+    game = await repo.upsert_game(db, _make_source_game_dict("similar-test-source-bundle-2010"))
+    await upsert_external_id(db, "GAME", game.id, "IGDB", _DISALLOWED_IGDB_ID)
+
+    sim_entry = {"id": 9999930, "name": "Bundle Not A Game", "slug": "bundle-not-a-game"}
+    source_raw = _make_source_raw_with_similar([sim_entry])
+    source_raw["slug"] = "similar-test-source-bundle-2010"
+
+    bundle_detail = {
+        "id": 9999930,
+        "name": "Bundle Not A Game",
+        "slug": "bundle-not-a-game",
+        "summary": "",
+        "first_release_date": 1577836800,
+        "rating": 70.0,
+        "rating_count": 100,
+        "game_type": 3,  # BUNDLE — excluded from the allowlist
+    }
+
+    async def fake_get_game_by_slug(slug: str) -> dict | None:
+        if slug == "similar-test-source-bundle-2010":
+            return source_raw
+        if slug == "bundle-not-a-game":
+            return bundle_detail
+        return None
+
+    with patch.object(
+        service._igdb_client,
+        "get_game_by_slug",
+        side_effect=fake_get_game_by_slug,
+    ):
+        result = await service.get_similar_games(db, "similar-test-source-bundle-2010")
+
+    assert result.results == []
+    persisted = await repo.get_game_by_slug(db, "bundle-not-a-game")
+    assert persisted is None
+
+
+async def test_get_similar_games_keeps_allowed_and_drops_disallowed(db):
+    """Among multiple similar-games hits, only the allowed-category ones are kept."""
+    game = await repo.upsert_game(db, _make_source_game_dict("similar-test-source-mixed-2010"))
+    await upsert_external_id(db, "GAME", game.id, "IGDB", "9999907")
+
+    sim_entries = [
+        {"id": 9999940, "name": "Allowed Rec Game", "slug": "allowed-rec-game"},
+        {"id": 9999941, "name": "Disallowed Rec Game", "slug": "disallowed-rec-game"},
+    ]
+    source_raw = _make_source_raw_with_similar(sim_entries)
+    source_raw["slug"] = "similar-test-source-mixed-2010"
+
+    allowed_detail = _make_rec_raw(igdb_id=9999940, slug="allowed-rec-game")
+    disallowed_detail = {
+        "id": 9999941,
+        "name": "Disallowed Rec Game",
+        "slug": "disallowed-rec-game",
+        "summary": "",
+        "first_release_date": 1577836800,
+        "rating": 70.0,
+        "rating_count": 100,
+        "game_type": 11,  # PORT — excluded from the allowlist
+    }
+
+    async def fake_get_game_by_slug(slug: str) -> dict | None:
+        if slug == "similar-test-source-mixed-2010":
+            return source_raw
+        if slug == "allowed-rec-game":
+            return allowed_detail
+        if slug == "disallowed-rec-game":
+            return disallowed_detail
+        return None
+
+    with patch.object(
+        service._igdb_client,
+        "get_game_by_slug",
+        side_effect=fake_get_game_by_slug,
+    ):
+        result = await service.get_similar_games(db, "similar-test-source-mixed-2010")
+
+    assert len(result.results) == 1
+    assert result.results[0].slug == "allowed-rec-game"
+    assert await repo.get_game_by_slug(db, "allowed-rec-game") is not None
+    assert await repo.get_game_by_slug(db, "disallowed-rec-game") is None
+
+
 async def test_get_similar_games_limits_to_10(db):
     """Only up to 10 results are returned even if IGDB returns more."""
     game = await repo.upsert_game(db, _make_source_game_dict("similar-test-source-limit-2010"))

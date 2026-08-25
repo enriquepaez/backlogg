@@ -192,6 +192,70 @@ async def test_ingest_games_upserts_all_hits_from_search_page(db):
     assert g2 is not None
 
 
+# ── Feature 65: game_category_allowlist ────────────────────────────────────
+
+
+async def test_ingest_games_discards_disallowed_category(db):
+    """A search hit whose category is not in the allowlist is never persisted."""
+    from backlogg.search import service
+
+    raw_results = [
+        {
+            "id": 7401,
+            "name": "Bundle Not A Game",
+            "slug": "bundle-not-a-game-fanout",
+            "game_type": 3,  # BUNDLE — excluded from the allowlist
+        },
+    ]
+
+    async def fake_search_games(q, limit=5, offset=0):
+        return raw_results
+
+    with (
+        patch.object(service._igdb_client, "search_games", new=fake_search_games),
+        patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
+    ):
+        await service._ingest_games("bundle hit", page=1, limit=20)
+
+    persisted = await games_repo.get_game_by_slug(db, "bundle-not-a-game-fanout")
+    assert persisted is None
+
+
+async def test_ingest_games_persists_allowed_category_and_drops_disallowed(db):
+    """Among multiple search hits, only the allowed-category ones get persisted."""
+    from backlogg.search import service
+
+    raw_results = [
+        {
+            "id": 7402,
+            "name": "Allowed DLC Game",
+            "slug": "allowed-dlc-game-fanout",
+            "game_type": 1,  # DLC_ADDON — allowed
+        },
+        {
+            "id": 7403,
+            "name": "Excluded Port Game",
+            "slug": "excluded-port-game-fanout",
+            "game_type": 11,  # PORT — excluded from the allowlist
+        },
+    ]
+
+    async def fake_search_games(q, limit=5, offset=0):
+        return raw_results
+
+    with (
+        patch.object(service._igdb_client, "search_games", new=fake_search_games),
+        patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
+    ):
+        await service._ingest_games("mixed hit", page=1, limit=20)
+
+    allowed = await games_repo.get_game_by_slug(db, "allowed-dlc-game-fanout")
+    excluded = await games_repo.get_game_by_slug(db, "excluded-port-game-fanout")
+    assert allowed is not None
+    assert allowed.game_type == "DLC_ADDON"
+    assert excluded is None
+
+
 def _movie_detail(tmdb_id: int, title_prefix: str = "Capped Movie") -> dict:
     return {
         "id": tmdb_id,

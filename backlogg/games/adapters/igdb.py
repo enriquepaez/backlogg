@@ -10,6 +10,7 @@ import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from backlogg.core.config import settings
+from backlogg.games.constants import ALLOWED_GAME_CATEGORY_IDS, GAME_TYPE_MAP
 
 _TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 _IGDB_BASE = "https://api.igdb.com/v4"
@@ -38,24 +39,9 @@ _igdb_retry = retry(
     reraise=True,
 )
 
-# Map IGDB game_type integer to descriptive string
-_GAME_TYPE_MAP: dict[int, str] = {
-    0: "MAIN_GAME",
-    1: "DLC_ADDON",
-    2: "EXPANSION",
-    3: "BUNDLE",
-    4: "STANDALONE_EXPANSION",
-    5: "MOD",
-    6: "EPISODE",
-    7: "SEASON",
-    8: "REMAKE",
-    9: "REMASTER",
-    10: "EXPANDED_GAME",
-    11: "PORT",
-    12: "FORK",
-    13: "PACK",
-    14: "UPDATE",
-}
+# IGDB category filter clause for get_top_games — e.g. "0,1,2,4,6,7,8,9".
+# See backlogg.games.constants for the allowlist this is derived from.
+_ALLOWED_CATEGORY_CLAUSE = ",".join(str(i) for i in sorted(ALLOWED_GAME_CATEGORY_IDS))
 
 
 def _slugify(text: str) -> str:
@@ -149,7 +135,8 @@ class IGDBClient:
         return await self._post("games", igdb_query)
 
     async def get_top_games(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """Fetch top-rated main games from IGDB for seeding.
+        """Fetch top-rated games from IGDB for seeding, restricted to the
+        allowed categories (see ``backlogg.games.constants``).
 
         ``offset`` maps to IGDB's native ``offset N;`` query clause.  IGDB
         caps each request at 500 results, so bigger limits paginate with
@@ -166,7 +153,7 @@ class IGDBClient:
                 "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
                 "involved_companies.company.name,involved_companies.company.slug,"
                 "involved_companies.developer,involved_companies.publisher;"
-                " where game_type = (0) & rating > 0;"
+                f" where game_type = ({_ALLOWED_CATEGORY_CLAUSE}) & rating > 0;"
                 " sort rating_count desc;"
                 f" limit {per_request};"
                 f" offset {current_offset};"
@@ -196,7 +183,7 @@ class IGDBClient:
 
         # Game type
         game_type_int = raw.get("game_type", 0)
-        game_type = _GAME_TYPE_MAP.get(game_type_int, "MAIN_GAME")
+        game_type = GAME_TYPE_MAP.get(game_type_int, "MAIN_GAME")
 
         # Cover image
         poster_url: str | None = None

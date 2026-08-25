@@ -109,6 +109,84 @@ async def test_get_game_not_found_anywhere(db):
     assert exc_info.value.status_code == 404
 
 
+def _make_disallowed_game_dict(slug: str, game_type: str = "BUNDLE") -> dict:
+    data = _make_game_dict()
+    data["slug"] = slug
+    data["game_type"] = game_type
+    return data
+
+
+# ── Feature 65: game_category_allowlist ────────────────────────────────────
+
+
+async def test_get_game_discards_disallowed_category(db):
+    """An IGDB result whose category is not in the allowlist is not persisted; 404 instead."""
+    raw = _make_raw_igdb()
+    raw["slug"] = "bundle-game-not-allowed"
+
+    with (
+        patch.object(
+            service._igdb_client,
+            "get_game_by_slug",
+            new_callable=AsyncMock,
+            return_value=raw,
+        ),
+        patch.object(
+            service._igdb_client,
+            "game_to_dict",
+            return_value=_make_disallowed_game_dict("bundle-game-not-allowed"),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_game(db, "bundle-game-not-allowed")
+
+    assert exc_info.value.status_code == 404
+    persisted = await repo.get_game_by_slug(db, "bundle-game-not-allowed")
+    assert persisted is None
+
+
+@pytest.mark.parametrize(
+    "game_type",
+    [
+        "MAIN_GAME",
+        "DLC_ADDON",
+        "EXPANSION",
+        "STANDALONE_EXPANSION",
+        "EPISODE",
+        "SEASON",
+        "REMAKE",
+        "REMASTER",
+    ],
+)
+async def test_get_game_persists_every_allowed_category(db, game_type):
+    """None of the 8 allowed categories is a false negative — every one is persisted."""
+    raw = _make_raw_igdb()
+    slug = f"allowed-game-{game_type.lower()}"
+    raw["slug"] = slug
+    game_data = _make_game_dict()
+    game_data["slug"] = slug
+    game_data["game_type"] = game_type
+
+    with (
+        patch.object(
+            service._igdb_client,
+            "get_game_by_slug",
+            new_callable=AsyncMock,
+            return_value=raw,
+        ),
+        patch.object(
+            service._igdb_client,
+            "game_to_dict",
+            return_value=game_data,
+        ),
+    ):
+        result = await service.get_game(db, slug)
+
+    assert result.game_type == game_type
+    persisted = await repo.get_game_by_slug(db, slug)
+    assert persisted is not None
+
+
 async def test_get_game_title_search_fallback(db):
     """When get_game_by_slug returns None, search_games fallback is used."""
     raw = _make_raw_igdb()
