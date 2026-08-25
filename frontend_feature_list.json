@@ -1120,7 +1120,7 @@
         "Filtros de /admin/* (admin-catalog-filters.tsx) NO se tocan — siguen mostrando/filtrando por rating_external, decisión explícita del usuario",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 59,

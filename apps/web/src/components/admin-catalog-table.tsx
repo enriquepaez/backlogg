@@ -97,7 +97,7 @@ export function AdminCatalogTable({ type, items, dateLabel }: AdminCatalogTableP
                 {item.release_date ?? t("emptyValue")}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
-                {item.rating_external !== null ? item.rating_external.toFixed(1) : t("emptyValue")}
+                {item.rating_external != null ? item.rating_external.toFixed(1) : t("emptyValue")}
               </TableCell>
               <TableCell>
                 <Button type="button" variant="outline" size="sm" onClick={() => setEditingSlug(item.slug)}>

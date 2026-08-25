@@ -6,7 +6,7 @@ export type ItemSimilarItem = {
   slug: string;
   poster_url: string | null;
   release_date: string | null;
-  rating_external: number | null;
+  rating_internal: number | null;
 };
 
 export type ItemSimilarProps = {
@@ -41,7 +41,7 @@ export function ItemSimilar({ type, items, heading, emptyMessage }: ItemSimilarP
               key={item.slug}
               title={item.title}
               posterUrl={item.poster_url}
-              ratingExternal={item.rating_external}
+              ratingInternal={item.rating_internal}
               href={`/${type}/${item.slug}`}
             />
           ))}

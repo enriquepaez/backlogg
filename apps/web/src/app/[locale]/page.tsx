@@ -78,7 +78,7 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
               key={`${item.item_type}-${item.slug}`}
               title={item.title}
               posterUrl={item.poster_url}
-              ratingExternal={item.rating_external}
+              ratingInternal={item.rating_internal}
               typeLabel={t(`typeBadge.${type}`)}
               href={`/${type}/${item.slug}`}
             />
@@ -102,7 +102,7 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
                 key={item.slug}
                 title={item.title}
                 posterUrl={item.poster_url}
-                ratingExternal={item.rating_external}
+                ratingInternal={item.rating_internal}
                 href={`/${type}/${item.slug}`}
               />
             ))}

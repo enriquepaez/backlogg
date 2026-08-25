@@ -18,8 +18,6 @@ export type ItemHeroProps = {
   posterUrl: string | null;
   /** `null` for books (`BookOut` has no `backdrop_url`, see `docs/api.md`). */
   backdropUrl: string | null;
-  ratingExternal: number | null;
-  ratingCountExternal: number | null;
   ratingInternal: number | null;
   ratingCountInternal: number;
   /** Genre names (already resolved from `GenreOut`/`BookGenreOut`/etc by the caller). */
@@ -33,16 +31,18 @@ export type ItemHeroProps = {
   slug: string;
   originalTitleLabel: string;
   genresLabel: string;
-  ratingExternalLabel: string;
   ratingInternalLabel: string;
   noRatingsLabel: string;
 };
 
 /**
- * One rating (external or internal), or the "no ratings yet" fallback for
- * the internal one — `rating_internal` is `null` until at least one user has
+ * The community's own rating badge (`rating_internal`), or the "no ratings
+ * yet" fallback — `rating_internal` is `null` until at least one user has
  * rated the item (`docs/schema.md`), which is expected to be common early
- * on since ratings/reviews (FE-18) haven't shipped yet.
+ * on since ratings/reviews (FE-18) haven't shipped yet. `rating_external`
+ * (TMDB/Open Library/IGDB) is never shown to end users (FE-59/backend
+ * `rating_display_internal_only`) — kept generic (label/value/count props)
+ * in case another internal-only rating badge needs the same shape later.
  */
 function RatingBadge({
   label,
@@ -59,10 +59,10 @@ function RatingBadge({
     <div className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-sm">
       <Star aria-hidden className="size-4 fill-current text-yellow-500" />
       <span className="sr-only">{label}</span>
-      {value !== null ? (
+      {value != null ? (
         <span className="font-medium">
           {value.toFixed(1)}
-          {count !== null && count > 0 ? (
+          {count != null && count > 0 ? (
             <span className="ml-1 text-muted-foreground">({count})</span>
           ) : null}
         </span>
@@ -89,8 +89,6 @@ export function ItemHero({
   overview,
   posterUrl,
   backdropUrl,
-  ratingExternal,
-  ratingCountExternal,
   ratingInternal,
   ratingCountInternal,
   genres,
@@ -100,7 +98,6 @@ export function ItemHero({
   slug,
   originalTitleLabel,
   genresLabel,
-  ratingExternalLabel,
   ratingInternalLabel,
   noRatingsLabel,
 }: ItemHeroProps) {
@@ -167,12 +164,6 @@ export function ItemHero({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <RatingBadge
-              label={ratingExternalLabel}
-              value={ratingExternal}
-              count={ratingCountExternal}
-              noRatingsLabel={noRatingsLabel}
-            />
             <RatingBadge
               label={ratingInternalLabel}
               value={ratingInternal}
