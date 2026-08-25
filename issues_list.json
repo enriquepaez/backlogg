@@ -124,7 +124,7 @@
         "Confirmar si aplica igual a series/games (mismo patrón de _persist_series_people/companies) o es específico de movies — no verificado todavía."
       ],
       "verification": "Confirmado en DB local: antes del fix, 3/104 movies con credits. Tras aplicar el fix y correr `uv run python scripts/backfill_sync.py movie --slice-size 15 --time-budget-minutes 1` (reutiliza sync_movies real), 100/166 movies quedaron con credits, 0 errors, 0 people_errors en el log. Spot check directo del item citado en el síntoma: Spider-Man: Brand New Day (id=23) pasó de 0 a 11 filas en credits. bash init.sh en verde (702 tests). Pendiente: repetir el mismo backfill/verificación para series y books antes de dar por buena la recurrencia en esos dominios (comparten el mismo patrón de fix, pero no se corrió el backfill real en esta sesión, solo movies).",
-      "notes": "Descubierto durante QA manual de FE-18 (rate_review) por el usuario, al notar ItemCredits vacío en el detalle de película. Es una recurrencia de Issue 1 — el fix de esa fecha no se sostuvo o tiene un fallo estructural no detectado entonces. Fix implementado y revisado (reviewer: APPROVED) en rama fix/issue-7-credits-vacios; pendiente de confirmación del usuario para commit/push/PR."
+      "notes": "Descubierto durante QA manual de FE-18 (rate_review) por el usuario, al notar ItemCredits vacío en el detalle de película. Es una recurrencia de Issue 1 — el fix de esa fecha no se sostuvo o tiene un fallo estructural no detectado entonces. Fix implementado y revisado (reviewer: APPROVED) en rama fix/issue-7-credits-vacios; pendiente de confirmación del usuario para commit/push/PR. El backfill pendiente anotado en 'verification' (series/books) nunca se ejecutó — reabierto como Issue 15 el 2026-08-25."
     },
     {
       "id": 8,
@@ -241,6 +241,36 @@
         "Aumentar _FANOUT_LIMIT y el número de hits ingeridos en _ingest_movies/_ingest_series/_ingest_books (actualmente solo top-1) cuando el fallback sí dispara, sin tocar la condición de disparo.",
         "Confirmar primero si esto es una limitación aceptada por diseño (evitar rate-limiting/latencia de APIs externas en cada búsqueda) antes de decidir cualquier cambio — no implementar sin alinear con el usuario qué comportamiento espera."
       ]
+    },
+    {
+      "id": 15,
+      "title": "Credits vacíos en series (100%) y gran parte de movies/books — el backfill pendiente de Issue #7 nunca se ejecutó",
+      "area": "backend",
+      "severity": "high",
+      "status": "open",
+      "discovered": "2026-08-25",
+      "resolved": null,
+      "resolution_ref": null,
+      "symptom": "Reportado por el usuario: muchas películas/series con créditos vacíos. Verificado por el leader contra la DB local (backlogg-db, mismo esquema/código que prod): movies 349/462 sin credits (75%), series 170/170 sin credits (100%), books 190/192 sin credits (99%, no investigado a fondo). Adicional (fuera del síntoma original pero en la misma superficie): games no tiene ningún código que persista credits — solo lee (backlogg/games/service.py:86, get_credits_for_item) — pese a que docs/schema.md documenta rol DIRECTOR para games; no es un backfill pendiente, es una feature de ingestión nunca implementada.",
+      "cause": "Es la misma causa raíz que Issue #7 (retryless TMDB calls + excepción tragada en _persist_*_people), ya arreglada en código el 2026-08-13. Pero el campo 'verification' de Issue #7 ya advertía: 'Pendiente: repetir el mismo backfill/verificación para series y books... no se corrió el backfill real en esta sesión, solo movies' — y aun así el issue se cerró como resolved. Ese backfill (a) nunca se corrió para series, (b) quedó a medias para movies (100/166 en esa sesión, hoy sigue habiendo huecos), (c) nunca se confirmó para books.",
+      "solution": "Ya existe el mecanismo (no requiere código nuevo): .github/workflows/backfill-sync.yml (workflow_dispatch) corre scripts/backfill_sync.py directo contra Neon (prod), idempotente y reanudable por sync_cursors. Falta: (1) dispararlo para series (nunca se hizo), (2) volver a dispararlo para movies hasta agotar el catálogo, (3) verificar books y correrlo si aplica. games queda fuera de este issue — requeriría implementar _persist_game_credits (o equivalente) antes de que un backfill tenga sentido; si se decide abordar, debería ser una feature nueva en backend_feature_list.json, no un backfill.",
+      "verification": null,
+      "notes": "El usuario decidió explícitamente no disparar el backfill contra producción en esta sesión ('no, solo anotalo y seguimos') — queda anotado para más adelante. No confundir con Issue #7 (sigue marcado resolved, correctamente, para lo que sí se verificó: el fix de código). Este issue cubre específicamente el trabajo operativo que quedó sin hacer."
+    },
+    {
+      "id": 16,
+      "title": "Las descripciones (overview) de los 4 tipos de producto se muestran sin saltos de línea",
+      "area": "frontend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-08-25",
+      "resolved": null,
+      "resolution_ref": null,
+      "symptom": "Reportado por el usuario: la descripción de cualquier item (película/serie/libro/juego) se ve como un bloque de texto plano, sin párrafos, aunque el texto original sí los tenga.",
+      "cause": "Confirmado en DB local: el texto SÍ trae saltos de línea reales en origen — series (id 18, One Piece) y games (id 1, Dune II) traen '\\n\\n' entre párrafos, books (id 2, The Hobbit) trae '\\r\\n\\r\\n' (estilo Windows, Open Library). Solo en la muestra de movies no apareció ningún '\\n' (452 overviews sin newline), probablemente porque TMDB suele dar sinopsis de un solo párrafo para películas, no que el bug no les afecte. apps/web/src/components/item-hero.tsx:184-188 renderiza overview dentro de un <p> sin ninguna clase whitespace-*; el CSS por defecto (white-space: normal) colapsa cualquier '\\n'/'\\r\\n' a un solo espacio. ItemHero es el componente de hero compartido por los 4 tipos de producto (un solo sitio, un solo fix cubre los 4).",
+      "solution": "Añadir whitespace-pre-line (Tailwind) a la clase del <p> de overview en item-hero.tsx:185 — preserva saltos de línea y colapsa espacios/tabs repetidos, y normaliza '\\r\\n' igual que '\\n' en el render de navegadores modernos. No requiere cambios de backend (el dato ya llega correcto) ni tocar los otros 3 tipos por separado.",
+      "verification": null,
+      "notes": "No es una feature nueva, es un fix de una clase CSS en un componente ya existente — cambio puntual fuera del backlog formal (AGENTS.md sección 4: sin progress/review_<id>.md, veredicto del reviewer solo como texto)."
     }
   ]
 }

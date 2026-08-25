@@ -1298,6 +1298,58 @@
         "bash init.sh termina en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 65,
+      "name": "game_category_allowlist",
+      "title": "Restringir la ingestión de juegos a categorías IGDB concretas",
+      "description": "Decisión de producto del usuario (2026-08-25): IGDB devuelve 14 categorías de 'juego' (campo category, guardado localmente como game_type — backlogg/games/models.py:151, docs/schema.md:108) y hoy solo el seed/sync nocturno (get_top_games, backlogg/games/adapters/igdb.py:169) filtra por categoría (game_type = 0, solo MAIN_GAME). Los otros 3 caminos de ingestión — get_game_by_slug y get_similar_games (backlogg/games/service.py) y el fan-out de búsqueda _ingest_games (backlogg/search/service.py:305) — persisten cualquier categoría sin filtrar. Confirmado en DB local: 13 categorías distintas conviviendo, 66/301 juegos no son MAIN_GAME (causa raíz de Issue #14, donde un DLC ganaba en ranking a un juego con 8.6 de nota). El usuario decidió qué categorías quedan: MAIN_GAME, DLC_ADDON, EXPANSION, STANDALONE_EXPANSION, EPISODE, SEASON, REMAKE, REMASTER (8 de 14). Quedan fuera: BUNDLE, MOD, EXPANDED_GAME, PORT, FORK, PACK, UPDATE.",
+      "depends_on": [],
+      "acceptance": [
+        "Conjunto de categorías permitidas definido en un solo sitio (constante compartida, no repetida en cada call site): MAIN_GAME(0), DLC_ADDON(1), EXPANSION(2), STANDALONE_EXPANSION(4), EPISODE(6), SEASON(7), REMAKE(8), REMASTER(9)",
+        "get_top_games actualiza su filtro IGDB de 'game_type = (0)' a las 8 categorías permitidas",
+        "get_game_by_slug y get_similar_games (backlogg/games/service.py) no persisten (upsert_game) un resultado de IGDB cuya categoría no esté en el conjunto permitido",
+        "_ingest_games (backlogg/search/service.py, fan-out de búsqueda) aplica el mismo filtro antes de ingestar",
+        "Decisión explícita y documentada sobre las filas ya existentes en producción con categoría no permitida (hoy en DB local: BUNDLE 21, PORT 35, PACK 11, MOD 6, EXPANDED_GAME 7, DLC_ADDON ya permitido no cuenta, FORK 0, UPDATE 1) — no purgar sin comprobar antes si hay library_entries/ratings de usuarios reales apuntando a esas filas; si las hay, decidir con el usuario si se conservan (solo se corta la ingestión de nuevas) o se purgan igualmente",
+        "Tests cubriendo los 4 call sites: categoría permitida se persiste, categoría no permitida se descarta, sin falsos negativos en las 8 permitidas",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 66,
+      "name": "rating_display_internal_only",
+      "title": "Sort por rating y respuesta de la API priorizan rating_internal; rating_external deja de ser lo que se muestra al usuario",
+      "description": "Decisión de producto del usuario (2026-08-25): la web da demasiada importancia al rating externo (TMDB/Open Library/IGDB); solo debe importar el rating de los propios usuarios (rating_internal, feature 62). Aclaración explícita del usuario: a nivel interno SÍ se puede seguir usando rating_external cuando haga falta (p. ej. como señal de desempate mientras rating_internal es disperso por tener pocos usuarios todavía) — lo único que no debe pasar es que el valor que ve el usuario final sea el externo. Excepción explícita y ya implementada que se mantiene intacta: SearchRepository.search() (backlogg/search/repository.py, Issue #14) sigue ordenando /search por rating_external DESC NULLS LAST — es el mecanismo de fan-out que el usuario quiere conservar tal cual. catalog_search (la vista materializada que usa /search) no tiene columna rating_internal (docs/schema.md, gap confirmado en la investigación) — no se toca en este feature.",
+      "depends_on": [
+        62
+      ],
+      "acceptance": [
+        "sort=rating_desc/rating_asc (default documentado en docs/api.md) para GET /v1/movies|series|books|games pasa de ordenar por rating_external a ordenar por rating_internal DESC/ASC NULLS LAST, con rating_external DESC NULLS LAST como criterio secundario interno de desempate (nunca expuesto como 'la razón' del orden, solo mejora el orden de los items sin rating_internal todavía) — backlogg/movies/repository.py, backlogg/series/repository.py, backlogg/books/repository.py, backlogg/games/repository.py",
+        "Similar items (backlogg/books/repository.py, backlogg/games/service.py, backlogg/series/service.py) y el fallback sin-seed de recomendaciones (backlogg/recommendations/service.py) aplican el mismo criterio: rating_internal primero, rating_external como desempate interno",
+        "SearchRepository.search() (backlogg/search/repository.py) NO se toca — sigue siendo rating_external DESC NULLS LAST, es la excepción explícita del usuario",
+        "Los schemas de respuesta (movies/series/books/games) siguen exponiendo ambos campos (rating_external y rating_internal) — no se elimina el dato, solo cambia qué decide el orden por defecto; el frontend decide qué mostrar (feature de frontend correspondiente)",
+        "Filtros/sort de /admin/* (rating_external_min/max, sort dropdown) NO se tocan — decisión explícita del usuario, es herramienta de moderación interna, no cara al usuario final",
+        "docs/api.md actualizado: el default sort=rating_desc ya no se describe como 'ordena por rating externo' sino por el rating de la propia comunidad, con la nota de desempate interno",
+        "Tests actualizados/nuevos que verifiquen el nuevo ORDER BY en los 4 dominios + similar items + recomendaciones, y un test de regresión que confirme que SearchRepository.search() sigue intacto",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 67,
+      "name": "game_developer_publisher_exposure",
+      "title": "Exponer developer/publisher de juegos (ya ingestados, nunca leídos)",
+      "description": "Reportado por el usuario (2026-08-25): el detail page de un juego no muestra el desarrollador. Causa confirmada: el dato SÍ se ingesta desde IGDB (involved_companies, backlogg/games/adapters/igdb.py:123,143,167,244-262, roles DEVELOPER/PUBLISHER) y SÍ se persiste (backlogg/games/repository.py:230-244, upsert en companies/company_credits) — pero nunca se lee de vuelta. get_game (backlogg/games/service.py:61-107) solo consulta backlogg.shared.credits.get_credits_for_item (personas, rol DIRECTOR); company_credits no se consulta en ningún sitio, GameOut (backlogg/games/schemas.py) no tiene campo para companies. docs/schema.md documenta company_credits como 'GAME in MVP; MOVIE, SERIES in v2' — confirma que el scope actual es solo games, no ampliar a movies/series en este feature.",
+      "depends_on": [],
+      "acceptance": [
+        "Helper de lectura para company_credits (mismo patrón que backlogg/shared/credits.py get_credits_for_item, p. ej. get_company_credits_for_item) que devuelve company + role (DEVELOPER/PUBLISHER) para un item",
+        "GameOut (backlogg/games/schemas.py) gana un campo companies (lista de {id, name, slug, role}) o dos campos separados developers/publishers — decidir en implementación cuál es más simple de consumir en frontend",
+        "get_game (backlogg/games/service.py) consulta el nuevo helper y lo incluye en la respuesta",
+        "Tests: un juego con developer+publisher distintos, uno con solo developer, uno sin ninguno (no debe romper ni devolver null donde se espera lista vacía)",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

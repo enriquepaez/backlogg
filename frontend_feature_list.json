@@ -1069,6 +1069,108 @@
         "typecheck+lint+test+build en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 56,
+      "code": "FE-57",
+      "milestone": "M3",
+      "name": "catalog_card_type_visual_coding",
+      "title": "Señal visual más fuerte del tipo de item (movie/series/book/game) en CatalogCard",
+      "description": "Reportado por el usuario (2026-08-25): el tipo de un item tiene poca evidencia visual en la card. Estado actual (apps/web/src/components/catalog-card.tsx:106-110): la única señal es `typeLabel`, un badge de texto plano (fondo neutro `bg-background/90`) que además solo se pasa en las grids que mezclan tipos (home trending, /search) — las grids por tipo (browse/[type], secciones 'featured') lo omiten por diseño, asumiendo que el contexto ya lo deja claro. El usuario pide investigar cómo dar más peso visual al tipo, con un código de colores como opción de partida. Ya existe un patrón directamente reutilizable: `STATUS_COLOR_CLASSES` (apps/web/src/lib/library-types.ts) + los tokens `--status-<x>`/`--status-<x>-foreground` de globals.css, colores vivos y sólidos, no pastel ([[design-prefers-vivid-not-pastel]] en memoria del usuario).",
+      "depends_on": [],
+      "acceptance": [
+        "Se define un token de color por tipo (movie/series/book/game) siguiendo el mismo patrón que --status-<x> en globals.css (oklch, vivo y sólido, con variante -foreground), consistente en tema claro y oscuro",
+        "CatalogCard aplica esa señal de forma perceptible sin depender solo del texto — decidir en implementación la forma concreta (badge de tipo coloreado en vez de neutro, acento/borde del poster, icono, o combinación) y documentar la decisión elegida en el propio componente",
+        "Se decide explícitamente (con el usuario si hace falta) si la señal se muestra también en las grids por tipo que hoy omiten typeLabel, o si se mantiene reservada a contextos mixtos — no dejarlo implícito",
+        "El mismo código de color se reutiliza en cualquier otro sitio de la app que ya distinga tipo visualmente (si lo hay), para no crear un segundo sistema de color paralelo al de status",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 57,
+      "code": "FE-58",
+      "milestone": "M3",
+      "name": "game_type_display_labels",
+      "title": "Mostrar game_type con texto legible en detail page y CatalogCard",
+      "description": "Reportado por el usuario (2026-08-25), junto con la petición de restringir categorías en ingestión (backend feature 65): hoy el detail page de un juego (apps/web/src/app/[locale]/[type]/[slug]/page.tsx:129-130) muestra el valor crudo de game_type tal cual viene de IGDB/la DB (ej. literalmente 'MAIN_GAME', 'DLC_ADDON', 'STANDALONE_EXPANSION'), sin traducir. CatalogCard no recibe ni muestra game_type en absoluto todavía. El mapa de etiquetas debe cubrir las 14 categorías de IGDB, no solo las 8 que la feature 65 deja permitidas — filas históricas con categorías ya excluidas (BUNDLE, MOD, EXPANDED_GAME, PORT, FORK, PACK, UPDATE) pueden seguir existiendo en producción una vez esa feature se decida (ver su acceptance sobre purga de filas existentes), y el detail page de esos juegos concretos (para quien ya los tenga en biblioteca) no debe romperse ni mostrar un valor sin traducir.",
+      "depends_on": [],
+      "acceptance": [
+        "Mapa de traducción (i18n, namespace nuevo o existente en messages/en.json y es.json) con las 14 categorías IGDB -> etiqueta legible (ej. MAIN_GAME -> 'Main Game'/'Juego principal', DLC_ADDON -> 'DLC', STANDALONE_EXPANSION -> 'Standalone Expansion'/'Expansión independiente', etc.)",
+        "El detail page usa la etiqueta traducida en el campo gameType (page.tsx:130) en vez del valor crudo",
+        "CatalogCard (o el caller que arma sus props para juegos) muestra el game_type traducido en las grids donde aplica — decidir en implementación si MAIN_GAME se omite por ser el caso esperado/silencioso o se muestra igual que el resto, y documentar la decisión",
+        "Valor no reconocido (por si IGDB añade una categoría nueva en el futuro) no rompe el render — fallback razonable en vez de crash o texto vacío",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 58,
+      "code": "FE-59",
+      "milestone": "M3",
+      "name": "rating_badge_internal_only",
+      "title": "CatalogCard y detail page muestran solo rating_internal, nunca rating_external",
+      "description": "Contraparte frontend de la decisión de producto del backend (rating_display_internal_only): el badge de rating que ve el usuario final debe ser siempre el de la propia comunidad (rating_internal), nunca el externo. Estado actual: CatalogCard (apps/web/src/components/catalog-card.tsx:111-116) muestra un badge de estrella con ratingExternal en TODAS las grids (home, browse, search, trending, biblioteca, recomendaciones, similar). El detail page (apps/web/src/components/item-hero.tsx:170-180) ya muestra AMBOS badges lado a lado — external (170-174) e internal (176-180) — el internal ya existe y solo hay que quitar el external. Decisión ya tomada con el usuario: cuando no haya rating_internal (dato disperso al principio, pocos usuarios reales todavía), el badge se OCULTA — no se rellena con external ni con un placeholder.",
+      "depends_on": [],
+      "acceptance": [
+        "CatalogCard deja de recibir/mostrar ratingExternal; gana (o reutiliza) un prop de rating interno, oculto cuando es null — mismo criterio visual que el RatingBadge ya existente en item-hero.tsx (reutilizar el componente si tiene sentido, no duplicar estilos)",
+        "item-hero.tsx elimina el RatingBadge externo (líneas 170-174), conserva el interno (176-180) tal cual",
+        "Todos los callers que hoy pasan ratingExternal a CatalogCard cambian a rating_internal: [locale]/page.tsx, search/page.tsx, trending/page.tsx, browse/[type]/page.tsx, u/[username]/page.tsx, u/[username]/library/page.tsx, recommendations/page.tsx, item-similar.tsx, [type]/[slug]/page.tsx",
+        "El orden en que aparecen los resultados de /search NO cambia (sigue viniendo del backend ordenado por rating_external, feature de backend rating_display_internal_only lo deja intacto) — este feature es solo sobre qué número se MUESTRA en cada card, no sobre el orden de la lista",
+        "Filtros de /admin/* (admin-catalog-filters.tsx) NO se tocan — siguen mostrando/filtrando por rating_external, decisión explícita del usuario",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 59,
+      "code": "FE-60",
+      "milestone": "M3",
+      "name": "game_platform_brand_badges",
+      "title": "Plataformas de un juego como badges con color de marca, en vez de texto plano",
+      "description": "Reportado por el usuario (2026-08-25, con captura de referencia de un tracker en Notion): el detail page de juegos tiene poca información y poca identidad visual comparado con lo que quiere. Petición concreta: dar más presencia a las plataformas, con un código de colores por marca (PlayStation, Xbox, Nintendo, PC, etc.). Estado actual: `game.platforms` (backlogg/games/schemas.py:42, `GamePlatformOut{id,name,slug}`) ya viene de la API con nombre Y slug (IGDB), pero el detail page (apps/web/src/app/[locale]/[type]/[slug]/page.tsx:132-137) las junta en un solo string plano ('PS5, Xbox Series X, PC') dentro de la lista genérica de 'fields' (label/value gris, sin badge). Contraste con genres (item-hero.tsx:156-167), que sí son pills (`rounded-full bg-muted`) en su propia fila — pero sin color por categoría, todas iguales. Volumen real de plataformas ya en catálogo: 60+ slugs distintos (PlayStation 1-5+Vita+VR+PSP, Xbox/360/One/Series X|S, Switch/Switch 2, PC/Mac/Linux, retro Sega/Atari/Commodore/MSX, móvil, VR, web) — inviable mapear color exacto por cada slug uno a uno; necesita agrupación por familia/marca con fallback neutro para lo retro/obscuro no mapeado explícitamente.",
+      "depends_on": [],
+      "acceptance": [
+        "Las plataformas dejan de estar dentro de la lista genérica de 'fields' (texto plano) y pasan a su propia fila de badges, mismo patrón visual que la fila de genres pero con color por familia de marca (ej. PlayStation azul, Xbox verde, Nintendo rojo, PC/Windows un tono neutro distintivo, retro/no mapeado con un color neutro de fallback — paleta viva y sólida, no pastel, [[design-prefers-vivid-not-pastel]])",
+        "El mapeo de color se basa en el slug (backlogg/games/schemas.py GamePlatformOut.slug, ya disponible) agrupado por familia/prefijo, no un color hardcodeado por cada uno de los 60+ slugs existentes uno a uno — debe seguir funcionando cuando el catálogo traiga una plataforma nueva de IGDB no vista antes (fallback neutro, nunca un badge roto o sin estilo)",
+        "Coherente con FE-57 (catalog_card_type_visual_coding, movie/series/book/game): son dos sistemas de color distintos con propósitos distintos (tipo de item vs. marca de plataforma) — no deben poder confundirse visualmente ni compartir la misma paleta de tokens",
+        "Accesible: el color no es el único medio de distinguir plataformas (el nombre sigue siendo texto legible dentro o junto al badge, no solo un icono/color)",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 60,
+      "code": "FE-61",
+      "milestone": "M3",
+      "name": "game_developer_publisher_display",
+      "title": "Mostrar developer/publisher en el detail page de juegos",
+      "description": "Contraparte frontend de la feature de backend game_developer_publisher_exposure: una vez la API exponga companies/developers/publishers en GameOut, mostrarlos en el detail page (apps/web/src/app/[locale]/[type]/[slug]/page.tsx, buildFields para game). Hoy el detail page de un juego no muestra ningún desarrollador — dato ausente por completo en la UI.",
+      "depends_on": [],
+      "acceptance": [
+        "El detail page de un juego muestra developer y publisher (cuando existan) de forma distinguible entre sí, no mezclados en un solo string",
+        "Si un juego no tiene developer/publisher conocido, el campo se omite igual que hoy hacen otros campos opcionales (game_type, platforms) — sin fila vacía",
+        "Consistente con el resto de metadata del detail page (mismo patrón visual que el resto de 'fields', salvo que el equipo decida integrarlo en la fila de badges junto a plataformas — a criterio de implementación)",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 61,
+      "code": "FE-62",
+      "milestone": "M3",
+      "name": "genre_pills_prominence",
+      "title": "Dar más peso visual a los géneros (mismo color de acento para todos, en los 4 tipos de producto)",
+      "description": "Reportado por el usuario (2026-08-25): los géneros pasan desapercibidos en el detail page. Hoy son pills neutras (item-hero.tsx:156-167, `rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground`), iguales para movies/series/books/games — sin distinción de color por género (decisión explícita del usuario: NO se quiere un color distinto por género, la variedad de taxonomías por dominio — MovieGenre/SeriesGenre/BookGenre/GameGenre, cada una con su propia fuente TMDB/Open Library/IGDB sin vocabulario compartido — lo hacía inmantenible). En su lugar: mismo color de acento para TODOS los géneros, más peso visual que hoy (pill más grande/marcada). Ya existe el token de marca adecuado: `--accent` (violeta, FE-40, apps/web/src/app/globals.css) es el único token con chroma real de la app — reutilizarlo aquí en vez de introducir un color nuevo mantiene coherencia con el resto del sistema de diseño.",
+      "depends_on": [],
+      "acceptance": [
+        "Las pills de género en item-hero.tsx (compartido por los 4 tipos de producto) usan `--accent`/`--accent-foreground` en vez de `bg-muted`/`text-muted-foreground`",
+        "Más peso visual que el estado actual: tamaño de pill y/o tipografía aumentados respecto a `text-xs`/`px-2.5 py-0.5` — decidir el grado exacto en implementación, pero debe notarse la diferencia frente al resto de badges (rating, platform, etc.) que no compiten por el mismo tipo de atención",
+        "Mismo tratamiento en los 4 tipos de producto (movies/series/books/games) — item-hero.tsx es compartido, así que un solo cambio ya cubre los 4 mientras no se reintroduzca un caso especial por tipo",
+        "No debe confundirse visualmente con `--status-<x>` (colores de estado de biblioteca) ni con los sistemas de color nuevos de FE-57 (tipo de item) o FE-60 (plataforma) — todos deben poder convivir en la misma pantalla de detalle sin verse como el mismo sistema",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
