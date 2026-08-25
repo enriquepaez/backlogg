@@ -295,7 +295,7 @@ describe("ItemDetailPage — game developer/publisher fields (FE-61)", () => {
     });
   });
 
-  it("shows only the developer field when there's no publisher", async () => {
+  it("shows the developer field with its value and the publisher field with the placeholder when there's no publisher (FE-63)", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
       item: {
@@ -310,10 +310,13 @@ describe("ItemDetailPage — game developer/publisher fields (FE-61)", () => {
 
     const fields = fieldsFromDom(container);
     expect(fields).toContainEqual({ label: "fields.developer", value: "Indie Studio" });
-    expect(fields.some((field) => field.label === "fields.publisher")).toBe(false);
+    expect(fields).toContainEqual({
+      label: "fields.publisher",
+      value: "fields.notAvailable",
+    });
   });
 
-  it("omits both fields when the game has no known companies", async () => {
+  it("shows both fields with the not-available placeholder when the game has no known companies (FE-63)", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
       item: { ...gameItem, companies: [] },
@@ -322,7 +325,185 @@ describe("ItemDetailPage — game developer/publisher fields (FE-61)", () => {
     const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
 
     const fields = fieldsFromDom(container);
-    expect(fields.some((field) => field.label === "fields.developer")).toBe(false);
-    expect(fields.some((field) => field.label === "fields.publisher")).toBe(false);
+    expect(fields).toContainEqual({
+      label: "fields.developer",
+      value: "fields.notAvailable",
+    });
+    expect(fields).toContainEqual({
+      label: "fields.publisher",
+      value: "fields.notAvailable",
+    });
+  });
+});
+
+describe("ItemDetailPage — not-available placeholder for absent metadata fields (FE-63)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function fieldsFromDom(container: HTMLElement): { label: string; value: string }[] {
+    const hero = container.querySelector('[data-testid="item-hero"]');
+    expect(hero).not.toBeNull();
+    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
+    return props.fields;
+  }
+
+  it("movie: shows the actual value when present and the placeholder when absent", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.releaseDate",
+      value: "2021-10-22",
+    });
+
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: null },
+    });
+    const { container: container2 } = render(
+      await ItemDetailPage(buildProps("movie", "dune-2021")),
+    );
+    expect(fieldsFromDom(container2)).toContainEqual({
+      label: "fields.releaseDate",
+      value: "fields.notAvailable",
+    });
+  });
+
+  it("movie: a real runtime of 0 is shown formatted, not as the placeholder", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, runtime: 0 },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.runtime",
+      value: 'fields.runtimeValue:{"minutes":0}',
+    });
+  });
+
+  it("movie: a missing runtime shows the placeholder instead of a formatted value", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, runtime: null },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.runtime",
+      value: "fields.notAvailable",
+    });
+  });
+
+  it("series: shows the actual season/episode counts when present, including a legitimate 0", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        first_air_date: "2021-01-01",
+        last_air_date: "2021-03-01",
+        number_of_seasons: 1,
+        number_of_episodes: 0,
+        status: "Upcoming",
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({ label: "fields.seasons", value: "1" });
+    expect(fields).toContainEqual({ label: "fields.episodes", value: "0" });
+  });
+
+  it("series: shows the placeholder for every optional field that's absent", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        release_date: undefined,
+        first_air_date: null,
+        last_air_date: null,
+        number_of_seasons: null,
+        number_of_episodes: null,
+        status: null,
+        original_language: null,
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({ label: "fields.firstAirDate", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({ label: "fields.lastAirDate", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({ label: "fields.seasons", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({ label: "fields.episodes", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({ label: "fields.status", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({
+      label: "fields.originalLanguage",
+      value: "fields.notAvailable",
+    });
+  });
+
+  it("book: shows the actual value when present and the placeholder when absent", async () => {
+    const bookItem = {
+      ...movieItem,
+      release_date: undefined,
+      first_publish_date: "1965-08-01",
+      original_language: "en",
+    };
+    getItemDetail.mockResolvedValue({ status: "ok", item: bookItem });
+    const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
+    const fields = fieldsFromDom(container);
+    expect(fields).toContainEqual({
+      label: "fields.firstPublishDate",
+      value: "1965-08-01",
+    });
+    expect(fields).toContainEqual({ label: "fields.originalLanguage", value: "en" });
+
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...bookItem, first_publish_date: null, original_language: null },
+    });
+    const { container: container2 } = render(
+      await ItemDetailPage(buildProps("book", "dune-1965")),
+    );
+    const fields2 = fieldsFromDom(container2);
+    expect(fields2).toContainEqual({
+      label: "fields.firstPublishDate",
+      value: "fields.notAvailable",
+    });
+    expect(fields2).toContainEqual({
+      label: "fields.originalLanguage",
+      value: "fields.notAvailable",
+    });
+  });
+
+  it("game: shows the actual value when present and the placeholder when absent", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...gameItem,
+        platforms: [{ id: 1, name: "PC", slug: "pc" }],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.platforms",
+      value: "PC",
+    });
+
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...gameItem, platforms: [], game_type: null, original_language: null },
+    });
+    const { container: container2 } = render(await ItemDetailPage(buildProps("game", "hades")));
+    const fields = fieldsFromDom(container2);
+    expect(fields).toContainEqual({ label: "fields.platforms", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({ label: "fields.gameType", value: "fields.notAvailable" });
+    expect(fields).toContainEqual({
+      label: "fields.originalLanguage",
+      value: "fields.notAvailable",
+    });
   });
 });

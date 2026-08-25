@@ -1190,7 +1190,7 @@
         "Tests actualizados/nuevos por tipo (movie/series/book/game) cubriendo al menos un campo con valor y el mismo campo sin valor mostrando el placeholder, para los 4 tipos",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
