@@ -182,7 +182,7 @@ export function ItemHero({
           </div>
 
           {overview ? (
-            <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+            <p className="max-w-2xl whitespace-pre-line text-base leading-7 text-muted-foreground">
               {overview}
             </p>
           ) : null}
