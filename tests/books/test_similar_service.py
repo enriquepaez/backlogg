@@ -177,3 +177,21 @@ async def test_get_similar_books_response_shape(db):
     assert item.poster_url == "https://covers.openlibrary.org/b/id/12345-L.jpg"
     assert item.release_date == date(1999, 3, 1)
     assert item.rating_external == 6.7
+    # Feature 69: rating_internal travels too, null when the book has none.
+    assert item.rating_internal is None
+
+
+async def test_get_similar_books_includes_rating_internal_value(db):
+    """Feature 69: a candidate's non-null rating_internal travels in the response."""
+    genres = [{"name": "F69 Internal Genre", "slug": "f69-internal-genre"}]
+    await books_repo.upsert_book(
+        db, _book_data("f69-internal-source-2001", genres=genres, rating=None)
+    )
+    match_data = _book_data("f69-internal-match-2002", rating=6.0, genres=genres)
+    match_data["rating_internal"] = 4.35
+    await books_repo.upsert_book(db, match_data)
+
+    result = await service.get_similar_books(db, "f69-internal-source-2001")
+
+    assert len(result.results) == 1
+    assert result.results[0].rating_internal == 4.35

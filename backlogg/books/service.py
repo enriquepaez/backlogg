@@ -131,6 +131,7 @@ async def list_books(
             poster_url=b.poster_url,
             release_date=b.first_publish_date,
             rating_external=float(b.rating_external) if b.rating_external is not None else None,
+            rating_internal=float(b.rating_internal) if b.rating_internal is not None else None,
             genres=[g.slug for g in b.genres],
         )
         for b in items
@@ -206,6 +207,7 @@ def _book_to_similar_out(book: Book) -> SimilarBookOut:
         poster_url=book.poster_url,
         release_date=book.first_publish_date,
         rating_external=float(book.rating_external) if book.rating_external is not None else None,
+        rating_internal=float(book.rating_internal) if book.rating_internal is not None else None,
     )
 
 

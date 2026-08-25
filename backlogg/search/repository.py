@@ -128,6 +128,9 @@ class SearchRepository:
                 "rating_external": (
                     float(row.rating_external) if row.rating_external is not None else None
                 ),
+                "rating_internal": (
+                    float(row.rating_internal) if row.rating_internal is not None else None
+                ),
             }
             for row in rows
         ]

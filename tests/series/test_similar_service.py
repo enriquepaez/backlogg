@@ -124,6 +124,8 @@ async def test_get_similar_series_persists_and_returns(db):
     assert item.poster_url is not None
     assert item.release_date == date(2015, 2, 8)
     assert item.rating_external == 8.8
+    # Feature 69: a freshly-persisted TMDB item has no community rating yet.
+    assert item.rating_internal is None
 
     # Verify it was persisted
     persisted = await repo.get_series_by_slug(db, "recommended-series-2015")
@@ -274,6 +276,10 @@ async def test_get_similar_series_orders_by_rating_internal_over_external(db):
         "similar-series-order-high-internal-2016",
         "similar-series-order-low-internal-2015",
     ]
+    # Feature 69: rating_internal travels in the response, with the correct
+    # value per item (not just used internally to compute the order).
+    assert result.results[0].rating_internal == 4.5
+    assert result.results[1].rating_internal == 2.0
 
 
 async def test_get_similar_series_limits_to_10(db):

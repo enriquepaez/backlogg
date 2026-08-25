@@ -1369,6 +1369,27 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 69,
+      "name": "rating_internal_list_exposure",
+      "title": "Exponer rating_internal en los schemas de lista/grid (movies/series/books/games, trending, search, library, recommendations, similar items)",
+      "description": "Bloqueo descubierto durante la implementación de la contraparte frontend (FE-59, rating_badge_internal_only) de la feature 66 (rating_display_internal_only, ya done). Feature 66 cambió el ORDER BY interno a rating_internal y confirmó que los 4 schemas de detalle (MovieOut/SeriesOut/BookOut/GameOut) exponen ambos campos — pero nunca tocó los schemas de lista/grid, que solo exponen rating_external: MovieListItemOut/SimilarMovieOut (backlogg/movies/schemas.py), SeriesListItemOut/SimilarSeriesOut (backlogg/series/schemas.py), BookListItemOut (backlogg/books/schemas.py), GameListItemOut (backlogg/games/schemas.py), TrendingItemOut (backlogg/trending/schemas.py), SearchResultItem (backlogg/search/schemas.py), LibraryItemOut (backlogg/library/schemas.py), RecommendationOut (backlogg/recommendations/schemas.py). Sin este dato, el frontend no puede mostrar rating_internal en ninguna de las grids (home, browse, /search, trending, biblioteca, recomendaciones, similar) — solo en el detail page. Caso especial: SearchResultItem se alimenta de la vista materializada catalog_search (docs/schema.md), que hoy no tiene columna rating_internal en su definición SQL — los 4 tablas base (movies/series/books/games) SÍ tienen la columna (docs/schema.md, confirmado también en feature 66), así que añadirla a la vista es viable sin heurística nueva.",
+      "depends_on": [
+        66
+      ],
+      "acceptance": [
+        "MovieListItemOut, SimilarMovieOut, SeriesListItemOut, SimilarSeriesOut, BookListItemOut, GameListItemOut, SimilarBookOut, SimilarGameOut ganan el campo rating_internal (float | None), poblado desde la columna ya existente en las tablas base — sin nuevo cálculo, es lectura directa",
+        "TrendingItemOut, LibraryItemOut y RecommendationOut ganan el mismo campo rating_internal, poblado desde la tabla base correspondiente en cada servicio/repository",
+        "catalog_search (vista materializada, docs/schema.md) se actualiza para incluir rating_internal en el SELECT de las 4 sub-queries UNION ALL, vía migración Alembic que recree la vista (DROP + CREATE MATERIALIZED VIEW, mismo patrón que si la vista ya se recreó antes en el historial de alembic/versions/) + REFRESH MATERIALIZED VIEW CONCURRENTLY; SearchResultItem gana rating_internal poblado desde la vista actualizada",
+        "SearchRepository.search() (backlogg/search/repository.py) NO cambia su ORDER BY — sigue siendo rating_external DESC NULLS LAST (excepción ya fijada por feature 66); este feature solo añade el campo a la respuesta, no toca el orden",
+        "Ningún ORDER BY de movies/series/books/games/trending/library/recommendations cambia — feature 66 ya lo dejó en rating_internal donde correspondía; este feature es solo de exposición de campo, no de ordenamiento",
+        "docs/api.md actualizado: los endpoints de lista afectados documentan el nuevo campo rating_internal en su contrato de respuesta",
+        "docs/schema.md actualizado con la definición nueva de catalog_search",
+        "Tests: cada schema de lista afectado tiene un test que verifica que rating_internal viaja en la respuesta (con valor y con null); test de regresión sobre catalog_search tras el REFRESH; test de regresión que confirme que SearchRepository.search() sigue ordenando por rating_external",
+        "bash init.sh en verde"
+      ],
+      "status": "done"
     }
   ]
 }

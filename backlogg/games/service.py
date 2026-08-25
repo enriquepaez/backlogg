@@ -53,6 +53,7 @@ async def list_games(
             poster_url=g.poster_url,
             release_date=g.release_date,
             rating_external=float(g.rating_external) if g.rating_external is not None else None,
+            rating_internal=float(g.rating_internal) if g.rating_internal is not None else None,
             genres=[genre.slug for genre in g.genres],
         )
         for g in items
@@ -181,6 +182,7 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
                     poster_url=sim_game.poster_url,
                     release_date=sim_game.release_date,
                     rating_external=rating_external,
+                    rating_internal=rating_internal,
                 ),
             )
         )

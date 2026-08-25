@@ -117,6 +117,7 @@ def _library_select(item_type: str, model: type):
         model.poster_url.label("poster_url"),
         release_col.label("release_date"),
         model.rating_external.label("rating_external"),
+        model.rating_internal.label("rating_internal"),
         LibraryEntry.status.label("status"),
         LibraryEntry.created_at.label("created_at"),
         LibraryEntry.updated_at.label("updated_at"),

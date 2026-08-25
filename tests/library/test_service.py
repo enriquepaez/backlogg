@@ -168,6 +168,30 @@ async def test_get_user_library_filters(db):
     assert only_want.items[0].status == "want"
 
 
+async def test_get_user_library_includes_rating_internal(db):
+    """Feature 69: rating_internal travels on each library item — with a
+    value and with null."""
+    await upsert_movie(
+        db, _movie_data("svc-library-movie-rating-internal-set") | {"rating_internal": 3.9}
+    )
+    await upsert_movie(db, _movie_data("svc-library-movie-rating-internal-null"))
+    user = await _make_user(db, "library-svc-user-rating-internal")
+
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-rating-internal-set", LibraryStatus.want, user
+    )
+    await service.set_library_status(
+        db, "MOVIE", "svc-library-movie-rating-internal-null", LibraryStatus.want, user
+    )
+
+    result = await service.get_user_library(
+        db, "library-svc-user-rating-internal", None, None, 1, 20
+    )
+    by_slug = {entry.item.slug: entry.item for entry in result.items}
+    assert by_slug["svc-library-movie-rating-internal-set"].rating_internal == 3.9
+    assert by_slug["svc-library-movie-rating-internal-null"].rating_internal is None
+
+
 async def test_get_library_counts(db):
     await upsert_movie(db, _movie_data("svc-library-movie-8"))
     user = await _make_user(db, "library-svc-user-8")

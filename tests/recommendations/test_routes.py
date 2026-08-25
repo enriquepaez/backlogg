@@ -89,5 +89,6 @@ async def test_recommendations_happy_path_fallback(client, db):
         "poster_url",
         "release_date",
         "rating_external",
+        "rating_internal",
         "reason",
     }

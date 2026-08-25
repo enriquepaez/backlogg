@@ -260,6 +260,7 @@ async def test_get_user_library_public_cross_type(client, db):
         "poster_url",
         "release_date",
         "rating_external",
+        "rating_internal",
     }
     assert "status" in sample
 

@@ -35,6 +35,7 @@ class RecommendationOut(BaseModel):
     poster_url: str | None
     release_date: date | None
     rating_external: float | None
+    rating_internal: float | None
     reason: str
 
 
@@ -54,6 +55,7 @@ class RecommendationsOut(BaseModel):
                         "poster_url": "https://image.tmdb.org/t/p/w500/br2049.jpg",
                         "release_date": "2017-10-06",
                         "rating_external": 8.0,
+                        "rating_internal": 4.5,
                         "reason": "Because you rated Dune",
                     }
                 ],

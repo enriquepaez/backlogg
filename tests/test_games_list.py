@@ -121,6 +121,39 @@ async def test_list_games_filter_by_genre(client, db):
     assert body["total"] == 1
 
 
+async def test_list_games_response_includes_rating_internal(client, db):
+    """GET /games items include rating_internal — with a value and with null (feature 69)."""
+    genre = {"name": "gm-rating-internal-name", "slug": "gm-rating-internal-slug"}
+    await repo.upsert_game(
+        db,
+        _make_game(
+            slug="gm-rating-internal-set-2021",
+            title="Game With Internal Rating",
+            rating=8.0,
+            release_date=date(2021, 1, 1),
+            genres=[genre],
+        )
+        | {"rating_internal": 4.6},
+    )
+    await repo.upsert_game(
+        db,
+        _make_game(
+            slug="gm-rating-internal-null-2021",
+            title="Game Without Internal Rating",
+            rating=7.0,
+            release_date=date(2021, 1, 1),
+            genres=[genre],
+        ),
+    )
+
+    response = await client.get("/v1/games?genre=gm-rating-internal-slug")
+    assert response.status_code == 200
+    body = response.json()
+    by_slug = {item["slug"]: item for item in body["items"]}
+    assert by_slug["gm-rating-internal-set-2021"]["rating_internal"] == 4.6
+    assert by_slug["gm-rating-internal-null-2021"]["rating_internal"] is None
+
+
 async def test_list_games_sort_rating_desc(client, db):
     """GET /games?sort=rating_desc orders by rating_external descending."""
     genre = {"name": "gm-sort-rating-name", "slug": "gm-sort-rating-slug"}

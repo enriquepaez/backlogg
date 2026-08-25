@@ -200,6 +200,7 @@ async def get_genre_overlap_candidates(
             model.poster_url.label("poster_url"),
             release_col.label("release_date"),
             model.rating_external.label("rating_external"),
+            model.rating_internal.label("rating_internal"),
             overlap,
         )
         .join(join, join_item == model.id)

@@ -41,6 +41,7 @@ def _row_to_rec(item_type: str, row, reason: str) -> RecommendationOut:
         poster_url=row.poster_url,
         release_date=row.release_date,
         rating_external=(float(row.rating_external) if row.rating_external is not None else None),
+        rating_internal=(float(row.rating_internal) if row.rating_internal is not None else None),
         reason=reason,
     )
 
@@ -123,6 +124,7 @@ async def get_recommendations(
                             poster_url=item.poster_url,
                             release_date=item.release_date,
                             rating_external=item.rating_external,
+                            rating_internal=item.rating_internal,
                             reason=reason,
                         )
                     )

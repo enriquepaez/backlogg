@@ -170,6 +170,7 @@ async def list_series(
             poster_url=s.poster_url,
             release_date=s.first_air_date,
             rating_external=float(s.rating_external) if s.rating_external is not None else None,
+            rating_internal=float(s.rating_internal) if s.rating_internal is not None else None,
             genres=[g.slug for g in s.genres],
         )
         for s in items
@@ -310,6 +311,7 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
                     poster_url=rec_series.poster_url,
                     release_date=rec_series.first_air_date,
                     rating_external=rating_external,
+                    rating_internal=rating_internal,
                 ),
             )
         )

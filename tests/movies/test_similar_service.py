@@ -121,6 +121,8 @@ async def test_get_similar_movies_persists_and_returns(db):
     assert item.poster_url is not None
     assert item.release_date == date(2008, 7, 18)
     assert item.rating_external == 9.0
+    # Feature 69: a freshly-persisted TMDB item has no community rating yet.
+    assert item.rating_internal is None
 
     # Verify it was persisted
     persisted = await repo.get_movie_by_slug(db, "recommended-movie-2008")
@@ -178,6 +180,58 @@ async def test_get_similar_movies_uses_local_if_already_present(db):
     mock_detail.assert_not_called()
     assert len(result.results) == 1
     assert result.results[0].slug == "recommended-movie-local-2008"
+
+
+async def test_get_similar_movies_includes_rating_internal_from_local_movie(db):
+    """Feature 69: a pre-seeded local rec movie's rating_internal travels in
+    the response (not just rating_external)."""
+    movie = await repo.upsert_movie(
+        db, _make_source_movie_dict("similar-test-source-rating-internal-2010")
+    )
+    await upsert_external_id(db, "MOVIE", movie.id, "TMDB", "9999905")
+
+    rec_dict = {
+        "title": "Recommended Movie With Internal Rating",
+        "original_title": "Recommended Movie With Internal Rating",
+        "slug": "recommended-movie-with-internal-rating-2008",
+        "overview": "A recommended film already in DB with a community rating.",
+        "release_date": date(2008, 7, 18),
+        "runtime": 152,
+        "original_language": "en",
+        "poster_url": "https://image.tmdb.org/t/p/w500/rec.jpg",
+        "backdrop_url": None,
+        "budget": 0,
+        "revenue": 0,
+        "status": "Released",
+        "rating_external": 9.0,
+        "rating_count_external": 28000,
+        "rating_internal": 4.4,
+        "rating_count_internal": 12,
+        "last_synced_at": datetime.now(UTC),
+        "genres": [],
+    }
+    await repo.upsert_movie(db, rec_dict)
+
+    rec_item = {
+        "id": _REC_TMDB_ID + 2,
+        "title": "Recommended Movie With Internal Rating",
+        "release_date": "2008-07-18",
+    }
+
+    with (
+        patch.object(
+            service._tmdb,
+            "get_movie_recommendations",
+            new_callable=AsyncMock,
+            return_value=[rec_item],
+        ),
+        patch.object(service._tmdb, "get_movie_detail", new_callable=AsyncMock),
+    ):
+        result = await service.get_similar_movies(db, "similar-test-source-rating-internal-2010")
+
+    assert len(result.results) == 1
+    assert result.results[0].slug == "recommended-movie-with-internal-rating-2008"
+    assert result.results[0].rating_internal == 4.4
 
 
 async def test_get_similar_movies_limits_to_10(db):

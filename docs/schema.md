@@ -311,6 +311,10 @@ without punctuation (`Spiderman`) still matches a punctuated title
 (`Spider-Man`) — the `simple` dictionary never generates that concatenated
 lexeme on its own. `overview` is left unnormalized.
 
+`rating_internal` (feature 69, `rating_internal_list_exposure`) is included in
+every sub-query alongside `rating_external` — it is a plain passthrough of the
+base table's own `rating_internal` column, not a new computation.
+
 ```sql
 CREATE MATERIALIZED VIEW catalog_search AS
 SELECT
@@ -322,18 +326,19 @@ SELECT
     poster_url,
     release_date,
     rating_external,
+    rating_internal,
     to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, '')) AS search_vector
 FROM movies
 UNION ALL
-SELECT id, 'SERIES', slug, title, overview, poster_url, first_air_date, rating_external,
+SELECT id, 'SERIES', slug, title, overview, poster_url, first_air_date, rating_external, rating_internal,
     to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM series
 UNION ALL
-SELECT id, 'BOOK', slug, title, overview, poster_url, first_publish_date, rating_external,
+SELECT id, 'BOOK', slug, title, overview, poster_url, first_publish_date, rating_external, rating_internal,
     to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM books
 UNION ALL
-SELECT id, 'GAME', slug, title, overview, poster_url, release_date, rating_external,
+SELECT id, 'GAME', slug, title, overview, poster_url, release_date, rating_external, rating_internal,
     to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
 FROM games;
 

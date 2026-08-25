@@ -321,7 +321,8 @@ async def test_trending_invalid_type_returns_422(client, db):
 
 
 async def test_trending_result_fields(client, db):
-    """Each result includes item_type, title, slug, poster_url, release_date, rating_external."""
+    """Each result includes item_type, title, slug, poster_url, release_date,
+    rating_external, rating_internal (feature 69)."""
     raw_movie = _raw_movie(tmdb_id=9011, slug_title="Fields Check Movie")
 
     with (
@@ -351,9 +352,63 @@ async def test_trending_result_fields(client, db):
         "poster_url",
         "release_date",
         "rating_external",
+        "rating_internal",
     )
     for field in expected_fields:
         assert field in item, f"Missing field: {field}"
+
+
+async def test_trending_result_includes_rating_internal_from_local_movie(client, db):
+    """Feature 69: a pre-seeded local movie's rating_internal travels in the
+    trending response (a fresh TMDB-only item has none, so seed one locally
+    with a community rating already set)."""
+    await movies_repo.upsert_movie(
+        db,
+        {
+            "title": "Rating Internal Trending Movie",
+            "original_title": "Rating Internal Trending Movie",
+            "slug": "rating-internal-trending-movie-2023",
+            "overview": "A trending film with a community rating.",
+            "release_date": date(2023, 6, 15),
+            "runtime": 120,
+            "original_language": "en",
+            "poster_url": "https://example.com/rating-internal-trending-movie.jpg",
+            "backdrop_url": None,
+            "budget": None,
+            "revenue": None,
+            "status": "Released",
+            "rating_external": 7.8,
+            "rating_count_external": 5000,
+            "rating_internal": 4.1,
+            "rating_count_internal": 9,
+            "last_synced_at": datetime.now(UTC),
+            "genres": [],
+        },
+    )
+    raw_movie = _raw_movie(tmdb_id=9013, slug_title="Rating Internal Trending Movie")
+
+    with (
+        patch(
+            "backlogg.trending.service._movies_tmdb.get_trending_movies",
+            new=AsyncMock(return_value=[raw_movie]),
+        ),
+        patch(
+            "backlogg.trending.service._series_tmdb.get_trending_series",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "backlogg.trending.service._movies_tmdb.get_movie_detail",
+            new=AsyncMock(),
+        ) as mock_detail,
+    ):
+        response = await client.get("/v1/trending?type=movie")
+
+    assert response.status_code == 200
+    # Found locally — no detail fetch needed.
+    mock_detail.assert_not_called()
+    body = response.json()
+    item = next(r for r in body["results"] if r["slug"] == "rating-internal-trending-movie-2023")
+    assert item["rating_internal"] == 4.1
 
 
 async def test_trending_items_persisted_in_db(client, db):
