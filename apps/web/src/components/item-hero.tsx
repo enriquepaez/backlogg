@@ -174,11 +174,29 @@ export function ItemHero({
           </div>
 
           {genres.length > 0 ? (
+            /*
+             * FE-62: same flat accent color for every genre, on purpose —
+             * the four `*Genre` taxonomies (movie/series/book/game, one per
+             * external source: TMDB/Open Library/IGDB) share no common
+             * vocabulary, so a per-genre color would be both arbitrary and
+             * unmaintainable as new genres show up from those APIs. `bg-
+             * accent`/`text-accent-foreground` reuses the app's one existing
+             * brand-chroma token (`--accent`, violet H 292, FE-40) instead of
+             * introducing a new hue. Sized up from the FE-60 platform-badge
+             * pattern right below (`text-xs`/`px-2.5 py-0.5`/`font-medium`)
+             * to `text-sm`/`px-3 py-1`/`font-semibold` per this feature's
+             * acceptance ("more visual weight than rating/platform/type
+             * badges") — the size bump plus `--accent`'s hue, deliberately
+             * placed away from `--status-*`/`--type-*`/`--platform-*` on the
+             * wheel (see `globals.css`'s FE-40 comment), keeps genres reading
+             * as their own system rather than a reskinned status/type/
+             * platform badge.
+             */
             <div aria-label={genresLabel} className="flex flex-wrap gap-2">
               {genres.map((genre) => (
                 <span
                   key={genre}
-                  className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
+                  className="rounded-full bg-accent px-3 py-1 text-sm font-semibold text-accent-foreground"
                 >
                   {genre}
                 </span>
