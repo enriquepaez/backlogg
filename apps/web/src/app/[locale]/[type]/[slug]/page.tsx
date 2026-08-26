@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { ItemCredits, type ItemCredit } from "@/components/item-credits";
 import { ItemHero, type ItemMetadataField } from "@/components/item-hero";
+import { ItemPlatforms } from "@/components/item-platforms";
 import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
@@ -76,6 +77,27 @@ function companiesByRole(
 }
 
 /**
+ * Same shape/rationale as {@link companiesByRole}, over `credits` instead
+ * of `companies` — joins the names of everyone credited with `role` into a
+ * single string, or `null` when there's none. Used to surface each type's
+ * "who's primarily responsible" as its own row in `buildFields`'s metadata
+ * `dl` (FE-64, per the user's explicit request that this belongs alongside
+ * the rest of the metadata, not in a separate section): `AUTHOR` for book,
+ * `DIRECTOR` for movie (`backlogg/movies/service.py`, TMDB crew filtered to
+ * `job == "Director"`), `CREATOR` for series (`backlogg/series/service.py`,
+ * TMDB's `created_by` field — TV credits rarely name a single director,
+ * unlike film, so the show's creator is the meaningful "who made this"
+ * here instead). Games have no equivalent row here — developer/publisher
+ * (via {@link companiesByRole}) already cover it.
+ */
+function peopleByRole(credits: ItemCredit[] | undefined, role: string): string | null {
+  const names = (credits ?? [])
+    .filter((credit) => credit.role === role)
+    .map((credit) => credit.person_name);
+  return names.length > 0 ? names.join(", ") : null;
+}
+
+/**
  * `value ?? t("fields.notAvailable")` for the common case of a plain
  * optional string field (release/air/publish dates, status, original
  * language, game type, and the developer/publisher strings {@link
@@ -89,7 +111,7 @@ function orNotAvailable(value: string | null | undefined, t: ItemDetailTranslato
 }
 
 /**
- * Type-specific metadata rows (release date, runtime, seasons, ...) for
+ * Type-specific metadata rows (release date, director, status, ...) for
  * `ItemHero`'s `fields` prop. `item`'s shape is guaranteed to correspond to
  * `type` — both always come from the very same `getItemDetail(type, slug)`
  * call below — but `ItemDetail` itself is a union (the four `*Out` response
@@ -98,19 +120,46 @@ function orNotAvailable(value: string | null | undefined, t: ItemDetailTranslato
  *
  * `GameDetail.platforms` is deliberately NOT pushed here (FE-60) — unlike
  * every other field, it needed a per-item color (console-maker brand), which
- * this plain label/value `dl` has no room for, so it's threaded straight
- * from `item.platforms` into `ItemHero`'s own `platforms` prop below instead,
- * rendered as its own badge row (see that component).
+ * this plain label/value `dl` has no room for. It's rendered by
+ * `ItemPlatforms` instead (FE-64), its own section right after the hero
+ * (see {@link getPlatforms} and the render call below).
  *
- * Every other optional field is always pushed (FE-63) — external data is
- * frequently partial (e.g. Open Library rarely has `original_language`) but
- * the row itself must stay visible with a "Not available" placeholder
- * ({@link orNotAvailable}) rather than disappearing, so the metadata `dl`
- * has a stable, predictable shape across items instead of shrinking per
- * item. `runtime`/`number_of_seasons`/`number_of_episodes` are numeric and
- * checked with `!= null` rather than truthiness, since a real `0` (e.g. an
- * upcoming series with zero aired episodes yet) is a legitimate value, not
- * an absent one, and must not be swallowed into the placeholder.
+ * Every field pushed here is always pushed (FE-63) — even when it happens
+ * to be absent for this particular item, the row stays visible with a "Not
+ * available" placeholder ({@link orNotAvailable}) rather than disappearing,
+ * so the metadata `dl` has a stable, predictable shape across items instead
+ * of shrinking per item. `runtime`/`number_of_seasons` are numeric and
+ * checked with `!= null` rather than truthiness, since a real `0` is a
+ * legitimate value, not an absent one, and must not be swallowed into the
+ * placeholder.
+ *
+ * Fields that a type's source API can **never** populate — not "often
+ * missing for this item," but structurally absent for every item of that
+ * type — are omitted from `buildFields` entirely instead of always-pushed-
+ * with-placeholder: `original_language` for all 4 types (removed
+ * 2026-08-27, per the user — TMDB does have it for movie/series, but the
+ * decision was to drop the field everywhere rather than keep it for 2 of 4
+ * types) and `number_of_episodes` for series (removed same date, per the
+ * user — `number_of_seasons` alone was judged enough). Both stay on the
+ * wire (`MovieOut.original_language`, `SeriesOut.number_of_episodes`,
+ * etc.) and in the DB — this is a display-only omission, same treatment as
+ * `budget`/`revenue` (movie) and `last_air_date` (series) below.
+ *
+ * Push order within each `case` follows `docs/detail-page-layout.md`
+ * (FE-64, several rounds of correction — see `progress/history.md` for the
+ * full back-and-forth): date first, then "who's primarily responsible"
+ * ({@link peopleByRole}) — `director`/`creator`/`author`/`developer`+
+ * `publisher` — right after the date and before everything else, per the
+ * user's explicit request that this position be fixed across all 4 types
+ * rather than falling wherever it lands after other fields collapse. Then
+ * `status` (movie/series only), then the fields specific to that one type.
+ * This "who's responsible" row lives in this `dl`, not in a separate
+ * section — a different, narrower thing than the full "Credits" section
+ * (`ItemCredits` below, movie/series only, full cast/crew) — one name (or
+ * a couple, co-authorship/co-direction), not the whole cast. Game has no
+ * separate row for this — developer/publisher (via {@link companiesByRole})
+ * already are that row, just split into two (different roles, unlike a
+ * single person credit).
  */
 function buildFields(
   type: CatalogType,
@@ -124,16 +173,16 @@ function buildFields(
       const movie = item as MovieDetail;
       fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(movie.release_date, t) });
       fields.push({
+        label: t("fields.director"),
+        value: orNotAvailable(peopleByRole(movie.credits, "DIRECTOR"), t),
+      });
+      fields.push({ label: t("fields.status"), value: orNotAvailable(movie.status, t) });
+      fields.push({
         label: t("fields.runtime"),
         value:
           movie.runtime != null
             ? t("fields.runtimeValue", { minutes: movie.runtime })
             : t("fields.notAvailable"),
-      });
-      fields.push({ label: t("fields.status"), value: orNotAvailable(movie.status, t) });
-      fields.push({
-        label: t("fields.originalLanguage"),
-        value: orNotAvailable(movie.original_language, t),
       });
       break;
     }
@@ -144,27 +193,16 @@ function buildFields(
         value: orNotAvailable(series.first_air_date, t),
       });
       fields.push({
-        label: t("fields.lastAirDate"),
-        value: orNotAvailable(series.last_air_date, t),
+        label: t("fields.creator"),
+        value: orNotAvailable(peopleByRole(series.credits, "CREATOR"), t),
       });
+      fields.push({ label: t("fields.status"), value: orNotAvailable(series.status, t) });
       fields.push({
         label: t("fields.seasons"),
         value:
           series.number_of_seasons != null
             ? String(series.number_of_seasons)
             : t("fields.notAvailable"),
-      });
-      fields.push({
-        label: t("fields.episodes"),
-        value:
-          series.number_of_episodes != null
-            ? String(series.number_of_episodes)
-            : t("fields.notAvailable"),
-      });
-      fields.push({ label: t("fields.status"), value: orNotAvailable(series.status, t) });
-      fields.push({
-        label: t("fields.originalLanguage"),
-        value: orNotAvailable(series.original_language, t),
       });
       break;
     }
@@ -175,14 +213,23 @@ function buildFields(
         value: orNotAvailable(book.first_publish_date, t),
       });
       fields.push({
-        label: t("fields.originalLanguage"),
-        value: orNotAvailable(book.original_language, t),
+        label: t("fields.author"),
+        value: orNotAvailable(peopleByRole(book.credits, "AUTHOR"), t),
       });
+      fields.push({ label: t("fields.isbn"), value: orNotAvailable(book.isbn, t) });
       break;
     }
     case "game": {
       const game = item as GameDetail;
       fields.push({ label: t("fields.releaseDate"), value: orNotAvailable(game.release_date, t) });
+      fields.push({
+        label: t("fields.developer"),
+        value: orNotAvailable(companiesByRole(game.companies, "DEVELOPER"), t),
+      });
+      fields.push({
+        label: t("fields.publisher"),
+        value: orNotAvailable(companiesByRole(game.companies, "PUBLISHER"), t),
+      });
       fields.push({
         label: t("fields.gameType"),
         // `orNotAvailable` alone isn't enough here (FE-58): unlike every
@@ -195,18 +242,6 @@ function buildFields(
           game.game_type != null
             ? gameTypeLabel(game.game_type, t)
             : t("fields.notAvailable"),
-      });
-      fields.push({
-        label: t("fields.developer"),
-        value: orNotAvailable(companiesByRole(game.companies, "DEVELOPER"), t),
-      });
-      fields.push({
-        label: t("fields.publisher"),
-        value: orNotAvailable(companiesByRole(game.companies, "PUBLISHER"), t),
-      });
-      fields.push({
-        label: t("fields.originalLanguage"),
-        value: orNotAvailable(game.original_language, t),
       });
       break;
     }
@@ -276,13 +311,23 @@ function buildJsonLd(type: CatalogType, item: ItemDetail, url: string): Record<s
 }
 
 /**
- * `credits[]` exists on all four detail shapes (`docs/api.md`) — movies/
- * series/games expose cast & crew, books expose the author(s) as a credit
- * with `role: "AUTHOR"`. `ItemCredits`' heading/empty copy is a single
- * type-agnostic "Credits" label (`ItemDetail.credits` in
- * `messages/{en,es}.json`) rather than per-type wording, since a single
- * author doesn't fit a "Cast & crew" framing — same simple, presentational
- * spirit as the rest of this component (see its own doc comment).
+ * `credits[]` exists on all four detail shapes (`docs/api.md`), but the
+ * person-credits section (`ItemCredits`, full cast/crew list under
+ * "Credits") only renders for movie/series (FE-64, per the user's explicit
+ * request — see the render call below). Book and game don't get this
+ * section at all: book's only credit role is `AUTHOR` (`docs/schema.md`),
+ * and that single name already has its own row in `buildFields`'s metadata
+ * `dl` via {@link peopleByRole} — a whole extra "Credits" section for one
+ * or two names would be redundant. Game has no person-credits data at all
+ * (backend feature `catalog_credits_ingestion_parity`, still pending,
+ * doesn't add one either) and developer/publisher already cover "who made
+ * this" via {@link companiesByRole} in the same `dl`.
+ *
+ * Position on the page (FE-64, per the user's explicit request): right
+ * after the hero, before "Your rating"/"Reviews" — not at the bottom near
+ * "You might also like" where it used to sit. `ItemPlatforms` (game only)
+ * occupies this exact same slot as the type-appropriate alternative; book
+ * gets neither, nothing renders in this slot for book.
  *
  * Defensive `?? []`: the generated `ItemDetail` type says `credits` is
  * always an array, but an empty `credits: []` from the backend has been
@@ -307,9 +352,9 @@ function getBackdropUrl(type: CatalogType, item: ItemDetail): string | null {
 
 /**
  * `GameDetail.platforms` (FE-60) — the only type with a `platforms` field
- * (`docs/api.md`), so `ItemHero`'s `platforms` prop is `undefined` for
- * movies/series/books and that row simply doesn't render (see its own doc
- * comment).
+ * (`docs/api.md`). Used to feed `ItemPlatforms` (FE-64), which only renders
+ * for game — see the render call below, and `ItemPlatforms`' own doc
+ * comment for why this moved out of `ItemHero` into its own section.
  */
 function getPlatforms(type: CatalogType, item: ItemDetail): GameDetail["platforms"] | undefined {
   if (type !== "game") {
@@ -427,8 +472,6 @@ export default async function ItemDetailPage({
         ratingInternal={item.rating_internal}
         ratingCountInternal={item.rating_count_internal}
         genres={(item.genres ?? []).map((genre) => genre.name)}
-        platforms={getPlatforms(type, item)}
-        platformsLabel={t("platformsLabel")}
         fields={buildFields(type, item, t)}
         viewerStatus={item.viewer_status}
         type={type}
@@ -439,6 +482,22 @@ export default async function ItemDetailPage({
         noRatingsLabel={t("noRatings")}
       />
 
+      {(type === "movie" || type === "series") && (
+        <ItemCredits
+          credits={getCredits(item)}
+          heading={t("credits.heading")}
+          emptyMessage={t("credits.empty")}
+        />
+      )}
+
+      {type === "game" && (
+        <ItemPlatforms
+          platforms={getPlatforms(type, item) ?? []}
+          heading={t("platformsLabel")}
+          emptyMessage={t("platformsEmpty")}
+        />
+      )}
+
       <RatingWidget
         type={type}
         slug={slug}
@@ -447,12 +506,6 @@ export default async function ItemDetailPage({
       />
 
       <ItemReviews type={type} slug={slug} />
-
-      <ItemCredits
-        credits={getCredits(item)}
-        heading={t("credits.heading")}
-        emptyMessage={t("credits.empty")}
-      />
 
       <ItemSimilar
         type={type}

@@ -3001,7 +3001,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/backlogg__genres__schemas__ItemTypeEnum"
+                  "$ref": "#/components/schemas/ItemTypeEnum"
                 },
                 {
                   "type": "null"
@@ -3043,7 +3043,7 @@
           "trending"
         ],
         "summary": "Get trending items",
-        "description": "Up to 20 trending movies and/or series (TMDB). New items are persisted locally.",
+        "description": "Up to 20 trending items. Movies/series come from TMDB's Trending API (new items are persisted locally). Books/games have no external trending endpoint, so they use a local popularity heuristic (rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST as tie-break) \u2014 period is accepted but has no effect for those two types.",
         "operationId": "get_trending_v1_trending_get",
         "parameters": [
           {
@@ -3053,7 +3053,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/backlogg__trending__schemas__ItemTypeEnum"
+                  "$ref": "#/components/schemas/ItemTypeEnum"
                 },
                 {
                   "type": "null"
@@ -5380,6 +5380,17 @@
             ],
             "title": "Poster Url"
           },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
           "rating_external": {
             "anyOf": [
               {
@@ -5453,6 +5464,7 @@
           "first_publish_date",
           "original_language",
           "poster_url",
+          "isbn",
           "rating_external",
           "rating_count_external",
           "rating_internal",
@@ -6459,6 +6471,16 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "ItemTypeEnum": {
+        "type": "string",
+        "enum": [
+          "movie",
+          "series",
+          "book",
+          "game"
+        ],
+        "title": "ItemTypeEnum"
       },
       "LibraryCounts": {
         "properties": {
@@ -8805,7 +8827,9 @@
             "type": "string",
             "enum": [
               "MOVIE",
-              "SERIES"
+              "SERIES",
+              "BOOK",
+              "GAME"
             ],
             "title": "Item Type"
           },
@@ -9341,16 +9365,6 @@
         ],
         "title": "VerifyConfirmRequest"
       },
-      "backlogg__genres__schemas__ItemTypeEnum": {
-        "type": "string",
-        "enum": [
-          "movie",
-          "series",
-          "book",
-          "game"
-        ],
-        "title": "ItemTypeEnum"
-      },
       "backlogg__people__schemas__CreditOut": {
         "properties": {
           "item_type": {
@@ -9480,14 +9494,6 @@
           "billing_order"
         ],
         "title": "CreditOut"
-      },
-      "backlogg__trending__schemas__ItemTypeEnum": {
-        "type": "string",
-        "enum": [
-          "movie",
-          "series"
-        ],
-        "title": "ItemTypeEnum"
       }
     },
     "securitySchemes": {

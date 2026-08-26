@@ -722,7 +722,7 @@ export interface paths {
         };
         /**
          * Get trending items
-         * @description Up to 20 trending movies and/or series (TMDB). New items are persisted locally.
+         * @description Up to 20 trending items. Movies/series come from TMDB's Trending API (new items are persisted locally). Books/games have no external trending endpoint, so they use a local popularity heuristic (rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST as tie-break) — period is accepted but has no effect for those two types.
          */
         get: operations["get_trending_v1_trending_get"];
         put?: never;
@@ -1554,6 +1554,8 @@ export interface components {
             original_language: string | null;
             /** Poster Url */
             poster_url: string | null;
+            /** Isbn */
+            isbn: string | null;
             /** Rating External */
             rating_external: number | null;
             /** Rating Count External */
@@ -1934,6 +1936,11 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * ItemTypeEnum
+         * @enum {string}
+         */
+        ItemTypeEnum: "movie" | "series" | "book" | "game";
         /**
          * LibraryCounts
          * @description Per-status counts of a user's library, surfaced on the public profile.
@@ -2812,7 +2819,7 @@ export interface components {
              * Item Type
              * @enum {string}
              */
-            item_type: "MOVIE" | "SERIES";
+            item_type: "MOVIE" | "SERIES" | "BOOK" | "GAME";
             /** Title */
             title: string;
             /** Slug */
@@ -2998,11 +3005,6 @@ export interface components {
             /** Token */
             token: string;
         };
-        /**
-         * ItemTypeEnum
-         * @enum {string}
-         */
-        backlogg__genres__schemas__ItemTypeEnum: "movie" | "series" | "book" | "game";
         /** CreditOut */
         backlogg__people__schemas__CreditOut: {
             /** Item Type */
@@ -3035,11 +3037,6 @@ export interface components {
             /** Billing Order */
             billing_order: number | null;
         };
-        /**
-         * ItemTypeEnum
-         * @enum {string}
-         */
-        backlogg__trending__schemas__ItemTypeEnum: "movie" | "series";
     };
     responses: never;
     parameters: never;
@@ -4475,7 +4472,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Filter by item type: movie, series, book, game */
-                type?: components["schemas"]["backlogg__genres__schemas__ItemTypeEnum"] | null;
+                type?: components["schemas"]["ItemTypeEnum"] | null;
             };
             header?: never;
             path?: never;
@@ -4506,7 +4503,7 @@ export interface operations {
     get_trending_v1_trending_get: {
         parameters: {
             query?: {
-                type?: components["schemas"]["backlogg__trending__schemas__ItemTypeEnum"] | null;
+                type?: components["schemas"]["ItemTypeEnum"] | null;
                 period?: components["schemas"]["PeriodEnum"];
             };
             header?: never;

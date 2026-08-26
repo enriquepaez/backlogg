@@ -41,18 +41,32 @@ vi.mock("@/lib/catalog", () => ({
 // `buildFields`' game developer/publisher rows (FE-61) can be asserted on
 // without duplicating `ItemHero`'s own rendering tests.
 vi.mock("@/components/item-hero", () => ({
-  ItemHero: (props: {
-    fields: { label: string; value: string }[];
-    platforms?: { id: number; name: string; slug: string }[];
-  }) => (
-    <div
-      data-testid="item-hero"
-      data-props={JSON.stringify({ fields: props.fields, platforms: props.platforms })}
-    />
+  ItemHero: (props: { fields: { label: string; value: string }[] }) => (
+    <div data-testid="item-hero" data-props={JSON.stringify({ fields: props.fields })} />
   ),
 }));
 vi.mock("@/components/item-credits", () => ({
-  ItemCredits: () => <div data-testid="item-credits" />,
+  ItemCredits: (props: { heading: string; emptyMessage: string }) => (
+    <div
+      data-testid="item-credits"
+      data-heading={props.heading}
+      data-empty-message={props.emptyMessage}
+    />
+  ),
+}));
+vi.mock("@/components/item-platforms", () => ({
+  ItemPlatforms: (props: {
+    platforms: { id: number; name: string; slug: string }[];
+    heading: string;
+    emptyMessage: string;
+  }) => (
+    <div
+      data-testid="item-platforms"
+      data-platforms={JSON.stringify(props.platforms)}
+      data-heading={props.heading}
+      data-empty-message={props.emptyMessage}
+    />
+  ),
 }));
 vi.mock("@/components/item-reviews", () => ({
   ItemReviews: () => <div data-testid="item-reviews" />,
@@ -427,13 +441,16 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     return props.fields;
   }
 
-  it("movie: shows the actual value when present and the placeholder when absent", async () => {
+  it("movie: shows the actual value when present and the placeholder when absent (no originalLanguage row at all, FE-64)", async () => {
     getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
     const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
     expect(fieldsFromDom(container)).toContainEqual({
       label: "fields.releaseDate",
       value: "2021-10-22",
     });
+    expect(fieldsFromDom(container)).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
+    );
 
     vi.clearAllMocks();
     getSimilarItems.mockResolvedValue([]);
@@ -474,25 +491,22 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     });
   });
 
-  it("series: shows the actual season/episode counts when present, including a legitimate 0", async () => {
+  it("series: shows the actual season count when present, including a legitimate 0", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
       item: {
         ...movieItem,
         first_air_date: "2021-01-01",
         last_air_date: "2021-03-01",
-        number_of_seasons: 1,
-        number_of_episodes: 0,
+        number_of_seasons: 0,
         status: "Upcoming",
       },
     });
     const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
-    const fields = fieldsFromDom(container);
-    expect(fields).toContainEqual({ label: "fields.seasons", value: "1" });
-    expect(fields).toContainEqual({ label: "fields.episodes", value: "0" });
+    expect(fieldsFromDom(container)).toContainEqual({ label: "fields.seasons", value: "0" });
   });
 
-  it("series: shows the placeholder for every optional field that's absent", async () => {
+  it("series: shows the placeholder for every optional field that's absent (no episodes/originalLanguage row at all, FE-64)", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
       item: {
@@ -509,22 +523,81 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
     const fields = fieldsFromDom(container);
     expect(fields).toContainEqual({ label: "fields.firstAirDate", value: "fields.notAvailable" });
-    expect(fields).toContainEqual({ label: "fields.lastAirDate", value: "fields.notAvailable" });
     expect(fields).toContainEqual({ label: "fields.seasons", value: "fields.notAvailable" });
-    expect(fields).toContainEqual({ label: "fields.episodes", value: "fields.notAvailable" });
     expect(fields).toContainEqual({ label: "fields.status", value: "fields.notAvailable" });
-    expect(fields).toContainEqual({
-      label: "fields.originalLanguage",
+    expect(fields).not.toContainEqual(expect.objectContaining({ label: "fields.episodes" }));
+    expect(fields).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
+    );
+  });
+
+  it("movie: shows the director (role DIRECTOR in credits) with a value and with the placeholder (FE-64)", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        credits: [
+          { role: "DIRECTOR", person_name: "Denis Villeneuve", person_slug: "denis-villeneuve" },
+        ],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.director",
+      value: "Denis Villeneuve",
+    });
+
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({ status: "ok", item: { ...movieItem, credits: [] } });
+    const { container: container2 } = render(
+      await ItemDetailPage(buildProps("movie", "dune-2021")),
+    );
+    expect(fieldsFromDom(container2)).toContainEqual({
+      label: "fields.director",
       value: "fields.notAvailable",
     });
   });
 
-  it("book: shows the actual value when present and the placeholder when absent", async () => {
+  it("series: shows the creator (role CREATOR in credits) with a value and with the placeholder (FE-64)", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        release_date: undefined,
+        first_air_date: "2021-01-01",
+        credits: [{ role: "CREATOR", person_name: "Vince Gilligan", person_slug: "vince-gilligan" }],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
+    expect(fieldsFromDom(container)).toContainEqual({
+      label: "fields.creator",
+      value: "Vince Gilligan",
+    });
+
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: undefined, first_air_date: "2021-01-01", credits: [] },
+    });
+    const { container: container2 } = render(
+      await ItemDetailPage(buildProps("series", "some-series")),
+    );
+    expect(fieldsFromDom(container2)).toContainEqual({
+      label: "fields.creator",
+      value: "fields.notAvailable",
+    });
+  });
+
+  it("book: shows the actual value when present and the placeholder when absent (no originalLanguage row — Open Library never has it at work level, FE-64)", async () => {
     const bookItem = {
       ...movieItem,
       release_date: undefined,
       first_publish_date: "1965-08-01",
       original_language: "en",
+      isbn: "9780441013593",
+      credits: [{ role: "AUTHOR", person_name: "Frank Herbert", person_slug: "frank-herbert" }],
     };
     getItemDetail.mockResolvedValue({ status: "ok", item: bookItem });
     const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
@@ -533,13 +606,23 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
       label: "fields.firstPublishDate",
       value: "1965-08-01",
     });
-    expect(fields).toContainEqual({ label: "fields.originalLanguage", value: "en" });
+    expect(fields).toContainEqual({ label: "fields.author", value: "Frank Herbert" });
+    expect(fields).toContainEqual({ label: "fields.isbn", value: "9780441013593" });
+    expect(fields).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
+    );
 
     vi.clearAllMocks();
     getSimilarItems.mockResolvedValue([]);
     getItemDetail.mockResolvedValue({
       status: "ok",
-      item: { ...bookItem, first_publish_date: null, original_language: null },
+      item: {
+        ...bookItem,
+        first_publish_date: null,
+        original_language: null,
+        isbn: null,
+        credits: [],
+      },
     });
     const { container: container2 } = render(
       await ItemDetailPage(buildProps("book", "dune-1965")),
@@ -549,13 +632,14 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
       label: "fields.firstPublishDate",
       value: "fields.notAvailable",
     });
-    expect(fields2).toContainEqual({
-      label: "fields.originalLanguage",
-      value: "fields.notAvailable",
-    });
+    expect(fields2).toContainEqual({ label: "fields.author", value: "fields.notAvailable" });
+    expect(fields2).toContainEqual({ label: "fields.isbn", value: "fields.notAvailable" });
+    expect(fields2).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
+    );
   });
 
-  it("game: shows the actual value when present and the placeholder when absent (gameType/originalLanguage — platforms is no longer one of these label/value rows, see FE-60 below)", async () => {
+  it("game: shows the actual value when present and the placeholder when absent (gameType — platforms is no longer one of these label/value rows, see FE-60 below; no originalLanguage row — IGDB has no such concept, FE-64)", async () => {
     getItemDetail.mockResolvedValue({
       status: "ok",
       item: { ...gameItem, platforms: [{ id: 1, name: "PC", slug: "pc" }] },
@@ -563,6 +647,9 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
     expect(fieldsFromDom(container)).not.toContainEqual(
       expect.objectContaining({ label: "fields.platforms" }),
+    );
+    expect(fieldsFromDom(container)).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
     );
 
     vi.clearAllMocks();
@@ -574,29 +661,151 @@ describe("ItemDetailPage — not-available placeholder for absent metadata field
     const { container: container2 } = render(await ItemDetailPage(buildProps("game", "hades")));
     const fields = fieldsFromDom(container2);
     expect(fields).toContainEqual({ label: "fields.gameType", value: "fields.notAvailable" });
-    expect(fields).toContainEqual({
-      label: "fields.originalLanguage",
-      value: "fields.notAvailable",
-    });
+    expect(fields).not.toContainEqual(
+      expect.objectContaining({ label: "fields.originalLanguage" }),
+    );
   });
 });
 
-describe("ItemDetailPage — platforms forwarded to ItemHero as its own prop, not a fields row (FE-60)", () => {
+describe("ItemDetailPage — field order follows docs/detail-page-layout.md (FE-64)", () => {
+  // Every other test in this file uses `toContainEqual`, which is
+  // order-insensitive by design (it's checking presence/placeholder
+  // behavior, not sequence) — so none of them would catch a `buildFields`
+  // push reordered or misplaced. `ItemHero` renders `fields.map(...)`
+  // directly (`item-hero.tsx`), so array order IS render order; these use
+  // `toEqual` against the full array to actually pin that order down.
+  function fieldsFromDom(container: HTMLElement): { label: string; value: string }[] {
+    const hero = container.querySelector('[data-testid="item-hero"]');
+    expect(hero).not.toBeNull();
+    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
+    return props.fields;
+  }
+
+  beforeEach(() => {
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  it("movie: releaseDate, director, status, runtime — in that order, no originalLanguage row", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        credits: [
+          { role: "DIRECTOR", person_name: "Denis Villeneuve", person_slug: "denis-villeneuve" },
+        ],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(fieldsFromDom(container)).toEqual([
+      { label: "fields.releaseDate", value: "2021-10-22" },
+      { label: "fields.director", value: "Denis Villeneuve" },
+      { label: "fields.status", value: "Released" },
+      { label: "fields.runtime", value: 'fields.runtimeValue:{"minutes":155}' },
+    ]);
+  });
+
+  it("series: firstAirDate, creator, status, seasons — in that order, no lastAirDate/episodes/originalLanguage row", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        release_date: undefined,
+        first_air_date: "2011-04-17",
+        last_air_date: "2019-05-19",
+        number_of_seasons: 8,
+        number_of_episodes: 73,
+        status: "Ended",
+        credits: [{ role: "CREATOR", person_name: "Vince Gilligan", person_slug: "vince-gilligan" }],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("series", "some-series")));
+    expect(fieldsFromDom(container)).toEqual([
+      { label: "fields.firstAirDate", value: "2011-04-17" },
+      { label: "fields.creator", value: "Vince Gilligan" },
+      { label: "fields.status", value: "Ended" },
+      { label: "fields.seasons", value: "8" },
+    ]);
+  });
+
+  it("book: firstPublishDate, author, isbn — in that order, no originalLanguage row", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        release_date: undefined,
+        first_publish_date: "1965-08-01",
+        isbn: "9780441013593",
+        credits: [{ role: "AUTHOR", person_name: "Frank Herbert", person_slug: "frank-herbert" }],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
+    expect(fieldsFromDom(container)).toEqual([
+      { label: "fields.firstPublishDate", value: "1965-08-01" },
+      { label: "fields.author", value: "Frank Herbert" },
+      { label: "fields.isbn", value: "9780441013593" },
+    ]);
+  });
+
+  it("game: releaseDate, developer, publisher, gameType — in that order, no originalLanguage row", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...gameItem,
+        original_language: "en",
+        companies: [
+          { id: 1, name: "Supergiant Games", slug: "supergiant-games", role: "DEVELOPER" },
+          { id: 2, name: "Some Publisher", slug: "some-publisher", role: "PUBLISHER" },
+        ],
+      },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+    expect(fieldsFromDom(container)).toEqual([
+      { label: "fields.releaseDate", value: "2020-09-17" },
+      { label: "fields.developer", value: "Supergiant Games" },
+      { label: "fields.publisher", value: "Some Publisher" },
+      { label: "fields.gameType", value: "gameTypes.MAIN_GAME" },
+    ]);
+  });
+});
+
+describe("ItemDetailPage — 'Credits' section (full cast/crew) only renders for movie/series (FE-64)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSimilarItems.mockResolvedValue([]);
   });
 
-  function platformsFromDom(
-    container: HTMLElement,
-  ): { id: number; name: string; slug: string }[] | undefined {
-    const hero = container.querySelector('[data-testid="item-hero"]');
-    expect(hero).not.toBeNull();
-    const props = JSON.parse(hero?.getAttribute("data-props") ?? "{}");
-    return props.platforms;
-  }
+  it("movie/series render it with the generic 'Credits' heading", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    const credits = container.querySelector('[data-testid="item-credits"]');
+    expect(credits).not.toBeNull();
+    expect(credits?.getAttribute("data-heading")).toBe("credits.heading");
+    expect(credits?.getAttribute("data-empty-message")).toBe("credits.empty");
+  });
 
-  it("forwards GameOut.platforms verbatim for a game", async () => {
+  it("book renders no 'Credits' section at all — the single author already has its own row in the fields dl", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: undefined, first_publish_date: "1965-08-01" },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
+    expect(container.querySelector('[data-testid="item-credits"]')).toBeNull();
+  });
+
+  it("game renders no 'Credits' section at all — developer/publisher already cover it in the fields dl", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: gameItem });
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+    expect(container.querySelector('[data-testid="item-credits"]')).toBeNull();
+  });
+});
+
+describe("ItemDetailPage — ItemPlatforms renders for game only, in its own section (FE-60/FE-64)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  it("forwards GameOut.platforms verbatim for a game, with the platforms heading/empty copy", async () => {
     const platforms = [
       { id: 1, name: "PlayStation 5", slug: "ps5" },
       { id: 2, name: "Nintendo Switch", slug: "switch" },
@@ -605,14 +814,82 @@ describe("ItemDetailPage — platforms forwarded to ItemHero as its own prop, no
 
     const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
 
-    expect(platformsFromDom(container)).toEqual(platforms);
+    const el = container.querySelector('[data-testid="item-platforms"]');
+    expect(el).not.toBeNull();
+    expect(JSON.parse(el?.getAttribute("data-platforms") ?? "null")).toEqual(platforms);
+    expect(el?.getAttribute("data-heading")).toBe("platformsLabel");
+    expect(el?.getAttribute("data-empty-message")).toBe("platformsEmpty");
   });
 
-  it("is undefined for a movie — only GameOut has a platforms field", async () => {
+  it("renders no ItemPlatforms section at all for movie/series/book", async () => {
     getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    const { container: movieContainer } = render(
+      await ItemDetailPage(buildProps("movie", "dune-2021")),
+    );
+    expect(movieContainer.querySelector('[data-testid="item-platforms"]')).toBeNull();
 
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: undefined, first_publish_date: "1965-08-01" },
+    });
+    const { container: bookContainer } = render(
+      await ItemDetailPage(buildProps("book", "dune-1965")),
+    );
+    expect(bookContainer.querySelector('[data-testid="item-platforms"]')).toBeNull();
+  });
+});
+
+describe("ItemDetailPage — Credits/Platforms sit right after the hero, before 'Your rating'/'Reviews' (FE-64)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function testIdOrder(container: HTMLElement): string[] {
+    return Array.from(
+      container.querySelectorAll(
+        '[data-testid="item-hero"], [data-testid="item-credits"], [data-testid="item-platforms"], [data-testid="rating-widget"], [data-testid="item-reviews"], [data-testid="item-similar"]',
+      ),
+    ).map((el) => el.getAttribute("data-testid") as string);
+  }
+
+  it("movie: hero, credits, rating-widget, reviews, similar — in that order", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
     const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "item-credits",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
+  });
 
-    expect(platformsFromDom(container)).toBeUndefined();
+  it("game: hero, platforms, rating-widget, reviews, similar — in that order", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: gameItem });
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "item-platforms",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
+  });
+
+  it("book: hero, rating-widget, reviews, similar — no credits/platforms slot at all", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: undefined, first_publish_date: "1965-08-01" },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
   });
 });
