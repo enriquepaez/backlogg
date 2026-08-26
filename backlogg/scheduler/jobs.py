@@ -372,6 +372,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
                     "cover_i": raw.get("cover_i") or raw.get("cover_id"),
                     "subject": raw.get("subject", []),
                     "author_name": raw.get("author_name", []),
+                    "isbn": raw.get("isbn", []),
                 }
 
                 book_data = _ol_client.book_to_dict(search_doc, None)

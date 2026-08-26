@@ -315,3 +315,66 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
     # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
     await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
     await db.commit()
+
+
+async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
+    """Bugfix: sync_books must copy `isbn` from the raw OL doc into the
+    hand-built search_doc it passes to book_to_dict, so the persisted Book
+    row ends up with `isbn` populated — not just an in-memory dict.
+
+    Regression coverage for the nightly-sync path: `raw` (as returned by
+    `get_popular_books`) carries `isbn`, but the `search_doc` sync_books
+    reconstructs by hand used to drop that key, so every book seeded via
+    the nightly job persisted with `isbn=None` even though Open Library
+    provided one.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 1)
+    await set_sync_offset(db, "BOOK", 0)
+
+    popular_raw = [
+        {
+            "key": "/works/OL86301W",
+            "title": "Isbn Sync Job Fixture",
+            "first_publish_year": 2010,
+            "cover_i": None,
+            "subject": [],
+            "author_name": [],
+            "isbn": ["9780000000001", "9780000000002"],
+        }
+    ]
+
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_popular_books",
+            new_callable=AsyncMock,
+            return_value=popular_raw,
+        ),
+        patch.object(
+            sync_jobs._ol_client,
+            "get_work_detail",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=db)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        result = await sync_jobs.sync_books()
+
+    assert result["synced"] == 1
+    assert result["errors"] == 0
+
+    book_result = await db.execute(select(Book).where(Book.slug == "isbn-sync-job-fixture-2010"))
+    book = book_result.scalar_one()
+    assert book.isbn == "9780000000001"
+
+    # _persist_cursor commits, so remove the row we left in the shared test
+    # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
+    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
+    await db.commit()
