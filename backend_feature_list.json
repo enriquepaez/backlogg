@@ -1368,7 +1368,7 @@
         "Tests de servicio para books/games con la heurística mockeada/seedeada",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 69,

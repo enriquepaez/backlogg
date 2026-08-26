@@ -953,15 +953,31 @@ Sin `type` devuelve los géneros de todos los tipos. Response:
 ### Trending
 
 ```
-GET /v1/trending?type=movie|series&period=day|week
-→ 200  Hasta 20 items trending (TMDB Trending API)
+GET /v1/trending?type=movie|series|book|game&period=day|week
+→ 200  Hasta 20 items trending
 → 422  type o period inválidos
 ```
 
-Sin `type` devuelve mix de movies y series. `period` default: `week`.
-Response: `{"results": [...]}` — cada item: `item_type`, `title`, `slug`,
-`poster_url`, `release_date`, `rating_external`, `rating_internal` (feature
-69). Los items nuevos se persisten en la DB local.
+Sin `type` devuelve mix de los 4 tipos (movies, series, books, games — hasta
+~5 de cada uno, intercalados, con tope de 20 en total). `period` default:
+`week`. Response: `{"results": [...]}` — cada item: `item_type`, `title`,
+`slug`, `poster_url`, `release_date`, `rating_external`, `rating_internal`
+(feature 69).
+
+**Fuente por tipo** (feature 68 — Open Library e IGDB no exponen un
+"trending" nativo, ver `docs/external-apis.md`):
+
+- `movie`/`series`: TMDB Trending API. `period=day|week` selecciona la
+  ventana temporal de TMDB. Los items nuevos descubiertos se persisten en la
+  DB local (comportamiento sin cambios respecto a la feature 20).
+- `book`/`game`: heurística de popularidad local sobre items ya persistidos
+  (no hay fan-out a Open Library/IGDB — no existe un endpoint de trending
+  que consultar). Mismo criterio de orden que el resto del catálogo
+  (feature 66): `rating_internal DESC NULLS LAST` como criterio visible,
+  `rating_external DESC NULLS LAST` solo como desempate interno.
+  **Limitación conocida:** `period` se acepta sin error pero no tiene efecto
+  para `book`/`game` — la heurística no tiene ventana temporal, el resultado
+  es el mismo para `period=day` y `period=week`.
 
 ### Admin (sync trigger)
 

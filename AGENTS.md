@@ -55,12 +55,6 @@
 
 ## 4. Cómo elegir una tarea
 
-Si `progress/priority_order.md` existe y tiene entradas pendientes, ese
-orden manda sobre el criterio por defecto de abajo — es una prioridad
-acordada explícitamente con el usuario, no se recalcula sola. Cuando se
-complete la última tarea de esa lista, borra `progress/priority_order.md` y
-este párrafo — no dejar el puntero apuntando a una lista ya vacía.
-
 ```
 1. Abre backend_feature_list.json
 2. Filtra por status == "pending"
