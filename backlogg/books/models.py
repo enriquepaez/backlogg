@@ -68,6 +68,10 @@ class Book(Base):
     first_publish_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     original_language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     poster_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Feature 71 (book_isbn_field): first ISBN reported by Open Library's
+    # search.json for this work — see book_to_dict for the tie-break when
+    # several are returned.
+    isbn: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rating_external: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
     rating_count_external: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rating_internal: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)

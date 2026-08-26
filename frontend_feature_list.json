@@ -1191,6 +1191,27 @@
         "typecheck+lint+test+build en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 63,
+      "code": "FE-64",
+      "milestone": "M1",
+      "name": "item_detail_field_ordering",
+      "title": "Reordenar los campos de metadata del detail page según docs/detail-page-layout.md (comunes → parciales → específicos)",
+      "description": "Pedido por el usuario (2026-08-26) tras revisar las 4 detail pages: el orden de buildFields (apps/web/src/app/[locale]/[type]/[slug]/page.tsx, líneas 122-212) es distinto en cada tipo sin ningún criterio, y original_language/status saltan de posición según el tipo. Decisión documentada en docs/detail-page-layout.md: dentro del bloque de metadata, los campos van siempre en 3 grupos en este orden — 1) comunes a los 4 tipos (fecha principal, original_language), 2) parciales (status, solo en movie/series), 3) específicos de cada tipo. rating_external/rating_internal, genres y viewer_status NO forman parte de este cambio — ya tienen posición fija fuera de buildFields. Movie pierde budget/revenue de cualquier plan futuro (nunca estuvieron en buildFields, el usuario confirmó que no aportan valor — no se añaden). Series pierde last_air_date (decisión explícita del usuario, 2026-08-26) — sigue existiendo en SeriesOut/DB, solo deja de mostrarse. Book gana isbn como campo específico (el usuario confirmó que quiere mostrarlo) — requisito duro de precedencia: la feature de backend book_isbn_field (id 71, backend_feature_list.json, hoy pending) tiene que estar mergeada y el cliente tipado regenerado con BookDetail.isbn antes de poder implementar este feature en su totalidad; si se aborda FE-64 antes de que 71 esté lista, se hace solo el reordenamiento de fecha/original_language para book (que no depende de nada nuevo) y se deja isbn pendiente — pero la implementación completa exige las dos.",
+      "depends_on": [],
+      "acceptance": [
+        "Movie: orden final release_date → original_language → status → runtime (hoy: release_date, runtime, status, original_language)",
+        "Series: orden final first_air_date → original_language → status → number_of_seasons → number_of_episodes, sin last_air_date (hoy: first_air_date, last_air_date, seasons, episodes, status, original_language)",
+        "Book: orden final first_publish_date → original_language → isbn (hoy: first_publish_date, original_language, sin isbn) — requiere backend feature 71 mergeada y BookDetail.isbn disponible en el cliente tipado",
+        "Game: orden final release_date → original_language → game_type → developer → publisher (hoy: release_date, game_type, developer, publisher, original_language)",
+        "No se toca el bloque de rating badge, pills de género ni la sección 'Your status' — solo el array que construye buildFields por tipo",
+        "No se añaden budget ni revenue a movie en ningún caso",
+        "last_air_date deja de mostrarse en series — no se borra de SeriesDetail ni de la API, solo se quita de buildFields",
+        "Tests existentes de buildFields por tipo actualizados al nuevo orden, incluyendo el nuevo caso isbn con valor y sin valor para book (probablemente en apps/web/src/app/[locale]/[type]/[slug]/page.test.tsx)",
+        "typecheck+lint+test+build en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

@@ -252,9 +252,11 @@ GET /v1/books/{slug}
 ```
 
 Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_publish_date`,
-`original_language`, `poster_url`, `rating_external`, `rating_count_external`,
+`original_language`, `poster_url`, `isbn`, `rating_external`, `rating_count_external`,
 `rating_internal`, `rating_count_internal`, `genres[]`, `credits[]`, `viewer_status`
-(ver Movies). El autor se expone como credit con `role: "AUTHOR"`.
+(ver Movies). El autor se expone como credit con `role: "AUTHOR"`. `isbn` puede ser
+`null` (feature 71 — `book_isbn_field`): es el primer ISBN devuelto por Open Library
+para el work, cuando existe alguno.
 
 ```
 GET /v1/books/{slug}/similar

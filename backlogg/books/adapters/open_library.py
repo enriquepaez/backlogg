@@ -359,6 +359,16 @@ class OpenLibraryClient:
             elif isinstance(desc, dict):
                 overview = desc.get("value") or None
 
+        # ISBN from search doc. Open Library returns a list — a work can have
+        # several editions/ISBNs. Feature 71 decision: persist the first one
+        # as-is, with no ISBN-13/ISBN-10 preference. search.json already
+        # orders `isbn` by edition relevance for the matched work, so the
+        # first entry is a reasonable canonical pick without adding a
+        # priority pass; revisit only if real data shows this picks a poor
+        # edition in practice.
+        isbn_list = search_doc.get("isbn", [])
+        isbn = isbn_list[0] if isbn_list else None
+
         # Subjects/genres from search doc — filter to clean, user-facing labels
         subjects = search_doc.get("subject", [])
         genres = []
@@ -382,6 +392,7 @@ class OpenLibraryClient:
             "first_publish_date": first_publish_date,
             "original_language": None,
             "poster_url": poster_url,
+            "isbn": isbn,
             "rating_external": None,
             "rating_count_external": None,
             "rating_internal": None,
