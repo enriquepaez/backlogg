@@ -84,10 +84,46 @@ async def test_get_book_fallback_to_open_library(db):
 
     assert result.title == "Dune"
     assert result.slug == "dune-1965"
+    # search_doc carries isbn (feature 71) — book_to_dict maps it through
+    assert result.isbn == "9780441013593"
 
     # Verify persisted in DB
     persisted = await repo.get_book_by_slug(db, "dune-1965")
     assert persisted is not None
+    assert persisted.isbn == "9780441013593"
+
+
+async def test_get_book_fallback_without_isbn(db):
+    """A search_doc with no isbn must persist and expose isbn=None, not break the flow."""
+    search_doc = _make_search_doc()
+    search_doc["key"] = "/works/OL999W"
+    search_doc["title"] = "Dune Messiah"  # distinct slug from the isbn-present test above
+    del search_doc["isbn"]
+    work_detail = _make_work_detail()
+    work_detail["key"] = "/works/OL999W"
+    work_detail["title"] = "Dune Messiah"
+
+    with (
+        patch.object(
+            service._ol_client,
+            "search_book",
+            new_callable=AsyncMock,
+            return_value=[search_doc],
+        ),
+        patch.object(
+            service._ol_client,
+            "get_work_detail",
+            new_callable=AsyncMock,
+            return_value=work_detail,
+        ),
+    ):
+        result = await service.get_book(db, "dune-messiah-1965")
+
+    assert result.isbn is None
+
+    persisted = await repo.get_book_by_slug(db, "dune-messiah-1965")
+    assert persisted is not None
+    assert persisted.isbn is None
 
 
 async def test_get_book_not_found_anywhere(db):

@@ -1390,6 +1390,41 @@
         "bash init.sh en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 70,
+      "name": "catalog_credits_ingestion_parity",
+      "title": "Persistir credits/autoría en TODOS los paths de ingestión para movies/series/books, no solo on-demand y sync (games queda fuera de scope)",
+      "description": "Reportado por el usuario (2026-08-26) al revisar las 4 detail pages: House of the Dragon (series) muestra 'No credit information available' pese a que TMDB sí tiene cast para esa serie. Causa raíz confirmada en código: _persist_movie_people (backlogg/movies/service.py:79), _persist_series_people/_persist_series_creators (backlogg/series/service.py:74,120) y _persist_book_authors (backlogg/books/service.py:73) solo se invocan desde DOS sitios por tipo — el primer GET on-demand del propio item (movies/service.py:204, series/service.py:206-209, books/service.py:191) y el job nocturno (scheduler/jobs.py:182 movies, 279-282 series, ~71 books). Cualquier otro path que inserte la fila vía upsert_movie/upsert_series/upsert_book la deja SIN credits para siempre, porque el upsert es idempotente por slug y una vez existe la fila nunca vuelve a pasar por el branch 'if X is None' que dispara la persistencia de personas. Paths confirmados que hacen upsert sin credits: get_similar_movies (movies/service.py, upsert ~283), get_similar_series (series/service.py, upsert ~294), ingestión de fallback de búsqueda para movies/series/books (backlogg/search/service.py: movie ~166, series ~223, book ~287), e ingestión de trending para movies/series (backlogg/trending/service.py: movie ~58, series ~112). Corrección de scope del usuario (2026-08-26) respecto a la versión anterior de este feature: 'credits' como concepto genérico (cast/crew) solo tiene sentido para movie y series. Para book el concepto correcto es 'Author' (rol AUTHOR ya modelado en la tabla credits, pero es una lista simple de autores, no cast/crew) — el fix de paridad de ingestión sigue aplicando (_persist_book_authors solo cubre 2 de 3 paths), pero el framing es 'autoría', no 'créditos'. Para game NO aplica ningún concepto de person-credits: developer/publisher ya se resuelven vía companies/company_credits (feature 67, done), cuya persistencia vive DENTRO de upsert_game (backlogg/games/repository.py, bloque 'Companies / company_credits') — como upsert_game es la función común a los 4 paths de ingestión de games (on-demand, sync_games, similar-games, búsqueda), developer/publisher YA tiene paridad completa sin necesidad de ningún fix. Se descarta por tanto crear _persist_game_people/rol DIRECTOR — no está en el alcance pedido por el usuario. Nota de scope adicional: esto es distinto del hardcodeo de original_language=None en books/adapters/open_library.py:383 e igdb.py:258 (esos campos nunca se piden a la API, en ningún path) — ese es otro problema y no se ataca en este feature.",
+      "depends_on": [],
+      "acceptance": [
+        "_persist_movie_people se invoca también desde get_similar_movies (movies/service.py) y desde la ingestión de fallback de búsqueda y de trending para movies (search/service.py, trending/service.py) cuando el item se crea por primera vez en esos paths",
+        "_persist_series_people y _persist_series_creators se invocan también desde get_similar_series y desde la ingestión de fallback de búsqueda y de trending para series",
+        "_persist_book_authors se invoca también desde la ingestión de fallback de búsqueda para books (search/service.py) — sigue siendo solo autoría (rol AUTHOR), no se amplía a un concepto de 'credits' más amplio para books",
+        "games queda explícitamente fuera de este feature: developer/publisher ya tiene paridad completa entre paths porque su persistencia vive dentro de upsert_game (backlogg/games/repository.py), común a los 4 paths de ingestión — no se crea ningún concepto de person-credits (director u otro) para games",
+        "La condición para disparar la persistencia de credits/autoría es 'la fila se acaba de crear en este path', igual que el patrón ya existente — no se re-fetchea en cada lectura de un item ya existente; si se decide que también hace falta refresco periódico (el cast puede cambiar), es una decisión explícita de implementación y se documenta, no un efecto accidental",
+        "Decisión documentada sobre las filas ya existentes en DB sin credits (como House of the Dragon): o un backfill puntual, o aceptar que se autocorrigen en el siguiente paso del job nocturno correspondiente (sync_series/sync_movies/sync_books) — cualquiera de las dos es válida pero debe quedar explícita en la implementación, no asumida",
+        "Tests: para movies, series y books, un test que ingiera un item vía el path 'barato' (recommendations/similar, búsqueda fallback, trending cuando aplique) y compruebe que credits/autoría queda poblado, no solo la fila del item",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 71,
+      "name": "book_isbn_field",
+      "title": "Exponer ISBN en books (dato ya sincronizado desde Open Library, hoy descartado)",
+      "description": "Surgido de la revisión de ordenación de campos del detail page (2026-08-26, docs/detail-page-layout.md): el usuario preguntó si hay más datos disponibles para book además de fecha de publicación. Confirmado en código: Open Library YA devuelve isbn en la misma llamada que se usa hoy — el field-set pedido a search.json es key,title,author_name,first_publish_year,cover_i,subject,isbn (docs/external-apis.md), y el propio código lo referencia en los comentarios de backlogg/books/adapters/open_library.py:181,206,226 — pero book_to_dict (mismo archivo) nunca lo mapea al dict persistido, la tabla books no tiene columna isbn, y docs/schema.md documenta explícitamente 'ISBN, page count, publisher are out of MVP scope'. A diferencia de publisher (que exigiría remodelar a nivel de edition — investigación aparte, fuera de scope aquí), isbn no cuesta ninguna llamada nueva: ya está en la respuesta que se recibe hoy, solo falta persistirlo y exponerlo. Nota: search.json devuelve isbn como lista (un work puede tener varias ediciones/ISBNs); decidir en implementación si se persiste el primero, una lista, o se prioriza ISBN-13 sobre ISBN-10 si hay varios — documentar la elección.",
+      "depends_on": [],
+      "acceptance": [
+        "Columna isbn (VARCHAR, nullable) añadida a books vía migración Alembic",
+        "book_to_dict (backlogg/books/adapters/open_library.py) mapea isbn desde el search_doc ya solicitado — sin llamada nueva a Open Library",
+        "Decisión documentada (en el propio código o en docs/schema.md) sobre qué ISBN persistir cuando search.json devuelve varios para el mismo work",
+        "BookOut (backlogg/books/schemas.py) expone el nuevo campo isbn",
+        "docs/schema.md y docs/api.md actualizados con el nuevo campo",
+        "Tests: un libro con isbn presente, uno sin isbn (no debe romper ni devolver algo distinto de null)",
+        "bash init.sh en verde"
+      ],
+      "status": "done"
     }
   ]
 }

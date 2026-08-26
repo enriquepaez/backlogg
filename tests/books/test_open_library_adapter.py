@@ -874,6 +874,46 @@ async def test_persist_book_authors_handles_normalized_edition_authors():
     assert persisted_roles == {"AUTHOR"}
 
 
+# ---------------------------------------------------------------------------
+# isbn tests (feature 71 — book_isbn_field)
+# ---------------------------------------------------------------------------
+
+
+def test_book_to_dict_maps_first_isbn_from_search_doc():
+    """book_to_dict must persist the first ISBN when search.json returns several."""
+    ol = OpenLibraryClient()
+    search_doc = {
+        "title": "Dune",
+        "first_publish_year": 1965,
+        "isbn": ["9780441013593", "0441013597", "9780450011849"],
+    }
+    result = ol.book_to_dict(search_doc)
+    assert result["isbn"] == "9780441013593"
+
+
+def test_book_to_dict_isbn_is_none_when_absent():
+    """book_to_dict must not break and must return isbn=None when search_doc has none."""
+    ol = OpenLibraryClient()
+    search_doc = {
+        "title": "Untitled Work",
+        "first_publish_year": 2020,
+    }
+    result = ol.book_to_dict(search_doc)
+    assert result["isbn"] is None
+
+
+def test_book_to_dict_isbn_is_none_when_empty_list():
+    """An empty isbn list (present but no editions carry one) must also map to None."""
+    ol = OpenLibraryClient()
+    search_doc = {
+        "title": "Another Untitled Work",
+        "first_publish_year": 2021,
+        "isbn": [],
+    }
+    result = ol.book_to_dict(search_doc)
+    assert result["isbn"] is None
+
+
 def test_book_to_dict_caps_genres_at_five():
     """book_to_dict must return at most 5 genres even when more clean subjects exist."""
     ol = OpenLibraryClient()

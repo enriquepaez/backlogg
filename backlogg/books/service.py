@@ -149,6 +149,7 @@ def _book_to_out(book: Book, credits: list[CreditOut], viewer_status: str | None
         first_publish_date=book.first_publish_date,
         original_language=book.original_language,
         poster_url=book.poster_url,
+        isbn=book.isbn,
         rating_external=float(book.rating_external) if book.rating_external is not None else None,
         rating_count_external=book.rating_count_external,
         rating_internal=(float(book.rating_internal) if book.rating_internal is not None else None),

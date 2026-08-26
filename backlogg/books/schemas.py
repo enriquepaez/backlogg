@@ -39,6 +39,7 @@ class BookOut(BaseModel):
     first_publish_date: date | None
     original_language: str | None
     poster_url: str | None
+    isbn: str | None
     rating_external: float | None
     rating_count_external: int | None
     rating_internal: float | None

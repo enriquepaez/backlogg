@@ -68,7 +68,11 @@ CREATE INDEX idx_series_last_synced_at ON series (last_synced_at);
 
 ### `books`
 
-Modeled at **work** level (not edition). ISBN, page count, publisher are out of MVP scope.
+Modeled at **work** level (not edition). Page count and publisher are out of
+MVP scope — they require remodeling at edition level (separate
+investigation). `isbn` (feature 71 — `book_isbn_field`) is the exception:
+Open Library already returns it in the same `search.json` call used to
+populate the other work-level fields, so it costs no extra request.
 Authorship is modeled via `credits` with role `AUTHOR`, supporting co-authorship.
 
 ```sql
@@ -81,6 +85,7 @@ CREATE TABLE books (
     first_publish_date      DATE,
     original_language       VARCHAR(10),
     poster_url              VARCHAR(1000),            -- cover image
+    isbn                    VARCHAR(20),              -- first ISBN reported by Open Library for this work; see note below
     rating_external         NUMERIC(3,1),
     rating_count_external   INTEGER,
     rating_internal         NUMERIC(3,2),
@@ -94,6 +99,13 @@ CREATE TABLE books (
 CREATE INDEX idx_books_first_publish_date ON books (first_publish_date);
 CREATE INDEX idx_books_last_synced_at ON books (last_synced_at);
 ```
+
+**`isbn`** (feature 71): Open Library's `search.json` returns `isbn` as a
+list — a work can have several editions/ISBNs. `book_to_dict`
+(`backlogg/books/adapters/open_library.py`) persists the **first** entry
+as-is, with no ISBN-13/ISBN-10 preference — `search.json` already orders
+`isbn` by edition relevance for the matched work, so the first entry is a
+reasonable canonical pick without an extra priority pass.
 
 ### `games`
 
