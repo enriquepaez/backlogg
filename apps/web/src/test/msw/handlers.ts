@@ -186,6 +186,7 @@ export const duneBookFixture: BookOut = {
   overview: "Set on the desert planet Arrakis.",
   first_publish_date: "1965-08-01",
   original_language: "en",
+  isbn: "9780441013593",
   poster_url: "https://covers.openlibrary.org/b/id/12-L.jpg",
   rating_external: 4.3,
   rating_count_external: 500,

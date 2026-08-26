@@ -3,12 +3,6 @@ import Image from "next/image";
 
 import { ViewerStatusSlot } from "@/components/viewer-status-slot";
 import type { CatalogType } from "@/lib/catalog-types";
-import {
-  PLATFORM_COLOR_CLASSES,
-  platformFamily,
-  type GamePlatform,
-} from "@/lib/game-platform-colors";
-import { cn } from "@/lib/utils";
 
 export type ItemMetadataField = {
   label: string;
@@ -28,21 +22,6 @@ export type ItemHeroProps = {
   ratingCountInternal: number;
   /** Genre names (already resolved from `GenreOut`/`BookGenreOut`/etc by the caller). */
   genres: string[];
-  /**
-   * `GameOut.platforms` (FE-60) — own badge row, colored by console-maker
-   * family via `platformFamily`/`PLATFORM_COLOR_CLASSES`
-   * (`game-platform-colors.ts`), same visual slot pattern as {@link genres}
-   * right above it but with a brand-color signal instead of a flat neutral
-   * pill. `undefined`/empty for movies/series/books — this row only renders
-   * when non-empty, same guard as {@link genres}. Kept as its own prop
-   * rather than folded into {@link fields} (where `GameOut.platforms` lived
-   * before FE-60): `fields` is a plain label/value `dl` with no room for a
-   * per-item color, and platforms — unlike every other field there — needed
-   * one (FE-60 acceptance).
-   */
-  platforms?: GamePlatform[];
-  /** aria-label for the {@link platforms} row, same convention as `genresLabel` below. */
-  platformsLabel: string;
   /** Type-specific metadata (release date, runtime, seasons, ...), built by the page per {@link CatalogType}. */
   fields: ItemMetadataField[];
   /** `MovieOut.viewer_status` (etc) — see `ViewerStatusSlot`. */
@@ -113,8 +92,6 @@ export function ItemHero({
   ratingInternal,
   ratingCountInternal,
   genres,
-  platforms,
-  platformsLabel,
   fields,
   viewerStatus,
   type,
@@ -201,27 +178,6 @@ export function ItemHero({
                   {genre}
                 </span>
               ))}
-            </div>
-          ) : null}
-
-          {platforms && platforms.length > 0 ? (
-            <div aria-label={platformsLabel} className="flex flex-wrap gap-2">
-              {platforms.map((platform) => {
-                const family = platformFamily(platform);
-                return (
-                  <span
-                    key={platform.id}
-                    className={cn(
-                      "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                      family
-                        ? PLATFORM_COLOR_CLASSES[family]
-                        : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {platform.name}
-                  </span>
-                );
-              })}
             </div>
           ) : null}
 

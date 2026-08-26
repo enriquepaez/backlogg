@@ -1211,7 +1211,7 @@
         "Tests existentes de buildFields por tipo actualizados al nuevo orden, incluyendo el nuevo caso isbn con valor y sin valor para book (probablemente en apps/web/src/app/[locale]/[type]/[slug]/page.test.tsx)",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
