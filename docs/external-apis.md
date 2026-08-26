@@ -51,6 +51,15 @@
   key. Conclusion: `GET /books/{slug}/similar` (feature 46) is computed
   entirely from local data (same author via `credits`, then genre overlap,
   then `rating_external`) instead of a new external dependency.
+- **"Trending" investigation (2026-08-26, feature 68)**: Open Library has no
+  "trending this week/day" endpoint (`/trending/weekly.json` exists but is
+  capped at a few hundred entries and unrelated to what the catalog needs —
+  see the popular-books note above, same reasoning applies). `GET
+  /trending?type=book` is therefore computed entirely from local data: the
+  same `rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST`
+  order already used by `GET /books` (feature 66), over items already
+  persisted — no Open Library call happens for this endpoint. `period` is
+  accepted but has no effect (no time-windowed signal exists to apply it to).
 
 ## IGDB (Games)
 
@@ -89,6 +98,13 @@
 - **Slug strategy**: IGDB provides `slug` field directly.
 - **Coverage note**: director data is sparse — only sync when available.
 - **external_ids source value**: `IGDB`
+- **"Trending" investigation (2026-08-26, feature 68)**: IGDB has no
+  "trending this week/day" endpoint. `GET /trending?type=game` is therefore
+  computed entirely from local data — same heuristic as `type=book` (see
+  Open Library's "Trending" note above): `rating_internal DESC NULLS LAST,
+  rating_external DESC NULLS LAST` order already used by `GET /games`
+  (feature 66), over items already persisted. No IGDB call happens for this
+  endpoint, and `period` is accepted but has no effect.
 
 ## SMTP (Email) — feature 36 `account_recovery`
 

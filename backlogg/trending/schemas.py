@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict
 class ItemTypeEnum(StrEnum):
     movie = "movie"
     series = "series"
+    book = "book"
+    game = "game"
 
 
 class PeriodEnum(StrEnum):
@@ -16,7 +18,7 @@ class PeriodEnum(StrEnum):
 
 
 class TrendingItemOut(BaseModel):
-    item_type: Literal["MOVIE", "SERIES"]
+    item_type: Literal["MOVIE", "SERIES", "BOOK", "GAME"]
     title: str
     slug: str
     poster_url: str | None
