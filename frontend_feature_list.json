@@ -1170,7 +1170,7 @@
         "No debe confundirse visualmente con `--status-<x>` (colores de estado de biblioteca) ni con los sistemas de color nuevos de FE-57 (tipo de item) o FE-60 (plataforma) — todos deben poder convivir en la misma pantalla de detalle sin verse como el mismo sistema",
         "typecheck+lint+test+build en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 62,

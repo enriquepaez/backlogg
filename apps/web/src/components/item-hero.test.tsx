@@ -61,6 +61,20 @@ describe("ItemHero", () => {
     expect(screen.getByText("Adventure")).toBeInTheDocument();
   });
 
+  it("gives genre pills the flat accent color and more visual weight than the other badges (FE-62)", () => {
+    render(<ItemHero {...baseProps} genres={["Science Fiction", "Adventure"]} />);
+
+    const scienceFiction = screen.getByText("Science Fiction");
+    const adventure = screen.getByText("Adventure");
+
+    // Same accent token on every genre — no per-genre color (FE-62 acceptance).
+    expect(scienceFiction).toHaveClass("bg-accent", "text-accent-foreground");
+    expect(adventure).toHaveClass("bg-accent", "text-accent-foreground");
+    // More weight than the neutral `bg-muted`/`text-xs`/`font-medium` pill this replaces.
+    expect(scienceFiction).not.toHaveClass("bg-muted", "text-muted-foreground");
+    expect(scienceFiction).toHaveClass("text-sm", "font-semibold");
+  });
+
   it("renders the internal rating rounded to one decimal, with the count", () => {
     render(<ItemHero {...baseProps} ratingInternal={7.756} ratingCountInternal={9231} />);
 
