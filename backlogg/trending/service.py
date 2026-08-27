@@ -14,9 +14,11 @@ from backlogg.games.schemas import GameSortEnum
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.adapters.tmdb import _slugify as _movie_slugify
+from backlogg.movies.service import _persist_movie_people
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
 from backlogg.series.adapters.tmdb import _slugify as _series_slugify
+from backlogg.series.service import _persist_series_creators, _persist_series_people
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.trending.schemas import TrendingItemOut, TrendingOut
 
@@ -57,6 +59,13 @@ async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut
         movie_data = _movies_tmdb.movie_to_dict(detail)
         movie = await movies_repo.upsert_movie(db, movie_data)
         await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
+
+        # Persist people (cast + directors) — the row was just created by the
+        # upsert above (feature 70: trending ingestion previously left movies
+        # without credits forever, since upsert_movie is idempotent by slug
+        # and this branch only runs once per movie).
+        await _persist_movie_people(db, movie, tmdb_id)
+
         await db.commit()
 
     poster_path = raw.get("poster_path")
@@ -111,6 +120,16 @@ async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOu
         series_data = _series_tmdb.series_to_dict(detail)
         series = await series_repo.upsert_series(db, series_data)
         await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
+
+        # Persist people (cast + creators) — the row was just created by the
+        # upsert above (feature 70: trending ingestion previously left series
+        # without credits forever, since upsert_series is idempotent by slug
+        # and this branch only runs once per series).
+        await _persist_series_people(db, series, tmdb_id)
+        created_by = detail.get("created_by", [])
+        if created_by:
+            await _persist_series_creators(db, series, created_by)
+
         await db.commit()
 
     poster_path = raw.get("poster_path")

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from backlogg.movies import repository as repo
 from backlogg.movies import service
+from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 
 # Fake TMDB IDs that do NOT correspond to real movies
@@ -15,6 +16,7 @@ from backlogg.shared.external_ids import upsert_external_id
 _SOURCE_TMDB_ID_SIM = "9999901"
 _SOURCE_TMDB_ID_LOCAL = "9999902"
 _SOURCE_TMDB_ID_LIMIT = "9999903"
+_SOURCE_TMDB_ID_CREDITS = "9999904"
 _REC_TMDB_ID = 9999910
 
 
@@ -110,6 +112,12 @@ async def test_get_similar_movies_persists_and_returns(db):
             "get_movie_detail",
             new_callable=AsyncMock,
             return_value=rec_detail,
+        ),
+        patch.object(
+            service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value=None,
         ),
     ):
         result = await service.get_similar_movies(db, "similar-test-source-sim-2010")
@@ -280,7 +288,76 @@ async def test_get_similar_movies_limits_to_10(db):
             "get_movie_detail",
             side_effect=fake_get_movie_detail,
         ),
+        patch.object(
+            service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         result = await service.get_similar_movies(db, "similar-test-source-limit-2010")
 
     assert len(result.results) == 10
+
+
+# ── Feature 70: catalog_credits_ingestion_parity ────────────────────────────
+
+
+async def test_get_similar_movies_persists_credits_for_new_movie(db):
+    """A movie ingested via the similar/recommendations path gets its cast
+    and crew persisted too, not just the item row (feature 70 — previously
+    only the on-demand GET and the nightly job triggered credit persistence,
+    leaving recommended movies without credits forever)."""
+    movie = await repo.upsert_movie(db, _make_source_movie_dict("similar-test-source-credits-2010"))
+    await upsert_external_id(db, "MOVIE", movie.id, "TMDB", _SOURCE_TMDB_ID_CREDITS)
+
+    rec_item = _make_recommendation_item(tmdb_id=_REC_TMDB_ID + 3)
+    rec_detail = _make_tmdb_detail(tmdb_id=_REC_TMDB_ID + 3)
+    credits_data = {
+        "cast": [
+            {
+                "id": 555001,
+                "name": "Credits Test Actor",
+                "character": "The Lead",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [
+            {
+                "id": 555002,
+                "name": "Credits Test Director",
+                "job": "Director",
+                "profile_path": None,
+            }
+        ],
+    }
+
+    with (
+        patch.object(
+            service._tmdb,
+            "get_movie_recommendations",
+            new_callable=AsyncMock,
+            return_value=[rec_item],
+        ),
+        patch.object(
+            service._tmdb,
+            "get_movie_detail",
+            new_callable=AsyncMock,
+            return_value=rec_detail,
+        ),
+        patch.object(
+            service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value=credits_data,
+        ),
+    ):
+        await service.get_similar_movies(db, "similar-test-source-credits-2010")
+
+    rec_movie = await repo.get_movie_by_slug(db, "recommended-movie-2008")
+    assert rec_movie is not None
+    persisted_credits = await get_credits_for_item(db, "MOVIE", rec_movie.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "DIRECTOR" in roles

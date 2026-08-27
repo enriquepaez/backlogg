@@ -293,6 +293,16 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
             series_data = _tmdb.series_to_dict(detail)
             rec_series = await repo.upsert_series(db, series_data)
             await upsert_external_id(db, "SERIES", rec_series.id, "TMDB", str(rec_tmdb_id))
+
+            # Persist people (cast + creators) — the row was just created by
+            # the upsert above (feature 70: this path previously left
+            # recommended series without credits forever, since upsert_series
+            # is idempotent by slug and this branch only runs once per series).
+            await _persist_series_people(db, rec_series, rec_tmdb_id)
+            rec_created_by = detail.get("created_by", [])
+            if rec_created_by:
+                await _persist_series_creators(db, rec_series, rec_created_by)
+
             await db.commit()
 
         rating_internal = (

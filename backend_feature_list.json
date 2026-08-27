@@ -1407,7 +1407,7 @@
         "Tests: para movies, series y books, un test que ingiera un item vía el path 'barato' (recommendations/similar, búsqueda fallback, trending cuando aplique) y compruebe que credits/autoría queda poblado, no solo la fila del item",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 71,

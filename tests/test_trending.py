@@ -10,6 +10,8 @@ from backlogg.books import repository as books_repo
 from backlogg.games import repository as games_repo
 from backlogg.main import app
 from backlogg.movies import repository as movies_repo
+from backlogg.series import repository as series_repo
+from backlogg.shared.credits import get_credits_for_item
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -231,6 +233,14 @@ async def test_trending_returns_200_with_mix(client, db):
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9002, "Test Trending Show")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending")
 
@@ -256,6 +266,10 @@ async def test_trending_type_movie_only(client, db):
             "backlogg.trending.service._movies_tmdb.get_movie_detail",
             new=AsyncMock(return_value=_tmdb_movie_detail(9003, "Only Movie Trending")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending?type=movie")
 
@@ -276,6 +290,10 @@ async def test_trending_type_series_only(client, db):
         patch(
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9004, "Only Series Trending")),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
         ),
     ):
         response = await client.get("/v1/trending?type=series")
@@ -304,6 +322,14 @@ async def test_trending_period_day(client, db):
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9006, "Day Trending Show")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending?period=day")
 
@@ -331,6 +357,14 @@ async def test_trending_period_week(client, db):
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9008, "Week Trending Show")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending?period=week")
 
@@ -357,6 +391,14 @@ async def test_trending_default_period_is_week(client, db):
         patch(
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9010, "Default Period Show")),
+        ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
         ),
     ):
         response = await client.get("/v1/trending")
@@ -389,6 +431,10 @@ async def test_trending_result_fields(client, db):
         patch(
             "backlogg.trending.service._movies_tmdb.get_movie_detail",
             new=AsyncMock(return_value=_tmdb_movie_detail(9011, "Fields Check Movie")),
+        ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
         ),
     ):
         response = await client.get("/v1/trending?type=movie")
@@ -480,6 +526,10 @@ async def test_trending_items_persisted_in_db(client, db):
             "backlogg.trending.service._movies_tmdb.get_movie_detail",
             new=AsyncMock(return_value=_tmdb_movie_detail(9012, "Persist Test Movie")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending?type=movie")
 
@@ -526,6 +576,14 @@ async def test_trending_up_to_20_items(client, db):
         patch(
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=series_detail_mock,
+        ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
         ),
     ):
         response = await client.get("/v1/trending")
@@ -772,6 +830,14 @@ async def test_trending_no_type_mixes_four_types(client, db):
             "backlogg.trending.service._series_tmdb.get_series_detail",
             new=AsyncMock(return_value=_tmdb_series_detail(9102, "Mix Four Series")),
         ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.get("/v1/trending")
 
@@ -788,3 +854,118 @@ async def test_trending_invalid_type_book_game_accepted(client, db):
     game_response = await client.get("/v1/trending?type=game")
     assert book_response.status_code == 200
     assert game_response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Feature 70: catalog_credits_ingestion_parity
+# ---------------------------------------------------------------------------
+#
+# Trending ingestion previously left movies/series without credits forever,
+# because it upserted the row directly without ever calling
+# _persist_movie_people/_persist_series_people — only the on-demand GET and
+# the nightly job did.
+
+
+async def test_trending_persists_movie_credits_for_new_movie(client, db):
+    """A movie ingested via trending gets its cast+crew persisted too, not just the item row."""
+    raw_movie = _raw_movie(tmdb_id=9201, slug_title="Trending Credits Movie")
+    credits_data = {
+        "cast": [
+            {
+                "id": 557001,
+                "name": "Trending Credits Actor",
+                "character": "Trending Lead",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [
+            {
+                "id": 557002,
+                "name": "Trending Credits Director",
+                "job": "Director",
+                "profile_path": None,
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "backlogg.trending.service._movies_tmdb.get_trending_movies",
+            new=AsyncMock(return_value=[raw_movie]),
+        ),
+        patch(
+            "backlogg.trending.service._series_tmdb.get_trending_series",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "backlogg.trending.service._movies_tmdb.get_movie_detail",
+            new=AsyncMock(return_value=_tmdb_movie_detail(9201, "Trending Credits Movie")),
+        ),
+        patch(
+            "backlogg.movies.service._tmdb.get_movie_credits",
+            new=AsyncMock(return_value=credits_data),
+        ),
+    ):
+        response = await client.get("/v1/trending?type=movie")
+
+    assert response.status_code == 200
+    movie = await movies_repo.get_movie_by_slug(db, "trending-credits-movie-2023")
+    assert movie is not None
+    persisted_credits = await get_credits_for_item(db, "MOVIE", movie.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "DIRECTOR" in roles
+
+
+async def test_trending_persists_series_credits_and_creators_for_new_series(client, db):
+    """A series ingested via trending gets its cast+creators persisted too, not just the item row.
+
+    Regression coverage for the reported bug (House of the Dragon showing
+    "No credit information available" despite TMDB having cast data).
+    """
+    raw_series = _raw_series(tmdb_id=9202, slug_title="Trending Credits Series")
+    series_detail = _tmdb_series_detail(9202, "Trending Credits Series")
+    series_detail["created_by"] = [
+        {"id": 557003, "name": "Trending Credits Creator", "profile_path": None}
+    ]
+    credits_data = {
+        "cast": [
+            {
+                "id": 557004,
+                "name": "Trending Credits Series Actor",
+                "character": "Trending Series Lead",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [],
+    }
+
+    with (
+        patch(
+            "backlogg.trending.service._movies_tmdb.get_trending_movies",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "backlogg.trending.service._series_tmdb.get_trending_series",
+            new=AsyncMock(return_value=[raw_series]),
+        ),
+        patch(
+            "backlogg.trending.service._series_tmdb.get_series_detail",
+            new=AsyncMock(return_value=series_detail),
+        ),
+        patch(
+            "backlogg.series.service._tmdb.get_series_credits",
+            new=AsyncMock(return_value=credits_data),
+        ),
+    ):
+        response = await client.get("/v1/trending?type=series")
+
+    assert response.status_code == 200
+    series = await series_repo.get_series_by_slug(db, "trending-credits-series-2022")
+    assert series is not None
+    persisted_credits = await get_credits_for_item(db, "SERIES", series.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "CREATOR" in roles

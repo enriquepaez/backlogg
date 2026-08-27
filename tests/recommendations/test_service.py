@@ -311,6 +311,12 @@ async def test_external_fanout_when_local_candidates_insufficient(db):
             new_callable=AsyncMock,
             return_value=rec_detail,
         ),
+        patch.object(
+            movies_service._tmdb,
+            "get_movie_credits",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         out = await service.get_recommendations(db, user, "movie", page=1, limit=20)
 
