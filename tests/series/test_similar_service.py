@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from backlogg.series import repository as repo
 from backlogg.series import service
+from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 
 # Fake TMDB IDs that do NOT correspond to real series
@@ -15,6 +16,7 @@ from backlogg.shared.external_ids import upsert_external_id
 _SOURCE_TMDB_ID_SIM = "9999801"
 _SOURCE_TMDB_ID_LOCAL = "9999802"
 _SOURCE_TMDB_ID_LIMIT = "9999803"
+_SOURCE_TMDB_ID_CREDITS = "9999805"
 _REC_TMDB_ID = 9999810
 
 
@@ -113,6 +115,12 @@ async def test_get_similar_series_persists_and_returns(db):
             "get_series_detail",
             new_callable=AsyncMock,
             return_value=rec_detail,
+        ),
+        patch.object(
+            service._tmdb,
+            "get_series_credits",
+            new_callable=AsyncMock,
+            return_value=None,
         ),
     ):
         result = await service.get_similar_series(db, "similar-series-test-source-sim-2008")
@@ -331,7 +339,75 @@ async def test_get_similar_series_limits_to_10(db):
             "get_series_detail",
             side_effect=fake_get_series_detail,
         ),
+        patch.object(
+            service._tmdb,
+            "get_series_credits",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         result = await service.get_similar_series(db, "similar-series-test-source-limit-2008")
 
     assert len(result.results) == 10
+
+
+# ── Feature 70: catalog_credits_ingestion_parity ────────────────────────────
+
+
+async def test_get_similar_series_persists_credits_and_creators_for_new_series(db):
+    """A series ingested via the similar/recommendations path gets its cast
+    and creators persisted too, not just the item row (feature 70 — previously
+    only the on-demand GET and the nightly job triggered credit persistence,
+    leaving recommended series without credits forever, e.g. House of the
+    Dragon)."""
+    series = await repo.upsert_series(
+        db, _make_source_series_dict("similar-series-test-source-credits-2008")
+    )
+    await upsert_external_id(db, "SERIES", series.id, "TMDB", _SOURCE_TMDB_ID_CREDITS)
+
+    rec_item = _make_recommendation_item(tmdb_id=_REC_TMDB_ID + 3)
+    rec_detail = _make_tmdb_series_detail(tmdb_id=_REC_TMDB_ID + 3)
+    rec_detail["created_by"] = [
+        {"id": 555003, "name": "Credits Test Creator", "profile_path": None}
+    ]
+    credits_data = {
+        "cast": [
+            {
+                "id": 555004,
+                "name": "Credits Test Series Actor",
+                "character": "The Protagonist",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [],
+    }
+
+    with (
+        patch.object(
+            service._tmdb,
+            "get_series_recommendations",
+            new_callable=AsyncMock,
+            return_value=[rec_item],
+        ),
+        patch.object(
+            service._tmdb,
+            "get_series_detail",
+            new_callable=AsyncMock,
+            return_value=rec_detail,
+        ),
+        patch.object(
+            service._tmdb,
+            "get_series_credits",
+            new_callable=AsyncMock,
+            return_value=credits_data,
+        ),
+    ):
+        await service.get_similar_series(db, "similar-series-test-source-credits-2008")
+
+    rec_series = await repo.get_series_by_slug(db, "recommended-series-2015")
+    assert rec_series is not None
+    persisted_credits = await get_credits_for_item(db, "SERIES", rec_series.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "CREATOR" in roles

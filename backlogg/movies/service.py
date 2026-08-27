@@ -282,6 +282,13 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
             movie_data = _tmdb.movie_to_dict(detail)
             rec_movie = await repo.upsert_movie(db, movie_data)
             await upsert_external_id(db, "MOVIE", rec_movie.id, "TMDB", str(rec_tmdb_id))
+
+            # Persist people (cast + directors) — the row was just created by
+            # the upsert above (feature 70: this path previously left
+            # recommended movies without credits forever, since upsert_movie
+            # is idempotent by slug and this branch only runs once per movie).
+            await _persist_movie_people(db, rec_movie, rec_tmdb_id)
+
             await db.commit()
 
         results.append(

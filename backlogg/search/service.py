@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
+from backlogg.books.service import _persist_book_authors
 from backlogg.core.cache import get_cache
 from backlogg.core.database import async_session_factory
 from backlogg.core.metrics import get_metrics
@@ -53,9 +54,11 @@ from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.games.constants import ALLOWED_GAME_TYPES
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
+from backlogg.movies.service import _persist_movie_people
 from backlogg.search.repository import SearchRepository
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
+from backlogg.series.service import _persist_series_creators, _persist_series_people
 from backlogg.shared.external_ids import upsert_external_id
 
 logger = logging.getLogger(__name__)
@@ -163,8 +166,20 @@ async def _ingest_movies(q: str, page: int, limit: int) -> None:
                     try:
                         movie_data = _tmdb_movies.movie_to_dict(detail)
                         async with db.begin_nested():  # savepoint per movie
+                            # Row-just-created check (same pattern as the
+                            # on-demand/similar/trending paths) so credits are
+                            # only fetched once per movie, not on every
+                            # re-ingestion of an already-persisted slug.
+                            is_new = (
+                                await movies_repo.get_movie_by_slug(db, movie_data["slug"]) is None
+                            )
                             movie = await movies_repo.upsert_movie(db, movie_data)
                             await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
+                            if is_new:
+                                # Persist people (cast + directors) — feature
+                                # 70: this fallback path previously left
+                                # movies without credits forever.
+                                await _persist_movie_people(db, movie, tmdb_id)
                     except Exception:
                         logger.exception(
                             "search fallback: error ingesting movie tmdb_id=%s for q=%r",
@@ -220,8 +235,23 @@ async def _ingest_series(q: str, page: int, limit: int) -> None:
                     try:
                         series_data = _tmdb_series.series_to_dict(detail)
                         async with db.begin_nested():  # savepoint per series
+                            # Row-just-created check (same pattern as the
+                            # on-demand/similar/trending paths) so credits
+                            # are only fetched once per series.
+                            is_new = (
+                                await series_repo.get_series_by_slug(db, series_data["slug"])
+                                is None
+                            )
                             series = await series_repo.upsert_series(db, series_data)
                             await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
+                            if is_new:
+                                # Persist people (cast + creators) — feature
+                                # 70: this fallback path previously left
+                                # series without credits forever.
+                                await _persist_series_people(db, series, tmdb_id)
+                                created_by = detail.get("created_by", [])
+                                if created_by:
+                                    await _persist_series_creators(db, series, created_by)
                     except Exception:
                         logger.exception(
                             "search fallback: error ingesting series tmdb_id=%s for q=%r",
@@ -288,11 +318,22 @@ async def _ingest_books(q: str, page: int, limit: int) -> None:
                         if not book_data.get("title"):
                             continue
                         async with db.begin_nested():  # savepoint per book
+                            # Row-just-created check (same pattern as the
+                            # on-demand path) so authors are only fetched
+                            # once per book.
+                            is_new = (
+                                await books_repo.get_book_by_slug(db, book_data["slug"]) is None
+                            )
                             book = await books_repo.upsert_book(db, book_data)
                             if work_id:
                                 await upsert_external_id(
                                     db, "BOOK", book.id, "OPEN_LIBRARY", work_id
                                 )
+                            if is_new and work_detail:
+                                # Persist authors — feature 70: this
+                                # fallback path previously left books
+                                # without authorship credits forever.
+                                await _persist_book_authors(db, book, work_detail)
                     except Exception:
                         logger.exception(
                             "search fallback: error ingesting book key=%r for q=%r",

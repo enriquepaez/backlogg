@@ -16,12 +16,22 @@ these tests need to exercise.
 """
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from backlogg.books import repository as books_repo
 from backlogg.games import repository as games_repo
 from backlogg.movies import repository as movies_repo
+from backlogg.movies import service as movies_service
 from backlogg.series import repository as series_repo
+from backlogg.series import service as series_service
+from backlogg.shared.credits import get_credits_for_item
+
+# Note: _persist_movie_people/_persist_series_people/_persist_series_creators
+# (invoked by _ingest_movies/_ingest_series since feature 70) reach TMDB
+# through the *movies*/*series* service modules' own module-level clients
+# (``movies_service._tmdb`` / ``series_service._tmdb``) — separate instances
+# from ``backlogg.search.service._tmdb_movies`` / ``_tmdb_series`` used for
+# the search/detail calls themselves. Both must be mocked independently.
 
 
 def _session_factory_returning(session):
@@ -84,6 +94,7 @@ async def test_ingest_movies_upserts_all_hits_from_search_page(db):
     with (
         patch.object(service._tmdb_movies, "search_movie", new=fake_search_movie),
         patch.object(service._tmdb_movies, "get_movie_detail", new=fake_get_movie_detail),
+        patch.object(movies_service._tmdb, "get_movie_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_movies("multi hit", page=1, limit=20)
@@ -130,6 +141,7 @@ async def test_ingest_series_upserts_all_hits_from_search_page(db):
     with (
         patch.object(service._tmdb_series, "search_series", new=fake_search_series),
         patch.object(service._tmdb_series, "get_series_detail", new=fake_get_series_detail),
+        patch.object(series_service._tmdb, "get_series_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_series("multi hit", page=1, limit=20)
@@ -313,6 +325,7 @@ async def test_ingest_movies_caps_detail_fetches_to_limit(db):
     with (
         patch.object(service._tmdb_movies, "search_movie", new=fake_search_movie),
         patch.object(service._tmdb_movies, "get_movie_detail", new=fake_get_movie_detail),
+        patch.object(movies_service._tmdb, "get_movie_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_movies("cap hit", page=1, limit=2)
@@ -345,6 +358,7 @@ async def test_ingest_series_caps_detail_fetches_to_limit(db):
     with (
         patch.object(service._tmdb_series, "search_series", new=fake_search_series),
         patch.object(service._tmdb_series, "get_series_detail", new=fake_get_series_detail),
+        patch.object(series_service._tmdb, "get_series_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_series("cap hit", page=1, limit=2)
@@ -445,6 +459,7 @@ async def test_ingest_movies_detail_fetches_run_concurrently(db):
     with (
         patch.object(service._tmdb_movies, "search_movie", new=fake_search_movie),
         patch.object(service._tmdb_movies, "get_movie_detail", new=fake_get_movie_detail),
+        patch.object(movies_service._tmdb, "get_movie_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_movies("concurrent hit", page=1, limit=3)
@@ -474,6 +489,7 @@ async def test_ingest_series_detail_fetches_run_concurrently(db):
     with (
         patch.object(service._tmdb_series, "search_series", new=fake_search_series),
         patch.object(service._tmdb_series, "get_series_detail", new=fake_get_series_detail),
+        patch.object(series_service._tmdb, "get_series_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_series("concurrent hit", page=1, limit=3)
@@ -498,6 +514,7 @@ async def test_ingest_movies_one_detail_fetch_failure_does_not_abort_others(db):
     with (
         patch.object(service._tmdb_movies, "search_movie", new=fake_search_movie),
         patch.object(service._tmdb_movies, "get_movie_detail", new=fake_get_movie_detail),
+        patch.object(movies_service._tmdb, "get_movie_credits", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
     ):
         await service._ingest_movies("partial failure", page=1, limit=2)
@@ -506,3 +523,157 @@ async def test_ingest_movies_one_detail_fetch_failure_does_not_abort_others(db):
     survivor = await movies_repo.get_movie_by_slug(db, "survivor-movie-9502-2020")
     assert failed is None
     assert survivor is not None
+
+
+# ── Feature 70: catalog_credits_ingestion_parity ────────────────────────────
+#
+# The search fallback path previously left movies/series/books without
+# credits/authorship forever, because it upserted the row directly without
+# ever calling _persist_movie_people/_persist_series_people/
+# _persist_book_authors — only the on-demand GET and the nightly job did.
+
+
+async def test_ingest_movies_persists_credits_for_new_movie(db):
+    """_ingest_movies persists cast+crew for a movie ingested via the search fallback."""
+    from backlogg.search import service
+
+    raw_results = [{"id": 9601}]
+    credits_data = {
+        "cast": [
+            {
+                "id": 556001,
+                "name": "Fanout Credits Actor",
+                "character": "Fanout Lead",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [
+            {
+                "id": 556002,
+                "name": "Fanout Credits Director",
+                "job": "Director",
+                "profile_path": None,
+            }
+        ],
+    }
+
+    async def fake_search_movie(q, page=1, year=None):
+        return raw_results
+
+    async def fake_get_movie_detail(tmdb_id):
+        return _movie_detail(tmdb_id, title_prefix="Fanout Credits Movie")
+
+    with (
+        patch.object(service._tmdb_movies, "search_movie", new=fake_search_movie),
+        patch.object(service._tmdb_movies, "get_movie_detail", new=fake_get_movie_detail),
+        patch.object(
+            movies_service._tmdb, "get_movie_credits", new=AsyncMock(return_value=credits_data)
+        ),
+        patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
+    ):
+        await service._ingest_movies("fanout credits", page=1, limit=20)
+
+    movie = await movies_repo.get_movie_by_slug(db, "fanout-credits-movie-9601-2020")
+    assert movie is not None
+    persisted_credits = await get_credits_for_item(db, "MOVIE", movie.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "DIRECTOR" in roles
+
+
+async def test_ingest_series_persists_credits_and_creators_for_new_series(db):
+    """_ingest_series persists cast+creators for a series ingested via the search fallback."""
+    from backlogg.search import service
+
+    raw_results = [{"id": 8601}]
+    credits_data = {
+        "cast": [
+            {
+                "id": 556003,
+                "name": "Fanout Credits Series Actor",
+                "character": "Fanout Series Lead",
+                "order": 0,
+                "profile_path": None,
+            }
+        ],
+        "crew": [],
+    }
+
+    def _detail(tmdb_id: int) -> dict:
+        detail = _series_detail(tmdb_id, title_prefix="Fanout Credits Series")
+        detail["created_by"] = [
+            {"id": 556004, "name": "Fanout Credits Creator", "profile_path": None}
+        ]
+        return detail
+
+    async def fake_search_series(q, page=1):
+        return raw_results
+
+    async def fake_get_series_detail(tmdb_id):
+        return _detail(tmdb_id)
+
+    with (
+        patch.object(service._tmdb_series, "search_series", new=fake_search_series),
+        patch.object(service._tmdb_series, "get_series_detail", new=fake_get_series_detail),
+        patch.object(
+            series_service._tmdb, "get_series_credits", new=AsyncMock(return_value=credits_data)
+        ),
+        patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
+    ):
+        await service._ingest_series("fanout credits", page=1, limit=20)
+
+    series = await series_repo.get_series_by_slug(db, "fanout-credits-series-8601-2019")
+    assert series is not None
+    persisted_credits = await get_credits_for_item(db, "SERIES", series.id)
+    roles = {c.role for c in persisted_credits}
+    assert "ACTOR" in roles
+    assert "CREATOR" in roles
+
+
+async def test_ingest_books_persists_authors_for_new_book(db):
+    """_ingest_books persists authorship (role=AUTHOR) for a book ingested via the search fallback.
+
+    ``_persist_book_authors`` (imported from ``backlogg.books.service``) calls
+    Open Library through *its own* module-level ``_ol_client`` — a different
+    instance from ``backlogg.search.service._ol_client`` used for the search
+    itself — so ``get_author`` is mocked on the books-service client.
+    """
+    from backlogg.books import service as books_service
+    from backlogg.search import service
+
+    raw_results = [
+        {"key": "/works/OLF70FANOUT1W", "title": "Fanout Credits Book", "first_publish_year": 2001}
+    ]
+    work_detail = {
+        "key": "/works/OLF70FANOUT1W",
+        "title": "Fanout Credits Book",
+        "authors": [{"author": {"key": "/authors/OLF70FANOUT1A"}}],
+    }
+    author_data = {
+        "key": "/authors/OLF70FANOUT1A",
+        "name": "Fanout Credits Author",
+        "personal_name": "Fanout Credits Author Full",
+    }
+
+    async def fake_search_book(q, page=1, limit=1):
+        return raw_results
+
+    async def fake_get_work_detail(work_id):
+        return work_detail
+
+    with (
+        patch.object(service._ol_client, "search_book", new=fake_search_book),
+        patch.object(service._ol_client, "get_work_detail", new=fake_get_work_detail),
+        patch.object(
+            books_service._ol_client, "get_author", new=AsyncMock(return_value=author_data)
+        ),
+        patch("backlogg.search.service.async_session_factory", new=_session_factory_returning(db)),
+    ):
+        await service._ingest_books("fanout authors", page=1, limit=20)
+
+    book = await books_repo.get_book_by_slug(db, "fanout-credits-book-2001")
+    assert book is not None
+    persisted_credits = await get_credits_for_item(db, "BOOK", book.id)
+    roles = {c.role for c in persisted_credits}
+    assert roles == {"AUTHOR"}
