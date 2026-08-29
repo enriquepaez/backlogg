@@ -193,11 +193,11 @@
 
 ## TheTVDB v4 — EVALUADA Y APARCADA (2026-08-29)
 
-> **No se usa.** Se evaluó como sustituto de TMDB y se descartó; features 72-74
-> marcadas como `blocked`. Esta sección se conserva porque la investigación
-> sigue siendo válida si el coste de TMDB llega a pesar. Referencia recogida
-> del swagger oficial (`thetvdb/v4-api`, `docs/swagger.yml`) y de
-> `thetvdb.com/api-information`.
+> **No se usa.** Se evaluó como sustituto de TMDB y se descartó. Esta sección
+> se conserva porque la investigación sigue siendo válida si el coste de TMDB
+> llega a pesar: es toda la referencia necesaria para retomar el plan sin
+> volver a investigarlo. Recogida del swagger oficial (`thetvdb/v4-api`,
+> `docs/swagger.yml`) y de `thetvdb.com/api-information`.
 >
 > **Por qué se descartó**: (1) el coste de TMDB es *condicional* —solo aparece
 > al monetizar— mientras que el de migrar es cierto e inmediato: tres semanas
@@ -231,8 +231,9 @@
 - **⚠️ No existe endpoint de "similar" ni de "trending".** Ambos se sustituyen
   por cálculo local — features 85 y 86, ver `docs/recommendations-plan.md`.
 
-- **⚠️ No existe feed de popularidad paginado** (el problema caro de la
-  migración, feature 74). Las dos únicas vías, ambas con pegas:
+- **⚠️ No existe feed de popularidad paginado.** Es el problema caro: obligaría
+  a rehacer `scheduler/jobs.py` y `scripts/backfill_sync.py`, no solo a cambiar
+  de adaptador. Las dos únicas vías, ambas con pegas:
 
   | Vía | Ordena por popularidad | Pagina | Pega |
   |---|---|---|---|
@@ -255,10 +256,9 @@
 > **No se usa.** Se evaluó como sustituto de IGDB y se descartó por coherencia
 > con la decisión sobre TMDB: el coste de IGDB también es condicional, y migrar
 > antes de tener usuarios gasta el recurso escaso (tiempo hasta el lanzamiento)
-> para cubrir un problema que solo existe si el producto funciona. Feature 75
-> marcada como `blocked`. La investigación se conserva: RAWG es la salida
-> natural si los términos comerciales de IGDB —que no publican precio— acaban
-> siendo un problema.
+> para cubrir un problema que solo existe si el producto funciona. La
+> investigación se conserva: RAWG es la salida natural si los términos
+> comerciales de IGDB —que no publican precio— acaban siendo un problema.
 
 - **Base URL**: `https://api.rawg.io/api` · **Auth**: `key` como query param.
 - **Cuota gratuita con uso comercial permitido**: 20.000 peticiones/mes,

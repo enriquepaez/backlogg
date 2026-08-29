@@ -17,8 +17,10 @@ Dato adicional que confirmó la decisión: el tramo gratuito de TheTVDB
 (<50.000 $/año) **no es autoservicio** — exige la modalidad "Negotiated
 Contract", que entra en cola de revisión comercial.
 
-Features 72, 73, 74, 75 y 78 quedan en `blocked` con la razón escrita. La
-investigación se conserva íntegra en `docs/external-apis.md` por si el coste de
+Las features de migración que se habían planificado quedan **eliminadas del
+backlog** — el backlog es para trabajo real. La investigación completa (TheTVDB
+v4 y RAWG: endpoints, auth, límites y trampas) se conserva íntegra en
+`docs/external-apis.md`, que es suficiente para retomar el plan si el coste de
 TMDB llega a pesar.
 
 **Riesgo aceptado y su mitigación**: migrar más tarde dejaría huérfano el

@@ -4,7 +4,7 @@
 >
 > Origen: se diseñó como sustituto obligatorio de `GET /movie/{id}/similar` y
 > `/trending` de TMDB durante la migración de APIs que finalmente **se
-> descartó** (features 72-75 y 78, `blocked`). Al quedarse el proyecto en TMDB
+> descartó** (ver `docs/external-apis.md`). Al quedarse el proyecto en TMDB
 > esos endpoints siguen disponibles, así que este sistema pasa de ser
 > obligatorio a ser una **mejora** — pero sigue mereciendo la pena: el
 > `/similar` de TMDB cubre solo 2 de los 4 tipos y no cruza entre ellos, que es

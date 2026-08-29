@@ -1427,78 +1427,6 @@
       "status": "done"
     },
     {
-      "id": 72,
-      "name": "thetvdb_movies_adapter",
-      "title": "[APARCADA] Adaptador TheTVDB v4 para movies (sustituye TMDB)",
-      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nDecisión estratégica de 2026-08-29: TMDB prohíbe el uso comercial bajo la licencia gratuita (149 $/mes a partir del primer euro de ingreso), mientras que TheTVDB es gratis por debajo de 50.000 $/año de facturación con atribución. Se migra AHORA, con el catálogo vacío de usuarios reales, porque hacerlo después implicaría remapear los external_ids de cada ítem y dejaría huérfano el historial de biblioteca de quien tuviera ítems que TheTVDB no cubre. Cliente v4 contra https://api4.thetvdb.com/v4 con auth JWT vía POST /login (el token dura un mes: el cliente debe renovarlo solo, mismo patrón que el cliente de IGDB/Twitch en backlogg/games/adapters/igdb.py). Endpoints: /movies/{id}, /movies/{id}/extended (créditos y artwork), /movies/slug/{slug}, /movies/{id}/translations/{language} para castellano, /search. Mantener la firma pública del adaptador actual (backlogg/movies/adapters/tmdb.py) para que service.py no cambie. Los slugs los genera el propio adaptador con _slugify(titulo)-año, NO vienen del proveedor: verificado en código, y es lo que permite que las URLs sobrevivan al cambio de fuente. Corregir de paso docs/external-apis.md, que afirma incorrectamente que 'TMDB provides its own slug field. Use it directly'.",
-      "depends_on": [],
-      "acceptance": [
-        "Cliente TheTVDB v4 con auth JWT y renovación automática del token (dura 1 mes)",
-        "movie_to_dict produce exactamente la misma forma de dict que consume upsert_movie hoy",
-        "Traducciones al castellano vía /movies/{id}/translations/{language}, con fallback a inglés",
-        "Créditos (DIRECTOR, ACTOR) poblados desde /movies/{id}/extended",
-        "Slugs generados localmente con _slugify(titulo)-año — las URLs no dependen del proveedor",
-        "docs/external-apis.md actualizado: sección TheTVDB, y corregida la afirmación errónea sobre el slug de TMDB",
-        "Tests con respuestas de TheTVDB mockeadas, incluida la renovación del token",
-        "bash init.sh en verde"
-      ],
-      "status": "blocked"
-    },
-    {
-      "id": 73,
-      "name": "thetvdb_series_adapter",
-      "title": "[APARCADA] Adaptador TheTVDB v4 para series (sustituye TMDB)",
-      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nMismo patrón que la feature 72 aplicado a series, reutilizando el cliente JWT que aquélla introduce. Endpoints: /series/{id}, /series/{id}/extended, /series/slug/{slug}, /series/{id}/translations/{language}, /series/{id}/episodes/{season-type} y /series/{id}/artworks. TheTVDB es históricamente una base de datos de televisión, así que aquí la cobertura debería ser mejor que en cine. Roles de crédito CREATOR y ACTOR como hoy.",
-      "depends_on": [
-        72
-      ],
-      "acceptance": [
-        "series_to_dict produce la misma forma de dict que consume upsert_series hoy",
-        "Traducciones al castellano con fallback a inglés",
-        "Créditos (CREATOR, ACTOR) poblados desde /series/{id}/extended",
-        "Reutiliza el cliente JWT de la feature 72 en lugar de duplicarlo",
-        "Tests con respuestas mockeadas",
-        "bash init.sh en verde"
-      ],
-      "status": "blocked"
-    },
-    {
-      "id": 74,
-      "name": "catalog_seeding_redesign",
-      "title": "[APARCADA] Rediseño del motor de siembra: TheTVDB no tiene feed de popularidad paginado",
-      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nPieza más cara de la migración, detectada al leer el swagger de TheTVDB v4 (docs/swagger.yml del repo thetvdb/v4-api). Todo el crecimiento del catálogo actual —seed top-N, tramos nocturnos con cursor en sync_cursors, backfill— se apoya en GET /movie/popular?page=N de TMDB: un feed paginado Y ordenado por popularidad. TheTVDB no tiene equivalente: GET /movies?page=N pagina la base entera pero en orden de id, sin ordenar por popularidad; GET /movies/filter sí ordena por score pero exige country Y lang como parámetros obligatorios y NO acepta paginación. Hay que elegir e implementar una de las dos estrategias: (a) fan-out sobre una lista curada de pares país/idioma con sort=score y fusión de resultados, o (b) recorrido completo de /movies?page=N con ranking local por el campo score. Afecta a backlogg/scheduler/jobs.py y a scripts/backfill_sync.py, y debe preservar el contrato de cursores de sync_cursors para que el backfill siga siendo reanudable.",
-      "depends_on": [
-        72,
-        73
-      ],
-      "acceptance": [
-        "Estrategia elegida (fan-out por país/idioma vs recorrido completo con ranking local) documentada con su razón en docs/external-apis.md",
-        "scheduler/jobs.py siembra movies y series sin depender de un feed ordenado por popularidad",
-        "scripts/backfill_sync.py adaptado a la nueva estrategia, manteniendo reanudabilidad vía sync_cursors",
-        "El contrato de sync_cursors no cambia de forma que rompa los backfills en curso",
-        "Tests de la nueva estrategia de siembra, incluido el wraparound del cursor",
-        "bash init.sh en verde"
-      ],
-      "status": "blocked"
-    },
-    {
-      "id": 75,
-      "name": "rawg_games_adapter",
-      "title": "[APARCADA] Adaptador RAWG para games (sustituye IGDB) con siembra por listado y enriquecimiento perezoso",
-      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nIGDB es gratis solo para uso no comercial bajo el Twitch Developer Services Agreement, mismo problema que TMDB. RAWG permite uso comercial gratis hasta 20.000 peticiones/mes con menos de 100.000 usuarios activos o 500.000 páginas vistas. Verificado en la documentación de RAWG: el endpoint de listado GET /games devuelve 40 ítems por página (page_size máximo) con ordenación por popularidad (ordering=-added o -rating), e incluye ya name, slug, released, background_image, rating, ratings_count, genres y platforms. Solo faltan description (overview) y developers/publishers (companies), que viven en el detalle. Por tanto sembrar 10.000 juegos cuesta 250 peticiones, no 10.000; overview y companies se completan mediante el patrón de fallback on-demand que ya existe en backlogg/games/service.py, la primera vez que alguien abre la ficha. RAWG no impone ventana de caducidad de caché en sus términos, a diferencia de TMDB. Atención: RAWG exige atribución con enlace activo DESDE CADA PÁGINA donde se usen sus datos, más estricto que TMDB. Y no tiene equivalente al game_type de IGDB, así que el category allowlist de la feature 65 (backlogg/games/constants.py) debe sustituirse por otro filtro de calidad — por ejemplo umbral de ratings_count o added.",
-      "depends_on": [],
-      "acceptance": [
-        "Siembra vía GET /games con page_size=40 y ordering por popularidad — 10.000 juegos en ~250 peticiones",
-        "overview y companies se resuelven con el fallback on-demand existente, no en la siembra",
-        "Nuevo filtro de calidad que sustituye al category allowlist de game_type (feature 65), con su umbral documentado",
-        "Presupuesto de peticiones estimado y documentado en docs/external-apis.md, con margen sobre las 20.000/mes",
-        "backlogg/games/constants.py actualizado o retirado según la estrategia elegida",
-        "Tests con respuestas de RAWG mockeadas, incluido el camino de enriquecimiento perezoso",
-        "bash init.sh en verde"
-      ],
-      "status": "blocked"
-    },
-    {
       "id": 76,
       "name": "books_classification_ddc_lcc",
       "title": "Clasificación de libros sobre ddc/lcc en vez de la folksonomía subject",
@@ -1532,29 +1460,6 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
-    },
-    {
-      "id": 78,
-      "name": "source_migration_cutover",
-      "title": "[APARCADA] Corte de migración: reingesta, external_ids, hosts de imágenes y atribución obligatoria",
-      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nCierre del bloque de migración. Retira los adaptadores de TMDB e IGDB, reingesta el catálogo completo contra las nuevas fuentes, y cumple las obligaciones de atribución. Puntos concretos: los valores de source en external_ids pasan de TMDB/IGDB a THETVDB/RAWG; apps/web/next.config.ts tiene los hosts de imágenes cableados (image.tmdb.org, images.igdb.com) y hay que sustituirlos por los de TheTVDB y RAWG; TheTVDB exige atribución con enlace directo a TheTVDB.com visible para el usuario que ve los metadatos, y RAWG exige enlace activo desde cada página donde se usen sus datos — más estricto que la atribución en 'acerca de' que pedía TMDB. Verificar que ninguna referencia a TMDB o IGDB queda viva: hay 345 ocurrencias repartidas por 22 archivos de backend y 15 de frontend. Actualizar además render.yaml, .env.example y los secrets de GitHub Actions (TMDB_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET dejan de usarse).",
-      "depends_on": [
-        72,
-        73,
-        74,
-        75
-      ],
-      "acceptance": [
-        "Adaptadores de TMDB e IGDB retirados; sin referencias vivas a TMDB/IGDB en backlogg/ ni apps/web/src",
-        "external_ids migrados a los nuevos valores de source",
-        "apps/web/next.config.ts con los hosts de imágenes de TheTVDB y RAWG",
-        "Atribución de TheTVDB (enlace directo) y de RAWG (enlace en cada página con sus datos) visible en el frontend",
-        "render.yaml, .env.example y docs/operations.md actualizados con las nuevas variables de entorno",
-        "Catálogo reingerido y verificado: counts por tipo y créditos no vacíos",
-        "bruno/ sincronizado si cambia algún contrato",
-        "bash init.sh en verde y pnpm typecheck en apps/web en verde"
-      ],
-      "status": "blocked"
     },
     {
       "id": 79,
