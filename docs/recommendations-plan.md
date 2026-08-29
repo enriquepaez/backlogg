@@ -1,6 +1,6 @@
 # Plan — Sistema propio de similitud y recomendación cross-type
 
-> Estado: **diseño, sin implementar**. Features 79-88 del backlog.
+> Estado: **diseño, sin implementar**. Features 74-83 del backlog.
 >
 > Origen: se diseñó como sustituto obligatorio de `GET /movie/{id}/similar` y
 > `/trending` de TMDB durante la migración de APIs que finalmente **se

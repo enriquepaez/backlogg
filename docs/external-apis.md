@@ -26,7 +26,7 @@
   **«entrenar sistemas de machine learning / IA con datos de TMDB»**. Tarifa
   comercial reportada: 149 $/mes por debajo de 1 M$ de facturación y 2 M de
   usuarios. Contacto: `sales@themoviedb.org`.
-  - Consecuencia práctica para la **feature 80** (embeddings): generar
+  - Consecuencia práctica para la **feature 75** (embeddings): generar
     embeddings sobre las sinopsis de TMDB podría caer bajo esa cláusula y
     activar la licencia comercial **antes** de monetizar. Hay que preguntarlo
     por escrito antes de implementar.
@@ -229,7 +229,7 @@
     `GET /people/{id}`, `GET /updates`
 
 - **⚠️ No existe endpoint de "similar" ni de "trending".** Ambos se sustituyen
-  por cálculo local — features 85 y 86, ver `docs/recommendations-plan.md`.
+  por cálculo local — features 80 y 81, ver `docs/recommendations-plan.md`.
 
 - **⚠️ No existe feed de popularidad paginado.** Es el problema caro: obligaría
   a rehacer `scheduler/jobs.py` y `scripts/backfill_sync.py`, no solo a cambiar

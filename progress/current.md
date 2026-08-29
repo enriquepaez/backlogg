@@ -25,7 +25,7 @@ TMDB llega a pesar.
 
 **Riesgo aceptado y su mitigación**: migrar más tarde dejaría huérfano el
 historial de biblioteca de los usuarios, porque los ítems se identifican por
-`external_ids`. Se neutraliza con la **feature 84**, que persiste el QID de
+`external_ids`. Se neutraliza con la **feature 79**, que persiste el QID de
 Wikidata de cada ítem — `external_ids` ya admite varios `source` por ítem. Con
 ese ancla, cualquier cambio futuro de fuente es un remapeo mecánico.
 
@@ -38,15 +38,15 @@ Se vuelve al flujo normal de `AGENTS.md` §5: una rama por feature, PR a `main`.
 
 | Bloque | Features | Estado |
 |---|---|---|
-| Calidad del catálogo de libros | 76, 77 | Listas para empezar, sin bloqueantes |
-| Base de recomendación cross-type | 79-84 | 79 bloqueada por issue #15; 80 bloqueada por consulta legal a TMDB |
-| Endpoints propios | 85-88 | Mejoras, no sustitutos |
+| Calidad del catálogo de libros | 72, 73 | Listas para empezar, sin bloqueantes |
+| Base de recomendación cross-type | 74-79 | 74 bloqueada por issue #15; 75 bloqueada por consulta legal a TMDB |
+| Endpoints propios | 80-83 | Mejoras, no sustitutos |
 
 Diseño completo en `docs/recommendations-plan.md`. Hallazgos sobre Open Library
 (clasificación `ddc`/`lcc` y filtro de calidad de la siembra) en
 `docs/external-apis.md`.
 
-## ⚠️ Consulta legal pendiente antes de la feature 80
+## ⚠️ Consulta legal pendiente antes de la feature 75
 
 Los términos de TMDB listan «entrenar sistemas de machine learning / IA con
 datos de TMDB» entre sus **ejemplos de uso comercial**. Generar embeddings
