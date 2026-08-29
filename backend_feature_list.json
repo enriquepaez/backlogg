@@ -197,24 +197,6 @@
       "status": "done"
     },
     {
-      "id": 11,
-      "name": "admin_stats",
-      "title": "Admin stats — GET /admin/stats con conteo y último sync por tipo",
-      "description": "Endpoint GET /admin/stats que devuelve el número de items en DB y la fecha de última sincronización para cada tipo de contenido (movies, series, books, games).",
-      "depends_on": [
-        8
-      ],
-      "acceptance": [
-        "GET /admin/stats devuelve 200 con counts y last_synced_at para los 4 tipos",
-        "Los counts reflejan el estado real de la DB (COUNT queries, no caché)",
-        "last_synced_at es el MAX(last_synced_at) de cada tabla",
-        "El endpoint aparece documentado en docs/api.md",
-        "Tests de endpoint pasan",
-        "bash init.sh termina en verde"
-      ],
-      "status": "done"
-    },
-    {
       "id": 10,
       "name": "nightly_sync_trigger",
       "title": "Nightly sync via GitHub Actions — POST /admin/sync/{type}",
@@ -228,6 +210,24 @@
         "Se dispara con cron '0 2 * * *'",
         "Llama a los 4 endpoints de sync en orden",
         "La URL base se lee de un secret RENDER_API_URL",
+        "bash init.sh termina en verde"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 11,
+      "name": "admin_stats",
+      "title": "Admin stats — GET /admin/stats con conteo y último sync por tipo",
+      "description": "Endpoint GET /admin/stats que devuelve el número de items en DB y la fecha de última sincronización para cada tipo de contenido (movies, series, books, games).",
+      "depends_on": [
+        8
+      ],
+      "acceptance": [
+        "GET /admin/stats devuelve 200 con counts y last_synced_at para los 4 tipos",
+        "Los counts reflejan el estado real de la DB (COUNT queries, no caché)",
+        "last_synced_at es el MAX(last_synced_at) de cada tabla",
+        "El endpoint aparece documentado en docs/api.md",
+        "Tests de endpoint pasan",
         "bash init.sh termina en verde"
       ],
       "status": "done"
@@ -1425,6 +1425,229 @@
         "bash init.sh en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 72,
+      "name": "books_classification_ddc_lcc",
+      "title": "Clasificación de libros sobre ddc/lcc en vez de la folksonomía subject",
+      "description": "Investigación de 2026-08-29 documentada en docs/external-apis.md. El adaptador pide hoy solo el campo subject de search.json, que es el peor disponible: folksonomía sin control, con media de 40 subjects por obra — de ahí las 510 etiquetas distintas con solo 370 libros ingeridos, 397 de ellas usadas una sola vez ('Triathlon', 'Concentration camps', 'Country homes'). Cobertura medida sobre las 200 obras más estanteadas: lcc 89%, ddc 78%, subject_facet 99%, subjects en formato BISAC solo 17%. ddc y lcc son taxonomías controladas y jerárquicas. Límite conocido y que hay que respetar en el diseño: clasifican por disciplina y procedencia, no por género de lector — 813.6 es 'ficción estadounidense contemporánea', así que It Ends With Us e It de Stephen King comparten clasificación. Por tanto ddc/lcc dan el eje grueso y limpio (ficción vs ensayo, literatura vs psicología), y el género de cara al lector se resuelve en las features 76-78. Permite eliminar _is_clean_genre (backlogg/books/adapters/open_library.py), heurística de longitud/paréntesis/comas que hoy intenta arreglar aguas abajo un problema que se resuelve eligiendo otro campo.",
+      "depends_on": [],
+      "acceptance": [
+        "El field-set pedido a search.json incluye ddc, lcc y subject_facet",
+        "La clasificación persistida se deriva de lcc con ddc de respaldo; subject_facet cubre el ~10% restante",
+        "_is_clean_genre eliminado y su heurística retirada del adaptador",
+        "Migración de datos o reingesta que reemplaza las etiquetas basura existentes en book_genres",
+        "docs/external-apis.md y docs/schema.md actualizados",
+        "Tests: obra con ddc y lcc, obra solo con lcc, obra sin ninguno de los dos",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 73,
+      "name": "books_seeding_quality_filter",
+      "title": "Filtro de calidad en la siembra de libros (equivalente al allowlist de game_type)",
+      "description": "Segundo hallazgo de la investigación de 2026-08-29. La siembra actual usa q=*:*&sort=readinglog, que devuelve lo que más gente estantea en Open Library: autoayuda y BookTok (Atomic Habits, The 48 Laws of Power, It Ends With Us). No es un fallo de la API, es lo que esa señal mide. La query Solr admite filtros que lo corrigen; verificado en vivo que 'q=ddc:8* AND language:eng AND readinglog_count:[2000 TO *]&sort=readinglog' devuelve Harry Potter, A Game of Thrones, It y El Alquimista. Palancas disponibles: ddc:8* (solo literatura), language, readinglog_count, ratings_count, first_publish_year y number_of_pages_median (descarta folletos). Es el equivalente para libros del category allowlist de game_type (feature 65). Pendiente de calibrar: ese filtro estricto devuelve solo 97 resultados, así que hay que ajustar umbrales para alcanzar SEED_TOP_N_BOOKS sin reintroducir ruido, e incluir castellano además de inglés (la app es bilingüe).",
+      "depends_on": [
+        72
+      ],
+      "acceptance": [
+        "Query de siembra filtrada, con los umbrales elegidos justificados y documentados en docs/external-apis.md",
+        "Incluye obras en castellano además de en inglés",
+        "El catálogo resultante alcanza SEED_TOP_N_BOOKS sin reintroducir autoayuda ni folletos",
+        "Los umbrales son configurables por env, no constantes enterradas en el código",
+        "Tests de construcción de la query (no dependientes de la red)",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 74,
+      "name": "credits_writer_role",
+      "title": "Rol WRITER en credits de movies y series (puente libro-película por autoría)",
+      "description": "Primera capa del sistema de recomendación cross-type descrito en docs/recommendations-plan.md, y la de mejor relación coste/valor. La tabla credits ya es polimórfica sobre MOVIE, SERIES, BOOK y GAME contra la misma tabla people, pero los roles actuales no permiten el cruce más obvio: books guarda AUTHOR y movies/series solo DIRECTOR/ACTOR y CREATOR/ACTOR. Añadir el rol WRITER a movies y series produce el enlace libro→película por autor sin ninguna dependencia nueva: King, Gaiman, Tolkien, Sapkowski. Es el caso de uso cross-type más reconocible del producto. Se puebla desde el departamento 'Writing' de GET /movie/{id}/credits de TMDB, que ya se llama hoy para DIRECTOR y ACTOR — sin peticiones nuevas. BLOQUEADO DE FACTO por el issue #15 (créditos vacíos en el 100% de series y el 75% de movies): sin ingesta de créditos funcionando, el rol no sirve de nada.",
+      "depends_on": [],
+      "acceptance": [
+        "Rol WRITER admitido en credits para MOVIE y SERIES, documentado en docs/schema.md",
+        "Poblado desde el departamento 'Writing' de los credits de TMDB ya solicitados — sin llamadas nuevas",
+        "Consulta de repositorio que dado un person_id devuelve sus obras en TODOS los item_type",
+        "Issue #15 verificado como resuelto para movies y series antes de cerrar esta feature",
+        "Tests: persona con obra en dos tipos distintos aparece enlazada en ambos sentidos",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 75,
+      "name": "pgvector_item_embeddings",
+      "title": "pgvector + item_embeddings (requiere resolver antes la cláusula de IA de TMDB)",
+      "description": "⚠️ BLOQUEANTE PREVIO A IMPLEMENTAR: los términos de TMDB listan 'entrenar sistemas de machine learning / IA con datos de TMDB' entre sus EJEMPLOS DE USO COMERCIAL, no como prohibición absoluta. Generar embeddings sobre sus sinopsis podría por tanto activar la licencia comercial de 149 $/mes ANTES de monetizar, que es justo lo que la decisión de quedarse en TMDB busca evitar. Hay que resolverlo antes de escribir código, por escrito con sales@themoviedb.org. Alternativas si la respuesta es negativa: embeber solo título y géneros en lugar de la sinopsis de TMDB, o limitar la capa semántica a books (Open Library es CC0) y games.\n\nCapa semántica de docs/recommendations-plan.md: el puente natural entre tipos, porque todo ítem tiene título, sinopsis y géneros sea del tipo que sea, y el coseno en un espacio común cruza tipos por construcción. Decisiones ya tomadas: (1) tabla item_embeddings(item_type, item_id, embedding) polimórfica, coherente con credits y external_ids, en lugar de una columna por tabla y cuatro índices HNSW; (2) la inferencia ocurre AL INGERIR, no al servir — el vector se genera en el job de sync/backfill que corre en GitHub Actions, y servir /similar es un lookup ANN contra un índice HNSW, sin latencia añadida ni dependencia externa en el camino de la petición; (3) embeddings vía API con httpx (ya es dependencia) y no modelo local, porque meter torch/sentence-transformers añadiría cientos de MB y presión de RAM en un VPS de 2 vCPU. Modelo multilingüe obligatorio: las sinopsis llegan en castellano y en inglés. Con dimensions=512 el almacenamiento baja a ~80 MB para 40.000 ítems, relevante porque Neon cobra 0,35 $/GB-mes. Infra: docker-compose.yml usa postgres:16, que NO trae la extensión — hay que pasar a pgvector/pgvector:pg16, igual en CI. Neon soporta CREATE EXTENSION vector con índice HNSW.",
+      "depends_on": [],
+      "acceptance": [
+        "Respuesta por escrito de TMDB sobre si generar embeddings de sus sinopsis constituye uso comercial, documentada en docs/external-apis.md",
+        "Si la respuesta es negativa: alcance de la capa semántica reducido en consecuencia y documentado",
+        "Extensión vector habilitada vía migración Alembic, con tabla item_embeddings polimórfica e índice HNSW",
+        "docker-compose.yml y CI usan una imagen de Postgres con pgvector",
+        "Los embeddings se generan en el pipeline de ingesta, nunca en el camino de la petición",
+        "Modelo multilingüe, con la elección y su dimensionalidad justificadas y configurables por env",
+        "Coste estimado del embedding inicial y del incremental documentado en docs/operations.md",
+        "Tests: generación, persistencia y consulta por similitud coseno",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 76,
+      "name": "themes_taxonomy",
+      "title": "Taxonomía propia themes + theme_mappings (hub cross-type)",
+      "description": "Hub del mapeo de géneros descrito en docs/recommendations-plan.md. Hoy hay cuatro tablas de géneros independientes (movie_genres, series_genres, book_genres, game_genres) con taxonomías de cuatro proveedores que no se hablan: no hay identificador común entre 'Fantasía' de Open Library y 'Fantasy' de RAWG. Mapear por pares serían seis combinaciones a mantener; con un hub cada taxonomía se mapea una sola vez y las seis salen gratis, y añadir un quinto tipo sería un mapeo más y no cinco. theme_mappings es muchos-a-muchos POR DISEÑO: las taxonomías reales traen géneros compuestos ('Action & Adventure', 'Sci-Fi & Fantasy') que se rompen en dos temas. El campo kind (THEME | FORMAT | MECHANIC) no es decorativo: de los 22 géneros de juego solo unos cinco cargan un tema transversal, y el resto (Platform, Puzzle, Racing, RTS, Point-and-click) son mecánicas sin equivalente en cine ni literatura. Marcarlas como MECHANIC evita que el ranker invente equivalencias falsas. Solo THEME cruza tipos; FORMAT entra con peso bajo; MECHANIC no cruza nunca.",
+      "depends_on": [],
+      "acceptance": [
+        "Tablas themes(id, slug, name_es, name_en, kind) y theme_mappings(provider, item_type, source_genre, theme_id) vía migración Alembic",
+        "theme_mappings soporta muchos-a-muchos en ambos sentidos",
+        "kind con los tres valores THEME/FORMAT/MECHANIC y su semántica documentada en docs/schema.md",
+        "Consulta de repositorio: dado un ítem, sus themes; dado un theme, sus ítems de cualquier tipo",
+        "Los nombres de tema son traducibles (es/en) y estables frente a cambios de proveedor",
+        "Tests, incluido un género compuesto que mapea a dos themes",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 77,
+      "name": "themes_manual_mapping",
+      "title": "Mapeo manual de las taxonomías cerradas (TMDB/IGDB) y de la cabeza de Open Library",
+      "description": "Poblado del hub de la feature 76. Las taxonomías de movies, series y games son cerradas y pequeñas — medido en el catálogo actual: 19 géneros de movies (TMDB), 14 de series (TMDB, con compuestos como 'Action & Adventure' y 'Sci-Fi & Fantasy' que se rompen en dos temas) y 22 de games (IGDB), unas 55 entradas en total. El mapeo manual es la herramienta correcta: determinista, auditable y corregible en una fila cuando alguien reporte un error. Books no se puede mapear a mano (510 etiquetas con solo 370 libros, 397 usadas una sola vez), pero sí su cabeza: las ~100 subjects más frecuentes cubren la mayor parte del volumen real. Paso previo barato para libros: normalizar (minúsculas, quitar el sufijo ' fiction', singularizar) colapsa una parte notable de los duplicados semánticos (Fantasy/Fantasy fiction, romance/Dark Romance, Biography/biographies) antes de mapear nada. NOTA: al descartarse la migración de APIs, este mapeo se hace contra las taxonomías de TMDB e IGDB, que ya están en la base de datos — no hay que esperar a nada.",
+      "depends_on": [
+        76,
+        72
+      ],
+      "acceptance": [
+        "Mapeo completo de las taxonomías cerradas de movies, series y games (TMDB/IGDB) contra themes",
+        "Los géneros compuestos de TMDB ('Action & Adventure', 'Sci-Fi & Fantasy') mapean a dos themes cada uno",
+        "Normalización de subjects de Open Library aplicada antes del mapeo",
+        "Las ~100 subjects más frecuentes de books mapeadas a mano",
+        "Las mecánicas de juego marcadas como MECHANIC, no forzadas a un tema transversal",
+        "El mapeo vive como datos versionados (seed/fixture), no hardcodeado en la lógica",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 78,
+      "name": "themes_longtail_autoassign",
+      "title": "Asignación automática de la cola larga de subjects por similitud de embedding",
+      "description": "Cierre del problema de la folksonomía de Open Library. Tras el mapeo manual de la cabeza (feature 77) queda una cola de miles de subjects usados una sola vez que no se pueden mapear a mano y que además crecerá con el catálogo. Solución: embeber el nombre del subject y asignarlo al theme más cercano por coseno, con umbral de confianza; lo que no pase el umbral se queda sin theme, y para ese ítem la similitud la aporta el embedding de la sinopsis en lugar del género. Es justo el tipo de problema para el que la capa semántica es mejor herramienta que una tabla. Las asignaciones automáticas deben quedar marcadas como tales para poder auditarlas y corregirlas a mano después.",
+      "depends_on": [
+        77,
+        75
+      ],
+      "acceptance": [
+        "Job que asigna themes a subjects no mapeados por similitud de embedding, con umbral configurable",
+        "Las asignaciones automáticas se distinguen de las manuales en la tabla, y una corrección manual gana siempre",
+        "Los subjects por debajo del umbral quedan sin theme, sin inventar asignación",
+        "Informe de cobertura tras la ejecución: qué porcentaje de ítems de libro acaba con al menos un theme",
+        "Tests con embeddings mockeados, incluido el caso por debajo del umbral",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 79,
+      "name": "wikidata_adaptations",
+      "title": "Adaptaciones cross-media vía Wikidata + ancla de QID (póliza de migración)",
+      "description": "Doble propósito. (1) CAPA DE CONOCIMIENTO de docs/recommendations-plan.md: precisión quirúrgica y cobertura baja, pero es la que produce el momento 'no sabía que había libro'. Las propiedades P144 (based on) y P4969 (derivative work) enlazan explícitamente novela→película, película→videojuego y cómic→serie. Wikidata es CC0 y guarda los identificadores externos de TMDB, Open Library e IGDB, de modo que el mapeo contra el catálogo es POR ID y no heurístico. (2) PÓLIZA DE MIGRACIÓN: al descartarse la migración de APIs (ver docs/external-apis.md), el riesgo aplazado es que un cambio futuro de proveedor deje huérfano el historial de biblioteca de los usuarios. Persistir el QID de Wikidata de cada ítem en external_ids —tabla que ya soporta varios sources por ítem, UNIQUE (item_type, item_id, source)— da un ancla independiente del proveedor que convierte cualquier migración futura en un remapeo mecánico en lugar de una pérdida de datos. Es lo que hace segura la decisión de aplazar. Implementación: volcado SPARQL periódico (mensual basta, estas relaciones no cambian) hacia item_relations(from_type, from_id, to_type, to_id, relation, score, source), tabla que la feature 83 reutiliza para la co-ocurrencia.",
+      "depends_on": [],
+      "acceptance": [
+        "QID de Wikidata persistido en external_ids con source='WIKIDATA' para todo ítem que lo tenga",
+        "Informe de cobertura del ancla por tipo de ítem tras la primera ejecución",
+        "Tabla item_relations creada vía migración Alembic, con relation ADAPTATION/DERIVATIVE y source WIKIDATA",
+        "Job de volcado SPARQL que mapea por identificador externo, no por título",
+        "El job es idempotente y reanudable, y no borra relaciones de otras fuentes",
+        "Workflow de GitHub Actions programado, siguiendo el patrón de nightly-sync.yml",
+        "Tests con respuestas SPARQL mockeadas, incluido el caso de ítem no presente en el catálogo",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 80,
+      "name": "similar_semantic_rewrite",
+      "title": "GET /{tipo}/{slug}/similar propio sobre la capa semántica, con cuota cross-type",
+      "description": "Al quedarse el proyecto en TMDB, esta feature deja de ser un SUSTITUTO obligatorio y pasa a ser una MEJORA — pero sigue mereciendo la pena: el /similar de TMDB solo cubre 2 de los 4 tipos y no cruza entre ellos, que es precisamente el diferencial del producto. Pasa a calcularse con el índice HNSW de la feature 75 para los cuatro tipos, igual que books y games ya se calculan localmente hoy. Regla no negociable: CUOTA CROSS-TYPE. De 10 resultados, al menos 3 de un tipo distinto al del ítem origen. Sin esa regla la capa semántica devuelve casi siempre el mismo tipo, porque los ítems de un mismo tipo comparten vocabulario ('temporada', 'jugador', 'novela') y eso domina el coseno. Añadir además diversificación: penalización por franquicia o autor repetido, para que diez resultados de la misma saga no cuenten como diez recomendaciones. Cada resultado lleva su reason legible.",
+      "depends_on": [
+        75
+      ],
+      "acceptance": [
+        "Los cuatro tipos sirven /similar desde el índice vectorial, sin llamadas externas",
+        "Cuota cross-type garantizada y configurable por env; verificada con test",
+        "Diversificación por franquicia/autor repetido",
+        "Cada resultado incluye un reason legible",
+        "El ítem origen nunca aparece en sus propios resultados",
+        "docs/api.md actualizado",
+        "Tests: cuota cross-type, diversificación, ítem sin embedding",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 81,
+      "name": "trending_local",
+      "title": "GET /trending propio sobre actividad local, con period real para los cuatro tipos",
+      "description": "Al quedarse el proyecto en TMDB, deja de ser un sustituto obligatorio y pasa a ser una mejora, pero de las valiosas. Trending es un problema distinto del de similitud y más simple: es actividad reciente en la propia plataforma — activity_events, library_entries y user_ratings de los últimos N días con decaimiento temporal. En cuanto haya usuarios, el trending propio es mejor y más honesto que el de TMDB, porque refleja a la comunidad del producto y no el tráfico global de otra web. Mientras no haya usuarios suficientes se cae a rating_external por recencia, exactamente lo que ya hacen hoy type=book y type=game (feature 68). Efecto colateral valioso: el parámetro period, que hoy se acepta y se ignora para libros y juegos, pasa a tener efecto real para los cuatro tipos.",
+      "depends_on": [],
+      "acceptance": [
+        "Trending calculado desde actividad local con decaimiento temporal, sin llamadas externas",
+        "period tiene efecto real para los cuatro tipos",
+        "Fallback documentado y probado para cuando no hay actividad suficiente",
+        "El umbral de actividad mínima es configurable por env",
+        "docs/api.md actualizado: period deja de ser un parámetro sin efecto",
+        "Tests: con actividad, sin actividad, y distintos valores de period",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 82,
+      "name": "recommendations_ranker",
+      "title": "Ranker de recomendaciones: fusión de capas con pesos por env y reason por candidato",
+      "description": "Cierre del sistema descrito en docs/recommendations-plan.md. GET /v1/recommendations deja de ser solapamiento de géneros más fan-out externo y pasa a consumir un ranker que funde las capas: personas compartidas (79), semántica (80), themes (76-78) y adaptaciones de Wikidata (84). Pesos configurables por env (REC_WEIGHT_PEOPLE, REC_WEIGHT_SEMANTIC, REC_WEIGHT_THEMES, REC_WEIGHT_WIKIDATA) para poder ajustar sin desplegar, mismo criterio que RATE_LIMIT_*. Aplica cuota cross-type y diversificación igual que la feature 80. El reason por candidato no es un adorno: en recomendaciones cross-type es lo que hace que el usuario acepte que se le ofrezca un videojuego partiendo de una película, en lugar de leerlo como un error. Cada capa aporta el suyo: 'comparte autor con X', 'es la novela en que se basa', 'porque también es Fantasía'.",
+      "depends_on": [
+        74,
+        76,
+        79,
+        80
+      ],
+      "acceptance": [
+        "Ranker que funde las cuatro capas con pesos configurables por env",
+        "Cuota cross-type y diversificación aplicadas también aquí",
+        "reason específico por capa de origen, legible y traducible",
+        "El fan-out externo desaparece: ninguna recomendación depende de una API de terceros",
+        "Degradación limpia cuando una capa no tiene datos para un ítem",
+        "docs/api.md actualizado",
+        "Tests por capa y de la fusión, incluida la degradación",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 83,
+      "name": "cooccurrence_layer",
+      "title": "Capa de co-ocurrencia item-item sobre bibliotecas, activada por umbral de usuarios",
+      "description": "Última capa y la más potente para cruzar tipos, porque la biblioteca de un usuario ya abarca los cuatro: item-item sobre library_entries y user_ratings, coseno sobre la matriz ítem-usuario con ponderación tipo BM25/TF-IDF para que la popularidad no aplaste la señal. Precomputada en batch (job nocturno en GitHub Actions) y escrita en item_relations con relation='COOCCURRENCE'; nada se calcula en el camino de la petición. CRÍTICO: se activa por UMBRAL, no por fecha. Por debajo de aproximadamente 1.000 usuarios con unos 20 ítems cada uno la señal es ruido y EMPEORA las recomendaciones, así que el ranker debe consultar el umbral y saltarse la capa mientras no se cumpla. Se planifica ahora y se deja pendiente hasta que el producto tenga masa crítica real.",
+      "depends_on": [
+        82
+      ],
+      "acceptance": [
+        "Job batch que calcula co-ocurrencia item-item y la escribe en item_relations",
+        "Ponderación que corrige el sesgo de popularidad",
+        "El ranker consulta el umbral de activación y omite la capa cuando no se cumple",
+        "El umbral es configurable por env y su valor por defecto está justificado",
+        "Workflow de GitHub Actions programado para el recálculo",
+        "Tests: por debajo del umbral la capa no aporta candidatos; por encima sí",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }

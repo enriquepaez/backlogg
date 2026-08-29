@@ -15,7 +15,25 @@
   - `GET /movie/{tmdb_id}/credits` — cast & crew for credits sync
   - `GET /person/{person_id}` — person detail
 
-- **Slug strategy**: TMDB provides its own `slug` field. Use it directly.
+- **⚠️ Slug strategy**: la afirmación histórica de este documento («TMDB
+  provides its own `slug` field, use it directly») **es incorrecta**. El
+  adaptador genera los slugs localmente con `_slugify(título)-año`
+  (`backlogg/movies/adapters/tmdb.py`). Mantenerlo así: es lo que permitiría
+  que las URLs sobrevivieran a un cambio de fuente sin perder posicionamiento.
+- **⚠️ Uso comercial**: la licencia gratuita es solo para uso **no comercial**.
+  Sus términos cuentan como comerciales, entre otros, cobrar a usuarios, poner
+  publicidad, «operar sitios web que generan ingresos recomendando contenido» y
+  **«entrenar sistemas de machine learning / IA con datos de TMDB»**. Tarifa
+  comercial reportada: 149 $/mes por debajo de 1 M$ de facturación y 2 M de
+  usuarios. Contacto: `sales@themoviedb.org`.
+  - Consecuencia práctica para la **feature 75** (embeddings): generar
+    embeddings sobre las sinopsis de TMDB podría caer bajo esa cláusula y
+    activar la licencia comercial **antes** de monetizar. Hay que preguntarlo
+    por escrito antes de implementar.
+- **⚠️ Caché**: prohibido cachear datos de TMDB más de **6 meses**. Con
+  `SYNC_SLICE_SIZE=100` sobre 10.000 ítems el ciclo completo son 100 días —
+  dentro de la ventana, pero sin margen. Subir `SEED_TOP_N_*` sin subir el
+  slice sacaría al proyecto de los términos.
 - **external_ids source value**: `TMDB`
 
 ## Open Library (Books)
@@ -38,6 +56,73 @@
 
   Request the field set `key,title,author_name,first_publish_year,cover_i,subject,isbn`
   (the shape `book_to_dict` consumes).
+- **Clasificación y calidad de catálogo (investigación 2026-08-29)**: los dos
+  problemas observados en producción —géneros basura y catálogo basura— **no
+  requieren cambiar de proveedor**. Ambos se resuelven dentro de Open Library.
+
+  **Géneros.** El adaptador pide hoy solo `subject`, que es el peor campo
+  disponible: una folksonomía sin control, con **media de 40 subjects por
+  obra** (de ahí las 510 etiquetas distintas con solo 370 libros ingeridos, 397
+  de ellas usadas una sola vez). `search.json` expone además tres campos que el
+  adaptador no pide. Cobertura medida sobre las 200 obras más estanteadas:
+
+  | Campo | Cobertura | Naturaleza |
+  |---|---|---|
+  | `lcc` (Library of Congress) | 89 % | Taxonomía controlada y jerárquica |
+  | `ddc` (Dewey Decimal) | 78 % | Taxonomía controlada y jerárquica |
+  | `subject_facet` | 99 % | Más limpio que `subject`, aún folksonómico |
+  | `subject` (el que se usa hoy) | 99 % | Sin control, ~40 por obra |
+
+  Subjects en formato BISAC (`BUSINESS & ECONOMICS / ...`): solo **17 %** — no
+  sirven como taxonomía de respaldo.
+
+  **Uso recomendado, y su límite.** DDC y LCC clasifican por **disciplina y
+  procedencia, no por género tal y como lo entiende un lector**: `813.6` es
+  "ficción estadounidense contemporánea", así que *It Ends With Us* y *It* de
+  Stephen King comparten clasificación. Por tanto:
+  - `ddc`/`lcc` → eje **grueso y limpio** (ficción vs ensayo, literatura vs
+    psicología vs historia). Excelente para descartar ruido y para filtrar.
+  - Género de cara al lector (fantasía, terror, romance) → `subject_facet`
+    normalizado + mapeo manual de la cabeza + embeddings para la cola
+    (ver `docs/recommendations-plan.md`).
+
+  Adoptar `ddc`/`lcc` permite además **eliminar `_is_clean_genre`**
+  (`backlogg/books/adapters/open_library.py`), la heurística de longitud,
+  paréntesis y comas que hoy intenta arreglar aguas abajo un problema que se
+  resuelve en el origen eligiendo otro campo.
+
+  **Calidad del catálogo.** `q=*:*&sort=readinglog` devuelve lo que más gente
+  estantea en Open Library, que es autoayuda y BookTok — *Atomic Habits*,
+  *The 48 Laws of Power*, *It Ends With Us*. No es un fallo de la API: es lo
+  que esa señal mide. La query Solr admite filtros que lo corrigen. Verificado
+  en vivo:
+
+  ```
+  q=ddc:8* AND language:eng AND readinglog_count:[2000 TO *]&sort=readinglog
+  → Harry Potter, A Game of Thrones, It, The Alchemist, The Love Hypothesis
+  ```
+
+  Palancas disponibles: `ddc:8*` (solo literatura), `language`,
+  `readinglog_count`, `ratings_count`, `first_publish_year`,
+  `number_of_pages_median` (descarta folletos). Es el equivalente para libros
+  del **category allowlist de `game_type`** (feature 65) en juegos.
+
+  Pendiente de calibrar: el filtro estricto del ejemplo devuelve solo 97
+  resultados. Hay que ajustar umbrales para alcanzar `SEED_TOP_N_BOOKS` sin
+  reintroducir ruido, e incluir castellano además de inglés (la app es
+  bilingüe). Es trabajo de calibración, no de arquitectura.
+
+- **Alternativas evaluadas y descartadas (2026-08-29)**: Open Library sigue
+  siendo la fuente correcta, y es además la única de las cuatro verticales sin
+  problema de licencia comercial (CC0).
+
+  | Fuente | Por qué se descarta |
+  |---|---|
+  | Google Books | 1.000 peticiones/día: un backfill de 10.000 libros son 10 días de cuota. Sus términos advierten de que no es un sustituto de servicios comerciales |
+  | ISBNdb | 15–300 $/mes, y es **centrado en ISBN/ediciones**, no en obras: choca con el modelo work-level del catálogo. Reintroduce una dependencia de pago recurrente sin resolver ningún problema que Open Library no resuelva ya |
+  | Hardcover | GraphQL gratis, pero es **un competidor directo** (tracker de libros) y parte de sus datos vienen de Open Library y Google Books. Frágil como backbone |
+  | BookBrainz | CC0 y bien modelado, pero cobertura demasiado pequeña |
+  | Goodreads | API retirada en 2020 |
 - **Slug strategy**: Open Library uses `/works/OL123W` format. Strip prefix, use `OL123W`
   as slug or derive from title.
 - **Coverage note**: strong on classics and public domain; modern titles may have
@@ -105,6 +190,113 @@
   rating_external DESC NULLS LAST` order already used by `GET /games`
   (feature 66), over items already persisted. No IGDB call happens for this
   endpoint, and `period` is accepted but has no effect.
+
+## TheTVDB v4 — EVALUADA Y APARCADA (2026-08-29)
+
+> **No se usa.** Se evaluó como sustituto de TMDB y se descartó. Esta sección
+> se conserva porque la investigación sigue siendo válida si el coste de TMDB
+> llega a pesar: es toda la referencia necesaria para retomar el plan sin
+> volver a investigarlo. Recogida del swagger oficial (`thetvdb/v4-api`,
+> `docs/swagger.yml`) y de `thetvdb.com/api-information`.
+>
+> **Por qué se descartó**: (1) el coste de TMDB es *condicional* —solo aparece
+> al monetizar— mientras que el de migrar es cierto e inmediato: tres semanas
+> de trabajo, datos de cine peores y un motor de siembra reconstruido; (2) el
+> tramo gratuito (<50.000 $/año) **no es autoservicio**: exige la modalidad
+> "Negotiated Contract", que entra en cola de revisión comercial, así que no es
+> un tier sobre el que se pueda planificar.
+
+- **Por qué**: TMDB prohíbe el uso comercial bajo licencia gratuita
+  (149 $/mes desde el primer euro). TheTVDB escala por facturación propia:
+  **gratis por debajo de 50.000 $/año**, 1.000 $/año hasta 250 k$,
+  10.000 $/año hasta 1 M$.
+- **Modalidad de clave**: pedir la **licenciada**. La alternativa
+  ("user-supported") exige que cada usuario final mantenga una suscripción de
+  12 $/año — inviable para un producto de consumo.
+- **Base URL**: `https://api4.thetvdb.com/v4`
+- **Auth**: `POST /login` devuelve un JWT que **dura un mes**. El cliente debe
+  renovarlo solo (mismo patrón que el cliente Twitch/IGDB actual en
+  `backlogg/games/adapters/igdb.py`).
+- **Atribución obligatoria**: enlace directo a TheTVDB.com visible para el
+  usuario que ve los metadatos.
+
+- **Endpoints relevantes**:
+  - `GET /movies/{id}` · `GET /movies/{id}/extended` (créditos, artwork)
+  - `GET /movies/slug/{slug}` · `GET /movies/{id}/translations/{language}`
+  - `GET /series/{id}` · `/extended` · `/artworks` · `/slug/{slug}` ·
+    `/translations/{language}` · `/episodes/{season-type}`
+  - `GET /search`, `GET /search/remoteid/{remoteId}`, `GET /genres`,
+    `GET /people/{id}`, `GET /updates`
+
+- **⚠️ No existe endpoint de "similar" ni de "trending".** Ambos se sustituyen
+  por cálculo local — features 80 y 81, ver `docs/recommendations-plan.md`.
+
+- **⚠️ No existe feed de popularidad paginado.** Es el problema caro: obligaría
+  a rehacer `scheduler/jobs.py` y `scripts/backfill_sync.py`, no solo a cambiar
+  de adaptador. Las dos únicas vías, ambas con pegas:
+
+  | Vía | Ordena por popularidad | Pagina | Pega |
+  |---|---|---|---|
+  | `GET /movies?page=N` · `GET /series?page=N` | ❌ (orden de id) | ✅ | Hay que recorrer la base entera y rankear localmente por `score` |
+  | `GET /movies/filter` · `GET /series/filter` | ✅ (`sort=score`) | ❌ | `country` **y** `lang` son obligatorios: obliga a fan-out por pares país/idioma |
+
+  El campo `score` está presente en casi todas las entidades y, según el propio
+  swagger, «se usa para insinuar popularidad relativa a efectos de ordenación»,
+  sin garantías sobre su significado exacto.
+
+- **Otros límites**: `GET /search` está limitado a 5.000 resultados máximo.
+- **Slugs**: TheTVDB expone slug propio (`/movies/slug/{slug}`), pero el
+  catálogo **genera los suyos** con `_slugify(titulo)-año` en el adaptador.
+  Mantenerlo así: es lo que permite que las URLs sobrevivan al cambio de
+  fuente sin perder posicionamiento.
+- **external_ids source value**: `THETVDB`
+
+## RAWG — EVALUADA Y APARCADA (2026-08-29)
+
+> **No se usa.** Se evaluó como sustituto de IGDB y se descartó por coherencia
+> con la decisión sobre TMDB: el coste de IGDB también es condicional, y migrar
+> antes de tener usuarios gasta el recurso escaso (tiempo hasta el lanzamiento)
+> para cubrir un problema que solo existe si el producto funciona. La
+> investigación se conserva: RAWG es la salida natural si los términos
+> comerciales de IGDB —que no publican precio— acaban siendo un problema.
+
+- **Base URL**: `https://api.rawg.io/api` · **Auth**: `key` como query param.
+- **Cuota gratuita con uso comercial permitido**: 20.000 peticiones/mes,
+  siempre que el proyecto tenga menos de 100.000 usuarios activos o 500.000
+  páginas vistas al mes. Planes Business (50.000) y Enterprise por encima.
+- **Atribución obligatoria**: enlace activo a RAWG **desde cada página** donde
+  se usen sus datos. Más estricto que TMDB, que se conformaba con el "acerca
+  de" — condiciona el diseño de la ficha de juego.
+- **Sin ventana de caducidad de caché** en sus términos (a diferencia de los
+  6 meses de TMDB).
+
+- **Presupuesto de peticiones — la clave del diseño**: `GET /games` devuelve
+  **40 ítems por página** (`page_size` máximo) con ordenación por popularidad
+  (`ordering=-added` o `-rating`). Sembrar 10.000 juegos cuesta **250
+  peticiones, no 10.000**.
+
+  | Campo del modelo `Game` | ¿En el listado? |
+  |---|---|
+  | title, slug, release_date | ✅ |
+  | poster_url (`background_image`) | ✅ |
+  | rating_external, rating_count_external | ✅ |
+  | genres, platforms | ✅ |
+  | **overview** (`description`) | ❌ solo en `GET /games/{id}` |
+  | **companies** (developers/publishers) | ❌ solo en `GET /games/{id}` |
+
+  Los dos campos que faltan se resuelven con el **fallback on-demand** que ya
+  existe en `backlogg/games/service.py`: una petición por ficha, la primera vez
+  que alguien la abre, pagada una sola vez.
+
+- **⚠️ No hay equivalente a `game_type` de IGDB**, así que el *category
+  allowlist* de la feature 65 (`backlogg/games/constants.py`) no se puede
+  portar tal cual. Sustituirlo por otro filtro de calidad (umbral de
+  `ratings_count` o `added`).
+- **external_ids source value**: `RAWG`
+
+- **Alternativas descartadas**: Giant Bomb (solo uso no comercial, revocan la
+  clave), MobyGames (de pago y con límites de ritmo muy bajos: 720
+  peticiones/hora en el tier no comercial).
 
 ## SMTP (Email) — feature 36 `account_recovery`
 
