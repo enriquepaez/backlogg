@@ -1,9 +1,18 @@
 # Plan — Sistema propio de similitud y recomendación cross-type
 
-> Estado: **diseño, sin implementar**. Sustituye la dependencia de
-> `GET /movie/{id}/similar` y `/trending` de TMDB (ver
-> `docs/source-migration-plan.md`) por un sistema propio que además cruza
-> recomendaciones entre tipos de producto.
+> Estado: **diseño, sin implementar**. Features 79-88 del backlog.
+>
+> Origen: se diseñó como sustituto obligatorio de `GET /movie/{id}/similar` y
+> `/trending` de TMDB durante la migración de APIs que finalmente **se
+> descartó** (features 72-75 y 78, `blocked`). Al quedarse el proyecto en TMDB
+> esos endpoints siguen disponibles, así que este sistema pasa de ser
+> obligatorio a ser una **mejora** — pero sigue mereciendo la pena: el
+> `/similar` de TMDB cubre solo 2 de los 4 tipos y no cruza entre ellos, que es
+> precisamente el diferencial del producto.
+>
+> **Prioridad realista**: por debajo del lanzamiento. Un sistema de
+> recomendación cross-type con cero usuarios es un sistema que no se puede
+> evaluar. Se construye cuando haya a quién recomendarle.
 
 ## El problema
 
@@ -13,12 +22,12 @@ Las tres señales de similitud actuales son **intra-tipo por construcción**:
 |---|---|---|
 | Mismo autor / director | `books/service.py`, `credits` | Solo se consulta dentro del mismo `item_type` |
 | Solapamiento de géneros | `*_genres_join` | Cuatro tablas de géneros distintas, cuatro taxonomías de proveedor que no se hablan |
-| `similar` externo | TMDB | Solo existe para movies/series, y desaparece con la migración |
+| `similar` externo | TMDB | Solo existe para movies/series, y no cruza tipos |
 
 Los géneros son el obstáculo estructural: `movie_genres`, `series_genres`,
 `book_genres` y `game_genres` son tablas independientes, pobladas desde
 proveedores distintos. No hay identificador común entre "Fantasía" (Open
-Library) y "Fantasy" (RAWG).
+Library) y "Fantasy" (IGDB).
 
 Lo que sí es transversal hoy: `people` + `credits`, que ya es polimórfica
 sobre `MOVIE`, `SERIES`, `BOOK` y `GAME` (ver `docs/schema.md`).
@@ -62,7 +71,9 @@ actuales, sin embargo, no permiten el cruce más obvio:
 **Añadir el rol `WRITER` a movies y series da el puente libro → película por
 autor sin ninguna dependencia nueva.** Stephen King, Gaiman, Tolkien, Sapkowski:
 el caso de uso cross-type más reconocible del producto, resuelto con una
-migración y un cambio en el adaptador de ingesta.
+migración Alembic y un cambio en el adaptador de ingesta. En TMDB los
+guionistas ya vienen en el departamento `Writing` de `GET /movie/{id}/credits`,
+que el sync ya llama hoy — sin peticiones nuevas.
 
 - Coste: bajo. Ya hay tabla, índices y patrón de persistencia.
 - Cobertura: limitada a obras con autoría cruzada, pero de altísima precisión.
@@ -121,10 +132,14 @@ produce el "no sabía que había libro".
 
 - `P144` (*based on*) y `P4969` (*derivative work*) enlazan explícitamente
   novela → película, película → videojuego, cómic → serie.
-- Wikidata es **CC0**: sin problema comercial, coherente con el resto de la
-  migración.
-- Guarda los identificadores externos de TheTVDB, Open Library y RAWG, así que
+- Wikidata es **CC0**: sin problema comercial de ningún tipo.
+- Guarda los identificadores externos de TMDB, Open Library e IGDB, así que
   el mapeo contra tu catálogo es **por id, no heurístico**.
+- **Doble propósito**: persistir el QID de cada ítem en `external_ids` (tabla
+  que ya admite varios `source` por ítem) da un ancla independiente del
+  proveedor. Es la póliza que hace segura la decisión de aplazar la migración
+  de APIs: convierte cualquier cambio futuro de fuente en un remapeo mecánico
+  en lugar de dejar huérfano el historial de biblioteca de los usuarios.
 
 Implementación: volcado SPARQL periódico (mensual basta, estas relaciones no
 cambian) → tabla `item_relations`:
@@ -209,8 +224,8 @@ mapeos — y las seis combinaciones salen gratis. Añadir un quinto tipo (cómic
 música, pódcast) sería un mapeo más, no cinco.
 
 El hub aporta además algo que el mapeo por pares no da: un vocabulario
-**propio**, estable y traducible (es/en), que no se rompe cuando TheTVDB
-renombre un género ni cuando vuelvas a cambiar de proveedor.
+**propio**, estable y traducible (es/en), que no se rompe cuando el proveedor
+renombre un género ni si algún día se cambia de fuente.
 
 ```sql
 themes (
@@ -220,7 +235,7 @@ themes (
 )
 
 theme_mappings (
-    provider,     -- THETVDB | OPEN_LIBRARY | RAWG
+    provider,     -- TMDB | OPEN_LIBRARY | IGDB
     item_type,    -- MOVIE | SERIES | BOOK | GAME
     source_genre, -- nombre o id del género en la taxonomía de origen
     theme_id
@@ -306,39 +321,46 @@ parecer redundante. No lo es:
 
 Entra en el ranker como capa propia, con su peso (`REC_WEIGHT_THEMES`).
 
-### Secuenciación: hazlo después de la migración, no antes
+### Secuenciación: se puede hacer ya
 
-Los 19 géneros de movies y los 14 de series de la tabla de arriba **son de
-TMDB**. TheTVDB tiene su propia taxonomía (unos 35 géneros según el enum de
-`/movies/filter` en su swagger), así que mapear ahora significa hacer el
-trabajo dos veces. Games igual: el mapeo debe hacerse contra la taxonomía de
-RAWG, no contra la de IGDB.
-
-Orden correcto: migrar fuentes → volcar las taxonomías reales de TheTVDB y
-RAWG → mapear a mano contra el hub.
+Al descartarse la migración de APIs, las taxonomías contra las que hay que
+mapear son las de TMDB e IGDB, **que ya están en la base de datos**. No hay que
+esperar a nada: las 55 entradas de movies, series y games son mapeables hoy.
 
 ---
 
 ## Orden de implementación
 
-Encaja con la migración de fuentes; los pasos 1 y 2 son los que sustituyen a
-TMDB `/similar`.
+Ninguno depende ya de la migración de APIs, descartada. El paso 1 está
+bloqueado por la consulta legal a TMDB (ver más abajo); los pasos 0, 3 y 4 se
+pueden hacer hoy.
 
 | # | Feature | Depende de |
 |---|---|---|
-| 0 | Rol `WRITER` en credits de movies y series | issue #15 |
-| 1 | pgvector + `item_embeddings` + generación en el pipeline de ingesta | migración de fuentes |
+| 0 | Rol `WRITER` en credits de movies y series (desde el departamento `Writing` de TMDB) | issue #15 |
+| 1 | pgvector + `item_embeddings` + generación en el pipeline de ingesta | **resolver antes la cláusula de IA de TMDB** |
 | 2 | `/similar` reescrito sobre capa semántica + cuota cross-type | 1 |
-| 3 | Taxonomía unificada `themes` + mapeos | migración de fuentes |
+| 3 | Taxonomía unificada `themes` + mapeos | — (mapeable ya, taxonomías en la DB) |
 | 4 | Adaptaciones vía Wikidata → `item_relations` | — |
 | 5 | Ranker sobre las capas 0–2 en `/recommendations` | 0, 2, 4 |
 | 6 | `/trending` propio sobre actividad local | — |
 | 7 | Co-ocurrencia en `item_relations` (activada por umbral) | 5, masa crítica de usuarios |
 
-## Cautela legal
+## ⚠️ Cautela legal — bloqueante de la capa 1
 
-Los términos de TMDB prohíben expresamente entrenar sistemas de IA con sus
-datos. Generar embeddings es inferencia sobre contenido que tienes licencia
-para mostrar, no entrenamiento, pero es zona gris. Tras la migración la
-pregunta se traslada a TheTVDB y RAWG: **revisar sus términos en busca de
-cláusulas sobre IA/ML antes de generar embeddings sobre sus sinopsis.**
+Los términos de TMDB listan **«entrenar sistemas de machine learning / IA con
+datos de TMDB»** entre sus *ejemplos de uso comercial*. No es una prohibición
+absoluta: es una actividad que activa la necesidad de licencia comercial
+(149 $/mes). Generar embeddings es inferencia sobre contenido que se tiene
+licencia para mostrar, no entrenamiento, pero la distinción no está escrita en
+sus términos.
+
+Al haberse descartado la migración, el proyecto **se queda en TMDB**, así que
+esto deja de ser una nota al pie: implementar la capa semántica sobre sinopsis
+de TMDB podría activar los 149 $/mes **antes de monetizar**, que es
+exactamente lo que la decisión de quedarse buscaba evitar.
+
+**Resolver por escrito con `sales@themoviedb.org` antes de escribir código.**
+Alternativas si la respuesta es negativa: embeber solo título y géneros en
+lugar de la sinopsis, o limitar la capa semántica a books (Open Library es
+CC0) y games.

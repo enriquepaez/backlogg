@@ -1429,8 +1429,8 @@
     {
       "id": 72,
       "name": "thetvdb_movies_adapter",
-      "title": "Adaptador TheTVDB v4 para movies (sustituye TMDB)",
-      "description": "Decisión estratégica de 2026-08-29: TMDB prohíbe el uso comercial bajo la licencia gratuita (149 $/mes a partir del primer euro de ingreso), mientras que TheTVDB es gratis por debajo de 50.000 $/año de facturación con atribución. Se migra AHORA, con el catálogo vacío de usuarios reales, porque hacerlo después implicaría remapear los external_ids de cada ítem y dejaría huérfano el historial de biblioteca de quien tuviera ítems que TheTVDB no cubre. Cliente v4 contra https://api4.thetvdb.com/v4 con auth JWT vía POST /login (el token dura un mes: el cliente debe renovarlo solo, mismo patrón que el cliente de IGDB/Twitch en backlogg/games/adapters/igdb.py). Endpoints: /movies/{id}, /movies/{id}/extended (créditos y artwork), /movies/slug/{slug}, /movies/{id}/translations/{language} para castellano, /search. Mantener la firma pública del adaptador actual (backlogg/movies/adapters/tmdb.py) para que service.py no cambie. Los slugs los genera el propio adaptador con _slugify(titulo)-año, NO vienen del proveedor: verificado en código, y es lo que permite que las URLs sobrevivan al cambio de fuente. Corregir de paso docs/external-apis.md, que afirma incorrectamente que 'TMDB provides its own slug field. Use it directly'.",
+      "title": "[APARCADA] Adaptador TheTVDB v4 para movies (sustituye TMDB)",
+      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nDecisión estratégica de 2026-08-29: TMDB prohíbe el uso comercial bajo la licencia gratuita (149 $/mes a partir del primer euro de ingreso), mientras que TheTVDB es gratis por debajo de 50.000 $/año de facturación con atribución. Se migra AHORA, con el catálogo vacío de usuarios reales, porque hacerlo después implicaría remapear los external_ids de cada ítem y dejaría huérfano el historial de biblioteca de quien tuviera ítems que TheTVDB no cubre. Cliente v4 contra https://api4.thetvdb.com/v4 con auth JWT vía POST /login (el token dura un mes: el cliente debe renovarlo solo, mismo patrón que el cliente de IGDB/Twitch en backlogg/games/adapters/igdb.py). Endpoints: /movies/{id}, /movies/{id}/extended (créditos y artwork), /movies/slug/{slug}, /movies/{id}/translations/{language} para castellano, /search. Mantener la firma pública del adaptador actual (backlogg/movies/adapters/tmdb.py) para que service.py no cambie. Los slugs los genera el propio adaptador con _slugify(titulo)-año, NO vienen del proveedor: verificado en código, y es lo que permite que las URLs sobrevivan al cambio de fuente. Corregir de paso docs/external-apis.md, que afirma incorrectamente que 'TMDB provides its own slug field. Use it directly'.",
       "depends_on": [],
       "acceptance": [
         "Cliente TheTVDB v4 con auth JWT y renovación automática del token (dura 1 mes)",
@@ -1442,13 +1442,13 @@
         "Tests con respuestas de TheTVDB mockeadas, incluida la renovación del token",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "blocked"
     },
     {
       "id": 73,
       "name": "thetvdb_series_adapter",
-      "title": "Adaptador TheTVDB v4 para series (sustituye TMDB)",
-      "description": "Mismo patrón que la feature 72 aplicado a series, reutilizando el cliente JWT que aquélla introduce. Endpoints: /series/{id}, /series/{id}/extended, /series/slug/{slug}, /series/{id}/translations/{language}, /series/{id}/episodes/{season-type} y /series/{id}/artworks. TheTVDB es históricamente una base de datos de televisión, así que aquí la cobertura debería ser mejor que en cine. Roles de crédito CREATOR y ACTOR como hoy.",
+      "title": "[APARCADA] Adaptador TheTVDB v4 para series (sustituye TMDB)",
+      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nMismo patrón que la feature 72 aplicado a series, reutilizando el cliente JWT que aquélla introduce. Endpoints: /series/{id}, /series/{id}/extended, /series/slug/{slug}, /series/{id}/translations/{language}, /series/{id}/episodes/{season-type} y /series/{id}/artworks. TheTVDB es históricamente una base de datos de televisión, así que aquí la cobertura debería ser mejor que en cine. Roles de crédito CREATOR y ACTOR como hoy.",
       "depends_on": [
         72
       ],
@@ -1460,13 +1460,13 @@
         "Tests con respuestas mockeadas",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "blocked"
     },
     {
       "id": 74,
       "name": "catalog_seeding_redesign",
-      "title": "Rediseño del motor de siembra: TheTVDB no tiene feed de popularidad paginado",
-      "description": "Pieza más cara de la migración, detectada al leer el swagger de TheTVDB v4 (docs/swagger.yml del repo thetvdb/v4-api). Todo el crecimiento del catálogo actual —seed top-N, tramos nocturnos con cursor en sync_cursors, backfill— se apoya en GET /movie/popular?page=N de TMDB: un feed paginado Y ordenado por popularidad. TheTVDB no tiene equivalente: GET /movies?page=N pagina la base entera pero en orden de id, sin ordenar por popularidad; GET /movies/filter sí ordena por score pero exige country Y lang como parámetros obligatorios y NO acepta paginación. Hay que elegir e implementar una de las dos estrategias: (a) fan-out sobre una lista curada de pares país/idioma con sort=score y fusión de resultados, o (b) recorrido completo de /movies?page=N con ranking local por el campo score. Afecta a backlogg/scheduler/jobs.py y a scripts/backfill_sync.py, y debe preservar el contrato de cursores de sync_cursors para que el backfill siga siendo reanudable.",
+      "title": "[APARCADA] Rediseño del motor de siembra: TheTVDB no tiene feed de popularidad paginado",
+      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nPieza más cara de la migración, detectada al leer el swagger de TheTVDB v4 (docs/swagger.yml del repo thetvdb/v4-api). Todo el crecimiento del catálogo actual —seed top-N, tramos nocturnos con cursor en sync_cursors, backfill— se apoya en GET /movie/popular?page=N de TMDB: un feed paginado Y ordenado por popularidad. TheTVDB no tiene equivalente: GET /movies?page=N pagina la base entera pero en orden de id, sin ordenar por popularidad; GET /movies/filter sí ordena por score pero exige country Y lang como parámetros obligatorios y NO acepta paginación. Hay que elegir e implementar una de las dos estrategias: (a) fan-out sobre una lista curada de pares país/idioma con sort=score y fusión de resultados, o (b) recorrido completo de /movies?page=N con ranking local por el campo score. Afecta a backlogg/scheduler/jobs.py y a scripts/backfill_sync.py, y debe preservar el contrato de cursores de sync_cursors para que el backfill siga siendo reanudable.",
       "depends_on": [
         72,
         73
@@ -1479,13 +1479,13 @@
         "Tests de la nueva estrategia de siembra, incluido el wraparound del cursor",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "blocked"
     },
     {
       "id": 75,
       "name": "rawg_games_adapter",
-      "title": "Adaptador RAWG para games (sustituye IGDB) con siembra por listado y enriquecimiento perezoso",
-      "description": "IGDB es gratis solo para uso no comercial bajo el Twitch Developer Services Agreement, mismo problema que TMDB. RAWG permite uso comercial gratis hasta 20.000 peticiones/mes con menos de 100.000 usuarios activos o 500.000 páginas vistas. Verificado en la documentación de RAWG: el endpoint de listado GET /games devuelve 40 ítems por página (page_size máximo) con ordenación por popularidad (ordering=-added o -rating), e incluye ya name, slug, released, background_image, rating, ratings_count, genres y platforms. Solo faltan description (overview) y developers/publishers (companies), que viven en el detalle. Por tanto sembrar 10.000 juegos cuesta 250 peticiones, no 10.000; overview y companies se completan mediante el patrón de fallback on-demand que ya existe en backlogg/games/service.py, la primera vez que alguien abre la ficha. RAWG no impone ventana de caducidad de caché en sus términos, a diferencia de TMDB. Atención: RAWG exige atribución con enlace activo DESDE CADA PÁGINA donde se usen sus datos, más estricto que TMDB. Y no tiene equivalente al game_type de IGDB, así que el category allowlist de la feature 65 (backlogg/games/constants.py) debe sustituirse por otro filtro de calidad — por ejemplo umbral de ratings_count o added.",
+      "title": "[APARCADA] Adaptador RAWG para games (sustituye IGDB) con siembra por listado y enriquecimiento perezoso",
+      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nIGDB es gratis solo para uso no comercial bajo el Twitch Developer Services Agreement, mismo problema que TMDB. RAWG permite uso comercial gratis hasta 20.000 peticiones/mes con menos de 100.000 usuarios activos o 500.000 páginas vistas. Verificado en la documentación de RAWG: el endpoint de listado GET /games devuelve 40 ítems por página (page_size máximo) con ordenación por popularidad (ordering=-added o -rating), e incluye ya name, slug, released, background_image, rating, ratings_count, genres y platforms. Solo faltan description (overview) y developers/publishers (companies), que viven en el detalle. Por tanto sembrar 10.000 juegos cuesta 250 peticiones, no 10.000; overview y companies se completan mediante el patrón de fallback on-demand que ya existe en backlogg/games/service.py, la primera vez que alguien abre la ficha. RAWG no impone ventana de caducidad de caché en sus términos, a diferencia de TMDB. Atención: RAWG exige atribución con enlace activo DESDE CADA PÁGINA donde se usen sus datos, más estricto que TMDB. Y no tiene equivalente al game_type de IGDB, así que el category allowlist de la feature 65 (backlogg/games/constants.py) debe sustituirse por otro filtro de calidad — por ejemplo umbral de ratings_count o added.",
       "depends_on": [],
       "acceptance": [
         "Siembra vía GET /games con page_size=40 y ordering por popularidad — 10.000 juegos en ~250 peticiones",
@@ -1496,7 +1496,7 @@
         "Tests con respuestas de RAWG mockeadas, incluido el camino de enriquecimiento perezoso",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "blocked"
     },
     {
       "id": 76,
@@ -1536,8 +1536,8 @@
     {
       "id": 78,
       "name": "source_migration_cutover",
-      "title": "Corte de migración: reingesta, external_ids, hosts de imágenes y atribución obligatoria",
-      "description": "Cierre del bloque de migración. Retira los adaptadores de TMDB e IGDB, reingesta el catálogo completo contra las nuevas fuentes, y cumple las obligaciones de atribución. Puntos concretos: los valores de source en external_ids pasan de TMDB/IGDB a THETVDB/RAWG; apps/web/next.config.ts tiene los hosts de imágenes cableados (image.tmdb.org, images.igdb.com) y hay que sustituirlos por los de TheTVDB y RAWG; TheTVDB exige atribución con enlace directo a TheTVDB.com visible para el usuario que ve los metadatos, y RAWG exige enlace activo desde cada página donde se usen sus datos — más estricto que la atribución en 'acerca de' que pedía TMDB. Verificar que ninguna referencia a TMDB o IGDB queda viva: hay 345 ocurrencias repartidas por 22 archivos de backend y 15 de frontend. Actualizar además render.yaml, .env.example y los secrets de GitHub Actions (TMDB_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET dejan de usarse).",
+      "title": "[APARCADA] Corte de migración: reingesta, external_ids, hosts de imágenes y atribución obligatoria",
+      "description": "APARCADA (2026-08-29). La migración de APIs se descarta: el coste de TMDB e IGDB es CONDICIONAL —solo aparece al monetizar— mientras que el de migrar es cierto e inmediato. Con 105 suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB; si el producto no llega ahí, nunca se pagan. Añadido: el tramo gratuito de TheTVDB (<50k$/año) NO es autoservicio — exige la modalidad 'Negotiated Contract', que entra en cola de revisión comercial. La investigación queda en docs/external-apis.md por si el coste de TMDB llega a pesar. El riesgo de migrar tarde (external_ids huérfanos) se neutraliza con la feature 84, que ancla cada ítem a su QID de Wikidata.\n\n--- Plan original ---\nCierre del bloque de migración. Retira los adaptadores de TMDB e IGDB, reingesta el catálogo completo contra las nuevas fuentes, y cumple las obligaciones de atribución. Puntos concretos: los valores de source en external_ids pasan de TMDB/IGDB a THETVDB/RAWG; apps/web/next.config.ts tiene los hosts de imágenes cableados (image.tmdb.org, images.igdb.com) y hay que sustituirlos por los de TheTVDB y RAWG; TheTVDB exige atribución con enlace directo a TheTVDB.com visible para el usuario que ve los metadatos, y RAWG exige enlace activo desde cada página donde se usen sus datos — más estricto que la atribución en 'acerca de' que pedía TMDB. Verificar que ninguna referencia a TMDB o IGDB queda viva: hay 345 ocurrencias repartidas por 22 archivos de backend y 15 de frontend. Actualizar además render.yaml, .env.example y los secrets de GitHub Actions (TMDB_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET dejan de usarse).",
       "depends_on": [
         72,
         73,
@@ -1554,19 +1554,17 @@
         "bruno/ sincronizado si cambia algún contrato",
         "bash init.sh en verde y pnpm typecheck en apps/web en verde"
       ],
-      "status": "pending"
+      "status": "blocked"
     },
     {
       "id": 79,
       "name": "credits_writer_role",
       "title": "Rol WRITER en credits de movies y series (puente libro-película por autoría)",
-      "description": "Primera capa del sistema de recomendación cross-type descrito en docs/recommendations-plan.md, y la de mejor relación coste/valor. La tabla credits ya es polimórfica sobre MOVIE, SERIES, BOOK y GAME contra la misma tabla people, pero los roles actuales no permiten el cruce más obvio: books guarda AUTHOR y movies/series solo DIRECTOR/ACTOR y CREATOR/ACTOR. Añadir el rol WRITER a movies y series produce el enlace libro→película por autor sin ninguna dependencia nueva: King, Gaiman, Tolkien, Sapkowski. Es el caso de uso cross-type más reconocible del producto. Bloqueado por el issue #15 (créditos vacíos en el 100% de series y el 75% de movies): sin ingesta de créditos funcionando, el rol no sirve de nada.",
-      "depends_on": [
-        78
-      ],
+      "description": "Primera capa del sistema de recomendación cross-type descrito en docs/recommendations-plan.md, y la de mejor relación coste/valor. La tabla credits ya es polimórfica sobre MOVIE, SERIES, BOOK y GAME contra la misma tabla people, pero los roles actuales no permiten el cruce más obvio: books guarda AUTHOR y movies/series solo DIRECTOR/ACTOR y CREATOR/ACTOR. Añadir el rol WRITER a movies y series produce el enlace libro→película por autor sin ninguna dependencia nueva: King, Gaiman, Tolkien, Sapkowski. Es el caso de uso cross-type más reconocible del producto. Se puebla desde el departamento 'Writing' de GET /movie/{id}/credits de TMDB, que ya se llama hoy para DIRECTOR y ACTOR — sin peticiones nuevas. BLOQUEADO DE FACTO por el issue #15 (créditos vacíos en el 100% de series y el 75% de movies): sin ingesta de créditos funcionando, el rol no sirve de nada.",
+      "depends_on": [],
       "acceptance": [
         "Rol WRITER admitido en credits para MOVIE y SERIES, documentado en docs/schema.md",
-        "Los adaptadores de TheTVDB pueblan WRITER desde /movies/{id}/extended y /series/{id}/extended",
+        "Poblado desde el departamento 'Writing' de los credits de TMDB ya solicitados — sin llamadas nuevas",
         "Consulta de repositorio que dado un person_id devuelve sus obras en TODOS los item_type",
         "Issue #15 verificado como resuelto para movies y series antes de cerrar esta feature",
         "Tests: persona con obra en dos tipos distintos aparece enlazada en ambos sentidos",
@@ -1577,17 +1575,16 @@
     {
       "id": 80,
       "name": "pgvector_item_embeddings",
-      "title": "pgvector + tabla item_embeddings + generación en el pipeline de ingesta",
-      "description": "Capa semántica de docs/recommendations-plan.md: el puente natural entre tipos, porque todo ítem tiene título, sinopsis y géneros sea del tipo que sea, y el coseno en un espacio común cruza tipos por construcción. Decisiones de arquitectura ya tomadas: (1) tabla item_embeddings(item_type, item_id, embedding) polimórfica, coherente con credits y external_ids, en lugar de una columna por tabla y cuatro índices HNSW; (2) la inferencia ocurre AL INGERIR, no al servir — el vector se genera en el job de sync/backfill que corre en GitHub Actions, y servir /similar es un lookup ANN contra un índice HNSW, sin latencia añadida ni dependencia externa en el camino de la petición; (3) embeddings vía API con httpx (ya es dependencia) y no modelo local, porque meter torch/sentence-transformers añadiría cientos de MB y presión de RAM en un VPS de 2 vCPU. Modelo multilingüe obligatorio: las sinopsis llegan en castellano y en inglés. Con dimensions=512 el almacenamiento baja a ~80 MB para 40.000 ítems, relevante porque Neon cobra 0,35 $/GB-mes. Infra: docker-compose.yml usa postgres:16, que NO trae la extensión — hay que pasar a pgvector/pgvector:pg16, igual en CI. Neon soporta CREATE EXTENSION vector con índice HNSW. Antes de implementar: revisar los términos de TheTVDB y RAWG en busca de cláusulas sobre IA/ML aplicadas a generar embeddings de sus sinopsis.",
-      "depends_on": [
-        78
-      ],
+      "title": "pgvector + item_embeddings (requiere resolver antes la cláusula de IA de TMDB)",
+      "description": "⚠️ BLOQUEANTE PREVIO A IMPLEMENTAR: los términos de TMDB listan 'entrenar sistemas de machine learning / IA con datos de TMDB' entre sus EJEMPLOS DE USO COMERCIAL, no como prohibición absoluta. Generar embeddings sobre sus sinopsis podría por tanto activar la licencia comercial de 149 $/mes ANTES de monetizar, que es justo lo que la decisión de quedarse en TMDB busca evitar. Hay que resolverlo antes de escribir código, por escrito con sales@themoviedb.org. Alternativas si la respuesta es negativa: embeber solo título y géneros en lugar de la sinopsis de TMDB, o limitar la capa semántica a books (Open Library es CC0) y games.\n\nCapa semántica de docs/recommendations-plan.md: el puente natural entre tipos, porque todo ítem tiene título, sinopsis y géneros sea del tipo que sea, y el coseno en un espacio común cruza tipos por construcción. Decisiones ya tomadas: (1) tabla item_embeddings(item_type, item_id, embedding) polimórfica, coherente con credits y external_ids, en lugar de una columna por tabla y cuatro índices HNSW; (2) la inferencia ocurre AL INGERIR, no al servir — el vector se genera en el job de sync/backfill que corre en GitHub Actions, y servir /similar es un lookup ANN contra un índice HNSW, sin latencia añadida ni dependencia externa en el camino de la petición; (3) embeddings vía API con httpx (ya es dependencia) y no modelo local, porque meter torch/sentence-transformers añadiría cientos de MB y presión de RAM en un VPS de 2 vCPU. Modelo multilingüe obligatorio: las sinopsis llegan en castellano y en inglés. Con dimensions=512 el almacenamiento baja a ~80 MB para 40.000 ítems, relevante porque Neon cobra 0,35 $/GB-mes. Infra: docker-compose.yml usa postgres:16, que NO trae la extensión — hay que pasar a pgvector/pgvector:pg16, igual en CI. Neon soporta CREATE EXTENSION vector con índice HNSW.",
+      "depends_on": [],
       "acceptance": [
+        "Respuesta por escrito de TMDB sobre si generar embeddings de sus sinopsis constituye uso comercial, documentada en docs/external-apis.md",
+        "Si la respuesta es negativa: alcance de la capa semántica reducido en consecuencia y documentado",
         "Extensión vector habilitada vía migración Alembic, con tabla item_embeddings polimórfica e índice HNSW",
         "docker-compose.yml y CI usan una imagen de Postgres con pgvector",
         "Los embeddings se generan en el pipeline de ingesta, nunca en el camino de la petición",
         "Modelo multilingüe, con la elección y su dimensionalidad justificadas y configurables por env",
-        "Cláusulas de IA/ML de TheTVDB y RAWG revisadas y el resultado documentado",
         "Coste estimado del embedding inicial y del incremental documentado en docs/operations.md",
         "Tests: generación, persistencia y consulta por similitud coseno",
         "bash init.sh en verde"
@@ -1599,9 +1596,7 @@
       "name": "themes_taxonomy",
       "title": "Taxonomía propia themes + theme_mappings (hub cross-type)",
       "description": "Hub del mapeo de géneros descrito en docs/recommendations-plan.md. Hoy hay cuatro tablas de géneros independientes (movie_genres, series_genres, book_genres, game_genres) con taxonomías de cuatro proveedores que no se hablan: no hay identificador común entre 'Fantasía' de Open Library y 'Fantasy' de RAWG. Mapear por pares serían seis combinaciones a mantener; con un hub cada taxonomía se mapea una sola vez y las seis salen gratis, y añadir un quinto tipo sería un mapeo más y no cinco. theme_mappings es muchos-a-muchos POR DISEÑO: las taxonomías reales traen géneros compuestos ('Action & Adventure', 'Sci-Fi & Fantasy') que se rompen en dos temas. El campo kind (THEME | FORMAT | MECHANIC) no es decorativo: de los 22 géneros de juego solo unos cinco cargan un tema transversal, y el resto (Platform, Puzzle, Racing, RTS, Point-and-click) son mecánicas sin equivalente en cine ni literatura. Marcarlas como MECHANIC evita que el ranker invente equivalencias falsas. Solo THEME cruza tipos; FORMAT entra con peso bajo; MECHANIC no cruza nunca.",
-      "depends_on": [
-        78
-      ],
+      "depends_on": [],
       "acceptance": [
         "Tablas themes(id, slug, name_es, name_en, kind) y theme_mappings(provider, item_type, source_genre, theme_id) vía migración Alembic",
         "theme_mappings soporta muchos-a-muchos en ambos sentidos",
@@ -1616,15 +1611,15 @@
     {
       "id": 82,
       "name": "themes_manual_mapping",
-      "title": "Mapeo manual de las taxonomías cerradas y de la cabeza de Open Library",
-      "description": "Poblado del hub de la feature 81. Las taxonomías de movies, series y games son cerradas y pequeñas — en el catálogo actual 19, 14 y 22 géneros respectivamente, unas 55 entradas en total — así que el mapeo manual es la herramienta correcta: determinista, auditable y corregible en una fila cuando alguien reporte un error. Books no se puede mapear a mano (510 etiquetas con 370 libros), pero sí su cabeza: las ~100 subjects más frecuentes cubren la mayor parte del volumen real. IMPORTANTE, secuenciación: los 19 géneros de movies y los 14 de series del catálogo actual son de TMDB, y TheTVDB tiene su propia taxonomía (unos 35 géneros según el enum de /movies/filter en su swagger); games hay que mapearlo contra RAWG y no contra IGDB. Hacer este mapeo antes de la migración significaría hacerlo dos veces. Paso previo barato para libros: normalizar (minúsculas, quitar el sufijo ' fiction', singularizar) colapsa una parte notable de los duplicados semánticos (Fantasy/Fantasy fiction, romance/Dark Romance, Biography/biographies) antes de mapear nada.",
+      "title": "Mapeo manual de las taxonomías cerradas (TMDB/IGDB) y de la cabeza de Open Library",
+      "description": "Poblado del hub de la feature 81. Las taxonomías de movies, series y games son cerradas y pequeñas — medido en el catálogo actual: 19 géneros de movies (TMDB), 14 de series (TMDB, con compuestos como 'Action & Adventure' y 'Sci-Fi & Fantasy' que se rompen en dos temas) y 22 de games (IGDB), unas 55 entradas en total. El mapeo manual es la herramienta correcta: determinista, auditable y corregible en una fila cuando alguien reporte un error. Books no se puede mapear a mano (510 etiquetas con solo 370 libros, 397 usadas una sola vez), pero sí su cabeza: las ~100 subjects más frecuentes cubren la mayor parte del volumen real. Paso previo barato para libros: normalizar (minúsculas, quitar el sufijo ' fiction', singularizar) colapsa una parte notable de los duplicados semánticos (Fantasy/Fantasy fiction, romance/Dark Romance, Biography/biographies) antes de mapear nada. NOTA: al descartarse la migración de APIs, este mapeo se hace contra las taxonomías de TMDB e IGDB, que ya están en la base de datos — no hay que esperar a nada.",
       "depends_on": [
         81,
         76
       ],
       "acceptance": [
-        "Taxonomías reales de TheTVDB y RAWG volcadas y versionadas en el repo",
-        "Mapeo completo de las taxonomías cerradas de movies, series y games contra themes",
+        "Mapeo completo de las taxonomías cerradas de movies, series y games (TMDB/IGDB) contra themes",
+        "Los géneros compuestos de TMDB ('Action & Adventure', 'Sci-Fi & Fantasy') mapean a dos themes cada uno",
         "Normalización de subjects de Open Library aplicada antes del mapeo",
         "Las ~100 subjects más frecuentes de books mapeadas a mano",
         "Las mecánicas de juego marcadas como MECHANIC, no forzadas a un tema transversal",
@@ -1655,12 +1650,12 @@
     {
       "id": 84,
       "name": "wikidata_adaptations",
-      "title": "Adaptaciones cross-media vía Wikidata (item_relations)",
-      "description": "Capa de conocimiento de docs/recommendations-plan.md: precisión quirúrgica y cobertura baja, pero es la que produce el momento 'no sabía que había libro'. Las propiedades P144 (based on) y P4969 (derivative work) enlazan explícitamente novela→película, película→videojuego y cómic→serie. Wikidata es CC0, coherente con el objetivo comercial de toda la migración, y guarda los identificadores externos de TheTVDB, Open Library y RAWG, de modo que el mapeo contra el catálogo es POR ID y no heurístico. Implementación: volcado SPARQL periódico (mensual basta, estas relaciones no cambian) hacia una tabla item_relations(from_type, from_id, to_type, to_id, relation, score, source) que la feature 88 reutiliza para la co-ocurrencia.",
-      "depends_on": [
-        78
-      ],
+      "title": "Adaptaciones cross-media vía Wikidata + ancla de QID (póliza de migración)",
+      "description": "Doble propósito. (1) CAPA DE CONOCIMIENTO de docs/recommendations-plan.md: precisión quirúrgica y cobertura baja, pero es la que produce el momento 'no sabía que había libro'. Las propiedades P144 (based on) y P4969 (derivative work) enlazan explícitamente novela→película, película→videojuego y cómic→serie. Wikidata es CC0 y guarda los identificadores externos de TMDB, Open Library e IGDB, de modo que el mapeo contra el catálogo es POR ID y no heurístico. (2) PÓLIZA DE MIGRACIÓN: al descartarse la migración de APIs (features 72-75, 78), el riesgo aplazado es que un cambio futuro de proveedor deje huérfano el historial de biblioteca de los usuarios. Persistir el QID de Wikidata de cada ítem en external_ids —tabla que ya soporta varios sources por ítem, UNIQUE (item_type, item_id, source)— da un ancla independiente del proveedor que convierte cualquier migración futura en un remapeo mecánico en lugar de una pérdida de datos. Es lo que hace segura la decisión de aplazar. Implementación: volcado SPARQL periódico (mensual basta, estas relaciones no cambian) hacia item_relations(from_type, from_id, to_type, to_id, relation, score, source), tabla que la feature 88 reutiliza para la co-ocurrencia.",
+      "depends_on": [],
       "acceptance": [
+        "QID de Wikidata persistido en external_ids con source='WIKIDATA' para todo ítem que lo tenga",
+        "Informe de cobertura del ancla por tipo de ítem tras la primera ejecución",
         "Tabla item_relations creada vía migración Alembic, con relation ADAPTATION/DERIVATIVE y source WIKIDATA",
         "Job de volcado SPARQL que mapea por identificador externo, no por título",
         "El job es idempotente y reanudable, y no borra relaciones de otras fuentes",
@@ -1673,8 +1668,8 @@
     {
       "id": 85,
       "name": "similar_semantic_rewrite",
-      "title": "GET /{tipo}/{slug}/similar reescrito sobre la capa semántica con cuota cross-type",
-      "description": "Sustituye la dependencia de GET /movie/{id}/similar de TMDB, que desaparece con la migración (TheTVDB no tiene endpoint de similares). Pasa a calcularse con el índice HNSW de la feature 80, igual que books y games ya se calculan localmente hoy. Regla no negociable: CUOTA CROSS-TYPE. De 10 resultados, al menos 3 de un tipo distinto al del ítem origen. Sin esa regla la capa semántica devuelve casi siempre el mismo tipo, porque los ítems de un mismo tipo comparten vocabulario ('temporada', 'jugador', 'novela') y eso domina el coseno. Añadir además diversificación: penalización por franquicia o autor repetido, para que diez resultados de la misma saga no cuenten como diez recomendaciones. Cada resultado lleva su reason legible.",
+      "title": "GET /{tipo}/{slug}/similar propio sobre la capa semántica, con cuota cross-type",
+      "description": "Al quedarse el proyecto en TMDB, esta feature deja de ser un SUSTITUTO obligatorio y pasa a ser una MEJORA — pero sigue mereciendo la pena: el /similar de TMDB solo cubre 2 de los 4 tipos y no cruza entre ellos, que es precisamente el diferencial del producto. Pasa a calcularse con el índice HNSW de la feature 80 para los cuatro tipos, igual que books y games ya se calculan localmente hoy. Regla no negociable: CUOTA CROSS-TYPE. De 10 resultados, al menos 3 de un tipo distinto al del ítem origen. Sin esa regla la capa semántica devuelve casi siempre el mismo tipo, porque los ítems de un mismo tipo comparten vocabulario ('temporada', 'jugador', 'novela') y eso domina el coseno. Añadir además diversificación: penalización por franquicia o autor repetido, para que diez resultados de la misma saga no cuenten como diez recomendaciones. Cada resultado lleva su reason legible.",
       "depends_on": [
         80
       ],
@@ -1694,10 +1689,8 @@
       "id": 86,
       "name": "trending_local",
       "title": "GET /trending propio sobre actividad local, con period real para los cuatro tipos",
-      "description": "Sustituye la dependencia de TMDB para movies y series. Trending es un problema distinto del de similitud y más simple: es actividad reciente en la propia plataforma — activity_events, library_entries y user_ratings de los últimos N días con decaimiento temporal. En cuanto haya usuarios, el trending propio es mejor y más honesto que el de TMDB, porque refleja a la comunidad del producto y no el tráfico global de otra web. Mientras no haya usuarios suficientes se cae a rating_external por recencia, exactamente lo que ya hacen hoy type=book y type=game (feature 68). Efecto colateral valioso: el parámetro period, que hoy se acepta y se ignora para libros y juegos, pasa a tener efecto real para los cuatro tipos.",
-      "depends_on": [
-        78
-      ],
+      "description": "Al quedarse el proyecto en TMDB, deja de ser un sustituto obligatorio y pasa a ser una mejora, pero de las valiosas. Trending es un problema distinto del de similitud y más simple: es actividad reciente en la propia plataforma — activity_events, library_entries y user_ratings de los últimos N días con decaimiento temporal. En cuanto haya usuarios, el trending propio es mejor y más honesto que el de TMDB, porque refleja a la comunidad del producto y no el tráfico global de otra web. Mientras no haya usuarios suficientes se cae a rating_external por recencia, exactamente lo que ya hacen hoy type=book y type=game (feature 68). Efecto colateral valioso: el parámetro period, que hoy se acepta y se ignora para libros y juegos, pasa a tener efecto real para los cuatro tipos.",
+      "depends_on": [],
       "acceptance": [
         "Trending calculado desde actividad local con decaimiento temporal, sin llamadas externas",
         "period tiene efecto real para los cuatro tipos",

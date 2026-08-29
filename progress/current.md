@@ -1,72 +1,68 @@
-# Sesión actual — Épico: migración de fuentes + recomendaciones cross-type
+# Sesión actual — Decisiones de 2026-08-29
 
-**Inicio:** 2026-08-29
-**Rama base del épico:** `epic/source-migration`
-**Snapshot previo:** tag `v0.1-tmdb-igdb` (main en 2dddc84, catálogo sobre TMDB + IGDB)
+## Decisión 1: no se migra de APIs. El proyecto se queda en TMDB, IGDB y Open Library
 
-## Por qué existe este épico
+Se evaluó a fondo migrar a TheTVDB (cine y series) y RAWG (juegos) para salir
+de las licencias no comerciales de TMDB e IGDB. **Se descarta.**
 
-TMDB prohíbe el uso comercial bajo su licencia gratuita (149 $/mes desde el
-primer euro de ingreso) e IGDB tiene la misma restricción bajo el Twitch
-Developer Services Agreement. TheTVDB es gratis por debajo de 50.000 $/año de
-facturación y RAWG permite uso comercial hasta 20.000 peticiones/mes.
+El razonamiento: el coste de TMDB es **condicional** —149 $/mes solo cuando
+monetizas, y solo monetizas si el producto funciona— mientras que el de migrar
+es **cierto e inmediato**: tres semanas de trabajo, datos de cine peores, un
+motor de siembra reconstruido desde cero y la pérdida de `/similar` y
+`/trending`. Sería pagar un coste seguro para cubrirse de un problema que solo
+aparece si hay éxito, gastando el recurso que hace falta para tenerlo. Con 105
+suscriptores a 19 €/año se cubren los 1.788 $/año de TMDB.
 
-Se migra **ahora, con el catálogo sin usuarios reales**, porque el coste de
-hacerlo después no es el código: es que cada entrada de biblioteca, rating y
-reseña cuelga de ítems identificados por `external_ids`, y re-sourcing con
-usuarios dentro dejaría huérfano el historial de quien tuviera ítems que la
-nueva fuente no cubre.
+Dato adicional que confirmó la decisión: el tramo gratuito de TheTVDB
+(<50.000 $/año) **no es autoservicio** — exige la modalidad "Negotiated
+Contract", que entra en cola de revisión comercial.
 
-Documentación de referencia, toda en el repo (una sesión nueva no necesita
-nada más):
+Features 72, 73, 74, 75 y 78 quedan en `blocked` con la razón escrita. La
+investigación se conserva íntegra en `docs/external-apis.md` por si el coste de
+TMDB llega a pesar.
 
-- `docs/external-apis.md` — referencia de TheTVDB v4 y RAWG (endpoints, auth,
-  límites, trampas), y los hallazgos sobre clasificación y calidad de Open
-  Library.
-- `docs/recommendations-plan.md` — diseño de las cuatro capas de similitud
-  cross-type y del ranker.
-- `.env.example` — `THETVDB_API_KEY` y `RAWG_API_KEY` con sus notas.
+**Riesgo aceptado y su mitigación**: migrar más tarde dejaría huérfano el
+historial de biblioteca de los usuarios, porque los ítems se identifican por
+`external_ids`. Se neutraliza con la **feature 84**, que persiste el QID de
+Wikidata de cada ítem — `external_ids` ya admite varios `source` por ítem. Con
+ese ancla, cualquier cambio futuro de fuente es un remapeo mecánico.
 
-Análisis estratégico completo (monetización, marketing e infraestructura), como
-artifact fuera del repo:
-https://claude.ai/code/artifact/43874a91-9655-40d6-88f9-a8082ad1dd08
+## Decisión 2: sin rama épica
 
-## Desviación deliberada del flujo de AGENTS.md §5
+Al no haber migración, no hay un bloque de features que se rompan mutuamente.
+Se vuelve al flujo normal de `AGENTS.md` §5: una rama por feature, PR a `main`.
 
-`AGENTS.md` manda abrir PR **a `main`** por cada feature. Durante este épico
-**no**: cada feature sale de `epic/source-migration` y vuelve a
-`epic/source-migration`. `main` se queda intacta sobre TMDB + IGDB, funcionando
-y verde, hasta que el épico esté completo y coherente — un `main` a medio
-migrar no arrancaría, porque las features 72-78 se rompen mutuamente hasta que
-el corte (78) está hecho.
+## Lo que sí queda planificado (12 features `pending`)
 
-El PR a `main` es **uno solo**, al final, de todo el épico.
-
-Todo lo demás del flujo se mantiene: rama por feature, implementer, reviewer,
-QA manual, y confirmación del usuario antes de commit/push/PR.
-
-## Bloqueantes antes de lanzar el primer implementer
-
-- [ ] **Clave de API de TheTVDB** — cuenta en thetvdb.com, modalidad
-      **licenciada** (no la "sostenida por usuarios", que obliga a que cada
-      usuario final pague 12 $/año). Gratis en el tramo <50.000 $/año.
-- [ ] **Clave de API de RAWG** — registro gratuito en rawg.io/apidocs.
-- [ ] Ambas en el `.env` del usuario (los agentes **no** tocan ese archivo) y
-      añadidas a `.env.example` como plantilla.
-
-## Orden de ejecución
-
-Las features 75, 76 y 77 (RAWG y libros) **no dependen** de TheTVDB: pueden
-avanzar en paralelo mientras se consigue la clave.
-
-| Bloque | Features | Nota |
+| Bloque | Features | Estado |
 |---|---|---|
-| A · Migración | 72 → 78 | 74 es la cara: TheTVDB no tiene feed de popularidad paginado |
-| B · Base de recomendación | 79 → 84 | 79 bloqueada por el issue #15 (créditos vacíos) |
-| C · Endpoints propios | 85 → 88 | 85 y 86 sustituyen a `/similar` y `/trending` de TMDB |
+| Calidad del catálogo de libros | 76, 77 | Listas para empezar, sin bloqueantes |
+| Base de recomendación cross-type | 79-84 | 79 bloqueada por issue #15; 80 bloqueada por consulta legal a TMDB |
+| Endpoints propios | 85-88 | Mejoras, no sustitutos |
 
-## Issues relacionados
+Diseño completo en `docs/recommendations-plan.md`. Hallazgos sobre Open Library
+(clasificación `ddc`/`lcc` y filtro de calidad de la siembra) en
+`docs/external-apis.md`.
 
-- **#15** (abierto, high): créditos vacíos en el 100 % de series y el 75 % de
-  movies. Bloquea la feature 79 y degrada el SEO de las fichas. La reingesta
-  de la feature 78 debería resolverlo de paso — verificarlo explícitamente.
+## ⚠️ Consulta legal pendiente antes de la feature 80
+
+Los términos de TMDB listan «entrenar sistemas de machine learning / IA con
+datos de TMDB» entre sus **ejemplos de uso comercial**. Generar embeddings
+sobre sus sinopsis podría por tanto activar la licencia de 149 $/mes **antes**
+de monetizar — justo lo que la decisión de quedarse buscaba evitar. Hay que
+preguntarlo por escrito a `sales@themoviedb.org` antes de escribir código.
+
+## La prioridad real no está en este backlog
+
+Con 70 features de backend y 63 de frontend cerradas, lo que separa al proyecto
+de producción es corto: páginas legales (aviso legal, privacidad, cookies —
+**no existe ninguna**), decidir nombre y comprar dominio, salir del free tier de
+Render (50 s de cold start), y el **issue #15** (créditos vacíos en el 100 % de
+series y el 75 % de movies).
+
+Las recomendaciones cross-type son el diferencial real del producto —ningún
+competidor cruza cuatro verticales— pero se construyen **después** de tener
+usuarios: un sistema de recomendación con cero usuarios no se puede evaluar.
+
+Análisis estratégico completo (monetización, marketing e infraestructura):
+https://claude.ai/code/artifact/43874a91-9655-40d6-88f9-a8082ad1dd08

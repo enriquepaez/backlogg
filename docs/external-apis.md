@@ -15,7 +15,25 @@
   - `GET /movie/{tmdb_id}/credits` — cast & crew for credits sync
   - `GET /person/{person_id}` — person detail
 
-- **Slug strategy**: TMDB provides its own `slug` field. Use it directly.
+- **⚠️ Slug strategy**: la afirmación histórica de este documento («TMDB
+  provides its own `slug` field, use it directly») **es incorrecta**. El
+  adaptador genera los slugs localmente con `_slugify(título)-año`
+  (`backlogg/movies/adapters/tmdb.py`). Mantenerlo así: es lo que permitiría
+  que las URLs sobrevivieran a un cambio de fuente sin perder posicionamiento.
+- **⚠️ Uso comercial**: la licencia gratuita es solo para uso **no comercial**.
+  Sus términos cuentan como comerciales, entre otros, cobrar a usuarios, poner
+  publicidad, «operar sitios web que generan ingresos recomendando contenido» y
+  **«entrenar sistemas de machine learning / IA con datos de TMDB»**. Tarifa
+  comercial reportada: 149 $/mes por debajo de 1 M$ de facturación y 2 M de
+  usuarios. Contacto: `sales@themoviedb.org`.
+  - Consecuencia práctica para la **feature 80** (embeddings): generar
+    embeddings sobre las sinopsis de TMDB podría caer bajo esa cláusula y
+    activar la licencia comercial **antes** de monetizar. Hay que preguntarlo
+    por escrito antes de implementar.
+- **⚠️ Caché**: prohibido cachear datos de TMDB más de **6 meses**. Con
+  `SYNC_SLICE_SIZE=100` sobre 10.000 ítems el ciclo completo son 100 días —
+  dentro de la ventana, pero sin margen. Subir `SEED_TOP_N_*` sin subir el
+  slice sacaría al proyecto de los términos.
 - **external_ids source value**: `TMDB`
 
 ## Open Library (Books)
@@ -101,7 +119,7 @@
   | Fuente | Por qué se descarta |
   |---|---|
   | Google Books | 1.000 peticiones/día: un backfill de 10.000 libros son 10 días de cuota. Sus términos advierten de que no es un sustituto de servicios comerciales |
-  | ISBNdb | 15–300 $/mes, y es **centrado en ISBN/ediciones**, no en obras: choca con el modelo work-level del catálogo. Reintroduce una dependencia de pago justo cuando la migración busca lo contrario |
+  | ISBNdb | 15–300 $/mes, y es **centrado en ISBN/ediciones**, no en obras: choca con el modelo work-level del catálogo. Reintroduce una dependencia de pago recurrente sin resolver ningún problema que Open Library no resuelva ya |
   | Hardcover | GraphQL gratis, pero es **un competidor directo** (tracker de libros) y parte de sus datos vienen de Open Library y Google Books. Frágil como backbone |
   | BookBrainz | CC0 y bien modelado, pero cobertura demasiado pequeña |
   | Goodreads | API retirada en 2020 |
@@ -173,11 +191,20 @@
   (feature 66), over items already persisted. No IGDB call happens for this
   endpoint, and `period` is accepted but has no effect.
 
-## TheTVDB v4 (Movies & Series) — DESTINO de la migración, features 72-74
+## TheTVDB v4 — EVALUADA Y APARCADA (2026-08-29)
 
-> Aún **no implementado**. Sustituye a TMDB. Referencia recogida el 2026-08-29
+> **No se usa.** Se evaluó como sustituto de TMDB y se descartó; features 72-74
+> marcadas como `blocked`. Esta sección se conserva porque la investigación
+> sigue siendo válida si el coste de TMDB llega a pesar. Referencia recogida
 > del swagger oficial (`thetvdb/v4-api`, `docs/swagger.yml`) y de
 > `thetvdb.com/api-information`.
+>
+> **Por qué se descartó**: (1) el coste de TMDB es *condicional* —solo aparece
+> al monetizar— mientras que el de migrar es cierto e inmediato: tres semanas
+> de trabajo, datos de cine peores y un motor de siembra reconstruido; (2) el
+> tramo gratuito (<50.000 $/año) **no es autoservicio**: exige la modalidad
+> "Negotiated Contract", que entra en cola de revisión comercial, así que no es
+> un tier sobre el que se pueda planificar.
 
 - **Por qué**: TMDB prohíbe el uso comercial bajo licencia gratuita
   (149 $/mes desde el primer euro). TheTVDB escala por facturación propia:
@@ -223,10 +250,15 @@
   fuente sin perder posicionamiento.
 - **external_ids source value**: `THETVDB`
 
-## RAWG (Games) — DESTINO de la migración, feature 75
+## RAWG — EVALUADA Y APARCADA (2026-08-29)
 
-> Aún **no implementado**. Sustituye a IGDB, que solo es gratis para uso no
-> comercial bajo el Twitch Developer Services Agreement.
+> **No se usa.** Se evaluó como sustituto de IGDB y se descartó por coherencia
+> con la decisión sobre TMDB: el coste de IGDB también es condicional, y migrar
+> antes de tener usuarios gasta el recurso escaso (tiempo hasta el lanzamiento)
+> para cubrir un problema que solo existe si el producto funciona. Feature 75
+> marcada como `blocked`. La investigación se conserva: RAWG es la salida
+> natural si los términos comerciales de IGDB —que no publican precio— acaban
+> siendo un problema.
 
 - **Base URL**: `https://api.rawg.io/api` · **Auth**: `key` como query param.
 - **Cuota gratuita con uso comercial permitido**: 20.000 peticiones/mes,
