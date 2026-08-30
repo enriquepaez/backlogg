@@ -54,24 +54,34 @@
   - `sort=rating` — surfaces obscure books with very few ratings
   - `sort=edition_count` — does not exist (returns HTTP 500)
 
-  Request the field set `key,title,author_name,first_publish_year,cover_i,subject,isbn`
-  (the shape `book_to_dict` consumes).
-- **Clasificación y calidad de catálogo (investigación 2026-08-29)**: los dos
+  Request the field set
+  `key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet`
+  (the shape `book_to_dict` consumes — constant `_OL_SEARCH_FIELDS` in
+  `backlogg/books/adapters/open_library.py`). `subject` se eliminó en la
+  feature 72: solo se consumía para derivar géneros, y eso ahora sale de
+  `lcc`/`ddc`.
+
+  ⚠️ `sync_books` (`backlogg/scheduler/jobs.py`) **no** pasa el doc crudo al
+  adaptador: reconstruye a mano un `search_doc` reducido campo a campo. Todo
+  campo nuevo del field set hay que copiarlo también ahí o el job nocturno lo
+  pierde en silencio mientras la búsqueda on-demand sigue funcionando (fue
+  exactamente el bug del issue #17 con `isbn`).
+- **Clasificación y calidad de catálogo (investigación 2026-08-29, clasificación implementada en la feature 72)**: los dos
   problemas observados en producción —géneros basura y catálogo basura— **no
   requieren cambiar de proveedor**. Ambos se resuelven dentro de Open Library.
 
-  **Géneros.** El adaptador pide hoy solo `subject`, que es el peor campo
-  disponible: una folksonomía sin control, con **media de 40 subjects por
-  obra** (de ahí las 510 etiquetas distintas con solo 370 libros ingeridos, 397
-  de ellas usadas una sola vez). `search.json` expone además tres campos que el
-  adaptador no pide. Cobertura medida sobre las 200 obras más estanteadas:
+  **Géneros.** El adaptador pedía solo `subject`, el peor campo disponible:
+  una folksonomía sin control, con **media de 40 subjects por obra** (de ahí
+  las 510 etiquetas distintas con solo 370 libros ingeridos, 397 de ellas
+  usadas una sola vez). `search.json` expone además tres campos que no se
+  pedían. Cobertura medida sobre las 200 obras más estanteadas:
 
   | Campo | Cobertura | Naturaleza |
   |---|---|---|
   | `lcc` (Library of Congress) | 89 % | Taxonomía controlada y jerárquica |
   | `ddc` (Dewey Decimal) | 78 % | Taxonomía controlada y jerárquica |
   | `subject_facet` | 99 % | Más limpio que `subject`, aún folksonómico |
-  | `subject` (el que se usa hoy) | 99 % | Sin control, ~40 por obra |
+  | `subject` (el que se usaba antes de la feature 72) | 99 % | Sin control, ~40 por obra |
 
   Subjects en formato BISAC (`BUSINESS & ECONOMICS / ...`): solo **17 %** — no
   sirven como taxonomía de respaldo.
@@ -84,12 +94,107 @@
     psicología vs historia). Excelente para descartar ruido y para filtrar.
   - Género de cara al lector (fantasía, terror, romance) → `subject_facet`
     normalizado + mapeo manual de la cabeza + embeddings para la cola
-    (ver `docs/recommendations-plan.md`).
+    (ver `docs/recommendations-plan.md`, features 76-78).
 
-  Adoptar `ddc`/`lcc` permite además **eliminar `_is_clean_genre`**
-  (`backlogg/books/adapters/open_library.py`), la heurística de longitud,
-  paréntesis y comas que hoy intenta arreglar aguas abajo un problema que se
+  **Decisión implementada (feature 72).** `book_to_dict` deriva los géneros con
+  `_derive_genres`, que emite **solo** etiquetas de un vocabulario controlado y
+  cerrado (`_CONTROLLED_GENRES`, ~32 entradas: Fiction, Poetry, Drama, Essays,
+  Literature, Children's & YA, Philosophy, Psychology, Self-Help, Religion,
+  History, Biography, Geography & Travel, Social Sciences, Economics &
+  Business, Political Science, Law, Education, Music, Art, Language, Science,
+  Mathematics, Computing, Medicine & Health, Technology, Agriculture, Cooking,
+  Military & Naval, Sports & Recreation, Reference, Library & Information
+  Science). Precedencia — **`lcc` decide la disciplina y `ddc` es su
+  respaldo**, con un único refinamiento acotado dentro de literatura:
+
+  1. **`lcc`** (primaria, 89 %). Open Library la devuelve normalizada y
+     ordenable (`"PS-3568.00000000.O243 D3 1998"`). Se extrae la clase de
+     letras inicial y se busca de más específico a menos (3 → 2 → 1 letra), así
+     que `BF` → Psychology gana a `B` → Philosophy, `HD` → Economics & Business
+     a `H` → Social Sciences, y `PZ` a `P` → Language.
+
+     ⚠️ **`lcc` es multivalor y hay que quedarse con la clase dominante, no
+     agregarlas todas.** Medido sobre las 100 obras más estanteadas: 87 traen
+     `lcc` y **45 de esas 87 (51 %) traen más de una clase distinta** — una obra
+     popular acumula la signatura de cada edición catalogada. Agregar produce
+     etiquetas falsas a partir de ediciones marginales: *L'étranger* trae 40
+     entradas `PQ` (literatura francesa) y 2 `PZ` de una edición escolar, y esas
+     dos bastaban para etiquetar a Camus como infantil. Se cuenta la frecuencia
+     de cada clase y gana la más frecuente; **el desempate es la primera
+     aparición en la lista original**, nunca el orden de un `set` ni un
+     `most_common` sin desempate, que no son estables entre ejecuciones. Las
+     entradas no parseables o de clase no mapeada **no votan**, así que una
+     clase desconocida no puede ganar y dejar el libro sin géneros: basta con
+     que **una** entrada mapee para que gane, aunque sea minoritaria
+     (`['YY','YY','YY','PS']` → `PS`), y solo se cae a `ddc` cuando **ninguna**
+     mapea. En la práctica es inalcanzable sin datos corruptos: todas las letras
+     de clase LCC reales están mapeadas (las que faltan —I, O, W, X, Y— no
+     existen en LCC).
+
+     ⚠️ **`PZ` no es "infantil": depende del número.** `PZ1`-`PZ4` es *ficción
+     en inglés para adultos* (una práctica antigua de LCC); lo juvenil empieza
+     en `PZ5` (*juvenile belles lettres*), y `PZ7` es ficción juvenil. Open
+     Library pone el número en la segunda posición: `"PZ-0004…"` → `PZ4` →
+     solo Fiction (*The Shining*, *L'étranger*); `"PZ-0007…"` → `PZ7` → Fiction
+     + Children's & YA (*Harry Potter*, *The Fault in Our Stars*);
+     `"PZ-0010.731…"` → `PZ10.3`, también juvenil. Sin número parseable se emite
+     solo Fiction, que es lo único que comparte toda la clase.
+  2. **`ddc`** (respaldo, 78 %). Se dispara cuando no hay `lcc`, y también
+     cuando la hay pero su clase no está mapeada o no es parseable (`YY-0001`
+     cae aquí). Se normaliza descartando todo carácter no numérico —así
+     `813/.54`, `j813.54` y `813.54 B` dan lo mismo— y se mapea por centenas, con refinamientos que si no se perderían
+     dentro de su clase (`004`-`006` Computing, `15x` Psychology, `158`
+     Self-Help, `641` Cooking, `78x` Music, `796` Sports, `91x` Geography &
+     Travel, `92`/`920` Biography — `929` queda excluido, es
+     genealogía y heráldica, no biografía). Dentro de `8xx` el **tercer dígito es la
+     forma literaria** y sí da señal de lector: `8_1` Poetry, `8_2` Drama,
+     `8_3` Fiction, `8_4` Essays (más Literature). También se aceptan las
+     notaciones entre corchetes `[Fic]` y `[E]`.
+  3. **`subject_facet`** (99 %, solo si no hay ninguna de las dos, ~10 % de los
+     casos). **No se acepta en crudo**: se compara por igualdad exacta
+     (case-insensitive, espacios colapsados) contra una tabla de sinónimos que
+     resuelve al mismo vocabulario. Lo que no casa se descarta.
+
+  **El refinamiento de forma literaria.** Cuando —y solo cuando— la clase LCC
+  resuelve a `literature`, se lee **además** el dígito de forma del `ddc` y se
+  antepone: `PS` + `813.54` → Fiction + Literature, `PS` + `814.54` → Essays +
+  Literature. No es una mezcla arbitraria de las dos taxonomías, sino el único
+  punto donde son complementarias en vez de redundantes: LCC clasifica la
+  literatura por **procedencia y lengua** (`PR` inglesa, `PS` estadounidense) y
+  **nunca codifica la forma**, mientras que DDC la codifica exactamente en el
+  tercer dígito de `8xx`. La disciplina la sigue decidiendo `lcc`.
+
+  Sin este refinamiento, una novela, un poemario y un libro de ensayos bajo
+  `PS` saldrían los tres como "Literature" a secas, y el eje ficción-vs-ensayo
+  —que es lo que esta clasificación existe para dar— solo se entregaría para el
+  ~11 % de libros sin `lcc`. Si el registro no trae `ddc`, o su dígito de forma
+  no es uno de los cuatro, el libro se queda en "Literature": es la respuesta
+  honesta cuando no hay señal de forma.
+
+  Fuera de las clases de literatura **no se refina nunca**: ahí ambas
+  taxonomías clasifican por disciplina y solo producirían etiquetas casi
+  duplicadas. `QA` + `813.54` sale como Mathematics, no como ficción.
+
+  Cada fuente se filtra contra el vocabulario **antes** de comprobar si está
+  vacía, para que una entrada errónea en una tabla de mapeo degrade a la fuente
+  siguiente en vez de dejar el libro sin géneros en silencio. Se mantiene el
+  tope de 5 géneros por libro y la deduplicación por slug; en la práctica salen
+  1-3.
+
+  **Qué pasa con el resto.** Un libro sin `lcc`, sin `ddc` y con
+  `subject_facet` que no casa con nada **se queda sin géneros**. Es un
+  resultado aceptado y explícito: mucho mejor que persistir "Triathlon".
+
+  Adoptar `ddc`/`lcc` permitió además **eliminar `_is_clean_genre`**, su regex
+  `_CLEAN_SUBJECT_RE` y `_GENRE_ALLOWLIST`
+  (`backlogg/books/adapters/open_library.py`): la heurística de longitud,
+  paréntesis y comas que intentaba arreglar aguas abajo un problema que se
   resuelve en el origen eligiendo otro campo.
+
+  Las etiquetas basura ya persistidas se purgaron con la migración
+  `0033_books_controlled_genres_purge`, que preserva los libros con `genres`
+  en `locked_fields` (ediciones manuales de admin, feature 49). Los géneros son
+  datos derivados: se repueblan con `uv run python scripts/backfill_sync.py book`.
 
   **Calidad del catálogo.** `q=*:*&sort=readinglog` devuelve lo que más gente
   estantea en Open Library, que es autoayuda y BookTok — *Atomic Habits*,

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import unicodedata
+from collections import Counter
 from datetime import UTC, date, datetime
 
 import httpx
@@ -13,6 +14,14 @@ _OL_HEADERS = {
     "User-Agent": "backlogg/1.0 (https://github.com/enriquepaez/backlogg; contact@backlogg.app)",
 }
 _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
+# Field set requested from search.json. ``subject`` was dropped in feature 72:
+# it was only ever consumed to derive genres, and those now come from the
+# controlled ``lcc``/``ddc`` classifications with ``subject_facet`` as the
+# filtered fallback (see _derive_genres). This is the shape book_to_dict
+# consumes — keep it in sync with the hand-built search_doc in
+# backlogg/scheduler/jobs.py::sync_books.
+_OL_SEARCH_FIELDS = "key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet"
 
 # Retry policy for the popular-books search: OL's Solr backend answers the
 # readinglog-sorted match-all query with intermittent 500s, and Issue #9
@@ -45,76 +54,604 @@ _ol_search_retry = retry(
     reraise=True,
 )
 
-_GENRE_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "fiction",
-        "nonfiction",
-        "non-fiction",
-        "science fiction",
-        "fantasy",
-        "mystery",
-        "thriller",
-        "horror",
-        "romance",
-        "historical fiction",
-        "biography",
-        "autobiography",
-        "history",
-        "science",
-        "philosophy",
-        "poetry",
-        "drama",
-        "adventure",
-        "crime",
-        "children's",
-        "young adult",
-        "graphic novel",
-        "short stories",
-        "essays",
-        "self-help",
-        "business",
-        "technology",
-        "travel",
-        "cooking",
-        "art",
-        "music",
-        "sports",
-        "religion",
-        "classics",
-        "literary fiction",
-        "dystopian",
-        "paranormal",
-        "suspense",
-        "satire",
-        "memoir",
-        "comics",
-    }
-)
+# ── Book classification (feature 72) ────────────────────────────────────────
+#
+# Genres used to be derived from Open Library's ``subject`` field, an
+# uncontrolled folksonomy averaging ~40 tags per work: 370 ingested books
+# produced 510 distinct labels, 397 of them used exactly once ("Triathlon",
+# "Concentration camps", "Country homes"). They are now derived from the two
+# controlled, hierarchical classifications ``search.json`` already exposes —
+# LCC (Library of Congress, 89% coverage) and DDC (Dewey, 78%) — with the
+# cleaner-but-still-folksonomic ``subject_facet`` (99%) used only as a net,
+# and only when it matches this same controlled vocabulary.
+
+# The closed, user-facing vocabulary: slug -> display name. Nothing outside
+# this table can ever reach ``book_genres``. Kept small and auditable on
+# purpose; it is the coarse axis (fiction vs essay, literature vs psychology
+# vs history), not reader-facing genre (fantasy/horror/romance), which DDC and
+# LCC structurally cannot express — see the module docstring of
+# ``_derive_genres`` and features 76-78.
+_CONTROLLED_GENRES: dict[str, str] = {
+    "fiction": "Fiction",
+    "poetry": "Poetry",
+    "drama": "Drama",
+    "essays": "Essays",
+    "literature": "Literature",
+    "childrens-young-adult": "Children's & Young Adult",
+    "philosophy": "Philosophy",
+    "psychology": "Psychology",
+    "self-help": "Self-Help",
+    "religion": "Religion",
+    "history": "History",
+    "biography": "Biography",
+    "geography-travel": "Geography & Travel",
+    "social-sciences": "Social Sciences",
+    "economics-business": "Economics & Business",
+    "political-science": "Political Science",
+    "law": "Law",
+    "education": "Education",
+    "music": "Music",
+    "art": "Art",
+    "language": "Language",
+    "science": "Science",
+    "mathematics": "Mathematics",
+    "computing": "Computing",
+    "medicine-health": "Medicine & Health",
+    "technology": "Technology",
+    "agriculture": "Agriculture",
+    "cooking": "Cooking",
+    "military-naval": "Military & Naval",
+    "sports-recreation": "Sports & Recreation",
+    "reference": "Reference",
+    "library-information-science": "Library & Information Science",
+}
+
+# LCC letter class -> vocabulary slugs. Looked up most-specific-first (3, then
+# 2, then 1 letter), so "PZ" wins over "P" and "P" catches PA..PT.
+_LCC_CLASS_GENRES: dict[str, tuple[str, ...]] = {
+    # A — general works, encyclopaedias, indexes
+    "A": ("reference",),
+    # B — philosophy, psychology, religion
+    "B": ("philosophy",),
+    "BC": ("philosophy",),  # logic
+    "BD": ("philosophy",),  # speculative philosophy
+    "BF": ("psychology",),
+    "BH": ("philosophy",),  # aesthetics
+    "BJ": ("philosophy",),  # ethics
+    "BL": ("religion",),
+    "BM": ("religion",),
+    "BP": ("religion",),
+    "BQ": ("religion",),
+    "BR": ("religion",),
+    "BS": ("religion",),
+    "BT": ("religion",),
+    "BV": ("religion",),
+    "BX": ("religion",),
+    # C — auxiliary sciences of history (CT is collective biography)
+    "C": ("history",),
+    "CT": ("biography",),
+    # D/E/F — world history and history of the Americas
+    "D": ("history",),
+    "E": ("history",),
+    "F": ("history",),
+    # G — geography, anthropology, recreation
+    "G": ("geography-travel",),
+    "GN": ("social-sciences",),  # anthropology
+    "GR": ("social-sciences",),  # folklore
+    "GV": ("sports-recreation",),
+    # H — social sciences; HB..HJ is the economics/business run
+    "H": ("social-sciences",),
+    "HB": ("economics-business",),
+    "HC": ("economics-business",),
+    "HD": ("economics-business",),
+    "HE": ("economics-business",),
+    "HF": ("economics-business",),
+    "HG": ("economics-business",),
+    "HJ": ("economics-business",),
+    # J/K/L — political science, law, education
+    "J": ("political-science",),
+    "K": ("law",),
+    "L": ("education",),
+    # M/N — music and fine arts
+    "M": ("music",),
+    "N": ("art",),
+    # P — language and literature. PB..PM are languages, PA/PG..PT are
+    # literatures, PZ is fiction and juvenile belles lettres — which of the
+    # two depends on the class *number*, see _LCC_PZ_SUBDIVISION_GENRES.
+    "P": ("language",),
+    "PA": ("literature",),
+    "PB": ("language",),
+    "PC": ("language",),
+    "PD": ("language",),
+    "PE": ("language",),
+    "PF": ("language",),
+    "PG": ("literature",),
+    "PH": ("language",),
+    "PJ": ("literature",),
+    "PK": ("literature",),
+    "PL": ("literature",),
+    "PM": ("language",),
+    "PN": ("literature",),
+    "PQ": ("literature",),
+    "PR": ("literature",),
+    "PS": ("literature",),
+    "PT": ("literature",),
+    # PZ is listed here only so the most-specific-first prefix lookup stops
+    # at it instead of falling back to "P" (language). Its value is the one
+    # thing the whole class shares; a real PZ entry is resolved by
+    # _lcc_entry_key into a _LCC_PZ_SUBDIVISION_GENRES key instead.
+    "PZ": ("fiction",),
+    # Q — science; QA is mathematics
+    "Q": ("science",),
+    "QA": ("mathematics",),
+    # R/S/T — medicine, agriculture, technology (TX is home economics/cookery)
+    "R": ("medicine-health",),
+    "S": ("agriculture",),
+    "T": ("technology",),
+    "TX": ("cooking",),
+    # U/V — military and naval science
+    "U": ("military-naval",),
+    "V": ("military-naval",),
+    # Z — bibliography and library science
+    "Z": ("library-information-science",),
+}
+
+# PZ subdivision -> vocabulary slugs. Unlike every other LCC class, PZ's
+# number changes what the class *means*:
+#
+#   PZ1-PZ4     fiction in English for **adults** — an older LCC practice that
+#               is still all over Open Library's records. The Shining carries
+#               "PZ-0004...", L'étranger "PZ-0003...".
+#   PZ5-PZ10.3  juvenile belles lettres, i.e. genuinely children's/YA. PZ7 is
+#               juvenile fiction (Harry Potter, The Fault in Our Stars), and
+#               PZ10.3 — normalized by OL as "PZ-0010.73100000" — is juvenile
+#               non-fiction. Both sit above the threshold.
+#
+# Mapping the whole class to children's is what put The Shining, L'étranger
+# and Fifty Shades of Grey under "Children's & Young Adult" in the dev
+# re-ingest (42 of 96 books).
+_LCC_PZ_ADULT_KEY = "PZ1-4"
+_LCC_PZ_JUVENILE_KEY = "PZ5+"
+_LCC_PZ_JUVENILE_MIN = 5.0
+_LCC_PZ_SUBDIVISION_GENRES: dict[str, tuple[str, ...]] = {
+    _LCC_PZ_ADULT_KEY: ("fiction",),
+    _LCC_PZ_JUVENILE_KEY: ("fiction", "childrens-young-adult"),
+}
+
+# DDC numeric prefix -> vocabulary slugs, longest prefix first. The 8xx
+# literature class is handled separately by ``_ddc_literature_genres`` because
+# there the *third* digit encodes literary form, not subject.
+_DDC_PREFIX_GENRES: dict[str, tuple[str, ...]] = {
+    # Refinements that would otherwise be lost inside their century
+    "004": ("computing",),
+    "005": ("computing",),
+    "006": ("computing",),
+    "158": ("self-help",),  # applied psychology / self-help
+    "641": ("cooking",),
+    "796": ("sports-recreation",),
+    "920": ("biography",),
+    "929": ("history",),  # genealogy, names, heraldry — not biography
+    "92": ("biography",),  # the abridged 2-digit biography notation
+    "15": ("psychology",),  # 150-159, the psychology half of the 1xx class
+    "78": ("music",),
+    "91": ("geography-travel",),  # 910-919 geography and travel
+    # Centuries
+    "0": ("reference",),
+    "1": ("philosophy",),
+    "2": ("religion",),
+    "3": ("social-sciences",),
+    "4": ("language",),
+    "5": ("science",),
+    "6": ("technology",),
+    "7": ("art",),
+    "9": ("history",),
+}
+
+# 8xx: the digit after the language digit is the literary *form*, and unlike
+# the rest of DDC it maps onto something a reader recognises. It is the one
+# signal LCC cannot carry, so it also refines the LCC literature classes —
+# see ``_ddc_literary_form_slugs`` and ``_derive_genres``.
+_DDC_LITERARY_FORM_GENRES: dict[str, tuple[str, ...]] = {
+    "1": ("poetry", "literature"),
+    "2": ("drama", "literature"),
+    "3": ("fiction", "literature"),
+    "4": ("essays", "literature"),
+}
+
+# Bracketed DDC notations Open Library returns for fiction/easy readers.
+_DDC_BRACKET_GENRES: dict[str, tuple[str, ...]] = {
+    "fic": ("fiction",),
+    "e": ("childrens-young-adult",),
+}
+
+# ``subject_facet`` values accepted as classification, exact match after
+# case-folding and whitespace collapsing. Deliberately an exact-match table
+# and not a substring/heuristic filter: this field is still a folksonomy, and
+# the whole point of feature 72 is that nothing uncontrolled gets persisted.
+# A book whose facets match nothing here simply ends up with no genres.
+_SUBJECT_FACET_GENRES: dict[str, tuple[str, ...]] = {
+    "fiction": ("fiction",),
+    "novel": ("fiction",),
+    "novels": ("fiction",),
+    "literary fiction": ("fiction", "literature"),
+    "juvenile fiction": ("fiction", "childrens-young-adult"),
+    "young adult fiction": ("fiction", "childrens-young-adult"),
+    "children's fiction": ("fiction", "childrens-young-adult"),
+    "children's literature": ("childrens-young-adult",),
+    "children's stories": ("childrens-young-adult",),
+    "juvenile literature": ("childrens-young-adult",),
+    "literature": ("literature",),
+    "poetry": ("poetry",),
+    "drama": ("drama",),
+    "plays": ("drama",),
+    "essays": ("essays",),
+    "biography": ("biography",),
+    "biographies": ("biography",),
+    "autobiography": ("biography",),
+    "memoirs": ("biography",),
+    "history": ("history",),
+    "military history": ("history", "military-naval"),
+    "philosophy": ("philosophy",),
+    "psychology": ("psychology",),
+    "self-help": ("self-help",),
+    "self-help techniques": ("self-help",),
+    "conduct of life": ("self-help",),
+    "religion": ("religion",),
+    "christianity": ("religion",),
+    "spirituality": ("religion",),
+    "science": ("science",),
+    "nature": ("science",),
+    "mathematics": ("mathematics",),
+    "computers": ("computing",),
+    "computer science": ("computing",),
+    "programming": ("computing",),
+    "technology": ("technology",),
+    "medicine": ("medicine-health",),
+    "health": ("medicine-health",),
+    "health & fitness": ("medicine-health",),
+    "business": ("economics-business",),
+    "business & economics": ("economics-business",),
+    "economics": ("economics-business",),
+    "management": ("economics-business",),
+    "finance": ("economics-business",),
+    "political science": ("political-science",),
+    "politics": ("political-science",),
+    "law": ("law",),
+    "education": ("education",),
+    "music": ("music",),
+    "art": ("art",),
+    "language": ("language",),
+    "languages": ("language",),
+    "social science": ("social-sciences",),
+    "social sciences": ("social-sciences",),
+    "sociology": ("social-sciences",),
+    "cooking": ("cooking",),
+    "cookbooks": ("cooking",),
+    "cookery": ("cooking",),
+    "travel": ("geography-travel",),
+    "voyages and travels": ("geography-travel",),
+    "description and travel": ("geography-travel",),
+    "geography": ("geography-travel",),
+    "sports": ("sports-recreation",),
+    "sports & recreation": ("sports-recreation",),
+    "games": ("sports-recreation",),
+    "agriculture": ("agriculture",),
+    "reference": ("reference",),
+}
+
+# Cap kept from the previous implementation. Since the lcc path now emits
+# only the dominant class (at most literary form + class = 3 slugs), the cap
+# is only ever reachable through the multivalued ddc path.
+_MAX_GENRES = 5
+
+# One normalized LCC call number: the letter class plus the zero-padded,
+# possibly decimal class number Open Library puts in the second position.
+# "PZ-0007.00000000.R79835 Har 1998" -> ("PZ", "0007.00000000").
+_LCC_ENTRY_RE = re.compile(r"^([A-Z]{1,3})-?\s*(\d+(?:\.\d+)?)?")
+_DDC_BRACKET_RE = re.compile(r"^\[([A-Za-z]+)\]")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
-_CLEAN_SUBJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9'\-]*(?:\s[A-Za-z][A-Za-z0-9'\-]*)?$")
+def _as_str_list(value: object) -> list[str]:
+    """Coerce an Open Library search-doc field into a list of strings.
 
-
-def _is_clean_genre(subject: str) -> bool:
-    """Return True if *subject* is suitable as a user-facing genre label.
-
-    A subject is accepted when it is either:
-    - present in ``_GENRE_ALLOWLIST`` (case-insensitive), or
-    - at most two ASCII words (no parentheses, no comma, ≤ 30 chars).
-
-    Multi-word bibliographic tags like "Lectures et morceaux choisis" or
-    long phrases with parentheses/commas are rejected.
+    ``search.json`` returns ``ddc``/``lcc``/``subject_facet`` as lists, but a
+    single string (or a missing/None value, or a list with non-string junk in
+    it) must never raise here — classification is best-effort metadata.
     """
-    lower = subject.lower().strip()
-    if lower in _GENRE_ALLOWLIST:
-        return True
-    return (
-        len(subject) <= 30
-        and "(" not in subject
-        and ")" not in subject
-        and "," not in subject
-        and bool(_CLEAN_SUBJECT_RE.match(subject))
-    )
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _lcc_class_key(letters: str) -> str | None:
+    """Most specific mapped LCC prefix of *letters* (3, then 2, then 1 letter).
+
+    ``"HD"`` wins over ``"H"`` and ``"PZ"`` over ``"P"``. ``None`` when no
+    prefix is in ``_LCC_CLASS_GENRES``.
+    """
+    for size in (3, 2, 1):
+        prefix = letters[:size]
+        if prefix in _LCC_CLASS_GENRES:
+            return prefix
+    return None
+
+
+def _lcc_pz_key(number: str | None) -> str:
+    """Resolve the class number of a PZ call number to its subdivision key.
+
+    ``PZ5`` and above is juvenile belles lettres; ``PZ1``-``PZ4`` is fiction
+    in English for adults. Open Library normalizes the number into the second
+    position with zero padding, so ``"PZ-0007.00000000.R79835 Har 1998"``
+    yields ``"0007.00000000"`` -> 7.0 (juvenile) and ``"PZ-0010.73100000"``
+    (PZ10.3) yields 10.731 (also juvenile), while ``"PZ-0004.00000000.K5227
+    Sh"`` yields 4.0 (adult fiction).
+
+    A missing or unparseable number falls back to the **adult** key, i.e.
+    plain "Fiction". That is the label the whole PZ class shares and therefore
+    the only safe assertion; inferring "children's" from a number that could
+    not be read is precisely the mistake that mislabelled 42 of 96 re-ingested
+    books, and it is the more damaging of the two errors (a novel filed as
+    children's misleads; a children's book filed as fiction is merely coarse).
+    """
+    if number is None:
+        return _LCC_PZ_ADULT_KEY
+    try:
+        value = float(number)
+    except ValueError:
+        return _LCC_PZ_ADULT_KEY
+    return _LCC_PZ_JUVENILE_KEY if value >= _LCC_PZ_JUVENILE_MIN else _LCC_PZ_ADULT_KEY
+
+
+def _lcc_entry_key(raw: str) -> str | None:
+    """Classification key of a single normalized LCC call number.
+
+    The key is the most specific mapped letter prefix, except for ``PZ``,
+    where it is the subdivision key (``_lcc_pz_key``) because there the number
+    decides the meaning. Returns ``None`` for anything that does not parse or
+    whose class is not in the mapping tables — an unmapped class must not take
+    part in (let alone win) the vote in ``_lcc_genre_slugs``.
+    """
+    match = _LCC_ENTRY_RE.match(raw.strip().upper())
+    if not match:
+        return None
+    key = _lcc_class_key(match.group(1))
+    if key is None:
+        return None
+    if key == "PZ":
+        return _lcc_pz_key(match.group(2))
+    return key
+
+
+def _lcc_key_genres(key: str) -> tuple[str, ...]:
+    """Vocabulary slugs for a key produced by ``_lcc_entry_key``."""
+    subdivided = _LCC_PZ_SUBDIVISION_GENRES.get(key)
+    if subdivided is not None:
+        return subdivided
+    return _LCC_CLASS_GENRES.get(key, ())
+
+
+def _lcc_genre_slugs(lcc_values: object) -> list[str]:
+    """Map an Open Library ``lcc`` list to the slugs of its *dominant* class.
+
+    Open Library returns LCC in its sortable normalized form
+    (``"PS-3568.00000000.O243 D3 1998"``) and contributes one entry per
+    edition, so the list is routinely multivalued *and* mixed: measured over
+    the 100 most-shelved works, 87 carry ``lcc`` and 45 of those 87 (51%)
+    carry more than one distinct class. Multivalue is the majority case, not
+    an edge case.
+
+    Aggregating every class in the list therefore let one oddly shelved
+    edition speak for the whole work: L'étranger carries 42 entries, 40 of
+    class ``PQ`` (French literature) and 2 of class ``PZ`` from a school
+    edition, and those 2 were enough to label Camus as children's. The Shining
+    had 11 ``PS`` against 3 ``PZ``. So the classes are counted and only the
+    **most frequent** one is emitted; minority classes contribute nothing.
+
+    Ties are broken by **first appearance in the list**: deterministic, stable
+    across runs, and independent of any set/dict iteration order.
+    ``Counter.most_common`` is deliberately not used — it makes no guarantee
+    about the relative order of equally frequent keys.
+
+    Entries that do not parse, or whose class is not in the mapping tables,
+    are skipped and never counted. ``PZ`` votes as its two subdivisions
+    (``PZ1-4`` and ``PZ5+``) rather than as a single class, so its entries
+    split: ``PQ``x3 + ``PZ1-4``x2 + ``PZ5+``x2 is won by ``PQ``. That is the
+    intended, conservative behaviour — telling the two halves apart is the
+    reason the subdivision exists.
+    """
+    keys = [key for key in (_lcc_entry_key(raw) for raw in _as_str_list(lcc_values)) if key]
+    if not keys:
+        return []
+    counts = Counter(keys)
+    top_count = max(counts.values())
+    dominant = next(key for key in keys if counts[key] == top_count)
+    return list(_lcc_key_genres(dominant))
+
+
+def _ddc_genre_slugs(ddc_values: object) -> list[str]:
+    """Map Dewey Decimal notations to vocabulary slugs.
+
+    Open Library returns values like ``"813.54"`` or ``"813/.54"`` (the slash
+    marks the segmentation point and is stripped), plus the occasional
+    bracketed ``"[Fic]"``/``"[E]"`` notation.
+
+    Classes map by hundreds (0 generalities, 1 philosophy, 2 religion,
+    3 social sciences, 4 language, 5 science, 6 technology, 7 arts,
+    8 literature, 9 history & geography), with a handful of refinements that
+    would otherwise be lost inside their century (computing, biography,
+    cooking, music, sports, travel, psychology/self-help). Inside 8xx the
+    third digit is the literary *form* — see ``_DDC_LITERARY_FORM_GENRES``.
+    """
+    slugs: list[str] = []
+    for raw in _as_str_list(ddc_values):
+        candidate = raw.strip()
+        bracket = _DDC_BRACKET_RE.match(candidate)
+        if bracket:
+            slugs.extend(_DDC_BRACKET_GENRES.get(bracket.group(1).lower(), ()))
+            continue
+        digits = candidate.replace("/", "").replace(".", "")
+        digits = "".join(ch for ch in digits if ch.isdigit())
+        if not digits:
+            continue
+        if digits[0] == "8":
+            slugs.extend(_ddc_literature_genres(digits))
+            continue
+        for size in (3, 2, 1):
+            mapped = _DDC_PREFIX_GENRES.get(digits[:size])
+            if mapped:
+                slugs.extend(mapped)
+                break
+    return slugs
+
+
+def _ddc_literature_genres(digits: str) -> tuple[str, ...]:
+    """Resolve an 8xx (literature) Dewey number to vocabulary slugs.
+
+    In 8xx the second digit is the language and the third is the literary
+    form: ``8_1`` poetry, ``8_2`` drama, ``8_3`` fiction, ``8_4`` essays. So
+    ``813.54`` is American English fiction. Forms outside that set (speeches,
+    letters, satire, miscellany) and the 80x general/theory range fall back to
+    the plain "Literature" label.
+    """
+    if len(digits) >= 3 and digits[1] != "0":
+        mapped = _DDC_LITERARY_FORM_GENRES.get(digits[2])
+        if mapped:
+            return mapped
+    return ("literature",)
+
+
+def _ddc_literary_form_slugs(ddc_values: object) -> list[str]:
+    """Extract *only* the literary-form signal from an 8xx Dewey number.
+
+    Used by ``_derive_genres`` to refine an LCC literature class. LCC files
+    literature by provenance and language (``PR`` English literature, ``PS``
+    American literature) and structurally never encodes form; DDC puts the
+    form in the third digit of ``8xx``. The two fields are therefore
+    complementary at this one point, and only here.
+
+    Returns an empty list when there is no ``ddc``, when it is not a
+    literature number, or when its form digit is not one of the four known
+    ones — "no form signal" is a valid answer, not a failure.
+    """
+    for raw in _as_str_list(ddc_values):
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if len(digits) < 3 or digits[0] != "8" or digits[1] == "0":
+            continue
+        mapped = _DDC_LITERARY_FORM_GENRES.get(digits[2])
+        if mapped:
+            return list(mapped)
+    return []
+
+
+def _subject_facet_genre_slugs(facet_values: object) -> list[str]:
+    """Map ``subject_facet`` values onto the controlled vocabulary.
+
+    Exact match only, case-insensitive and with collapsed whitespace. Values
+    that don't match are dropped: ``subject_facet`` is cleaner than ``subject``
+    but still a folksonomy, and letting it through raw is precisely the bug
+    feature 72 removes.
+    """
+    slugs: list[str] = []
+    for raw in _as_str_list(facet_values):
+        key = _WHITESPACE_RE.sub(" ", raw.strip().lower())
+        slugs.extend(_SUBJECT_FACET_GENRES.get(key, ()))
+    return slugs
+
+
+def _controlled_slugs(slugs: list[str]) -> list[str]:
+    """Keep only slugs that exist in the closed vocabulary, order preserved.
+
+    Applied to every source *before* the precedence decision in
+    ``_derive_genres``. If a mapping table ever gains a typo'd slug, the
+    source that produced it must count as empty so the next one can answer,
+    instead of silently leaving the book with no genres at all.
+    """
+    return [slug for slug in slugs if slug in _CONTROLLED_GENRES]
+
+
+def _derive_genres(search_doc: dict) -> list[dict]:
+    """Derive up to ``_MAX_GENRES`` controlled genres from an OL search doc.
+
+    ``lcc`` decides the discipline, ``ddc`` is its fallback:
+
+    1. ``lcc`` (Library of Congress Classification, 89% coverage on the 200
+       most-shelved works). Primary because it is the most complete of the two
+       controlled taxonomies and its letter classes map cleanly onto the
+       vocabulary.
+
+       Only the **dominant** class of the ``lcc`` list is used, never the
+       union of all of them. Open Library contributes one entry per edition
+       and 45 of the 87 works with ``lcc`` in the 100 most-shelved sample
+       (51%) carry more than one distinct class, so aggregating let a single
+       stray edition speak for the work — 2 ``PZ`` entries out of L'étranger's
+       42 turned Camus into children's literature. The most frequent class
+       wins; ties go to the class that appears first in the list. The one
+       class whose *number* is also read is ``PZ``: PZ1-PZ4 is adult fiction,
+       PZ5 and above juvenile belles lettres. See ``_lcc_genre_slugs`` and
+       ``_lcc_pz_key``.
+    2. When — and only when — the dominant LCC class resolves to
+       ``literature``, the literary-form digit of ``ddc`` is read *in
+       addition*, and prepended.
+       This is not a merge of two taxonomies: LCC files literature by
+       provenance and language (``PR`` is English literature, ``PS`` American
+       literature) and never encodes form, while DDC encodes exactly that in
+       the third digit of ``8xx`` (``8_1`` poetry, ``8_2`` drama, ``8_3``
+       fiction, ``8_4`` essays). The two fields are complementary at this one
+       point and nowhere else, so "Fiction" refines "Literature" instead of
+       contradicting or replacing it — the discipline still comes from LCC.
+       Without this, a novel, a poetry collection and a book of essays shelved
+       under ``PS`` would all come out as plain "Literature", i.e. the
+       fiction-vs-essay axis would only ever be delivered for the ~11% of books
+       with no ``lcc`` at all. If the record has no ``ddc``, or its form digit
+       is not one of the four above, the book stays at plain "Literature":
+       that is the honest answer when there is no form signal.
+
+       Outside the literature classes both taxonomies classify by discipline,
+       so there they would only produce near-duplicate labels; the refinement
+       is deliberately scoped and never applied elsewhere. Because it keys off
+       the dominant class only, a secondary ``PS`` on a mathematics book can
+       no longer make it come out as "Fiction".
+    3. ``ddc`` (Dewey, 78%) as the source, when ``lcc`` is missing or its class
+       is unmapped.
+    4. ``subject_facet`` (99%), filtered against the same closed vocabulary.
+       Covers the works with neither classification. If nothing matches, the
+       book gets no genres at all — an accepted, and much better, outcome than
+       persisting folksonomy noise.
+
+    Each source is filtered against ``_CONTROLLED_GENRES`` *before* it is
+    checked for emptiness, so a bad entry in a mapping table degrades into the
+    next source rather than into a silently genre-less book.
+
+    Known and deliberate limit: DDC and LCC classify by discipline and
+    provenance, not by reader-facing genre. ``813.6`` is "contemporary
+    American fiction", so *It Ends With Us* and Stephen King's *It* share a
+    classification. This function delivers the coarse, clean axis (fiction vs
+    essay, literature vs psychology vs history); fantasy/horror/romance is the
+    job of features 76-78 and must not be faked here.
+    """
+    slugs = _controlled_slugs(_lcc_genre_slugs(search_doc.get("lcc")))
+    if slugs:
+        if "literature" in slugs:
+            form = _controlled_slugs(_ddc_literary_form_slugs(search_doc.get("ddc")))
+            slugs = form + slugs
+    else:
+        slugs = _controlled_slugs(_ddc_genre_slugs(search_doc.get("ddc")))
+        if not slugs:
+            slugs = _controlled_slugs(_subject_facet_genre_slugs(search_doc.get("subject_facet")))
+
+    genres: list[dict] = []
+    seen: set[str] = set()
+    for slug in slugs:
+        if slug in seen:
+            continue
+        seen.add(slug)
+        genres.append({"name": _CONTROLLED_GENRES[slug], "slug": slug})
+        if len(genres) >= _MAX_GENRES:
+            break
+    return genres
 
 
 def _slugify(text: str) -> str:
@@ -178,7 +715,7 @@ class OpenLibraryClient:
                 f"{_OL_BASE}/search.json",
                 params={
                     "title": title,
-                    "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
+                    "fields": _OL_SEARCH_FIELDS,
                     "limit": limit,
                     "page": page,
                 },
@@ -203,7 +740,7 @@ class OpenLibraryClient:
         params = {
             "q": "*:*",
             "sort": "readinglog",
-            "fields": "key,title,author_name,first_publish_year,cover_i,subject,isbn",
+            "fields": _OL_SEARCH_FIELDS,
             "limit": per_page,
             "offset": offset,
         }
@@ -223,8 +760,8 @@ class OpenLibraryClient:
         capped at a few hundred entries.
 
         Returns search docs with the same field set as ``search_book``
-        (``key,title,author_name,first_publish_year,cover_i,subject,isbn``),
-        which is the shape ``book_to_dict`` consumes.
+        (``_OL_SEARCH_FIELDS``), which is the shape ``book_to_dict``
+        consumes.
 
         Raises ``httpx.HTTPStatusError`` when a page request keeps failing
         after exhausting the retries (or fails with a non-retryable 4xx),
@@ -369,19 +906,9 @@ class OpenLibraryClient:
         isbn_list = search_doc.get("isbn", [])
         isbn = isbn_list[0] if isbn_list else None
 
-        # Subjects/genres from search doc — filter to clean, user-facing labels
-        subjects = search_doc.get("subject", [])
-        genres = []
-        seen: set[str] = set()
-        for subject in subjects:
-            if not _is_clean_genre(subject):
-                continue
-            genre_slug = _slugify(subject)
-            if genre_slug and genre_slug not in seen:
-                genres.append({"name": subject, "slug": genre_slug})
-                seen.add(genre_slug)
-            if len(genres) >= 5:  # cap at 5 genres per book
-                break
+        # Genres from the controlled LCC/DDC classifications, with a filtered
+        # subject_facet fallback — see _derive_genres (feature 72).
+        genres = _derive_genres(search_doc)
 
         # Open Library has no aggregate rating — leave as None
         return {

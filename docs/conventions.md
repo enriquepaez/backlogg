@@ -66,6 +66,13 @@
 - El implementer **debe leer todos los archivos de migración existentes** antes
   de escribir uno nuevo para no recrear tablas ya creadas.
 - Cada migración incluye `upgrade()` y `downgrade()`.
+- **`downgrade()` no-op**: permitido **solo** cuando la migración borra datos
+  **derivados** y regenerables por reingesta, nunca cuando toca esquema ni datos
+  de usuario. Una purga de ese tipo no tiene inversa —no hay copia que
+  restaurar— y lanzar una excepción solo bloquearía un downgrade legítimo del
+  esquema circundante. En ese caso el cuerpo lleva un comentario que explique
+  por qué es un no-op y cómo se repuebla el dato. Precedente: `0033`
+  (purga de `book_genres`, repoblada por `scripts/backfill_sync.py book`).
 
 ## External IDs
 

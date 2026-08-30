@@ -15,6 +15,7 @@ Covers the two production failure modes seen in the first real books backfill:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import func, select, text
+from sqlalchemy.orm import selectinload
 
 from backlogg.books.models import Book, BookGenre
 from backlogg.books.repository import _get_or_create_genre as get_or_create_book_genre
@@ -244,9 +245,12 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
 
 
 async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
-    """The exact production scenario: two docs whose subjects collide on slug.
+    """The exact production scenario: two docs that resolve to the same genre.
 
-    Both books must be synced with errors=0 and share a single genre row.
+    Since feature 72 the labels come from a controlled vocabulary, so the two
+    spellings Open Library returns ("Fiction" / "fiction") normalise onto the
+    same slug before they ever reach the repository. Both books must be synced
+    with errors=0 and share a single genre row.
     """
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 2)
@@ -258,7 +262,7 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
             "title": "Umbral Collision Alpha",
             "first_publish_year": 2001,
             "cover_i": None,
-            "subject": ["Solar Noir"],
+            "subject_facet": ["Fiction"],
             "author_name": [],
         },
         {
@@ -266,7 +270,7 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
             "title": "Umbral Collision Beta",
             "first_publish_year": 2002,
             "cover_i": None,
-            "subject": ["solar noir"],
+            "subject_facet": ["fiction"],
             "author_name": [],
         },
     ]
@@ -299,7 +303,7 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
 
     # A single genre row serves both books
     genre_result = await db.execute(
-        select(func.count()).select_from(BookGenre).where(BookGenre.slug == "solar-noir")
+        select(func.count()).select_from(BookGenre).where(BookGenre.slug == "fiction")
     )
     assert genre_result.scalar_one() == 1
 
@@ -338,7 +342,6 @@ async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
             "title": "Isbn Sync Job Fixture",
             "first_publish_year": 2010,
             "cover_i": None,
-            "subject": [],
             "author_name": [],
             "isbn": ["9780000000001", "9780000000002"],
         }
@@ -373,6 +376,106 @@ async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
     book_result = await db.execute(select(Book).where(Book.slug == "isbn-sync-job-fixture-2010"))
     book = book_result.scalar_one()
     assert book.isbn == "9780000000001"
+
+    # _persist_cursor commits, so remove the row we left in the shared test
+    # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
+    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
+    await db.commit()
+
+
+async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, monkeypatch):
+    """Regression (feature 72): sync_books must copy `ddc`/`lcc`/`subject_facet`
+    from the raw Open Library doc into the hand-built `search_doc` it passes to
+    `book_to_dict`.
+
+    Same class of bug as the `isbn` one above (Issue #17): the nightly job does
+    not forward `raw` as-is, it rebuilds a reduced dict field by field. A field
+    missing there is lost silently — the on-demand search path keeps working,
+    so the catalogue only degrades for books seeded by the nightly sync. Here
+    `lcc` must win over `ddc` and the persisted genres must be the controlled
+    labels, proving the fields actually reached the adapter.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 2)
+    await set_sync_offset(db, "BOOK", 0)
+
+    captured_docs: list[dict] = []
+    real_book_to_dict = sync_jobs._ol_client.book_to_dict
+
+    def _spy(search_doc, work_detail=None):
+        captured_docs.append(search_doc)
+        return real_book_to_dict(search_doc, work_detail)
+
+    popular_raw = [
+        {
+            "key": "/works/OL86401W",
+            "title": "Classification Propagation Alpha",
+            "first_publish_year": 2011,
+            "cover_i": None,
+            "author_name": [],
+            "lcc": ["PZ-0007.00000000.R79835 Ha 1998"],
+            "ddc": ["813/.54"],
+            "subject_facet": ["Cooking"],
+        },
+        {
+            "key": "/works/OL86402W",
+            "title": "Classification Propagation Beta",
+            "first_publish_year": 2012,
+            "cover_i": None,
+            "author_name": [],
+            "ddc": ["811.54"],
+            "subject_facet": ["Cooking"],
+        },
+    ]
+
+    with (
+        patch.object(
+            sync_jobs._ol_client,
+            "get_popular_books",
+            new_callable=AsyncMock,
+            return_value=popular_raw,
+        ),
+        patch.object(
+            sync_jobs._ol_client,
+            "get_work_detail",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(sync_jobs._ol_client, "book_to_dict", side_effect=_spy),
+        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+    ):
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=db)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_cm
+
+        result = await sync_jobs.sync_books()
+
+    assert result["synced"] == 2
+    assert result["errors"] == 0
+
+    # The reconstructed search_doc carries the three classification fields
+    assert captured_docs[0]["lcc"] == ["PZ-0007.00000000.R79835 Ha 1998"]
+    assert captured_docs[0]["ddc"] == ["813/.54"]
+    assert captured_docs[0]["subject_facet"] == ["Cooking"]
+
+    # ...and they actually drove the persisted genres: lcc first, ddc second
+    alpha_result = await db.execute(
+        select(Book)
+        .where(Book.slug == "classification-propagation-alpha-2011")
+        .options(selectinload(Book.genres))
+    )
+    alpha = alpha_result.scalar_one()
+    assert {g.slug for g in alpha.genres} == {"fiction", "childrens-young-adult"}
+
+    beta_result = await db.execute(
+        select(Book)
+        .where(Book.slug == "classification-propagation-beta-2012")
+        .options(selectinload(Book.genres))
+    )
+    beta = beta_result.scalar_one()
+    assert {g.slug for g in beta.genres} == {"poetry", "literature"}
 
     # _persist_cursor commits, so remove the row we left in the shared test
     # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.

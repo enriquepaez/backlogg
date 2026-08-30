@@ -1441,7 +1441,7 @@
         "Tests: obra con ddc y lcc, obra solo con lcc, obra sin ninguno de los dos",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 73,

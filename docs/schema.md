@@ -213,6 +213,44 @@ CREATE TABLE movie_genres_join (
 CREATE INDEX idx_movie_genres_join_genre ON movie_genres_join (genre_id);
 ```
 
+### `book_genres` — vocabulario controlado (feature 72)
+
+A diferencia de movies/series/games, cuyos géneros vienen ya normalizados de
+TMDB/IGDB, los de libros **no** son las etiquetas que devuelve la fuente. Hasta
+la feature 72 se derivaban del campo `subject` de Open Library, una folksonomía
+sin control (~40 etiquetas por obra) que produjo 510 filas distintas con solo
+370 libros ingeridos, 397 de ellas usadas una sola vez ("Triathlon",
+"Concentration camps", "Country homes").
+
+Desde la feature 72, `book_genres` solo contiene etiquetas de un **vocabulario
+controlado y cerrado** definido en el adaptador
+(`_CONTROLLED_GENRES`, `backlogg/books/adapters/open_library.py`): ~32 entradas
+del tipo Fiction, Poetry, Drama, Essays, Literature, Children's & Young Adult,
+Philosophy, Psychology, History, Science, Technology, Cooking… Se derivan, por
+orden de precedencia, de `lcc` (Library of Congress) → `ddc` (Dewey) →
+`subject_facet` filtrado contra ese mismo vocabulario. `lcc` decide siempre la
+disciplina; el único punto donde se lee `ddc` además de `lcc` es la **forma
+literaria** dentro de las clases de literatura (`PS` + `813.54` → Fiction +
+Literature), porque LCC clasifica la literatura por procedencia y lengua y
+nunca codifica la forma. Detalle del mapeo y su justificación en
+`docs/external-apis.md`.
+
+Consecuencias operativas:
+
+- Es un **eje grueso** (ficción vs ensayo, literatura vs psicología vs
+  historia), no género de lector: DDC/LCC clasifican por disciplina y
+  procedencia. Fantasía/terror/romance es trabajo de las features 76-78.
+- Resultado medido en dev sobre los 100 libros de la siembra: **15 etiquetas
+  distintas, 96 de 100 libros con género**, frente a las 510 etiquetas (397 de
+  ellas usadas una sola vez) que producía la folksonomía con 370 libros.
+- Un libro puede quedarse **sin filas en `book_genres_join`** cuando no trae
+  ninguna de las tres señales; es un resultado aceptado, no un fallo.
+- Son datos **derivados y regenerables** por reingesta
+  (`scripts/backfill_sync.py book`). La migración
+  `0033_books_controlled_genres_purge` los purgó por eso, preservando los
+  libros con `genres` en `locked_fields` (edición manual de admin, feature 49),
+  que `upsert_book` no reescribe.
+
 ## Platforms (games only)
 
 ```sql

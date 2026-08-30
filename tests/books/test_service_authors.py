@@ -185,7 +185,6 @@ async def test_get_book_calls_author_persistence(db):
         "title": "F19 Service Integration Book",
         "first_publish_year": 1999,
         "cover_i": None,
-        "subject": [],
         "isbn": [],
     }
     work_detail = {
