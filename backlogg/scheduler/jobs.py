@@ -365,14 +365,22 @@ async def sync_books(slice_size: int | None = None) -> dict:
                 work_key = raw.get("key", "")
                 work_id = work_key.removeprefix("/works/") if work_key else None
 
+                # ⚠️ This search_doc is rebuilt by hand instead of passing
+                # ``raw`` straight through, so every field book_to_dict reads
+                # must be copied here explicitly. Forgetting one silently
+                # degrades the nightly job while the on-demand path keeps
+                # working (that was Issue #17 with ``isbn``). Keep in sync
+                # with ``_OL_SEARCH_FIELDS`` in the Open Library adapter.
                 search_doc: dict = {
                     "title": raw.get("title", ""),
                     "key": work_key,
                     "first_publish_year": raw.get("first_publish_year"),
                     "cover_i": raw.get("cover_i") or raw.get("cover_id"),
-                    "subject": raw.get("subject", []),
                     "author_name": raw.get("author_name", []),
                     "isbn": raw.get("isbn", []),
+                    "ddc": raw.get("ddc", []),
+                    "lcc": raw.get("lcc", []),
+                    "subject_facet": raw.get("subject_facet", []),
                 }
 
                 book_data = _ol_client.book_to_dict(search_doc, None)

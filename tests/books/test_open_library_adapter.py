@@ -21,6 +21,14 @@ Covers:
 - get_work_detail returns a work response unmodified (no redirect involved)
 - get_work_detail returns None on 404
 - get_author follows a 301 redirect (defensive consistency fix, Issue #10)
+- genres are derived from the controlled lcc/ddc/subject_facet taxonomies
+  (feature 72): lcc drives the discipline, ddc refines literary form inside
+  the literature classes only, and every mapping table stays inside the
+  closed vocabulary
+- a multivalued lcc list (the majority case: 51% of the works that carry lcc
+  carry more than one class) resolves to its dominant class, ties broken by
+  first appearance, and the PZ class is split by its number — PZ1-PZ4 is
+  adult fiction, PZ5+ juvenile belles lettres
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,9 +37,16 @@ import httpx
 import pytest
 
 from backlogg.books.adapters.open_library import (
+    _CONTROLLED_GENRES,
+    _DDC_BRACKET_GENRES,
+    _DDC_LITERARY_FORM_GENRES,
+    _DDC_PREFIX_GENRES,
+    _LCC_CLASS_GENRES,
+    _LCC_PZ_SUBDIVISION_GENRES,
     _OL_HEADERS,
+    _OL_SEARCH_FIELDS,
+    _SUBJECT_FACET_GENRES,
     OpenLibraryClient,
-    _is_clean_genre,
 )
 from backlogg.books.service import _persist_book_authors
 
@@ -128,10 +143,7 @@ async def test_get_popular_books_queries_search_json_with_readinglog_sort():
     assert captured["params"]["sort"] == "readinglog"
     assert captured["params"]["offset"] == 120
     assert captured["params"]["limit"] == 5
-    assert (
-        captured["params"]["fields"]
-        == "key,title,author_name,first_publish_year,cover_i,subject,isbn"
-    )
+    assert captured["params"]["fields"] == _OL_SEARCH_FIELDS
 
 
 @pytest.mark.asyncio
@@ -309,7 +321,9 @@ async def test_get_popular_books_parses_docs_list():
             "author_name": ["Author One"],
             "first_publish_year": 1999,
             "cover_i": 111,
-            "subject": ["Fiction"],
+            "lcc": ["PR-6068.00000000.O93 H37 1997"],
+            "ddc": ["823.914"],
+            "subject_facet": ["Fiction"],
         },
         {
             "key": "/works/OL2W",
@@ -317,7 +331,9 @@ async def test_get_popular_books_parses_docs_list():
             "author_name": ["Author Two"],
             "first_publish_year": 2005,
             "cover_i": 222,
-            "subject": ["Fantasy"],
+            "lcc": ["PS-3568.00000000.O243 D3 1998"],
+            "ddc": ["813.54"],
+            "subject_facet": ["Fiction"],
         },
     ]
 
@@ -344,9 +360,16 @@ async def test_get_popular_books_parses_docs_list():
     assert result[1]["title"] == "Book Two"
     # Each doc carries the fields book_to_dict consumes
     for doc in result:
-        assert {"key", "title", "author_name", "first_publish_year", "cover_i", "subject"} <= set(
-            doc
-        )
+        assert {
+            "key",
+            "title",
+            "author_name",
+            "first_publish_year",
+            "cover_i",
+            "lcc",
+            "ddc",
+            "subject_facet",
+        } <= set(doc)
 
 
 # ---------------------------------------------------------------------------
@@ -595,61 +618,412 @@ async def test_get_author_returns_none_on_404():
 
 
 # ---------------------------------------------------------------------------
-# Genre filtering tests (_is_clean_genre + book_to_dict)
+# Classification tests (feature 72 — lcc/ddc/subject_facet -> controlled genres)
 # ---------------------------------------------------------------------------
 
 
-def test_is_clean_genre_rejects_parenthesised_subject():
-    """Subjects containing parentheses must be filtered out."""
-    assert _is_clean_genre("American fiction (fictional works by one author)") is False
+def _genre_slugs(search_doc: dict) -> list[str]:
+    """Run book_to_dict over *search_doc* and return the derived genre slugs."""
+    result = OpenLibraryClient().book_to_dict(search_doc)
+    return [g["slug"] for g in result["genres"]]
 
 
-def test_is_clean_genre_rejects_subject_with_comma():
-    """Subjects containing commas must be filtered out."""
-    assert _is_clean_genre("Long island (n.y.), fiction") is False
+def test_derive_genres_lcc_literature_is_refined_by_ddc_literary_form():
+    """Inside the literature classes, ddc adds the form lcc cannot express.
+
+    LCC files literature by provenance and language (PS American literature,
+    PR English literature) and never encodes form, so the literary-form digit
+    of the 8xx ddc number is read *in addition* and prepended. The discipline
+    still comes from lcc; ddc only refines it.
+    """
+    # 8_3 -> fiction (both the plain and the segmented "813/.54" spelling)
+    assert _genre_slugs(
+        {
+            "title": "American Novel",
+            "first_publish_year": 1998,
+            "lcc": ["PS-3568.00000000.O243 D3 1998"],
+            "ddc": ["813.54", "813/.54"],
+        }
+    ) == ["fiction", "literature"]
+    assert _genre_slugs(
+        {
+            "title": "English Novel",
+            "lcc": ["PR-6068.00000000.O93 H377 1997"],
+            "ddc": ["823.914"],
+        }
+    ) == ["fiction", "literature"]
+    # 8_4 -> essays
+    assert _genre_slugs(
+        {
+            "title": "American Essays",
+            "lcc": ["PS-3568.00000000.O243 E8"],
+            "ddc": ["814.54"],
+        }
+    ) == ["essays", "literature"]
+    # 8_1 -> poetry
+    assert _genre_slugs(
+        {
+            "title": "American Poems",
+            "lcc": ["PS-3568.00000000.O243 P6"],
+            "ddc": ["811.54"],
+        }
+    ) == ["poetry", "literature"]
+    # 8_2 -> drama
+    assert _genre_slugs(
+        {
+            "title": "English Plays",
+            "lcc": ["PR-2823.00000000.A2 M67"],
+            "ddc": ["822.33"],
+        }
+    ) == ["drama", "literature"]
 
 
-def test_is_clean_genre_rejects_long_subject():
-    """Subjects longer than 30 characters with no punctuation still fail if > 30 chars."""
-    long_subject = "A" * 31  # 31 chars, no parens/comma
-    assert _is_clean_genre(long_subject) is False
+def test_derive_genres_lcc_literature_without_ddc_stays_plain_literature():
+    """No ddc means no form signal — "Literature" is the honest answer."""
+    assert _genre_slugs(
+        {
+            "title": "No Ddc",
+            "first_publish_year": 1998,
+            "lcc": ["PS-3568.00000000.O243 D3 1998"],
+        }
+    ) == ["literature"]
+    # Same when ddc is present but carries no usable form digit: 818 is
+    # miscellaneous writings and 80x is theory/general.
+    assert _genre_slugs({"title": "Miscellany", "lcc": ["PS-3568"], "ddc": ["818.5403"]}) == [
+        "literature"
+    ]
+    assert _genre_slugs({"title": "Criticism", "lcc": ["PR-0021"], "ddc": ["801.95"]}) == [
+        "literature"
+    ]
+    # And when ddc is not a literature number at all, it is simply ignored.
+    assert _genre_slugs({"title": "Odd Pair", "lcc": ["PR-0021"], "ddc": ["302.23"]}) == [
+        "literature"
+    ]
 
 
-def test_is_clean_genre_accepts_allowlist_entry():
-    """A subject that matches the allowlist (case-insensitive) must pass."""
-    assert _is_clean_genre("Fiction") is True
-    assert _is_clean_genre("FANTASY") is True
-    assert _is_clean_genre("science fiction") is True
+def test_derive_genres_lcc_pz_with_ddc_fiction_does_not_duplicate():
+    """PZ already carries "fiction"; the ddc refinement must not duplicate it.
+
+    PZ does not resolve to "literature", so the refinement never fires — and
+    even if it did, the dedup by slug keeps the output clean.
+    """
+    assert _genre_slugs(
+        {
+            "title": "Juvenile Novel",
+            "lcc": ["PZ-0007.00000000.R79835 Ha 1998"],
+            "ddc": ["823.914"],
+        }
+    ) == ["fiction", "childrens-young-adult"]
 
 
-def test_is_clean_genre_accepts_short_clean_subject():
-    """A short subject with no parentheses or commas must pass."""
-    assert _is_clean_genre("Magic") is True
-    assert _is_clean_genre("War") is True
+def test_derive_genres_non_literature_lcc_ignores_ddc_literary_form():
+    """Outside the literature classes lcc rules alone — ddc never refines.
+
+    Both taxonomies classify by discipline there, so mixing them would only
+    produce contradictory or near-duplicate labels.
+    """
+    # A mathematics book mis-shelved with a fiction ddc stays mathematics
+    assert _genre_slugs(
+        {"title": "Algorithms", "lcc": ["QA-0076.00000000.73"], "ddc": ["813.54"]}
+    ) == ["mathematics"]
+    assert _genre_slugs({"title": "Habits", "lcc": ["BF-0637.00000000.C6"], "ddc": ["158.1"]}) == [
+        "psychology"
+    ]
+    assert _genre_slugs({"title": "Cookbook", "lcc": ["TX-0714"], "ddc": ["811.54"]}) == ["cooking"]
 
 
-def test_book_to_dict_filters_raw_subjects():
-    """book_to_dict must exclude cataloguing subjects and keep only clean genres."""
-    ol = OpenLibraryClient()
-    search_doc = {
-        "title": "Test Book",
-        "first_publish_year": 2000,
-        "subject": [
-            "American fiction (fictional works by one author)",  # has parens -> out
-            "Lectures et morceaux choisis",  # >30 chars -> out
-            "Fiction",  # allowlist -> in
-            "Fantasy",  # allowlist -> in
-            "Long island (n.y.), fiction",  # parens + comma -> out
-        ],
+def test_derive_genres_from_lcc_only():
+    """A work with only lcc is classified from its letter class."""
+    assert _genre_slugs({"title": "Psych Only", "lcc": ["BF-0637.00000000.C6 C368 2018"]}) == [
+        "psychology"
+    ]
+    # Two-letter prefix wins over the one-letter fallback (HD -> economics,
+    # not H -> social sciences)
+    assert _genre_slugs({"title": "Econ", "lcc": ["HD-0057.00000000.7 K563 2016"]}) == [
+        "economics-business"
+    ]
+    # One-letter fallback when the two-letter prefix is unmapped
+    assert _genre_slugs({"title": "History", "lcc": ["DA-0566.00000000.9 C5"]}) == ["history"]
+
+
+def test_derive_genres_from_lcc_pz_is_fiction_and_juvenile():
+    """PZ (fiction and juvenile belles lettres) yields both labels."""
+    assert _genre_slugs({"title": "Juvenile", "lcc": ["PZ-0007.00000000.R79835 Ha 1998"]}) == [
+        "fiction",
+        "childrens-young-adult",
+    ]
+
+
+def test_derive_genres_multivalued_lcc_uses_the_dominant_class():
+    """A mixed lcc list resolves to its most frequent class, not their union.
+
+    Open Library contributes one lcc entry per edition, so the list is
+    routinely multivalued and mixed (51% of the works that carry lcc in the
+    100 most-shelved sample carry more than one class). Aggregating every
+    class let a single oddly shelved edition speak for the whole work.
+    Both cases below are real records.
+    """
+    # L'étranger: 40 entries of PQ (French literature) and 2 of PZ from a
+    # school edition. The 2 must not turn Camus into children's literature.
+    letranger = ["PQ-2605.00000000.A3734 E8 1957"] * 40 + [
+        "PZ-0003.00000000.C1468 St",
+        "PZ-0003.00000000.C1468 Str",
+    ]
+    assert _genre_slugs({"title": "L'étranger", "lcc": letranger}) == ["literature"]
+
+    # The Shining: 11 PS (American literature) against 3 PZ, with ddc 813.54
+    # supplying the literary form on top of the dominant class.
+    shining = ["PS-3561.00000000.I483 S5 1977"] * 11 + ["PZ-0004.00000000.K5227 Sh"] * 3
+    assert _genre_slugs({"title": "The Shining", "lcc": shining, "ddc": ["813.54"]}) == [
+        "fiction",
+        "literature",
+    ]
+
+    # The minority class contributes nothing at all, not even a trailing label
+    assert _genre_slugs(
+        {
+            "title": "Mostly Psychology",
+            "lcc": ["BF-0637.00000000.C6", "BF-0637.00000000.S4", "BF-0121", "TX-0714"],
+        }
+    ) == ["psychology"]
+
+
+def test_derive_genres_multivalued_lcc_tie_goes_to_first_appearance():
+    """A tie is broken by first appearance in the list — deterministic and stable.
+
+    Reversing the list therefore hands the win to the other class, which is
+    the documented rule rather than an accident of set/dict iteration order.
+    """
+    assert _genre_slugs(
+        {"title": "Tie", "lcc": ["QA-0076.00000000.73", "PS-3568"], "ddc": ["813.54"]}
+    ) == ["mathematics"]
+    assert _genre_slugs(
+        {"title": "Tie Reversed", "lcc": ["PS-3568", "QA-0076.00000000.73"], "ddc": ["813.54"]}
+    ) == ["fiction", "literature"]
+
+    # Same input, repeated calls: always the same answer
+    doc = {"title": "Stable", "lcc": ["TX-0714", "BF-0637", "M-1630", "QA-0076"]}
+    assert [_genre_slugs(doc) for _ in range(5)] == [["cooking"]] * 5
+
+
+def test_derive_genres_lcc_pz1_to_pz4_is_adult_fiction():
+    """PZ1-PZ4 is fiction in English for adults — never children's & YA.
+
+    An older LCC practice, still all over Open Library's records: The Shining
+    carries PZ4 and L'étranger PZ3.
+    """
+    assert _genre_slugs({"title": "Pz4", "lcc": ["PZ-0004.00000000.K5227 Sh"]}) == ["fiction"]
+    assert _genre_slugs({"title": "Pz3", "lcc": ["PZ-0003.00000000.C1468 St"]}) == ["fiction"]
+    assert _genre_slugs({"title": "Pz1", "lcc": ["PZ-0001.00000000.A1"]}) == ["fiction"]
+
+
+def test_derive_genres_lcc_pz5_and_above_is_childrens_and_young_adult():
+    """PZ5-PZ10.3 is juvenile belles lettres — this half really is children's/YA.
+
+    The last two assertions pin the exact cut at 5.0, the number that separates
+    adult fiction from juvenile and the whole point of the subdivision.
+    """
+    # PZ7, juvenile fiction (Harry Potter, The Fault in Our Stars)
+    assert _genre_slugs({"title": "Pz7", "lcc": ["PZ-0007.00000000.R79835 Har 1998"]}) == [
+        "fiction",
+        "childrens-young-adult",
+    ]
+    # PZ10.3, normalized by OL with the decimals in the second position
+    assert _genre_slugs({"title": "Pz10.3", "lcc": ["PZ-0010.73100000.B4514 Fr"]}) == [
+        "fiction",
+        "childrens-young-adult",
+    ]
+    # Unnormalized spelling ("PZ7.R79835") reads the same number
+    assert _genre_slugs({"title": "Pz7 Raw", "lcc": ["PZ7.R79835 Har 1998"]}) == [
+        "fiction",
+        "childrens-young-adult",
+    ]
+    # The boundary pair. PZ4.9 is the largest adult number, PZ5.0 the smallest
+    # juvenile one, so this is what makes `>= _LCC_PZ_JUVENILE_MIN` fail as `>`.
+    assert _genre_slugs({"title": "Pz4.9", "lcc": ["PZ-0004.90000000.A1"]}) == ["fiction"]
+    assert _genre_slugs({"title": "Pz5", "lcc": ["PZ-0005.00000000.A1"]}) == [
+        "fiction",
+        "childrens-young-adult",
+    ]
+
+
+def test_derive_genres_lcc_pz_without_a_readable_number_is_only_fiction():
+    """An unreadable PZ number falls back to plain Fiction, the safe assertion.
+
+    "Fiction" is what the whole PZ class shares; inferring "children's" from a
+    number that could not be parsed is the more damaging of the two possible
+    errors and is exactly the bug this round fixes.
+    """
+    assert _genre_slugs({"title": "Bare", "lcc": ["PZ"]}) == ["fiction"]
+    assert _genre_slugs({"title": "No Number", "lcc": ["PZ-K5227 Sh"]}) == ["fiction"]
+    assert _genre_slugs({"title": "Junk Number", "lcc": ["PZ-.-. x"]}) == ["fiction"]
+
+
+def test_derive_genres_literary_form_refines_the_dominant_class_only():
+    """The ddc refinement keys off the dominant class, never a secondary one.
+
+    A mathematics book with one stray PS edition used to come out as
+    "Fiction" because "literature" was present in the aggregated list.
+    """
+    assert _genre_slugs(
+        {
+            "title": "Algorithms With A Stray Ps",
+            "lcc": ["QA-0076.00000000.73", "QA-0076.00000000.9", "PS-3568"],
+            "ddc": ["813.54"],
+        }
+    ) == ["mathematics"]
+    # And it does still fire when literature *is* the dominant class
+    assert _genre_slugs(
+        {
+            "title": "Novel With A Stray Qa",
+            "lcc": ["PS-3568.00000000.O243", "PS-3568.00000000.O244", "QA-0076"],
+            "ddc": ["813.54"],
+        }
+    ) == ["fiction", "literature"]
+
+
+def test_derive_genres_from_ddc_only_literary_form_is_fiction():
+    """8_3 is the fiction literary form: 813.54 -> Fiction + Literature."""
+    assert _genre_slugs({"title": "Ddc Fiction", "ddc": ["813/.54"]}) == ["fiction", "literature"]
+
+
+def test_derive_genres_from_ddc_only_other_literary_forms():
+    """The other 8xx form digits map to poetry, drama and essays."""
+    assert _genre_slugs({"title": "Poems", "ddc": ["811.54"]}) == ["poetry", "literature"]
+    assert _genre_slugs({"title": "Plays", "ddc": ["822.33"]}) == ["drama", "literature"]
+    assert _genre_slugs({"title": "Essays", "ddc": ["824.912"]}) == ["essays", "literature"]
+    # 80x is literature theory/general — no form digit to read
+    assert _genre_slugs({"title": "Theory", "ddc": ["801.95"]}) == ["literature"]
+
+
+def test_derive_genres_from_ddc_non_literature_classes_and_refinements():
+    """Centuries map by hundreds, with the documented refinements on top."""
+    assert _genre_slugs({"title": "Programming", "ddc": ["005.133"]}) == ["computing"]
+    assert _genre_slugs({"title": "Self Help", "ddc": ["158.1"]}) == ["self-help"]
+    assert _genre_slugs({"title": "Psychology", "ddc": ["153.4"]}) == ["psychology"]
+    assert _genre_slugs({"title": "Cookbook", "ddc": ["641.5"]}) == ["cooking"]
+    assert _genre_slugs({"title": "Athletics", "ddc": ["796.332"]}) == ["sports-recreation"]
+    assert _genre_slugs({"title": "A Life", "ddc": ["920"]}) == ["biography"]
+    assert _genre_slugs({"title": "A Life", "ddc": ["92"]}) == ["biography"]
+    # 929 is genealogy/names/heraldry, not biography: the 3-digit prefix must
+    # win over the abridged "92" biography notation
+    assert _genre_slugs({"title": "Heraldry", "ddc": ["929.6"]}) == ["history"]
+    assert _genre_slugs({"title": "Genealogy", "ddc": ["929"]}) == ["history"]
+    assert _genre_slugs({"title": "Symphonies", "ddc": ["780.9"]}) == ["music"]
+    assert _genre_slugs({"title": "Travels", "ddc": ["914.204"]}) == ["geography-travel"]
+    assert _genre_slugs({"title": "Religion", "ddc": ["230"]}) == ["religion"]
+    assert _genre_slugs({"title": "War", "ddc": ["940.5318"]}) == ["history"]
+
+
+def test_derive_genres_falls_back_to_filtered_subject_facet():
+    """With neither lcc nor ddc, subject_facet is filtered by the vocabulary."""
+    slugs = _genre_slugs(
+        {
+            "title": "Facet Only",
+            "subject_facet": [
+                "Concentration camps",  # folksonomy noise -> dropped
+                "Country homes",  # folksonomy noise -> dropped
+                "Biography",  # controlled -> kept
+                "History",  # controlled -> kept
+            ],
+        }
+    )
+    assert slugs == ["biography", "history"]
+
+
+def test_derive_genres_ignores_subject_facet_when_lcc_present():
+    """subject_facet is a last resort, never merged with a real classification."""
+    assert _genre_slugs(
+        {
+            "title": "Facet Ignored",
+            "lcc": ["QA-0076.00000000.73"],
+            "subject_facet": ["Cooking", "Travel"],
+        }
+    ) == ["mathematics"]
+
+
+def test_derive_genres_returns_empty_when_nothing_matches():
+    """No classification and unmatched facets means no genres — not junk labels."""
+    assert _genre_slugs({"title": "Unclassifiable", "first_publish_year": 1990}) == []
+    assert (
+        _genre_slugs(
+            {
+                "title": "Noise Only",
+                "subject_facet": ["Triathlon", "Concentration camps", "Country homes"],
+            }
+        )
+        == []
+    )
+    assert _genre_slugs({"title": "Empty Lists", "lcc": [], "ddc": [], "subject_facet": []}) == []
+
+
+def test_derive_genres_survives_malformed_classification_values():
+    """Malformed or unexpected lcc/ddc payloads must never raise."""
+    doc = {
+        "title": "Malformed",
+        "lcc": ["", "1234-5678", "  ", "YY-0001", None, 42, "?!"],
+        "ddc": ["", "n/a", "[Fic]", None, 7],
+        "subject_facet": "Fiction",  # a bare string instead of a list
     }
-    result = ol.book_to_dict(search_doc)
-    genre_names = [g["name"] for g in result["genres"]]
+    slugs = _genre_slugs(doc)
+    # "YY" is not an LCC class, so nothing matches and ddc's "[Fic]" answers
+    assert slugs == ["fiction"]
 
-    assert "American fiction (fictional works by one author)" not in genre_names
-    assert "Lectures et morceaux choisis" not in genre_names
-    assert "Long island (n.y.), fiction" not in genre_names
-    assert "Fiction" in genre_names
-    assert "Fantasy" in genre_names
+    # A doc where every field is the wrong type still classifies to nothing
+    assert (
+        _genre_slugs({"title": "Junk Types", "lcc": 5, "ddc": {"a": 1}, "subject_facet": 9}) == []
+    )
+
+
+def test_derive_genres_only_emits_controlled_vocabulary():
+    """Every persisted label comes from the closed vocabulary."""
+    result = OpenLibraryClient().book_to_dict(
+        {"title": "Vocab Check", "lcc": ["PZ-0007.00000000.R79835"]}
+    )
+    for genre in result["genres"]:
+        assert genre["slug"] in _CONTROLLED_GENRES
+        assert genre["name"] == _CONTROLLED_GENRES[genre["slug"]]
+
+
+def test_mapping_tables_only_reference_controlled_vocabulary():
+    """Every slug any mapping table can emit must exist in _CONTROLLED_GENRES.
+
+    The precedence in _derive_genres filters each source against the closed
+    vocabulary *before* deciding whether it answered, so a typo'd slug in a
+    table degrades that source into the next one instead of leaving the book
+    genre-less. This test makes the tables themselves the guard rail rather
+    than relying on that fallback (and on human vigilance) — a typo fails
+    here, loudly, instead of silently downgrading a whole LCC class.
+    """
+    tables = {
+        "_LCC_CLASS_GENRES": _LCC_CLASS_GENRES,
+        "_DDC_PREFIX_GENRES": _DDC_PREFIX_GENRES,
+        "_DDC_LITERARY_FORM_GENRES": _DDC_LITERARY_FORM_GENRES,
+        "_DDC_BRACKET_GENRES": _DDC_BRACKET_GENRES,
+        "_SUBJECT_FACET_GENRES": _SUBJECT_FACET_GENRES,
+        "_LCC_PZ_SUBDIVISION_GENRES": _LCC_PZ_SUBDIVISION_GENRES,
+    }
+    unknown = {
+        f"{table_name}[{key!r}]": slug
+        for table_name, table in tables.items()
+        for key, slugs in table.items()
+        for slug in slugs
+        if slug not in _CONTROLLED_GENRES
+    }
+    assert unknown == {}, f"mapping tables emit slugs outside the vocabulary: {unknown}"
+
+
+def test_book_to_dict_no_longer_reads_subject():
+    """The folksonomic `subject` field is ignored entirely (feature 72)."""
+    assert (
+        _genre_slugs(
+            {
+                "title": "Subject Ignored",
+                "subject": ["Fiction", "Fantasy", "Triathlon"],
+            }
+        )
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -915,22 +1289,55 @@ def test_book_to_dict_isbn_is_none_when_empty_list():
 
 
 def test_book_to_dict_caps_genres_at_five():
-    """book_to_dict must return at most 5 genres even when more clean subjects exist."""
+    """book_to_dict must return at most 5 genres even when more classes match.
+
+    The cap is only reachable through the multivalued ddc path: the lcc path
+    emits the dominant class alone (at most literary form + class = 3 slugs).
+    """
     ol = OpenLibraryClient()
-    # Provide 8 subjects that all pass the filter (all in allowlist or short+clean)
+    # Six ddc notations resolving to six distinct vocabulary slugs
     search_doc = {
         "title": "Genre Rich Book",
         "first_publish_year": 2010,
-        "subject": [
-            "Fiction",
-            "Fantasy",
-            "Mystery",
-            "Thriller",
-            "Horror",
-            "Romance",
-            "Science",
-            "History",
+        "ddc": [
+            "005.133",  # computing
+            "158.1",  # self-help
+            "641.5",  # cooking
+            "796.332",  # sports & recreation
+            "780.9",  # music
+            "230",  # religion
         ],
     }
     result = ol.book_to_dict(search_doc)
     assert len(result["genres"]) == 5
+    assert [g["slug"] for g in result["genres"]] == [
+        "computing",
+        "self-help",
+        "cooking",
+        "sports-recreation",
+        "music",
+    ]
+
+
+def test_book_to_dict_lcc_no_longer_aggregates_every_class():
+    """Six lcc entries of six different classes are a six-way tie, not a union.
+
+    Before the dominant-class rule this doc produced five labels from six
+    unrelated classes. Now the tie-break (first appearance) picks one class
+    and only its slugs are emitted.
+    """
+    ol = OpenLibraryClient()
+    search_doc = {
+        "title": "Genre Rich Book",
+        "first_publish_year": 2010,
+        "lcc": [
+            "PZ-0007.00000000.R79835",  # fiction + children's & YA
+            "BF-0637.00000000.C6",  # psychology
+            "D-0000.00000000.1",  # history
+            "QA-0076.00000000.73",  # mathematics
+            "M-1630.00000000.18",  # music
+            "TX-0714.00000000.0",  # cooking
+        ],
+    }
+    result = ol.book_to_dict(search_doc)
+    assert [g["slug"] for g in result["genres"]] == ["fiction", "childrens-young-adult"]

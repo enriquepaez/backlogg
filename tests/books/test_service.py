@@ -15,7 +15,6 @@ def _make_search_doc() -> dict:
         "author_name": ["Frank Herbert"],
         "first_publish_year": 1965,
         "cover_i": 9988776,
-        "subject": ["Science Fiction", "Epic", "Space opera"],
         "isbn": ["9780441013593"],
     }
 
@@ -43,9 +42,11 @@ def _make_book_dict() -> dict:
         "rating_internal": None,
         "rating_count_internal": 0,
         "last_synced_at": datetime.now(UTC),
+        # Controlled vocabulary only (feature 72): nothing outside
+        # _CONTROLLED_GENRES can reach book_genres any more.
         "genres": [
-            {"name": "Science Fiction", "slug": "science-fiction"},
-            {"name": "Epic", "slug": "epic"},
+            {"name": "Fiction", "slug": "fiction"},
+            {"name": "Literature", "slug": "literature"},
         ],
     }
 

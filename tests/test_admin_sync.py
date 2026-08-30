@@ -315,7 +315,6 @@ async def test_sync_books_calls_get_work_detail_for_authors():
             "title": "Test Book",
             "first_publish_year": 2020,
             "cover_i": 12345,
-            "subject": ["Fiction"],
             "author_name": ["Test Author"],
         }
     ]
@@ -697,7 +696,6 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
             "title": "Credits Failure Book",
             "first_publish_year": 2015,
             "cover_i": 54321,
-            "subject": ["Fiction"],
             "author_name": ["Test Author"],
         }
     ]
