@@ -371,6 +371,10 @@ async def sync_books(slice_size: int | None = None) -> dict:
                 # degrades the nightly job while the on-demand path keeps
                 # working (that was Issue #17 with ``isbn``). Keep in sync
                 # with ``_OL_SEARCH_FIELDS`` in the Open Library adapter.
+                # ``edition_count`` is in that field set but deliberately not
+                # copied: it is the feature-73 seed filter's discriminant,
+                # requested only so a page can be audited, and book_to_dict
+                # never reads it — copying it would add a dead key.
                 search_doc: dict = {
                     "title": raw.get("title", ""),
                     "key": work_key,

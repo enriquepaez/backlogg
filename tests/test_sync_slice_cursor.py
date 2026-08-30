@@ -12,6 +12,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from sqlalchemy import func, select
 
+from backlogg.books.adapters import open_library as ol_adapter
 from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies.adapters.tmdb import TMDBClient
@@ -103,12 +104,23 @@ async def test_tmdb_series_offset_translates_to_pages():
     assert [r["id"] for r in results] == list(range(45, 60))
 
 
-async def test_open_library_passes_native_offset():
-    """Open Library popular search receives the offset as a native query param."""
+async def test_open_library_passes_native_offset(monkeypatch):
+    """Open Library popular search receives the offset as a native query param.
+
+    Since feature 73 the global offset is split across the two filtered seed
+    streams, so what travels on the wire is the stream's own sub-offset: with
+    one spanish slot every 10, global slots 120..124 are all english and map
+    to english sub-offset 120 - 12 = 108. The spanish stream contributes no
+    slot to this slice, so a single request is issued.
+    """
+    monkeypatch.setattr(ol_adapter.settings, "BOOKS_SEED_ES_EVERY_N", 10)
     client = OpenLibraryClient()
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"docs": [{"key": f"/works/OL{i}W"} for i in range(5)]}
+    response.json.return_value = {
+        "numFound": 16959,
+        "docs": [{"key": f"/works/OL{i}W"} for i in range(5)],
+    }
     with patch(
         "httpx.AsyncClient.get",
         new_callable=AsyncMock,
@@ -119,8 +131,8 @@ async def test_open_library_passes_native_offset():
     mock_get.assert_awaited_once()
     params = mock_get.call_args.kwargs["params"]
     assert params["limit"] == 5
-    assert params["offset"] == 120
-    assert params["q"] == "*:*"
+    assert params["offset"] == 108
+    assert params["q"] == ol_adapter.build_seed_query()
     assert params["sort"] == "readinglog"
     assert len(results) == 5
 

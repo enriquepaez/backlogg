@@ -8,6 +8,9 @@ from datetime import UTC, date, datetime
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from backlogg.books.constants import BOOK_LANGUAGE_EN, BOOK_LANGUAGE_ES
+from backlogg.core.config import settings
+
 _OL_BASE = "https://openlibrary.org"
 _OL_COVER_BASE = "https://covers.openlibrary.org/b/id"
 _OL_HEADERS = {
@@ -18,13 +21,17 @@ _OL_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 # Field set requested from search.json. ``subject`` was dropped in feature 72:
 # it was only ever consumed to derive genres, and those now come from the
 # controlled ``lcc``/``ddc`` classifications with ``subject_facet`` as the
-# filtered fallback (see _derive_genres). This is the shape book_to_dict
-# consumes — keep it in sync with the hand-built search_doc in
-# backlogg/scheduler/jobs.py::sync_books.
-_OL_SEARCH_FIELDS = "key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet"
+# filtered fallback (see _derive_genres). ``edition_count`` is not consumed by
+# book_to_dict: it is the seed filter's discriminant (feature 73) and is
+# requested so a returned page can be audited against the threshold that
+# selected it. This is the shape book_to_dict consumes — keep it in sync with
+# the hand-built search_doc in backlogg/scheduler/jobs.py::sync_books.
+_OL_SEARCH_FIELDS = (
+    "key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet,edition_count"
+)
 
 # Retry policy for the popular-books search: OL's Solr backend answers the
-# readinglog-sorted match-all query with intermittent 500s, and Issue #9
+# readinglog-sorted seed query with intermittent 500s, and Issue #9
 # showed those windows of degradation can last well over the ~30s a short
 # retry budget covers (an offset that 500'd through 5 attempts in ~30s
 # returned 200 again minutes later, unchanged). 8 attempts with exponential
@@ -53,6 +60,160 @@ _ol_search_retry = retry(
     wait=wait_exponential(multiplier=2, min=2, max=30),
     reraise=True,
 )
+
+# ── Seed query construction (feature 73) ────────────────────────────────────
+#
+# The seed used to ask for ``q=*:*&sort=readinglog`` — "whatever most users
+# shelved" — which drags in loose comic instalments, video-game tie-ins and
+# half-empty records. It is now two *disjoint* filtered streams, English and
+# Spanish, interleaved by quota. Why two and not one bilingual query: Open
+# Library's ``language`` is multivalued **at work level** (it aggregates the
+# languages of every edition), so ``language:(eng OR spa)`` is
+# indistinguishable from ``language:eng`` (29.476 vs 29.326 hits) and returns
+# the very same English list. A single readinglog-sorted query would seed zero
+# Spanish works. Hence the Spanish stream carries ``NOT language:eng`` (making
+# the two streams disjoint by construction, so the merge needs no dedup) and
+# its own, ~10x lower, readinglog threshold.
+#
+# Page size stays at 100. ``limit=1000`` is accepted by search.json and was
+# verified live to return 1000 docs, which would cut the request count 10x,
+# but raising it is an unrelated optimization: it changes the pagination
+# contract every caller test asserts on. Deliberately left as future work.
+_OL_MAX_PAGE_SIZE = 100
+
+# Open Library work keys end in ``W`` (``/works/OL82563W``). ``search.json``
+# also returns the odd *edition* key (``/works/OL9394106M``, "Metal Gear Solid
+# Volume 1"): editions with no parent work, exposed by the search index as if
+# they were works. They are ~1 in 1.000 docs on an unfiltered stream and
+# resolve to nothing useful downstream (``get_work_detail`` would 301 to the
+# edition endpoint), so the seed drops them. Cheap safety net rather than a
+# load-bearing filter: the calibrated thresholds already leave 0 of them in
+# every sampled page.
+_OL_WORK_KEY_SUFFIX = "W"
+
+
+def _is_work_doc(doc: dict) -> bool:
+    """True when a search doc is a real work, not an orphan edition key."""
+    key = doc.get("key")
+    return isinstance(key, str) and key.endswith(_OL_WORK_KEY_SUFFIX)
+
+
+def build_seed_query(*, spanish: bool = False) -> str:
+    """Build the Solr ``q`` for one of the two seed streams. Pure, no I/O.
+
+    Thresholds are read from ``settings`` **at call time** (not captured at
+    import time) so that a redeployed env var — or a test monkeypatch — takes
+    effect without reimporting the module.
+
+    The query is a plain conjunction of language, minimum length, minimum
+    shelving count and minimum edition count. There is **no classification
+    clause**: an earlier round filtered on ``(ddc:8* OR lcc:P*)`` and it was
+    wrong in both directions — it dropped every essay and non-fiction title
+    while letting comics through (LCC PN6700-6790 *is* "Comic books, graphic
+    novels"). Filtering comics out in Solr is not possible either: ``lcc``
+    takes no prefix wildcards, and ``subject_facet`` is returnable but not
+    queryable. ``edition_count`` replaces all of it — it measures notoriety,
+    which is the real discriminant, and it happens to subsume the
+    record-completeness signals too (0 docs without cover/year/author in the
+    sampled pages).
+
+    Syntax is load-bearing and every rule below was measured against the live
+    API: uppercase ``AND``/``OR``/``NOT`` (lowercase returns 0 hits) and
+    unquoted range bounds (quoting them makes Solr parse the range as text
+    and silently drop the filter). Encoding is left to ``httpx``, whose
+    default form-encoding of spaces was verified to return the same
+    ``numFound`` as percent-encoding.
+    """
+    if spanish:
+        min_readinglog = settings.BOOKS_SEED_MIN_READINGLOG_ES
+        min_editions = settings.BOOKS_SEED_MIN_EDITIONS_ES
+    else:
+        min_readinglog = settings.BOOKS_SEED_MIN_READINGLOG
+        min_editions = settings.BOOKS_SEED_MIN_EDITIONS
+
+    clauses = []
+    if spanish:
+        clauses.append(f"language:{BOOK_LANGUAGE_ES}")
+        clauses.append(f"NOT language:{BOOK_LANGUAGE_EN}")
+    else:
+        clauses.append(f"language:{BOOK_LANGUAGE_EN}")
+    clauses.append(f"number_of_pages_median:[{settings.BOOKS_SEED_MIN_PAGES} TO *]")
+    clauses.append(f"readinglog_count:[{min_readinglog} TO *]")
+    clauses.append(f"edition_count:[{min_editions} TO *]")
+    return " AND ".join(clauses)
+
+
+def is_spanish_slot(index: int, every_n: int) -> bool:
+    """True when the global seed slot *index* belongs to the Spanish stream.
+
+    One Spanish work every ``every_n`` slots, placed last inside each block
+    so a slice of exactly ``every_n`` items always contains one. ``every_n``
+    of 0 or less disables the Spanish stream entirely (English-only seed).
+    """
+    if every_n <= 0:
+        return False
+    return index % every_n == every_n - 1
+
+
+def spanish_offset(index: int, every_n: int) -> int:
+    """Number of Spanish slots before the global slot *index* (its sub-offset)."""
+    if every_n <= 0:
+        return 0
+    return index // every_n
+
+
+def english_offset(index: int, every_n: int) -> int:
+    """Number of English slots before the global slot *index* (its sub-offset)."""
+    if every_n <= 0:
+        return index
+    return index - index // every_n
+
+
+def split_seed_slice(
+    offset: int, limit: int, every_n: int
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Map a global ``(offset, limit)`` slice onto the two stream sub-slices.
+
+    Returns ``((en_offset, en_count), (es_offset, es_count))``. Because the
+    mapping is a pure function of the global index, the sync cursor in
+    ``backlogg/scheduler/jobs.py`` stays a single integer: no per-stream
+    cursor bookkeeping is needed.
+    """
+    end = offset + limit
+    en_start = english_offset(offset, every_n)
+    es_start = spanish_offset(offset, every_n)
+    return (en_start, english_offset(end, every_n) - en_start), (
+        es_start,
+        spanish_offset(end, every_n) - es_start,
+    )
+
+
+def interleave_seed_slice(
+    en_docs: list[dict], es_docs: list[dict], offset: int, limit: int, every_n: int
+) -> list[dict]:
+    """Merge both streams back into the global slot order given by ``is_spanish_slot``.
+
+    When the stream a slot belongs to has run out, the slot is filled from
+    the other stream instead of being left empty: a short page would make
+    ``_next_offset`` in the sync job wrap the cursor back to 0 and stall the
+    catalog. Pure, no I/O.
+    """
+    en_iter = iter(en_docs)
+    es_iter = iter(es_docs)
+    merged: list[dict] = []
+    for index in range(offset, offset + limit):
+        if is_spanish_slot(index, every_n):
+            primary, secondary = es_iter, en_iter
+        else:
+            primary, secondary = en_iter, es_iter
+        doc = next(primary, None)
+        if doc is None:
+            doc = next(secondary, None)
+        if doc is None:
+            break
+        merged.append(doc)
+    return merged
+
 
 # ── Book classification (feature 72) ────────────────────────────────────────
 #
@@ -725,7 +886,7 @@ class OpenLibraryClient:
             return data.get("docs", [])
 
     @_ol_search_retry
-    async def _fetch_popular_page(self, per_page: int, offset: int) -> dict:
+    async def _fetch_popular_page(self, query: str, per_page: int, offset: int) -> dict:
         """Fetch one page of the popular-books search, retrying transient failures.
 
         429/5xx responses, timeouts and transport errors are retried up to
@@ -736,9 +897,13 @@ class OpenLibraryClient:
         survives every retry — and any other 4xx (e.g. a 403 rate-limit),
         which a retry would not fix — raises ``httpx.HTTPStatusError``:
         callers must never mistake a failed fetch for an exhausted listing.
+
+        ``query`` is one of the two streams built by ``build_seed_query``;
+        it is passed in rather than built here so a single page fetch stays
+        stream-agnostic.
         """
         params = {
-            "q": "*:*",
+            "q": query,
             "sort": "readinglog",
             "fields": _OL_SEARCH_FIELDS,
             "limit": per_page,
@@ -749,15 +914,93 @@ class OpenLibraryClient:
         response.raise_for_status()
         return response.json()
 
+    async def _fetch_seed_stream(
+        self, query: str, offset: int, count: int, label: str
+    ) -> tuple[list[dict], int | None, int]:
+        """Fetch *count* consecutive docs of one seed stream starting at *offset*.
+
+        Returns ``(docs, num_found, next_offset)``:
+
+        - ``docs``: up to *count* usable search docs.
+        - ``num_found``: the stream's ``numFound``, ``None`` when no request
+          was needed because *count* was not positive. ``get_popular_books``
+          uses it for the pool-size guard.
+        - ``next_offset``: the **raw API offset** just past the last document
+          consumed. It is *not* ``offset + len(docs)``: dropped docs still
+          advance the API cursor. Callers that want to keep reading this
+          stream must use this value — see below.
+
+        Orphan edition keys (``_is_work_doc``) are dropped **here**, inside
+        the pagination loop, and not by the caller. That placement is what
+        makes the drop self-healing: the loop keeps requesting until it holds
+        *count* usable docs, so a discarded doc is replaced by the next one in
+        the stream. Filtering in ``get_popular_books`` instead would shrink an
+        already-counted slot budget and hand the sync job a short page with
+        neither stream exhausted — which ``_next_offset`` reads as
+        end-of-listing and answers by wrapping the cursor back to 0.
+
+        Two counters live here and they are deliberately different: the API
+        cursor and end-of-results (``len(docs) < per_page``, the only signal
+        OL gives) are in **raw doc space**, while ``results`` is in
+        **filtered** space. Mixing them either skips or re-requests
+        documents, so ``next_offset`` is returned rather than left for the
+        caller to reconstruct — reconstructing it as ``offset + len(docs)``
+        is precisely the bug this signature prevents (the exhaustion backfill
+        in ``get_popular_books`` re-requested the last *D* docs it had just
+        returned, duplicating them inside a single page).
+        """
+        if count <= 0:
+            return [], None, offset
+
+        results: list[dict] = []
+        num_found: int | None = None
+        cursor = offset
+        while len(results) < count:
+            per_page = min(count - len(results), _OL_MAX_PAGE_SIZE)
+            data = await self._fetch_popular_page(query, per_page, cursor)
+            if num_found is None:
+                num_found = data.get("numFound")
+            docs = data.get("docs", [])
+            if not docs:
+                logger.info("get_popular_books: no more %s results at offset %d", label, cursor)
+                break
+            work_docs = [doc for doc in docs if _is_work_doc(doc)]
+            if len(work_docs) < len(docs):
+                logger.info(
+                    "get_popular_books: dropped %d non-work key(s) from the %s stream at offset %d",
+                    len(docs) - len(work_docs),
+                    label,
+                    cursor,
+                )
+            results.extend(work_docs)
+            # Advance by the raw page, never by the kept docs. ``results`` can
+            # never overshoot ``count`` (each page asks for exactly the
+            # remainder and filtering only shrinks it), so the cursor always
+            # ends up just past the last doc actually returned by the API.
+            cursor += len(docs)
+            if len(docs) < per_page:
+                break
+
+        return results[:count], num_found, cursor
+
     async def get_popular_books(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular books from Open Library for nightly sync.
 
-        Uses ``GET /search.json`` with a Solr match-all query (``q=*:*``)
-        sorted by ``readinglog`` — how many users shelved the work as
-        want-to-read/reading/read — which surfaces genuinely popular works
-        and supports deep native offset/limit pagination (43M+ works
-        indexed), unlike the old ``/trending/weekly.json`` listing that was
-        capped at a few hundred entries.
+        Uses ``GET /search.json`` sorted by ``readinglog`` — how many users
+        shelved the work as want-to-read/reading/read — which surfaces
+        genuinely popular works and supports deep native offset/limit
+        pagination (verified past offset 100.000), unlike the old
+        ``/trending/weekly.json`` listing that was capped at a few hundred
+        entries.
+
+        The match-all ``q=*:*`` was replaced in feature 73 by two filtered,
+        disjoint streams (``build_seed_query``): raw readinglog popularity
+        drags in loose comic instalments, video-game tie-ins and half-empty
+        records. Both streams are restricted by language, minimum length,
+        minimum shelving count and minimum edition count, and are interleaved
+        by ``interleave_seed_slice`` so Spanish works appear from the first
+        slice on. The interleaving is a pure function of the global index, so
+        the caller's cursor stays a single integer.
 
         Returns search docs with the same field set as ``search_book``
         (``_OL_SEARCH_FIELDS``), which is the shape ``book_to_dict``
@@ -772,21 +1015,87 @@ class OpenLibraryClient:
         upserts are idempotent and the sync cursor is not advanced on error,
         so the next run refetches the same slice.
         """
-        results: list[dict] = []
-        per_page = min(limit, 100)  # OL search.json default page size
+        every_n = settings.BOOKS_SEED_ES_EVERY_N
+        (en_offset, en_count), (es_offset, es_count) = split_seed_slice(offset, limit, every_n)
+        en_query = build_seed_query(spanish=False)
+        es_query = build_seed_query(spanish=True)
 
-        while len(results) < limit:
-            data = await self._fetch_popular_page(per_page, offset)
-            docs = data.get("docs", [])
-            if not docs:
-                logger.info("get_popular_books: no more results at offset %d", offset)
-                break
-            results.extend(docs)
-            if len(docs) < per_page:
-                break
-            offset += per_page
+        # ``en_next``/``es_next`` are raw API offsets, not ``offset + len(docs)``:
+        # the orphan-key drop advances the API cursor without producing a doc,
+        # so only the stream itself knows where it stopped reading.
+        en_docs, en_found, en_next = await self._fetch_seed_stream(
+            en_query, en_offset, en_count, "english"
+        )
+        es_docs, es_found, es_next = await self._fetch_seed_stream(
+            es_query, es_offset, es_count, "spanish"
+        )
 
-        return results[:limit]
+        # Pool guard. Nothing else reads numFound, and without this check a
+        # filtered pool smaller than SEED_TOP_N_BOOKS would fail *silently*:
+        # past the last result OL answers 200 with an empty docs list, the
+        # caller sees a short page, wraps its cursor to 0 and re-syncs the
+        # same books every night while never reaching the target (the same
+        # failure mode /trending/weekly.json had in feature 25). The
+        # thresholds are env-tunable, so someone may well tighten them past
+        # that point.
+        if en_found is not None and es_found is not None:
+            pool = en_found + es_found
+            if pool < settings.SEED_TOP_N_BOOKS:
+                logger.warning(
+                    "get_popular_books: filtered pool (%d english + %d spanish = %d) is "
+                    "smaller than SEED_TOP_N_BOOKS (%d); the sync cursor will wrap before "
+                    "reaching the target — lower BOOKS_SEED_MIN_READINGLOG/"
+                    "BOOKS_SEED_MIN_READINGLOG_ES/BOOKS_SEED_MIN_PAGES/"
+                    "BOOKS_SEED_MIN_EDITIONS/BOOKS_SEED_MIN_EDITIONS_ES",
+                    en_found,
+                    es_found,
+                    pool,
+                    settings.SEED_TOP_N_BOOKS,
+                )
+
+        # Exhaustion fallback: a stream that runs out hands its remaining
+        # slots to the other one, which resumes from the raw offset it
+        # actually stopped at (``en_next``/``es_next``, returned by the fetch
+        # — *not* ``en_offset + len(en_docs)``, which is filtered space and
+        # would re-request every doc the orphan-key drop skipped, duplicating
+        # it inside this same page). The page is then not returned short,
+        # which the caller would read as end-of-listing. Warned once per call.
+        #
+        # Backfilling *into* spanish slots is gated on ``every_n > 0``: with
+        # the spanish stream switched off, ``es_count`` is 0 and the second
+        # branch's ``len(es_docs) == es_count`` would hold trivially, firing
+        # the spanish query the kill switch exists to avoid. That switch is
+        # there for "Open Library broke the spanish query", where emitting it
+        # anyway would burn the whole retry budget and fail the slice. Note
+        # the asymmetry is deliberate: ``every_n = 1`` is a quota setting
+        # (every slot is spanish), not a kill switch for english, and nothing
+        # promises it disables that stream.
+        if len(es_docs) < es_count and len(en_docs) == en_count:
+            extra, _, _ = await self._fetch_seed_stream(
+                en_query, en_next, es_count - len(es_docs), "english"
+            )
+            if extra:
+                logger.warning(
+                    "get_popular_books: spanish stream exhausted at offset %d; "
+                    "backfilled %d slot(s) from the english stream",
+                    es_next,
+                    len(extra),
+                )
+            en_docs.extend(extra)
+        elif every_n > 0 and len(en_docs) < en_count and len(es_docs) == es_count:
+            extra, _, _ = await self._fetch_seed_stream(
+                es_query, es_next, en_count - len(en_docs), "spanish"
+            )
+            if extra:
+                logger.warning(
+                    "get_popular_books: english stream exhausted at offset %d; "
+                    "backfilled %d slot(s) from the spanish stream",
+                    en_next,
+                    len(extra),
+                )
+            es_docs.extend(extra)
+
+        return interleave_seed_slice(en_docs, es_docs, offset, limit, every_n)
 
     async def get_work_detail(self, work_id: str) -> dict | None:
         """Fetch full work detail from Open Library.
