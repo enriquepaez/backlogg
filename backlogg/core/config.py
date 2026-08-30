@@ -16,6 +16,32 @@ class Settings(BaseSettings):
     SEED_TOP_N_BOOKS: int = 100
     SEED_TOP_N_GAMES: int = 100
 
+    # Quality thresholds for the Open Library seed query (feature 73). The
+    # language fragments live in backlogg/books/constants.py — only the
+    # tunable numbers are env vars. Defaults are the calibrated values
+    # documented in docs/external-apis.md: they yield a pool of 16.959
+    # English + 1.858 Spanish works, comfortably above SEED_TOP_N_BOOKS.
+    #
+    # BOOKS_SEED_MIN_READINGLOG applies to the English stream and
+    # BOOKS_SEED_MIN_READINGLOG_ES to the Spanish one: the shelving signal is
+    # ~10x weaker in Spanish, so a shared threshold would seed zero Spanish
+    # works. BOOKS_SEED_MIN_EDITIONS / _ES are the notoriety filter: how many
+    # editions the work has been published in. It is what separates a loose
+    # comic instalment (Ultimate Spider-Man Vol. 6, 3 editions) from a
+    # canonical graphic novel (Bone 11, Death Note 12, Watchmen 43) — no
+    # classification clause can, and none is queryable in Solr anyway. The
+    # Spanish floor is 2 and not 3 on purpose: Reina roja has exactly 2.
+    # BOOKS_SEED_ES_EVERY_N interleaves one Spanish work every N slots of the
+    # global cursor (10 ≈ the 1.858/18.817 share of the pool), so Spanish
+    # titles show up from the very first slice instead of after the English
+    # stream runs out.
+    BOOKS_SEED_MIN_READINGLOG: int = 20
+    BOOKS_SEED_MIN_READINGLOG_ES: int = 5
+    BOOKS_SEED_MIN_PAGES: int = 100
+    BOOKS_SEED_MIN_EDITIONS: int = 10
+    BOOKS_SEED_MIN_EDITIONS_ES: int = 2
+    BOOKS_SEED_ES_EVERY_N: int = 10
+
     SYNC_SLICE_SIZE: int = 200
 
     SYNC_CRON: str = "0 3 * * *"

@@ -1446,20 +1446,24 @@
     {
       "id": 73,
       "name": "books_seeding_quality_filter",
-      "title": "Filtro de calidad en la siembra de libros (equivalente al allowlist de game_type)",
-      "description": "Segundo hallazgo de la investigación de 2026-08-29. La siembra actual usa q=*:*&sort=readinglog, que devuelve lo que más gente estantea en Open Library: autoayuda y BookTok (Atomic Habits, The 48 Laws of Power, It Ends With Us). No es un fallo de la API, es lo que esa señal mide. La query Solr admite filtros que lo corrigen; verificado en vivo que 'q=ddc:8* AND language:eng AND readinglog_count:[2000 TO *]&sort=readinglog' devuelve Harry Potter, A Game of Thrones, It y El Alquimista. Palancas disponibles: ddc:8* (solo literatura), language, readinglog_count, ratings_count, first_publish_year y number_of_pages_median (descarta folletos). Es el equivalente para libros del category allowlist de game_type (feature 65). Pendiente de calibrar: ese filtro estricto devuelve solo 97 resultados, así que hay que ajustar umbrales para alcanzar SEED_TOP_N_BOOKS sin reintroducir ruido, e incluir castellano además de inglés (la app es bilingüe).",
+      "title": "Filtro de calidad en la siembra de libros (notoriedad vía edition_count)",
+      "description": "Origen: la siembra usaba q=*:*&sort=readinglog, lo que más gente estantea en Open Library. La investigación de 2026-08-29 diagnosticó el ruido como autoayuda/BookTok, pero el 2026-08-30 el usuario corrigió el diagnóstico dos veces sobre el catálogo real. Primero: el ruido son los cómics y las fichas con información confusa, no la autoayuda — el ensayo y la autoayuda SÍ deben entrar. Segundo: tampoco hay que excluir la novela gráfica como clase, porque Watchmen, Maus, Persepolis y Heartstopper son catálogo legítimo. El discriminante correcto no es el género sino la NOTORIEDAD de la obra, y se expresa con edition_count: hay un hueco limpio entre las entregas sueltas de serialización (Ultimate Spider-Man Vol. 6 ed=3, Batman and Robin Vol. 1 ed=1, Encyclopaedia Eorzea ed=1) y la novela gráfica canónica (Bone 11, Death Note 12, Heartstopper 23, Watchmen 43, Maus 66). Un primer intento con '(ddc:8* OR lcc:P*)' se descartó porque estaba invertido en las dos direcciones: excluía toda la no ficción y en cambio dejaba pasar los cómics (PN6700-6790 es 'Comic books, graphic novels' y casa con lcc:P*). Además se midió que filtrar cómics en Solr no es viable: lcc no admite comodines de prefijo y subject_facet no es consultable.",
       "depends_on": [
         72
       ],
       "acceptance": [
         "Query de siembra filtrada, con los umbrales elegidos justificados y documentados en docs/external-apis.md",
         "Incluye obras en castellano además de en inglés",
-        "El catálogo resultante alcanza SEED_TOP_N_BOOKS sin reintroducir autoayuda ni folletos",
+        "Entra la novela gráfica con identidad propia (Watchmen, Maus, Persepolis, Heartstopper)",
+        "Quedan fuera las entregas sueltas de serialización y los tie-ins (Ultimate Spider-Man Vol. 6, Batman and Robin Vol. 1, Encyclopaedia Eorzea)",
+        "Ficción, no ficción, ensayo y autoayuda SÍ entran (Atomic Habits, Sapiens, 1984, Dune)",
+        "Se descartan folletos y fichas con información insuficiente (sin portada, sin año, keys de edición huérfanas)",
+        "El catálogo resultante alcanza SEED_TOP_N_BOOKS",
         "Los umbrales son configurables por env, no constantes enterradas en el código",
         "Tests de construcción de la query (no dependientes de la red)",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 74,

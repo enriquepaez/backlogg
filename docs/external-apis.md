@@ -42,30 +42,43 @@
 - **Base URL**: `https://openlibrary.org`
 - **Rate limits**: none enforced — suitable for batch sync
 - **Key endpoints used**:
-  - `GET /search.json?q=*:*&sort=readinglog&offset=&limit=` — seed/nightly sync popular books
+  - `GET /search.json?q=<filtered>&sort=readinglog&offset=&limit=` — seed/nightly sync popular books (dos streams filtrados, EN y ES; ver *Popular-books strategy*)
   - `GET /search.json?title=&limit=` — on-demand fallback search
   - `GET /works/{olid}.json` — work detail (modeled at work level, not edition)
 
-- **Popular-books strategy**: the sync uses `search.json` with a Solr match-all query
-  (`q=*:*`, 43M+ works indexed) sorted by `readinglog` — the count of users who shelved
-  the work as want-to-read/reading/read — with native `offset`/`limit` pagination
-  (verified up to offset 9900). Do **not** use:
+- **Popular-books strategy**: the sync uses `search.json` sorted by `readinglog` —
+  the count of users who shelved the work as want-to-read/reading/read — with native
+  `offset`/`limit` pagination (verified up to offset 9900; offsets de 50.000 y 100.000
+  también responden 200). La query **ya no es `q=*:*`**: desde la feature 73 son dos
+  streams filtrados y disjuntos, inglés y castellano, intercalados por cuota
+  (ver *Calidad del catálogo* más abajo para las queries exactas y los umbrales).
+  Do **not** use:
   - `/trending/weekly.json` — capped at a few hundred entries, catalog cannot grow
   - `sort=rating` — surfaces obscure books with very few ratings
   - `sort=edition_count` — does not exist (returns HTTP 500)
 
+  **Page size**: el adaptador pagina de 100 en 100 (`_OL_MAX_PAGE_SIZE`).
+  `limit=1000` está **verificado en vivo** (devuelve 1000 docs y reduciría las
+  peticiones ×10), pero se mantiene en 100 **a propósito**: subirlo cambia el
+  contrato de paginación sobre el que assertan los tests de los llamadores y es
+  una optimización ajena a la feature 73. Queda como trabajo futuro.
+
   Request the field set
-  `key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet`
+  `key,title,author_name,first_publish_year,cover_i,isbn,ddc,lcc,subject_facet,edition_count`
   (the shape `book_to_dict` consumes — constant `_OL_SEARCH_FIELDS` in
   `backlogg/books/adapters/open_library.py`). `subject` se eliminó en la
   feature 72: solo se consumía para derivar géneros, y eso ahora sale de
-  `lcc`/`ddc`.
+  `lcc`/`ddc`. `edition_count` se añadió en la feature 73: Solr filtra por él
+  sin devolverlo, pero se pide para poder auditar una página contra el umbral
+  que la seleccionó.
 
   ⚠️ `sync_books` (`backlogg/scheduler/jobs.py`) **no** pasa el doc crudo al
   adaptador: reconstruye a mano un `search_doc` reducido campo a campo. Todo
   campo nuevo del field set hay que copiarlo también ahí o el job nocturno lo
   pierde en silencio mientras la búsqueda on-demand sigue funcionando (fue
-  exactamente el bug del issue #17 con `isbn`).
+  exactamente el bug del issue #17 con `isbn`). Excepción documentada en el
+  propio código: `edition_count` **no** se copia porque `book_to_dict` no lo
+  lee — es un campo de filtro/auditoría, no de persistencia.
 - **Clasificación y calidad de catálogo (investigación 2026-08-29, clasificación implementada en la feature 72)**: los dos
   problemas observados en producción —géneros basura y catálogo basura— **no
   requieren cambiar de proveedor**. Ambos se resuelven dentro de Open Library.
@@ -196,26 +209,206 @@
   en `locked_fields` (ediciones manuales de admin, feature 49). Los géneros son
   datos derivados: se repueblan con `uv run python scripts/backfill_sync.py book`.
 
-  **Calidad del catálogo.** `q=*:*&sort=readinglog` devuelve lo que más gente
-  estantea en Open Library, que es autoayuda y BookTok — *Atomic Habits*,
-  *The 48 Laws of Power*, *It Ends With Us*. No es un fallo de la API: es lo
-  que esa señal mide. La query Solr admite filtros que lo corrigen. Verificado
-  en vivo:
+  **Calidad del catálogo — filtro implementado en la feature 73.**
+  `q=*:*&sort=readinglog` devuelve lo que más gente estantea en Open Library,
+  y ahí entra mucha entrega suelta de serialización, tie-in de videojuego y
+  ficha a medias: *Batman and Robin Vol. 1*, *Ultimate Spider-Man Vol. 6*,
+  *Metal Gear Solid vol. 1*, *Encyclopaedia Eorzea Volume III*, *Ultimate
+  FFXIV Cookbook Vol. 2*, *Ferno the Fire Dragon (Beast Quest #1)*. No es un
+  fallo de la API: es lo que esa señal mide.
+
+  **El criterio es la notoriedad de la obra, no su clasificación.** Es el
+  punto que costó dos rondas acertar. No se trata de dejar fuera un género:
+  el ensayo y la autoayuda (*Atomic Habits*, *Sapiens*, *Thinking, Fast and
+  Slow*) son catálogo legítimo de una app de backlog de lectura, y la novela
+  gráfica con identidad propia (*Watchmen*, *Maus*, *Persepolis*, *V for
+  Vendetta*, *Sandman*, *Fun Home*, *Blankets*, *Bone*, *Akira*, *Death
+  Note*, *Heartstopper*) también. Lo que sobra es el volumen suelto de una
+  serialización, y eso lo separa **`edition_count`**: cuántas ediciones ha
+  tenido la obra.
+
+  Umbrales calibrados en vivo contra `search.json` (2026-08-30). Queries
+  finales, ambas verificadas:
 
   ```
-  q=ddc:8* AND language:eng AND readinglog_count:[2000 TO *]&sort=readinglog
-  → Harry Potter, A Game of Thrones, It, The Alchemist, The Love Hypothesis
+  EN (numFound = 16.959):
+    q=language:eng AND number_of_pages_median:[100 TO *]
+      AND readinglog_count:[20 TO *] AND edition_count:[10 TO *]
+    &sort=readinglog
+
+  ES (numFound = 1.858):
+    q=language:spa AND NOT language:eng AND number_of_pages_median:[100 TO *]
+      AND readinglog_count:[5 TO *] AND edition_count:[2 TO *]
+    &sort=readinglog
   ```
 
-  Palancas disponibles: `ddc:8*` (solo literatura), `language`,
-  `readinglog_count`, `ratings_count`, `first_publish_year`,
-  `number_of_pages_median` (descarta folletos). Es el equivalente para libros
-  del **category allowlist de `game_type`** (feature 65) en juegos.
+  Pool total 18.817 obras, ~190× el `SEED_TOP_N_BOOKS` por defecto. La primera
+  página EN es *Atomic Habits*, *The 48 Laws of Power*, *It Ends With Us*,
+  *Harry Potter 1*, *A Game of Thrones*, *It*.
 
-  Pendiente de calibrar: el filtro estricto del ejemplo devuelve solo 97
-  resultados. Hay que ajustar umbrales para alcanzar `SEED_TOP_N_BOOKS` sin
-  reintroducir ruido, e incluir castellano además de inglés (la app es
-  bilingüe). Es trabajo de calibración, no de arquitectura.
+  **Justificación de cada pieza:**
+
+  | Fragmento | Por qué | Medido |
+  |---|---|---|
+  | `edition_count:[10 TO *]` (EN) | El discriminante. Hueco limpio entre la entrega suelta y la novela gráfica canónica: *Ultimate Spider-Man Vol. 6* tiene 3 ediciones, *Batman and Robin Vol. 1* 1, *Metal Gear Solid* 3; la canónica con menos es *Bone*/*Blankets* con 11 y *Death Note* con 12, y de ahí para arriba (*Akira* 15, *Persepolis* 21, *Heartstopper* 23, *V for Vendetta* 36, *Watchmen* 43, *Maus* 66). **Subsume además la completitud de ficha**: 0 docs sin portada, año ni autor en 4 de 5 muestras de 1.000 | 52.067 → 16.959 a rl≥20 |
+  | `readinglog_count:[20 TO *]` (EN) | La cola aguanta limpia hasta el final verificado (offset 15.900: le Carré, Banville, Javier Marías, Rosario Castellanos, Chaucer). La variante conservadora rl≥50 da 8.497 y pasa la misma regresión; se elige 20 por margen para el backfill | 16.959 |
+  | `number_of_pages_median:[100 TO *]` | Descarta folletos y panfletos; recorta 9-12 %. ≥150 empieza a comerse novelas cortas legítimas sin ganancia | — |
+  | `language:spa AND NOT language:eng` + `readinglog_count:[5 TO *]` (ES) | `language` es **multivaluado a nivel de work** (agrega los idiomas de todas las ediciones), así que `language:(eng OR spa)` es indistinguible de `language:eng` (29.476 vs 29.326) y devuelve la misma lista inglesa: una query bilingüe única sembraría **cero** libros en castellano. La señal de estantería es ~10× menor en castellano, de ahí el umbral propio | 4.508 |
+  | `edition_count:[2 TO *]` (ES) | Con ed≥2 la cola es Arguedas, Benedetti, Barthes, Saramago, Martín Gaite, Elvira Lindo, Fernanda Melchor. **No puede subir a 3**: *Reina roja* tiene exactamente 2 ediciones (ed≥3 deja 976 obras y la expulsa). `cover_i:[* TO *]` se evaluó como alternativa y es peor palanca: da 3.466 obras pero la cola profunda es *101 Posturas Sexuales* y manuales técnicos autoeditados | 4.508 → 1.858 |
+
+  **Por qué NO hay cláusula de clasificación.** La primera versión de esta
+  feature filtraba por `(ddc:8* OR lcc:P*) AND NOT lcc:PE* AND NOT ddc:80*`
+  y estaba **invertida en las dos direcciones**: dejaba el catálogo en
+  solo-literatura (fuera *Atomic Habits* con `ddc 155.24`, *Thinking, Fast
+  and Slow* `153.42`, *The Psychology of Money* `332.02`, *Educated*, *Becoming*)
+  y **no** quitaba los cómics, que entraban justo por `lcc:P*` — LCC
+  PN6700-6790 *es* "Comic books, graphic novels". Se retiró entera.
+
+  **Y por qué tampoco se puede sustituir por una exclusión de cómics.** No hay
+  señal fiable en Solr, medido sobre un pool de 17.553 obras:
+
+  | Señal | numFound | Veredicto |
+  |---|---|---|
+  | `ddc:741.5*` | 218 (1,2 %) | Cobertura parcial: se le escapan Ultimate Spider-Man, Naruto, Berserk, Maus, Metal Gear Solid, y marca *Frankenstein* (lleva `741.5973` por sus adaptaciones) |
+  | `lcc:PN-67*` / `lcc:PN67*` / `lcc:PN-6*` | **0** | El campo `lcc` **no admite comodines de prefijo**: los valores están normalizados a `XX-NNNN.NNNNNNNN` y el guion rompe el parseo |
+  | `lcc:PN\-67*` (escapado) | 9 | Incoherente |
+  | `lcc:PN\-6728*` (escapado) | 13 | **Un prefijo más largo devuelve MÁS documentos** → el wildcard no es fiable |
+  | `lcc:[PN-6700 TO PN-6799]` | 276 | El rango sí funciona, pero contamina: el `lcc` de un *work* agrega el de todas sus ediciones, así que una adaptación en cómic mete a *Pride and Prejudice*, *Frankenstein* y *Dracula* en el rango |
+  | `subject_facet:"Graphic novels"` (y `"Manga"`, `"Comic books, strips"`) | 0-1 | **`subject_facet` no es consultable**, solo devolvible: cualquier cláusula sobre él es silenciosamente inútil |
+  | `subject:comics` | 494 | Consultable pero ruidoso: *1984* lleva ese subject |
+
+  **Filtro por patrón de título: evaluado y descartado.** Casar `Vol. N` /
+  `Volume N` / `#N` / `(Serie, #N)` sobre los docs recibidos afecta al
+  0,6-1,9 % del pool, pero lo que hay ahí dentro son novelas de serie
+  legítimas (*C is for Corpse (Kinsey Millhone, #3)*, *The Grey King (The Dark
+  is Rising #4)*, *Outcast of Redwall (Redwall #8)*). Sobre las listas de
+  control elimina **4 de 12** de los que deben entrar —*Heartstopper Volume
+  1*, *Akira Vol. 1*, *Death Note Vol. 1*, *Monstress Vol. 1*, un **33 %** de
+  las novelas gráficas canónicas— y de los que debe quitar, 6 de 7 ya caen por
+  los umbrales numéricos. **Ganancia neta real: 1 documento**, a cambio de
+  ~170-340 obras. No se aplica.
+
+  **Deduplicación: evaluada y descartada.** Las colisiones de (título
+  normalizado, primer autor) son 0,0-1,1 % en muestras de 1.000 y casi
+  ninguna es un duplicado real: son obras distintas que el normalizador
+  colapsa al quitarles el número de volumen (*Heartstopper* 1/2/3, *Amulet*
+  1/2). El caso que motivó la idea (*Metal Gear Solid vol. 1* / *Metal Gear
+  Solid Volume 1*) no sobrevive a los umbrales numéricos.
+
+  **Único filtro en código: `doc["key"].endswith("W")`.** `search.json`
+  devuelve de vez en cuando una key de *edición* (`/works/OL9394106M`, sufijo
+  `M`) como si fuera una obra: son ediciones sin work padre. ~1 de cada 1.000
+  docs sin `edition_count`, **0** con `ed≥10`. Se descarta **dentro del bucle
+  de paginación de `_fetch_seed_stream`**, no en `get_popular_books`: ahí el
+  hueco se rellena con el siguiente doc del stream, mientras que descartar
+  después de repartir los slots devolvería una página corta sin que ningún
+  stream esté agotado — y una página corta es justo lo que `_next_offset`
+  interpreta como fin de listado para envolver el cursor a 0. El fin de
+  resultados se sigue decidiendo sobre la página **cruda**
+  (`len(docs) < per_page`), que es la única señal que da OL.
+
+  **Costes aceptados.**
+  - Se pierde *Monstress, Vol. 1* (ed=4): obra reciente y de nicho. Es el
+    precio directo de usar la notoriedad como criterio.
+  - Entra ruido residual **de otra clase**: libros de texto académicos
+    (*Precalculus With Limits*, *iGenetics*, *Advanced Accounting*,
+    *Management Information Systems*). Son legítimamente populares y muy
+    reeditados, y **ninguna señal medida los distingue**. Candidatos a una
+    feature aparte, no a endurecer estos umbrales.
+  - Sobrevive *E Natale, Stilton! (#12)* (ed=17, rl=383). Mirado de cerca es
+    un libro infantil real y popular, no una ficha basura.
+  - Los títulos en alfabeto no latino (*Доктор Живаго*, *人間失格*) aparecen en
+    ambos streams porque `language` agrega todas las ediciones.
+  - *Cien años de soledad* y *La sombra del viento* **no** están en el stream
+    ES: tienen ediciones en inglés y las excluye `NOT language:eng`. Es una
+    propiedad preexistente del diseño de dos streams disjuntos.
+
+  **Fugas puntuales**: para un título concreto que se cuele, la herramienta
+  correcta es una **denylist explícita de `work key`**, no endurecer los
+  umbrales.
+
+  **Intercalado EN/ES.** Las dos queries son disjuntas por construcción, así
+  que se paginan por separado y se unen sin deduplicar. Como una sola query
+  ordenada por `readinglog` global daría cero castellano en el top 100, el
+  adaptador intercala **una obra en castellano cada `BOOKS_SEED_ES_EVERY_N`
+  huecos** del índice global `i`:
+
+  ```
+  is_es(i)     = (i % N) == N - 1
+  es_offset(i) = i // N
+  en_offset(i) = i - (i // N)
+  ```
+
+  Es función pura del índice global, así que el cursor de
+  `backlogg/scheduler/jobs.py` sigue siendo **un solo entero**. Si un stream
+  se agota, sus huecos se rellenan con el otro (continuando su propio offset)
+  para no devolver una página corta: `_next_offset` interpretaría esa página
+  corta como fin de listado y envolvería el cursor a 0.
+
+  `BOOKS_SEED_ES_EVERY_N=0` desactiva el stream español **de verdad**: no se
+  emite su query ni siquiera como relleno. Es la palanca para el caso "Open
+  Library rompe la query ES", donde emitirla igualmente agotaría el
+  presupuesto de reintentos y tumbaría el slice entero. La asimetría es
+  deliberada: `every_n=1` es un ajuste de cuota, no un kill switch del inglés,
+  y guardar esa rama devolvería páginas cortas.
+
+  ⚠️ **El relleno solapa slices consecutivos** (aceptado, por diseño). El
+  backfill consume docs del otro stream *por delante* de su propio cursor,
+  pero el slice siguiente recalcula su offset con la fórmula pura
+  (`en_offset(offset + limit)`), que es menor. Con el stream ES agotado
+  —a partir de un offset global de ~18.580 con los defaults— cada slice
+  repetiría `es_count` docs ingleses del slice anterior. **No estanca el
+  catálogo** (el offset propio de cada stream avanza `en_count` por slice) y
+  los upserts son idempotentes, así que el efecto se limita a reingestar unos
+  pocos libros ya conocidos. Es el precio deliberado de no devolver nunca una
+  página corta, que sí envolvería el cursor a 0.
+
+  **No confundirlo con un duplicado dentro de una misma página**, que sí era
+  un bug y está corregido. El backfill arranca desde el **offset crudo** donde
+  el stream dejó de leer, que `_fetch_seed_stream` devuelve como tercer
+  elemento de su tupla. Reconstruirlo como `en_offset + len(en_docs)` es
+  incorrecto desde que existe el descarte de keys huérfanas: `len(en_docs)`
+  está en espacio **filtrado**, así que por cada key descartada el backfill
+  repedía el último documento que acababa de devolver y la página salía con
+  un duplicado (10 ítems, 9 distintos). Como `sync_books` hace upsert por
+  ítem, el fallo era silencioso: inflaba `synced` y sembraba un libro distinto
+  menos. Regla: **toda aritmética de offset va en espacio crudo de la API**;
+  el único contador en espacio filtrado es cuántos docs útiles llevamos.
+
+  **Guarda de `numFound`.** El adaptador lee el `numFound` de ambos streams y
+  emite un `warning` si `numFound_en + numFound_es < SEED_TOP_N_BOOKS`. Sin
+  ella, unos umbrales demasiado duros dejarían el catálogo estancado **en
+  silencio** (mismo modo de fallo que `/trending/weekly.json` en la feature 25).
+  La comparación es contra el pool **total**, así que un stream ES minúsculo
+  junto a un EN enorme **no** dispara aviso aunque el ES se agote en cada
+  slice (y active el solapamiento de arriba). Vigilar por stream sería la
+  mejora natural si algún día el pool ES se estrecha.
+
+  **Sintaxis Solr — reglas obligatorias** (cada una medida; incumplirlas da 0
+  resultados o ignora el filtro sin avisar):
+
+  | Regla | Qué pasa si se incumple |
+  |---|---|
+  | `AND`/`OR`/`NOT` en MAYÚSCULAS | `and`/`or` en minúsculas → `numFound=0` |
+  | Rangos **sin** comillas | `readinglog_count:"[20 TO *]"` → 947.088, se parsea como texto y el filtro se ignora |
+  | Paréntesis alrededor de todo `OR` | `language:eng OR language:spa` suelto → 4.958, precedencia rota |
+  | `lcc` no admite comodines de prefijo | `lcc:PN-67*` → 0; escapado, incoherente. Solo el rango `[PN-6700 TO PN-6799]` funciona, y contamina |
+  | `subject_facet` no es consultable | Cualquier cláusula sobre él se ignora en silencio (0-1 resultados) |
+
+  Sí funcionan, verificado: `language:*`, `number_of_pages_median:[N TO *]`,
+  `readinglog_count:[N TO *]`, `edition_count:[N TO *]`, `cover_i:[* TO *]`,
+  `key:/works/OLxxxW` (sin escapar las barras).
+
+  El urlencode lo hace `httpx`; su codificación de espacios como `+` se
+  verificó que devuelve el mismo `numFound` que el percent-encoding.
+
+  **Dónde vive cada cosa:** los códigos de idioma son constantes
+  (`backlogg/books/constants.py`) porque no son umbrales y una query cruda en
+  una env var es frágil; los umbrales numéricos son env vars (`BOOKS_SEED_*`,
+  tabla de más abajo). El filtro se aplica **solo** al camino de siembra
+  (`get_popular_books`): `search_book` —fallback on-demand y fan-out de
+  búsqueda— no se filtra, o buscar por título un ensayo reciente o una novela
+  gráfica de nicho dejaría de encontrar nada.
 
 - **Alternativas evaluadas y descartadas (2026-08-29)**: Open Library sigue
   siendo la fuente correcta, y es además la única de las cuatro verticales sin
@@ -432,6 +625,12 @@
 | `SEED_TOP_N_SERIES`    | Sync job      | How many series to seed (default: 100)           |
 | `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
 | `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
+| `BOOKS_SEED_MIN_READINGLOG`    | Open Library seed | Mínimo `readinglog_count` del stream inglés (default: 20 → 16.959 obras) |
+| `BOOKS_SEED_MIN_READINGLOG_ES` | Open Library seed | Ídem para el stream en castellano; la señal es ~10× menor, por eso es distinto (default: 5 → 1.858 obras) |
+| `BOOKS_SEED_MIN_PAGES`         | Open Library seed | Mínimo `number_of_pages_median`; descarta folletos (default: 100) |
+| `BOOKS_SEED_MIN_EDITIONS`      | Open Library seed | Mínimo `edition_count` del stream inglés: el filtro de notoriedad que separa la entrega suelta de la obra canónica (default: 10) |
+| `BOOKS_SEED_MIN_EDITIONS_ES`   | Open Library seed | Ídem para el stream en castellano. **No subir a 3**: *Reina roja* tiene exactamente 2 ediciones (default: 2) |
+| `BOOKS_SEED_ES_EVERY_N`        | Open Library seed | Una obra en castellano cada N huecos sembrados; 0 desactiva el stream ES (default: 10) |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
 
 ### Roadmap — variables planificadas (features 35-40)

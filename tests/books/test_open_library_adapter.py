@@ -2,8 +2,17 @@
 
 Covers:
 - User-Agent header is sent in get_popular_books requests
-- get_popular_books queries /search.json with q=*:*, sort=readinglog and
-  native offset/limit, requesting the field set book_to_dict consumes
+- get_popular_books queries /search.json with the feature-73 filtered seed
+  queries (english + spanish streams), sort=readinglog and native
+  offset/limit, requesting the field set book_to_dict consumes
+- build_seed_query renders both streams verbatim, reading the thresholds from
+  settings at call time, and carries no ddc/lcc classification clause (the
+  round-1 filter, reverted: it excluded non-fiction and let comics through)
+- orphan edition keys (/works/OL...M) are dropped inside the pagination loop,
+  so a drop is topped up instead of shortening the page — and only shortens
+  it when the stream is genuinely exhausted
+- split_seed_slice / interleave_seed_slice map a global (offset, limit) slice
+  onto the two streams and back, including the stream-exhaustion fallback
 - get_popular_books raises immediately (no retry) when the API responds with 403
 - get_popular_books retries transient 5xx responses (via tenacity) and
   succeeds on a later attempt
@@ -36,6 +45,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from backlogg.books.adapters import open_library as ol_adapter
 from backlogg.books.adapters.open_library import (
     _CONTROLLED_GENRES,
     _DDC_BRACKET_GENRES,
@@ -47,8 +57,14 @@ from backlogg.books.adapters.open_library import (
     _OL_SEARCH_FIELDS,
     _SUBJECT_FACET_GENRES,
     OpenLibraryClient,
+    _is_work_doc,
+    build_seed_query,
+    interleave_seed_slice,
+    is_spanish_slot,
+    split_seed_slice,
 )
 from backlogg.books.service import _persist_book_authors
+from backlogg.core.config import Settings, settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,6 +90,16 @@ def _mock_response(status_code: int, json_data: dict | None = None) -> MagicMock
 
 def _search_payload(docs: list[dict]) -> dict:
     return {"numFound": len(docs), "docs": docs}
+
+
+def _is_spanish_query(params: dict | None) -> bool:
+    """True when the captured request belongs to the spanish seed stream.
+
+    Feature 73 turned the single ``q=*:*`` seed into two disjoint streams, so
+    tests that only care about one of them (retry budget, pagination) tell
+    them apart by the language clause instead of by call order.
+    """
+    return "language:spa" in (params or {}).get("q", "")
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +140,16 @@ async def test_get_popular_books_sends_user_agent_header():
 
 
 @pytest.mark.asyncio
-async def test_get_popular_books_queries_search_json_with_readinglog_sort():
-    """get_popular_books must hit /search.json with q=*:*, sort=readinglog,
-    native offset/limit and the field set consumed by book_to_dict."""
-    captured: dict = {}
+async def test_get_popular_books_queries_both_filtered_streams_with_readinglog_sort(
+    calibrated_thresholds,
+):
+    """get_popular_books must hit /search.json once per seed stream (feature 73).
+
+    Each request carries its stream's filtered query, sort=readinglog, the
+    field set consumed by book_to_dict and the stream's own sub-offset/limit
+    derived from the global (offset, limit) slice — not the raw global ones.
+    """
+    calls: list[dict] = []
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -130,20 +162,28 @@ async def test_get_popular_books_queries_search_json_with_readinglog_sort():
             pass
 
         async def get(self, url, params=None):
-            captured["url"] = url
-            captured["params"] = params
+            calls.append({"url": url, "params": params})
             return _mock_response(200, _search_payload([]))
 
     with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", FakeClient):
         client = OpenLibraryClient()
-        await client.get_popular_books(limit=5, offset=120)
+        await client.get_popular_books(limit=25, offset=120)
 
-    assert captured["url"].endswith("/search.json")
-    assert captured["params"]["q"] == "*:*"
-    assert captured["params"]["sort"] == "readinglog"
-    assert captured["params"]["offset"] == 120
-    assert captured["params"]["limit"] == 5
-    assert captured["params"]["fields"] == _OL_SEARCH_FIELDS
+    assert len(calls) == 2
+    english, spanish = calls
+    for call in calls:
+        assert call["url"].endswith("/search.json")
+        assert call["params"]["sort"] == "readinglog"
+        assert call["params"]["fields"] == _OL_SEARCH_FIELDS
+
+    # Global slots 120..144 with BOOKS_SEED_ES_EVERY_N=10 hold 23 english
+    # works (sub-offset 120 - 12 = 108) and 2 spanish ones (sub-offset 12).
+    assert english["params"]["q"] == build_seed_query()
+    assert english["params"]["offset"] == 108
+    assert english["params"]["limit"] == 23
+    assert spanish["params"]["q"] == build_seed_query(spanish=True)
+    assert spanish["params"]["offset"] == 12
+    assert spanish["params"]["limit"] == 2
 
 
 @pytest.mark.asyncio
@@ -176,7 +216,11 @@ async def test_get_popular_books_raises_on_403_without_retry():
 
 @pytest.mark.asyncio
 async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
-    """A transient 5xx must be retried via tenacity; the 2nd attempt's 200 is returned."""
+    """A transient 5xx must be retried via tenacity; the 2nd attempt's 200 is returned.
+
+    Scoped to the english stream: the spanish one answers empty so the result
+    is exactly the retried page.
+    """
     fake_docs = [{"key": "/works/OL1W", "title": "Book One"}]
     call_count = 0
 
@@ -193,6 +237,8 @@ async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
         async def get(self, url, params=None):
             nonlocal call_count
             call_count += 1
+            if _is_spanish_query(params):
+                return _mock_response(200, _search_payload([]))
             if call_count == 1:
                 return _mock_response(500)
             return _mock_response(200, _search_payload(fake_docs))
@@ -203,7 +249,7 @@ async def test_get_popular_books_retries_5xx_and_succeeds_on_second_attempt():
             result = await client.get_popular_books(limit=10)
 
     assert result == fake_docs
-    assert call_count == 2
+    assert call_count == 3  # 500 + 200 on the english stream, 1 empty spanish page
     mock_sleep.assert_awaited_once()  # one backoff between the two attempts
 
 
@@ -260,6 +306,8 @@ async def test_get_popular_books_recovers_after_long_5xx_burst():
         async def get(self, url, params=None):
             nonlocal call_count
             call_count += 1
+            if _is_spanish_query(params):
+                return _mock_response(200, _search_payload([]))
             if call_count < 7:
                 return _mock_response(500)
             return _mock_response(200, _search_payload(fake_docs))
@@ -270,7 +318,9 @@ async def test_get_popular_books_recovers_after_long_5xx_burst():
             result = await client.get_popular_books(limit=10)
 
     assert result == fake_docs
-    assert call_count == 7  # six 500s absorbed, 200 on the seventh attempt
+    # six 500s absorbed and a 200 on the seventh attempt (english stream),
+    # plus the single empty spanish page
+    assert call_count == 8
     assert mock_sleep.await_count == 6  # one backoff between each of the 7 attempts
 
 
@@ -308,7 +358,9 @@ async def test_get_popular_books_mid_pagination_error_discards_and_raises():
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_popular_books(limit=200, offset=0)
 
-    assert call_count == 9  # page 1 OK + 8 failed attempts on page 2 (Issue #9 budget)
+    # Page 1 OK + 8 failed attempts on page 2 (Issue #9 budget). The english
+    # stream is fetched first and raises, so the spanish one is never reached.
+    assert call_count == 9
 
 
 @pytest.mark.asyncio
@@ -348,6 +400,8 @@ async def test_get_popular_books_parses_docs_list():
             pass
 
         async def get(self, url, params=None):
+            if _is_spanish_query(params):
+                return _mock_response(200, _search_payload([]))
             # Return fewer items than per_page so the loop terminates after one page
             return _mock_response(200, _search_payload(fake_docs))
 
@@ -370,6 +424,678 @@ async def test_get_popular_books_parses_docs_list():
             "ddc",
             "subject_facet",
         } <= set(doc)
+
+
+# ---------------------------------------------------------------------------
+# Feature 73: books_seeding_quality_filter — seed query + stream interleaving
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def calibrated_thresholds(monkeypatch):
+    """Pin the seed thresholds to their shipped defaults.
+
+    Settings are loaded from the local .env, which an operator may have
+    overridden; these tests assert the calibrated query, not the machine's
+    configuration.
+    """
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_READINGLOG", 20)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_READINGLOG_ES", 5)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_PAGES", 100)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_EDITIONS", 10)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_EDITIONS_ES", 2)
+    monkeypatch.setattr(settings, "BOOKS_SEED_ES_EVERY_N", 10)
+
+
+def test_seed_threshold_defaults_are_the_calibrated_values():
+    """The shipped defaults must be the live-measured ones, ignoring any local .env.
+
+    16.959 english + 1.858 spanish works, a pool ~190x SEED_TOP_N_BOOKS's
+    default, with the spanish quota matching the spanish share of that pool
+    (1.858/18.817 ~ 10%).
+    """
+    defaults = Settings(_env_file=None)
+
+    assert defaults.BOOKS_SEED_MIN_READINGLOG == 20
+    assert defaults.BOOKS_SEED_MIN_READINGLOG_ES == 5
+    assert defaults.BOOKS_SEED_MIN_PAGES == 100
+    assert defaults.BOOKS_SEED_MIN_EDITIONS == 10
+    assert defaults.BOOKS_SEED_MIN_EDITIONS_ES == 2
+    assert defaults.BOOKS_SEED_ES_EVERY_N == 10
+
+
+def test_spanish_edition_floor_keeps_the_two_edition_control(calibrated_thresholds):
+    """BOOKS_SEED_MIN_EDITIONS_ES must stay at 2: Reina roja has exactly 2 editions.
+
+    Raising it to 3 nearly halves the spanish pool (1.858 -> 976) and expels a
+    control title that must be seeded, so the floor is pinned by a test rather
+    than left to a reviewer to remember.
+    """
+    assert settings.BOOKS_SEED_MIN_EDITIONS_ES <= 2
+    assert "edition_count:[2 TO *]" in build_seed_query(spanish=True)
+
+
+def test_build_seed_query_english_renders_the_calibrated_query(calibrated_thresholds):
+    """The english stream query must be rendered verbatim, thresholds included.
+
+    This exact string was measured live against search.json and returns
+    16.959 works. Asserting it character by character is deliberate: every
+    syntax detail is load-bearing. Note what is *absent*: no classification
+    clause. Filtering by ddc/lcc was tried and reverted — it dropped every
+    essay and non-fiction title while letting comics through, and no
+    comics-only signature is queryable in Solr anyway. ``edition_count`` is
+    the notoriety discriminant that replaced it.
+    """
+    assert build_seed_query() == (
+        "language:eng "
+        "AND number_of_pages_median:[100 TO *] "
+        "AND readinglog_count:[20 TO *] "
+        "AND edition_count:[10 TO *]"
+    )
+
+
+def test_build_seed_query_spanish_renders_the_calibrated_query(calibrated_thresholds):
+    """The spanish stream must exclude english works and use its own threshold.
+
+    ``NOT language:eng`` is what makes the two streams disjoint (OL's
+    ``language`` is multivalued at work level, so ``language:spa`` alone
+    returns the english list), and the lower readinglog and edition floors are
+    what make the stream non-empty: this exact string returns 1.858 works.
+    """
+    assert build_seed_query(spanish=True) == (
+        "language:spa AND NOT language:eng "
+        "AND number_of_pages_median:[100 TO *] "
+        "AND readinglog_count:[5 TO *] "
+        "AND edition_count:[2 TO *]"
+    )
+
+
+@pytest.mark.parametrize("spanish", [False, True])
+def test_build_seed_query_respects_solr_syntax_rules(spanish):
+    """Uppercase operators and unquoted range bounds, both measured live.
+
+    Lowercase ``and``/``or`` returns 0 hits and a quoted range is parsed as
+    text and silently ignored (``readinglog_count:"[20 TO *]"`` -> 947.088
+    hits, i.e. no filter at all).
+    """
+    query = build_seed_query(spanish=spanish)
+
+    assert " and " not in query
+    assert " or " not in query
+    assert " not " not in query
+    assert query.startswith(f"language:{'spa' if spanish else 'eng'}")
+    assert '"' not in query
+    assert "TO *]" in query
+
+
+@pytest.mark.parametrize("spanish", [False, True])
+def test_build_seed_query_carries_no_classification_clause(spanish):
+    """No ddc/lcc clause may come back: it excluded non-fiction and kept comics.
+
+    ``(ddc:8* OR lcc:P*)`` was the round-1 filter and it was wrong in both
+    directions — Atomic Habits (ddc 155.24) and Sapiens fell out while
+    Watchmen came in through LCC PN6737, which *is* the comics range. Solr
+    offers no working alternative either: ``lcc`` takes no prefix wildcards
+    (``lcc:PN-67*`` -> 0 hits; escaped, a longer prefix returns *more* docs)
+    and ``subject_facet`` is returnable but not queryable.
+    """
+    query = build_seed_query(spanish=spanish)
+
+    assert "ddc" not in query
+    assert "lcc" not in query
+
+
+def test_build_seed_query_reads_thresholds_from_settings(monkeypatch):
+    """Thresholds come from settings at call time, so env overrides take effect."""
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_READINGLOG", 200)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_READINGLOG_ES", 2)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_PAGES", 150)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_EDITIONS", 25)
+    monkeypatch.setattr(settings, "BOOKS_SEED_MIN_EDITIONS_ES", 7)
+
+    assert "readinglog_count:[200 TO *]" in build_seed_query()
+    assert "number_of_pages_median:[150 TO *]" in build_seed_query()
+    assert "edition_count:[25 TO *]" in build_seed_query()
+    assert "readinglog_count:[2 TO *]" in build_seed_query(spanish=True)
+    assert "number_of_pages_median:[150 TO *]" in build_seed_query(spanish=True)
+    assert "edition_count:[7 TO *]" in build_seed_query(spanish=True)
+
+
+def test_is_spanish_slot_places_one_spanish_work_per_block():
+    """One spanish slot every N, last in the block, so every N-sized slice has one."""
+    slots = [is_spanish_slot(i, 10) for i in range(20)]
+
+    assert [i for i, es in enumerate(slots) if es] == [9, 19]
+
+
+def test_is_spanish_slot_disabled_when_every_n_is_zero():
+    """every_n <= 0 disables the spanish stream instead of dividing by zero."""
+    assert [is_spanish_slot(i, 0) for i in range(5)] == [False] * 5
+
+
+@pytest.mark.parametrize(
+    ("offset", "limit", "every_n", "expected"),
+    [
+        # First slice: 90 english + 10 spanish, both from their own offset 0.
+        (0, 100, 10, ((0, 90), (0, 10))),
+        # Second slice: each stream resumes exactly where the first one left.
+        (100, 100, 10, ((90, 90), (10, 10))),
+        # Slice shorter than a block and not covering slot N-1: english only.
+        (0, 5, 10, ((0, 5), (0, 0))),
+        # Slice starting mid-block, crossing exactly one spanish slot.
+        (5, 10, 10, ((5, 9), (0, 1))),
+        # Deep offset: sub-offsets stay consistent with the global index.
+        (1000, 200, 10, ((900, 180), (100, 20))),
+        # every_n=1 makes the seed spanish-only.
+        (0, 10, 1, ((0, 0), (0, 10))),
+        # every_n=0 disables the spanish stream entirely.
+        (0, 10, 0, ((0, 10), (0, 0))),
+    ],
+)
+def test_split_seed_slice_maps_global_slice_onto_both_streams(offset, limit, every_n, expected):
+    """A global (offset, limit) maps to disjoint, gap-free sub-slices per stream."""
+    assert split_seed_slice(offset, limit, every_n) == expected
+
+
+@pytest.mark.parametrize("offset", [0, 1, 7, 9, 10, 99, 100, 137, 1000])
+def test_split_seed_slice_sub_offsets_are_contiguous_across_slices(offset):
+    """Consecutive slices must not skip or repeat a doc in either stream."""
+    limit = 25
+    (en_start, en_count), (es_start, es_count) = split_seed_slice(offset, limit, 10)
+    (next_en_start, _), (next_es_start, _) = split_seed_slice(offset + limit, limit, 10)
+
+    assert en_count + es_count == limit
+    assert next_en_start == en_start + en_count
+    assert next_es_start == es_start + es_count
+
+
+def test_interleave_seed_slice_places_spanish_docs_on_their_slots():
+    """The merged page follows the global slot order, spanish last in each block."""
+    en_docs = [{"key": f"en{i}"} for i in range(9)]
+    es_docs = [{"key": "es0"}]
+
+    merged = interleave_seed_slice(en_docs, es_docs, 0, 10, 10)
+
+    assert [doc["key"] for doc in merged] == [f"en{i}" for i in range(9)] + ["es0"]
+
+
+def test_interleave_seed_slice_honours_a_non_zero_global_offset():
+    """Slot parity is computed from the global index, not from the page index."""
+    en_docs = [{"key": f"en{i}"} for i in range(4)]
+    es_docs = [{"key": "es0"}]
+
+    # Global slots 7..11: only slot 9 is spanish.
+    merged = interleave_seed_slice(en_docs, es_docs, 7, 5, 10)
+
+    assert [doc["key"] for doc in merged] == ["en0", "en1", "es0", "en2", "en3"]
+
+
+def test_interleave_seed_slice_fills_gaps_when_the_spanish_stream_is_exhausted():
+    """An exhausted stream must not shorten the page: the other one fills the slot.
+
+    A short page is read upstream as end-of-listing and wraps the sync cursor
+    back to 0, stalling the catalog silently.
+    """
+    en_docs = [{"key": f"en{i}"} for i in range(10)]
+
+    merged = interleave_seed_slice(en_docs, [], 0, 10, 10)
+
+    assert [doc["key"] for doc in merged] == [f"en{i}" for i in range(10)]
+
+
+def test_interleave_seed_slice_fills_gaps_when_the_english_stream_is_exhausted():
+    """Symmetric fallback: spanish docs cover the english slots when needed."""
+    es_docs = [{"key": f"es{i}"} for i in range(5)]
+
+    merged = interleave_seed_slice([{"key": "en0"}], es_docs, 0, 6, 10)
+
+    assert [doc["key"] for doc in merged] == ["en0", "es0", "es1", "es2", "es3", "es4"]
+
+
+def test_interleave_seed_slice_returns_short_page_only_when_both_streams_run_out():
+    """With nothing left in either stream the merge stops instead of padding."""
+    merged = interleave_seed_slice([{"key": "en0"}], [{"key": "es0"}], 0, 10, 10)
+
+    assert [doc["key"] for doc in merged] == ["en0", "es0"]
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_interleaves_both_streams(calibrated_thresholds):
+    """End to end: the returned page carries spanish works on their slots."""
+    en_docs = [{"key": f"/works/EN{i}W", "title": f"English {i}"} for i in range(9)]
+    es_docs = [{"key": "/works/ES0W", "title": "Spanish 0"}]
+
+    class TwoStreamClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            docs = es_docs if _is_spanish_query(params) else en_docs
+            return _mock_response(200, _search_payload(docs))
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", TwoStreamClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    assert [doc["key"] for doc in result] == [f"/works/EN{i}W" for i in range(9)] + ["/works/ES0W"]
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_backfills_from_english_when_spanish_is_exhausted(
+    calibrated_thresholds,
+):
+    """An exhausted spanish stream is backfilled from english, keeping the page full."""
+    calls: list[dict] = []
+
+    class ExhaustedSpanishClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, {"numFound": 0, "docs": []})
+            offset = params["offset"]
+            docs = [
+                {"key": f"/works/EN{offset + i}W"}
+                for i in range(min(params["limit"], 200 - offset))
+            ]
+            return _mock_response(200, {"numFound": 200, "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", ExhaustedSpanishClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    assert len(result) == 10  # never short: the cursor upstream must keep advancing
+    assert [doc["key"] for doc in result] == [f"/works/EN{i}W" for i in range(10)]
+    # english page (9) + empty spanish page + english backfill of the 1 gap
+    assert len(calls) == 3
+    assert calls[2]["offset"] == 9
+    assert calls[2]["limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_never_queries_spanish_when_every_n_is_zero(monkeypatch):
+    """BOOKS_SEED_ES_EVERY_N=0 must keep the spanish query off the wire entirely.
+
+    The kill switch exists for "Open Library broke the spanish query": if the
+    exhaustion backfill still emitted it, a persistent 5xx on that query would
+    burn the retry budget and fail the whole slice. The regression it guards
+    against is subtle — with every_n=0 the spanish quota is 0, so the
+    backfill's ``len(es_docs) == es_count`` check (0 == 0) held trivially and
+    a short english page was enough to fire the query. Asserted on the
+    captured requests, not just on the returned docs: a spanish doc could
+    also be absent simply because the fake returned none.
+    """
+    monkeypatch.setattr(settings, "BOOKS_SEED_ES_EVERY_N", 0)
+    calls: list[dict] = []
+
+    class ShortEnglishClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, _search_payload([{"key": "/works/ES0W"}]))
+            # English pool exhausted after 3 docs: a short page is what used
+            # to trigger the spanish backfill.
+            return _mock_response(200, {"numFound": 3, "docs": [{"key": "/works/EN0W"}] * 3})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", ShortEnglishClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    assert not any(_is_spanish_query(params) for params in calls)
+    assert len(calls) == 1
+    assert calls[0]["q"] == build_seed_query()
+    assert calls[0]["limit"] == 10  # the whole slice is english when the quota is 0
+    # A short page is the honest answer here: with no spanish stream to fill
+    # from, there is nothing left to seed.
+    assert [doc["key"] for doc in result] == ["/works/EN0W"] * 3
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_warns_when_the_filtered_pool_is_too_small(
+    calibrated_thresholds, monkeypatch
+):
+    """A pool below SEED_TOP_N_BOOKS must warn instead of stalling silently.
+
+    Past the last result OL answers 200 with an empty docs list, which the
+    sync job reads as end-of-listing and wraps its cursor to 0 — the same
+    silent failure /trending/weekly.json had (feature 25). The thresholds are
+    env-tunable, so this is reachable by configuration.
+    """
+    monkeypatch.setattr(settings, "SEED_TOP_N_BOOKS", 100)
+
+    class SmallPoolClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            docs = [{"key": f"/works/OL{i}W"} for i in range(params["limit"])]
+            return _mock_response(200, {"numFound": 5, "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", SmallPoolClient):
+        with patch.object(ol_adapter.logger, "warning") as mock_warning:
+            client = OpenLibraryClient()
+            await client.get_popular_books(limit=10)
+
+    assert any(
+        "smaller than SEED_TOP_N_BOOKS" in call.args[0] for call in mock_warning.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_does_not_warn_when_the_pool_is_large_enough(
+    calibrated_thresholds, monkeypatch
+):
+    """The pool guard stays quiet when both streams together cover the target."""
+    monkeypatch.setattr(settings, "SEED_TOP_N_BOOKS", 100)
+
+    class LargePoolClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            docs = [{"key": f"/works/OL{i}W"} for i in range(params["limit"])]
+            return _mock_response(200, {"numFound": 16959, "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", LargePoolClient):
+        with patch.object(ol_adapter.logger, "warning") as mock_warning:
+            client = OpenLibraryClient()
+            await client.get_popular_books(limit=10)
+
+    assert not any(
+        "smaller than SEED_TOP_N_BOOKS" in call.args[0] for call in mock_warning.call_args_list
+    )
+
+
+def test_search_fields_keep_the_classification_and_add_edition_count():
+    """ddc/lcc must survive the filter rewrite; edition_count must be requested.
+
+    ddc/lcc stopped being a *filter* in feature 73 but they are still what
+    feature 72 derives genres from, so dropping them from the field set would
+    silently strip every seeded book of its genres. edition_count is the new
+    discriminant and is requested (Solr filters fine without returning it) so
+    a page can be audited against the threshold that selected it — which also
+    makes it a field the hand-built search_doc in scheduler/jobs.py has to
+    know about (Issue #17).
+    """
+    fields = _OL_SEARCH_FIELDS.split(",")
+
+    assert "ddc" in fields
+    assert "lcc" in fields
+    assert "subject_facet" in fields
+    assert "edition_count" in fields
+
+
+@pytest.mark.parametrize(
+    ("doc", "expected"),
+    [
+        ({"key": "/works/OL82563W"}, True),
+        ({"key": "/works/OL9394106M"}, False),
+        ({"key": ""}, False),
+        ({}, False),
+        ({"key": None}, False),
+    ],
+)
+def test_is_work_doc_only_accepts_work_keys(doc, expected):
+    """search.json returns the odd orphan *edition* key dressed up as a work.
+
+    ``/works/OL9394106M`` ("Metal Gear Solid Volume 1") is an edition with no
+    parent work: the M suffix gives it away. Persisting it would create a
+    catalog entry whose work detail lookup resolves to an edition endpoint.
+    """
+    assert _is_work_doc(doc) is expected
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_drops_orphan_edition_keys_and_tops_up(calibrated_thresholds):
+    """A dropped non-work key is replaced by the next doc, not left as a gap.
+
+    This is why the filter lives inside ``_fetch_seed_stream``'s pagination
+    loop instead of in ``get_popular_books``: dropping docs after the slot
+    budget has been split would return a short page with *neither* stream
+    exhausted, and the sync job reads a short page as end-of-listing and wraps
+    its cursor back to 0.
+    """
+    en_pool = [{"key": f"/works/EN{i}W"} for i in range(20)]
+    en_pool[3] = {"key": "/works/OL9394106M"}  # orphan edition key
+    calls: list[dict] = []
+
+    class OrphanKeyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, {"numFound": 1858, "docs": [{"key": "/works/ES0W"}]})
+            start = params["offset"]
+            docs = en_pool[start : start + params["limit"]]
+            return _mock_response(200, {"numFound": len(en_pool), "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", OrphanKeyClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    # Full page, no orphan key, no gap in the english sequence.
+    assert len(result) == 10
+    assert all(_is_work_doc(doc) for doc in result)
+    assert [doc["key"] for doc in result] == [
+        "/works/EN0W",
+        "/works/EN1W",
+        "/works/EN2W",
+        "/works/EN4W",
+        "/works/EN5W",
+        "/works/EN6W",
+        "/works/EN7W",
+        "/works/EN8W",
+        "/works/EN9W",
+        "/works/ES0W",
+    ]
+    # The top-up asks for exactly the one missing doc, continuing the *raw*
+    # API offset (9, the page size asked for) — mixing filtered and raw
+    # counters here would either skip or re-request a document.
+    english_calls = [call for call in calls if not _is_spanish_query(call)]
+    assert len(english_calls) == 2
+    assert english_calls[0]["offset"] == 0
+    assert english_calls[0]["limit"] == 9
+    assert english_calls[1]["offset"] == 9
+    assert english_calls[1]["limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_page_is_short_when_the_drop_empties_an_exhausted_stream(
+    calibrated_thresholds, monkeypatch
+):
+    """With the pool genuinely exhausted, the dropped doc makes the page shorter.
+
+    The loop must stop instead of paginating forever looking for a
+    replacement that does not exist: OL answers a past-the-end page with
+    fewer docs than requested, and that — not the filtered count — is the
+    end-of-results signal. A short page here is the honest answer.
+    """
+    monkeypatch.setattr(settings, "SEED_TOP_N_BOOKS", 1)
+    en_pool = [
+        {"key": "/works/EN0W"},
+        {"key": "/works/EN1W"},
+        {"key": "/works/OL9394106M"},
+        {"key": "/works/EN3W"},
+        {"key": "/works/EN4W"},
+    ]
+    calls: list[dict] = []
+
+    class ExhaustedPoolClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, {"numFound": 0, "docs": []})
+            start = params["offset"]
+            docs = en_pool[start : start + params["limit"]]
+            return _mock_response(200, {"numFound": len(en_pool), "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", ExhaustedPoolClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    assert [doc["key"] for doc in result] == [
+        "/works/EN0W",
+        "/works/EN1W",
+        "/works/EN3W",
+        "/works/EN4W",
+    ]
+    # One english page (short -> end of results) plus one empty spanish page:
+    # the drop must not trigger extra requests once the stream is exhausted.
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_backfill_resumes_from_the_raw_offset_after_a_dropped_key(calibrated_thresholds):
+    """The exhaustion backfill must resume from the raw API offset, not a filtered one.
+
+    Regression for the round-3 review blocker. ``_fetch_seed_stream`` returns
+    docs in *filtered* space, so ``en_offset + len(en_docs)`` is short by one
+    for every orphan key dropped: the backfill re-requested the last docs it
+    had just returned and the page came back with a duplicate — 10 items, 9
+    distinct, ``EN9W`` twice. Since the sync job upserts per item, the
+    duplicate is silent: it inflates ``synced`` and seeds one fewer distinct
+    book instead of failing.
+
+    Setup is the reviewer's: one orphan inside the english slice plus an empty
+    spanish stream, which is what forces the backfill to run.
+    """
+    en_pool = [{"key": f"/works/EN{i}W"} for i in range(40)]
+    en_pool[1] = {"key": "/works/OL1M"}  # orphan edition key inside the slice
+    calls: list[dict] = []
+
+    class OrphanPlusEmptySpanishClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, {"numFound": 0, "docs": []})
+            start = params["offset"]
+            docs = en_pool[start : start + params["limit"]]
+            return _mock_response(200, {"numFound": len(en_pool), "docs": docs})
+
+    with patch(
+        "backlogg.books.adapters.open_library.httpx.AsyncClient", OrphanPlusEmptySpanishClient
+    ):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    keys = [doc["key"] for doc in result]
+    assert len(keys) == 10
+    assert len(set(keys)) == 10  # the bug produced EN9W twice
+    assert keys == [f"/works/EN{i}W" for i in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
+
+    # Asserted on the wire, not just on the docs: the top-up of the dropped
+    # key stops the english stream at raw offset 10, and the backfill for the
+    # empty spanish slot must continue from there — not from 9, which is where
+    # filtered arithmetic would have pointed.
+    english_calls = [
+        (call["offset"], call["limit"]) for call in calls if not _is_spanish_query(call)
+    ]
+    assert english_calls == [(0, 9), (9, 1), (10, 1)]
+
+
+@pytest.mark.asyncio
+async def test_get_popular_books_keeps_paginating_when_a_whole_page_is_dropped(
+    calibrated_thresholds,
+):
+    """A page made entirely of orphan keys is not read as end-of-results.
+
+    ``len(docs) < per_page`` is evaluated on the raw page precisely so that a
+    full page of unusable docs keeps the cursor moving instead of stalling.
+    """
+    calls: list[dict] = []
+
+    class AllOrphansFirstPageClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            calls.append(params)
+            if _is_spanish_query(params):
+                return _mock_response(200, {"numFound": 1858, "docs": [{"key": "/works/ES0W"}]})
+            if params["offset"] == 0:
+                docs = [{"key": f"/works/OL{i}M"} for i in range(params["limit"])]
+            else:
+                docs = [
+                    {"key": f"/works/EN{params['offset'] + i}W"} for i in range(params["limit"])
+                ]
+            return _mock_response(200, {"numFound": 16959, "docs": docs})
+
+    with patch("backlogg.books.adapters.open_library.httpx.AsyncClient", AllOrphansFirstPageClient):
+        client = OpenLibraryClient()
+        result = await client.get_popular_books(limit=10)
+
+    assert len(result) == 10
+    assert all(_is_work_doc(doc) for doc in result)
+    english_calls = [call for call in calls if not _is_spanish_query(call)]
+    assert [call["offset"] for call in english_calls] == [0, 9]
+    assert [call["limit"] for call in english_calls] == [9, 9]
 
 
 # ---------------------------------------------------------------------------
