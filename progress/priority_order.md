@@ -39,9 +39,9 @@ esto» del final**.
 ## Estado (2026-09-02)
 
 - **15 features backend pendientes** (ids 74-88). Ninguna en `in_progress`.
-- **0 features frontend pendientes**: las 63 de `frontend_feature_list.json`
-  están `done`. El frontend que generarán las backend de esta cola está listado
-  en el apartado «Frontend», y se crea cuando llegue su momento.
+- **5 features frontend en `blocked`** (FE-65 a FE-69): ninguna ejecutable hoy,
+  cada una espera a su feature backend pareja. Las 63 anteriores están `done`.
+  Índice en el apartado «Frontend».
 - **1 issue abierto**: #15 (credits vacíos en gran parte del catálogo). Deja de
   ser un problema operativo «volver a lanzar el workflow» y pasa a resolverse
   con las features 84 y 85 — ver `issues_list.json`.
@@ -101,23 +101,28 @@ quedan satisfechas en secuencia.
 `item_detail_field_ordering`), y las rutas de `apps/web/src/app/[locale]/`
 cubren ya todo lo que expone el backend actual.
 
-Lo que sí falta es **el frontend que van a generar las features backend de esta
-cola**, que hoy no existe como entrada porque esas features no se han hecho
-todavía. Cada una se crea en `frontend_feature_list.json` **cuando su feature
-backend pareja esté `done`**, y se ejecuta como punto propio de la cola —
-misma regla de una tarea cada vez, su propia rama y su propio PR.
+Lo que sí hay es **el frontend que van a generar las features backend de esta
+cola**. Está en `frontend_feature_list.json` como **5 entradas con status
+`blocked`** (FE-65 a FE-69, ids 64-68), no aquí: esta tabla es solo el índice.
+Cada una se desbloquea cuando su feature backend pareja pasa a `done`, y
+entonces se ejecuta como punto propio de la cola — misma regla de una tarea cada
+vez, su propia rama y su propio PR.
 
-| Tras la backend… | Frontend que hará falta | Por qué |
+| Desbloquea | Frontend | Entrada |
 |---|---|---|
-| **74** `credits_source_author_role` | Mostrar y etiquetar los roles `SOURCE_AUTHOR` y `WRITER` en la sección Credits de la ficha | Hoy el único crew persistido es `DIRECTOR` (`docs/detail-page-layout.md` §Credits). Sin esto los roles nuevos se ingieren pero no se ven |
-| **79** `wikidata_adaptations` | Sección «basado en / adaptado a» en la ficha | Es la capa que produce el «no sabía que había libro». Alto valor visible, y sin frontend no existe para el usuario |
-| **80** `similar_semantic_rewrite` | Ajustar `/{tipo}/{slug}/similar` a la cuota cross-type | La página ya existe, pero pasará a devolver ítems de otros tipos y hay que presentarlos como tales |
-| **81** `trending_local` | `period` real en `/trending` para books y games | **Deuda ya registrada**: la feature backend 68 se cerró con la nota «sin frontend pareja todavía»; `period=day/week` se acepta hoy para book/game pero no tiene efecto |
-| **82** `recommendations_ranker` | Mostrar el `reason` por candidato en `/recommendations` | El ranker devuelve un motivo por recomendación y hoy la página no tiene dónde ponerlo |
+| backend **74** `credits_source_author_role` | Mostrar y etiquetar `SOURCE_AUTHOR` y `WRITER` en la sección Credits | **FE-65** `credits_source_author_writer_display` |
+| backend **79** `wikidata_adaptations` | Sección «basado en / adaptado a» en la ficha | **FE-66** `item_detail_adaptations_section` |
+| backend **80** `similar_semantic_rewrite` | Presentar la cuota cross-type en `/similar` | **FE-67** `similar_cross_type_presentation` |
+| backend **81** `trending_local` | `period` efectivo en `/trending` para books y games | **FE-68** `trending_period_books_games` |
+| backend **82** `recommendations_ranker` | Mostrar el `reason` por candidato | **FE-69** `recommendations_reason_display` |
+
+FE-68 no es especulación sino **deuda ya registrada**: la feature backend 68 se
+cerró el 2026-08-26 con la nota «sin frontend pareja todavía», y hoy
+`period=day/week` se acepta para book y game pero no tiene ningún efecto.
 
 Las features 76-78 (`themes`) podrían generar frontend también —navegación por
 tema cross-type—, pero eso es una decisión de producto que no está tomada: no
-las cuentes como deuda pendiente hasta que se decida.
+hay entrada creada y no cuenta como deuda hasta que se decida.
 
 ---
 
@@ -152,11 +157,9 @@ este orden** — son tres sitios, ninguno más:
 3. **Borra la línea de `progress/history.md`** que apunte a este orden, si se
    añadió alguna.
 
-Ojo con el apartado «Frontend»: sus filas **no se borran sin más**. Cada una que
-se haya convertido en una entrada real de `frontend_feature_list.json` vive ya
-allí; las que sigan sin convertirse, o se crean como entrada antes de borrar
-este archivo, o se descartan explícitamente. No las dejes desaparecer con el
-`rm`.
+El apartado «Frontend» se puede borrar con el resto sin perder nada: sus cinco
+filas son solo un índice de FE-65 a FE-69, que viven en
+`frontend_feature_list.json` y no dependen de este archivo para existir.
 
 Lo que **no** hay que borrar, porque no es «orden de ejecución» sino
 documentación permanente del proyecto: `docs/seeding-plan.md`, las entradas de

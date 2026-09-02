@@ -1212,6 +1212,95 @@
         "typecheck+lint+test+build en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 64,
+      "code": "FE-65",
+      "milestone": "M1",
+      "name": "credits_source_author_writer_display",
+      "title": "Sección Credits: mostrar y etiquetar los roles SOURCE_AUTHOR y WRITER",
+      "description": "BLOQUEADA por la feature de backend 74 (credits_source_author_role, backend_feature_list.json, hoy pending): hasta que esos roles no se persistan no hay nada que mostrar. Creada el 2026-09-02 al ordenar la cola (progress/priority_order.md) para que el trabajo de frontend que generan las features de backend pendientes sea visible en esta lista y no solo en el documento de prioridades. Hoy el único crew persistido para movies/series es DIRECTOR, y la sección Credits del detail page (docs/detail-page-layout.md, sección 'Credits') lo refleja. La feature 74 añade dos roles con semántica muy distinta que NO se pueden presentar igual: SOURCE_AUTHOR es el autor de la obra de origen (Stephen King en It) y es el puente libro-película del producto; WRITER es el guionista de la adaptación (Fukunaga en la misma película). Etiquetarlos ambos como 'Writer' destruiría exactamente la distinción que la feature 74 existe para crear. Ver docs/schema.md, sección 'SOURCE_AUTHOR vs WRITER'.",
+      "depends_on": [],
+      "acceptance": [
+        "Los roles SOURCE_AUTHOR y WRITER se muestran en la sección Credits de movie y series con etiquetas distintas y traducidas (es/en), nunca fusionados bajo una sola",
+        "La etiqueta de SOURCE_AUTHOR deja claro que es autoría de la obra de origen, no del guion",
+        "Un ítem sin ninguno de los dos roles no muestra sección vacía ni encabezado huérfano",
+        "Sin strings hardcodeados: claves de mensaje next-intl en es.json y en.json",
+        "Test que fija las etiquetas de ambos roles y su separación",
+        "pnpm --filter web typecheck && lint && build && test en verde"
+      ],
+      "status": "blocked"
+    },
+    {
+      "id": 65,
+      "code": "FE-66",
+      "milestone": "M1",
+      "name": "item_detail_adaptations_section",
+      "title": "Sección «basado en / adaptado a» en el detail page (adaptaciones cross-media)",
+      "description": "BLOQUEADA por la feature de backend 79 (wikidata_adaptations, backend_feature_list.json, hoy pending). Creada el 2026-09-02 al ordenar la cola (progress/priority_order.md). Es la capa que docs/recommendations-plan.md describe como la de mayor valor percibido: la que produce el 'no sabía que había libro'. Precisión quirúrgica y cobertura baja, así que la mayoría de ítems NO tendrán adaptaciones y la sección debe desaparecer limpiamente en ese caso, no quedarse como bloque vacío. La relación es bidireccional (P144 'based on' y P4969 'derivative work'), así que la misma sección sirve para 'esta película viene de este libro' y para 'de este libro salió esta serie', y el texto tiene que distinguir las dos direcciones.",
+      "depends_on": [],
+      "acceptance": [
+        "Sección de adaptaciones en el detail page de los 4 tipos, con enlace al ítem relacionado dentro del catálogo",
+        "Las dos direcciones de la relación se distinguen en el texto (origen vs obra derivada), no se presentan como una lista indiferenciada",
+        "Un ítem sin adaptaciones no renderiza la sección — sin encabezado vacío ni placeholder",
+        "Posición en la página acordada y reflejada en docs/detail-page-layout.md",
+        "Sin strings hardcodeados: claves next-intl en es.json y en.json",
+        "loading.tsx / skeleton coherente con el resto del detail page si la sección se carga aparte",
+        "pnpm --filter web typecheck && lint && build && test en verde"
+      ],
+      "status": "blocked"
+    },
+    {
+      "id": 66,
+      "code": "FE-67",
+      "milestone": "M1",
+      "name": "similar_cross_type_presentation",
+      "title": "Presentar la cuota cross-type en /{tipo}/{slug}/similar",
+      "description": "BLOQUEADA por la feature de backend 80 (similar_semantic_rewrite, backend_feature_list.json, hoy pending). Creada el 2026-09-02 al ordenar la cola (progress/priority_order.md). La página de similares ya existe, pero hoy solo devuelve ítems del MISMO tipo. Tras la feature 80 pasará a incluir una cuota de ítems de otros tipos, y una tarjeta de libro apareciendo sin más entre películas similares se lee como un error, no como una recomendación. Hay que apoyarse en el sistema de color por tipo que ya existe (FE-57, tokens --type-* en globals.css, TYPE_COLOR_CLASSES) en lugar de inventar señalización nueva.",
+      "depends_on": [],
+      "acceptance": [
+        "Los ítems de tipo distinto al del ítem actual son identificables de un vistazo, reutilizando el codificado visual por tipo de FE-57 y sin introducir un sistema de color nuevo",
+        "El comportamiento cuando el backend no devuelve ningún cross-type es el mismo de hoy, sin hueco ni sección vacía",
+        "Los enlaces resuelven a la ruta del tipo correcto, no a la del tipo de la página actual",
+        "Sin strings hardcodeados: claves next-intl en es.json y en.json",
+        "Test con una respuesta mixta de al menos dos tipos",
+        "pnpm --filter web typecheck && lint && build && test en verde"
+      ],
+      "status": "blocked"
+    },
+    {
+      "id": 67,
+      "code": "FE-68",
+      "milestone": "M1",
+      "name": "trending_period_books_games",
+      "title": "Selector de period efectivo en /trending para books y games",
+      "description": "DEUDA YA REGISTRADA, no especulación: la feature de backend 68 (trending_books_games) se cerró el 2026-08-26 con la nota explícita 'sin frontend pareja todavía'. Hoy GET /trending acepta period=day/week para book y game pero NO tiene efecto — la heurística de esos dos tipos (rating_internal DESC, rating_external DESC de desempate) no tiene ventana temporal, limitación documentada en docs/api.md y docs/external-apis.md y cubierta por un test de regresión en el backend. Movies y series sí usan el trending nativo de TMDB, donde period sí es real. BLOQUEADA por la feature de backend 81 (trending_local, hoy pending), que es la que da period real a los cuatro tipos calculándolo sobre actividad local. Hacer el frontend antes obligaría a exponer un control que miente en dos de los cuatro tipos. Creada como entrada propia el 2026-09-02 al ordenar la cola.",
+      "depends_on": [],
+      "acceptance": [
+        "El selector de period afecta de verdad a los cuatro tipos una vez la feature de backend 81 esté done",
+        "Se verifica contra el backend real que day y week devuelven resultados distintos para book y game, no solo para movie y series",
+        "Sin strings hardcodeados: claves next-intl en es.json y en.json",
+        "pnpm --filter web typecheck && lint && build && test en verde"
+      ],
+      "status": "blocked"
+    },
+    {
+      "id": 68,
+      "code": "FE-69",
+      "milestone": "M5",
+      "name": "recommendations_reason_display",
+      "title": "Mostrar el reason de cada candidato en /recommendations",
+      "description": "BLOQUEADA por la feature de backend 82 (recommendations_ranker, backend_feature_list.json, hoy pending). Creada el 2026-09-02 al ordenar la cola (progress/priority_order.md). El ranker fusiona cuatro capas (personas, semántica, adaptaciones de Wikidata, co-ocurrencia) y devuelve un reason por candidato. Sin mostrarlo, una recomendación cross-type —un libro recomendado a partir de una película— se lee como ruido; con él ('porque leíste X', 'mismo autor que Y') es justo el diferencial del producto. La página /recommendations ya existe y hoy no tiene dónde colocarlo.",
+      "depends_on": [],
+      "acceptance": [
+        "Cada tarjeta de /recommendations muestra su reason, con el texto construido en el frontend a partir de datos estructurados del backend, no como una cadena ya formada e intraducible",
+        "El reason se traduce a es/en vía next-intl, incluyendo los casos con nombre propio interpolado",
+        "Un candidato sin reason no rompe el layout ni deja hueco",
+        "El tratamiento visual no compite con el título ni con el badge de tipo (FE-57)",
+        "Test por cada tipo de reason que el backend pueda emitir",
+        "pnpm --filter web typecheck && lint && build && test en verde"
+      ],
+      "status": "blocked"
     }
   ]
 }
