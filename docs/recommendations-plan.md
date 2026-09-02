@@ -63,21 +63,64 @@ actuales, sin embargo, no permiten el cruce más obvio:
 
 | Dominio | Roles hoy | Falta |
 |---|---|---|
-| Movies | DIRECTOR, ACTOR | **WRITER** |
-| Series | CREATOR, ACTOR | **WRITER** |
+| Movies | DIRECTOR, ACTOR | **SOURCE_AUTHOR** |
+| Series | CREATOR, ACTOR | **SOURCE_AUTHOR** |
 | Books | AUTHOR | — |
-| Games | (ninguno persistido) | DIRECTOR, WRITER |
+| Games | (ninguno persistido) | DIRECTOR |
 
-**Añadir el rol `WRITER` a movies y series da el puente libro → película por
-autor sin ninguna dependencia nueva.** Stephen King, Gaiman, Tolkien, Sapkowski:
-el caso de uso cross-type más reconocible del producto, resuelto con una
-migración Alembic y un cambio en el adaptador de ingesta. En TMDB los
-guionistas ya vienen en el departamento `Writing` de `GET /movie/{id}/credits`,
-que el sync ya llama hoy — sin peticiones nuevas.
+**El puente libro → película lo da `SOURCE_AUTHOR` — el autor de la obra de
+origen — y solo él.** Stephen King, Gaiman, Tolkien, Sapkowski: el caso de uso
+cross-type más reconocible del producto, resuelto con una migración Alembic y un
+cambio en el adaptador de ingesta, sin peticiones nuevas a TMDB.
+
+**Corrección de 2026-09-02: `WRITER` NO sirve para esto.** La versión anterior
+de este plan proponía el rol `WRITER` poblado desde el departamento `Writing`
+de `GET /movie/{id}/credits`. Está mal por dos motivos, ambos verificados
+contra la API real:
+
+1. **`WRITER` en cine/TV es el guionista, no el autor.** En *The Shining* el
+   guion es de Diane Johnson y Kubrick; King aparece aparte. En *It (2017)* el
+   guion es de Fukunaga, Palmer y Dauberman; King aparte. Con el rol `WRITER`
+   el puente libro → película sencillamente no existe.
+2. **El departamento `Writing` no es una fuente utilizable tal cual.** TMDB
+   distingue autor de origen y guionista por el campo `job`, no por
+   `department`. Sobre 40 películas (popular + top_rated) los jobs del
+   departamento son: `Screenplay` 34, **`Story Artist` 32**, `Writer` 31,
+   `Story` 15, `Comic Book` 14, `Novel` 10, `Characters` 7, `Head of Story` 5,
+   `Lyricist` 4, `Story Supervisor` 4, `Dialogue` 3, `Screenstory` 3,
+   `Original Story` 3, `Adaptation` 1. `Story Artist` / `Head of Story` /
+   `Story Supervisor` son **storyboard de animación** y aparecen en 32 de 40.
+   Ingerir el departamento entero mete dibujantes como guionistas.
+
+La ingesta filtra por `job` con allowlist explícita, en dos roles distintos:
+
+| Rol | Jobs de TMDB | Para qué sirve |
+|---|---|---|
+| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Original Story`, `Characters` | **El puente cross-type.** Es la capa 0 |
+| `WRITER` | `Screenplay`, `Writer`, `Teleplay`, `Adaptation`, `Dialogue` | Dato de ficha (sección Credits de `docs/detail-page-layout.md`). **No es señal de recomendación** |
+
+`Story` y `Screenstory` se quedan fuera de `SOURCE_AUTHOR` deliberadamente: en
+TMDB son «argumento para pantalla», material original, no obra previa.
+
+**Por qué `WRITER` no entra en el ranker.** Nadie descubre una película porque
+comparte guionista con otra; el enganche existe (Sorkin, Kaufman) pero el
+usuario medio no sigue guionistas. No es redundante con `DIRECTOR` —medido
+sobre las mismas 40 películas, de 68 personas con job de guion solo 21 (31%)
+son además director del mismo filme, así que 47 son personas nuevas— pero su
+valor está en la ficha, donde hoy el único crew persistido es `DIRECTOR`,
+no en las recomendaciones. Peso cero en la capa 0.
+
+**Ruido conocido de `SOURCE_AUTHOR`: los traductores entran como `Book`.** En
+*The Witcher* TMDB acredita a Danusia Stok y David French junto a Sapkowski, y
+el `job` no los distingue. Se filtra exigiendo que la persona tenga además un
+credit `AUTHOR` en un libro del catálogo antes de emitir el enlace cross-type.
 
 - Coste: bajo. Ya hay tabla, índices y patrón de persistencia.
 - Cobertura: limitada a obras con autoría cruzada, pero de altísima precisión.
-- Bloqueante: la ingesta de créditos debe funcionar (issue #15).
+- Bloqueante: la ingesta de créditos debe funcionar (issue #15), **en los tres
+  dominios**. Medido en la DB de dev el 2026-09-02: movies 113/547 con credits
+  (21%), series 33/309 (11%), books 106/374 (28%). El puente necesita las dos
+  orillas, así que books cuenta tanto como movies/series.
 
 ---
 
@@ -331,14 +374,15 @@ esperar a nada: las 55 entradas de movies, series y games son mapeables hoy.
 
 ## Orden de implementación
 
-Ninguno depende ya de la migración de APIs, descartada. El paso 1 está
-bloqueado por la consulta legal a TMDB (ver más abajo); los pasos 0, 3 y 4 se
-pueden hacer hoy.
+Ninguno depende ya de la migración de APIs, descartada. Tampoco queda ningún
+bloqueante legal: la cláusula de IA de TMDB pasa de bloqueante a riesgo
+aceptado (ver más abajo). El único bloqueante vivo es operativo — el issue #15
+frena el paso 0.
 
 | # | Feature | Depende de |
 |---|---|---|
-| 0 | Rol `WRITER` en credits de movies y series (desde el departamento `Writing` de TMDB) | issue #15 |
-| 1 | pgvector + `item_embeddings` + generación en el pipeline de ingesta | **resolver antes la cláusula de IA de TMDB** |
+| 0 | Rol `SOURCE_AUTHOR` en credits de movies y series (jobs de obra previa de TMDB) | issue #15 |
+| 1 | pgvector + `item_embeddings` + generación en el pipeline de ingesta | — (riesgo TMDB aceptado) |
 | 2 | `/similar` reescrito sobre capa semántica + cuota cross-type | 1 |
 | 3 | Taxonomía unificada `themes` + mapeos | — (mapeable ya, taxonomías en la DB) |
 | 4 | Adaptaciones vía Wikidata → `item_relations` | — |
@@ -346,7 +390,7 @@ pueden hacer hoy.
 | 6 | `/trending` propio sobre actividad local | — |
 | 7 | Co-ocurrencia en `item_relations` (activada por umbral) | 5, masa crítica de usuarios |
 
-## ⚠️ Cautela legal — bloqueante de la capa 1
+## Cautela legal — riesgo aceptado en la capa 1
 
 Los términos de TMDB listan **«entrenar sistemas de machine learning / IA con
 datos de TMDB»** entre sus *ejemplos de uso comercial*. No es una prohibición
@@ -355,12 +399,15 @@ absoluta: es una actividad que activa la necesidad de licencia comercial
 licencia para mostrar, no entrenamiento, pero la distinción no está escrita en
 sus términos.
 
-Al haberse descartado la migración, el proyecto **se queda en TMDB**, así que
-esto deja de ser una nota al pie: implementar la capa semántica sobre sinopsis
-de TMDB podría activar los 149 $/mes **antes de monetizar**, que es
-exactamente lo que la decisión de quedarse buscaba evitar.
+**Decisión del usuario (2026-09-02): riesgo aceptado, la capa 1 deja de estar
+bloqueada.** Se embeben título, géneros y sinopsis de TMDB, sin consulta previa
+a `sales@themoviedb.org`. La versión anterior de este plan exigía resolverlo por
+escrito antes de escribir código; ese requisito se retira.
 
-**Resolver por escrito con `sales@themoviedb.org` antes de escribir código.**
-Alternativas si la respuesta es negativa: embeber solo título y géneros en
-lugar de la sinopsis, o limitar la capa semántica a books (Open Library es
-CC0) y games.
+- **Exposición asumida:** que TMDB reclame la licencia comercial de 149 $/mes
+  antes de que el producto monetice.
+- **Plan de repliegue si eso ocurre:** regenerar los embeddings de movies/series
+  solo con título y géneros (datos fácticos, no el texto con copyright), o
+  limitar la capa semántica a books (Open Library es CC0) y games. La tabla
+  `item_embeddings` es polimórfica por `item_type`, así que replegarse es
+  reprocesar dos tipos, no rehacer el diseño.
