@@ -1,0 +1,164 @@
+# Orden de prioridad del backlog
+
+> A diferencia de `progress/current.md`, este archivo **no se trunca** al cerrar
+> sesión — sobrevive entre sesiones. Actualízalo (no lo vacíes) cuando cambien
+> las prioridades o se complete algo de la lista.
+
+**Mientras este archivo tenga entradas pendientes, úsalo en vez del criterio por
+defecto de `AGENTS.md` §4** («coge la de menor id con dependencias
+satisfechas»). Ese criterio por defecto **daría una respuesta equivocada hoy**:
+elegiría la feature 74, que está bloqueada de facto por el issue #15.
+
+## ⚠️ Una tarea cada vez
+
+**Se ejecuta un único punto de esta cola a la vez, y no se empieza el siguiente
+hasta que el anterior está mergeado.** El ciclo completo por punto es:
+
+```
+rama feat|fix|chore/<name>  →  implementer  →  reviewer (APPROVED)
+  →  QA manual del leader  →  confirmación del usuario  →  commit + push + PR
+  →  merge a main  →  siguiente punto
+```
+
+Esto ya es la regla del proyecto (`one_feature_at_a_time: true` en
+`backend_feature_list.json` y en `frontend_feature_list.json`, y `AGENTS.md`
+§5), y se repite aquí porque es la que más fácil se rompe cuando hay una cola
+larga delante. **No agrupes dos puntos en una rama ni abras un PR con dos
+features dentro.** La única excepción admitida es la ya registrada en memoria:
+un bug encontrado durante la QA de la feature X se arregla en la rama de X,
+aunque su causa esté en otro sitio.
+
+Si un id de aquí ya no está en `pending` en `backend_feature_list.json`,
+sáltalo — no hace falta editar este archivo solo por eso.
+
+Al terminar la lista entera, **bórrala siguiendo el apartado «Cómo desmontar
+esto» del final**.
+
+---
+
+## Estado (2026-09-02)
+
+- **15 features backend pendientes** (ids 74-88). Ninguna en `in_progress`.
+- **0 features frontend pendientes**: las 63 de `frontend_feature_list.json`
+  están `done`. El frontend que generarán las backend de esta cola está listado
+  en el apartado «Frontend», y se crea cuando llegue su momento.
+- **1 issue abierto**: #15 (credits vacíos en gran parte del catálogo). Deja de
+  ser un problema operativo «volver a lanzar el workflow» y pasa a resolverse
+  con las features 84 y 85 — ver `issues_list.json`.
+
+---
+
+## Orden acordado con el usuario (2026-09-02)
+
+El razonamiento de fondo: **primero el catálogo, después lo que se construye
+encima.** Todas las features de recomendación (74-83) operan sobre el catálogo;
+construirlas sobre un catálogo parcial, con el 79% de las películas sin credits,
+es construir sobre arena. Y hay una razón mecánica además de la estratégica: la
+feature 75 embebe el catálogo entero, así que hacerla antes de sembrarlo obliga
+a re-embeberlo después.
+
+Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
+
+### Bloque A — Fundación del catálogo
+
+| # | Feature | Por qué aquí |
+|---|---|---|
+| 1 | **84** `bulk_load_pipeline` | Prerrequisito duro de 85, 86 y 87. Además es **condición necesaria** para la ventana de caché de 6 meses de TMDB: con 57.135 movies hacen falta 318/noche frente a los 200 de `SYNC_SLICE_SIZE`, y a 3,1 s/ítem eso excede el tope de ~15 min de Render (`docs/seeding-plan.md` §2.3) |
+| 2 | **85** `backfill_credits_targeted` | Cierra el **issue #15**, que es lo que bloquea la 74. Sin esto la capa 0 de recomendación no tiene datos |
+| 3 | **86** `tmdb_discover_quality_seeding` | El catálogo real de movies/series (`vote_count ≥ 25` → 57.135 + 10.880). Rompe el techo de 10.000 de `/popular` |
+| 4 | **87** `openlibrary_dump_seeding` | El catálogo real de books (18.874). Saca `search.json` del camino crítico |
+| 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |
+| 6 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |
+
+### Bloque B — Capa semántica y de conocimiento
+
+A partir de aquí el orden coincide con el numérico y todas las dependencias
+quedan satisfechas en secuencia.
+
+| # | Feature | Nota |
+|---|---|---|
+| 7 | **75** `pgvector_item_embeddings` | Ya **no está bloqueada**: el riesgo de la cláusula de IA de TMDB se aceptó explícitamente el 2026-09-02 (`docs/external-apis.md`). Va después del bloque A para embeber el catálogo definitivo una sola vez |
+| 8 | **76** `themes_taxonomy` | Hub cross-type |
+| 9 | **77** `themes_manual_mapping` | `depends_on: [76, 72✓]` |
+| 10 | **78** `themes_longtail_autoassign` | `depends_on: [77, 75]` |
+| 11 | **79** `wikidata_adaptations` | Independiente. Doble propósito: también es el ancla de QID frente a un cambio futuro de proveedor |
+| 12 | **80** `similar_semantic_rewrite` | `depends_on: [75]` |
+
+### Bloque C — Endpoints propios
+
+| # | Feature | Nota |
+|---|---|---|
+| 13 | **81** `trending_local` | Independiente |
+| 14 | **82** `recommendations_ranker` | `depends_on: [74, 76, 79, 80]` — todas satisfechas al llegar aquí |
+| 15 | **83** `cooccurrence_layer` | `depends_on: [82]`, **y además masa crítica de usuarios**. Es legítimo que se quede en `pending` indefinidamente: sin usuarios no hay co-ocurrencia que medir |
+
+---
+
+## Frontend
+
+**A fecha de hoy no hay ninguna feature de frontend pendiente**: las 63 de
+`frontend_feature_list.json` están en `done` (la última, FE-64
+`item_detail_field_ordering`), y las rutas de `apps/web/src/app/[locale]/`
+cubren ya todo lo que expone el backend actual.
+
+Lo que sí falta es **el frontend que van a generar las features backend de esta
+cola**, que hoy no existe como entrada porque esas features no se han hecho
+todavía. Cada una se crea en `frontend_feature_list.json` **cuando su feature
+backend pareja esté `done`**, y se ejecuta como punto propio de la cola —
+misma regla de una tarea cada vez, su propia rama y su propio PR.
+
+| Tras la backend… | Frontend que hará falta | Por qué |
+|---|---|---|
+| **74** `credits_source_author_role` | Mostrar y etiquetar los roles `SOURCE_AUTHOR` y `WRITER` en la sección Credits de la ficha | Hoy el único crew persistido es `DIRECTOR` (`docs/detail-page-layout.md` §Credits). Sin esto los roles nuevos se ingieren pero no se ven |
+| **79** `wikidata_adaptations` | Sección «basado en / adaptado a» en la ficha | Es la capa que produce el «no sabía que había libro». Alto valor visible, y sin frontend no existe para el usuario |
+| **80** `similar_semantic_rewrite` | Ajustar `/{tipo}/{slug}/similar` a la cuota cross-type | La página ya existe, pero pasará a devolver ítems de otros tipos y hay que presentarlos como tales |
+| **81** `trending_local` | `period` real en `/trending` para books y games | **Deuda ya registrada**: la feature backend 68 se cerró con la nota «sin frontend pareja todavía»; `period=day/week` se acepta hoy para book/game pero no tiene efecto |
+| **82** `recommendations_ranker` | Mostrar el `reason` por candidato en `/recommendations` | El ranker devuelve un motivo por recomendación y hoy la página no tiene dónde ponerlo |
+
+Las features 76-78 (`themes`) podrían generar frontend también —navegación por
+tema cross-type—, pero eso es una decisión de producto que no está tomada: no
+las cuentes como deuda pendiente hasta que se decida.
+
+---
+
+## Fuera de este backlog
+
+Nota estratégica registrada el 2026-08-29 y que sigue vigente: **la prioridad
+real antes de salir a producción no está en esta lista.** No la pierdas de vista
+al elegir tarea:
+
+- Páginas legales (no existe ninguna).
+- Nombre y dominio.
+- Salir del free tier de Render (hoy prod duerme, cold start ~50 s).
+- Ejecutar la siembra de verdad contra producción una vez estén las 84-88.
+
+Y el recordatorio del mismo día: las recomendaciones cross-type son el
+diferencial del producto, pero **con cero usuarios no se pueden evaluar**. El
+bloque A tiene valor desde el día uno; los bloques B y C no lo tendrán hasta que
+haya gente usando la app.
+
+---
+
+## Cómo desmontar esto
+
+Cuando las 15 features estén `done` (o se descarten), **borra todo rastro de
+este orden** — son tres sitios, ninguno más:
+
+1. **Borra este archivo**: `rm progress/priority_order.md`.
+2. **Revierte el override en `AGENTS.md` §4**: elimina el bloque
+   `> **Override activo**: …` que hay justo debajo del recuadro de «Cómo elegir
+   una tarea». Con eso el criterio vuelve a ser el de por defecto (menor id con
+   dependencias satisfechas), que para entonces será correcto.
+3. **Borra la línea de `progress/history.md`** que apunte a este orden, si se
+   añadió alguna.
+
+Ojo con el apartado «Frontend»: sus filas **no se borran sin más**. Cada una que
+se haya convertido en una entrada real de `frontend_feature_list.json` vive ya
+allí; las que sigan sin convertirse, o se crean como entrada antes de borrar
+este archivo, o se descartan explícitamente. No las dejes desaparecer con el
+`rm`.
+
+Lo que **no** hay que borrar, porque no es «orden de ejecución» sino
+documentación permanente del proyecto: `docs/seeding-plan.md`, las entradas de
+`backend_feature_list.json`, el diagnóstico del issue #15 en `issues_list.json`
+y las referencias a `docs/seeding-plan.md` en `AGENTS.md` §2 y `CLAUDE.md`.

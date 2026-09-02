@@ -1657,6 +1657,117 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 84,
+      "name": "bulk_load_pipeline",
+      "title": "Ruta de escritura por lotes (COPY + upserts agrupados) para ingesta masiva",
+      "description": "Prerrequisito de toda la siembra de producción y del arreglo del issue #15. Diseño completo en docs/seeding-plan.md §4. Medido sobre el run real de backfill 32937145403 (5 h 11 min, 6.000 series, 0 errores): 18.676 s / 6.000 = 3,1 s por ítem, todo secuencial. El cuello NO es el rate limit de TMDB sino el chattiness contra Neon: por ítem se hacen entre 35 y 75 round trips SQL, uno detrás de otro. El culpable principal es _get_or_create_person_tmdb (backlogg/movies/service.py:62-64), que hace get_person_id_by_external Y get_person_by_id como dos queries separadas por persona, más upsert_person (execute + flush + select), más upsert_external_id, más upsert_credit — todo multiplicado por ~7 credits por ítem, más 2 commits por ítem. A ~40 ms de latencia por round trip salen 1,6-2,5 s solo de SQL, que es exactamente lo que se observa. Por eso subir --slice-size nunca sirvió de nada: el coste es POR ÍTEM, no por iteración. A ese ritmo 100.000 ítems son 86 horas. El objetivo es pasar de ~40 round trips por ítem a ~4 por lote de 1.000, con COPY a tablas temporales más INSERT ... SELECT ... ON CONFLICT, y resolviendo todas las personas de un lote con un único SELECT ... WHERE external_id IN (...) en vez de dos queries por persona. || DIMENSIONADO DEFINITIVO (2026-09-02): esta feature es CONDICIÓN NECESARIA, no una optimización. Con el catálogo acordado (vote_count >= 25 en TMDB: 57.135 movies y 10.880 series), la ventana de caché de 6 meses obliga a re-sincronizar 57.135 movies cada 180 días = 318 por noche, frente a los 200 de SYNC_SLICE_SIZE hoy. A 3,1 s/ítem esos ~350 ítems son ~18-20 min, por encima del tope de ~15 min de una request a Render; con la escritura por lotes bajan a ~1-2 min. Series (61/noche) sí cabe con el slice actual, así que SYNC_SLICE_SIZE —hoy global— tiene que pasar a ser configurable POR TIPO. Ver docs/seeding-plan.md §2.3.",
+      "depends_on": [],
+      "acceptance": [
+        "Ruta de escritura por lotes para items, people, credits, external_ids y joins de género, usando COPY a tablas temporales + INSERT ... SELECT ... ON CONFLICT",
+        "Resolución de personas por lote con una sola query (SELECT ... WHERE external_id IN (...)), eliminando el par get_person_id_by_external + get_person_by_id por persona",
+        "La ruta on-demand (un ítem, GET de detalle) NO cambia de comportamiento: la carga por lotes es un camino adicional para ingesta masiva, no un reemplazo del upsert individual",
+        "Semántica de fallo documentada y explícita: qué pasa si una fila del lote es inválida (se descarta la fila y se registra, o se aborta el lote) — decisión razonada, no accidental",
+        "Los jobs de scheduler/jobs.py y scripts/backfill_sync.py usan la ruta nueva",
+        "Benchmark reproducible en el informe: ítems/segundo antes y después, medido contra una DB real con latencia (no SQLite ni localhost sin latencia)",
+        "SYNC_SLICE_SIZE pasa a ser configurable por tipo (movies necesita ~350/noche, series ~61) y puede subirse a ese valor sin acercarse al tope de ~15 min de Render, demostrado con el benchmark",
+        "Tests: lote con filas nuevas, lote con filas ya existentes (idempotencia), lote mixto, lote con una fila inválida",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 85,
+      "name": "backfill_credits_targeted",
+      "title": "Backfill de credits dirigido por el catálogo local en vez de por el ranking de TMDB (issue #15)",
+      "description": "Diagnóstico del 2026-09-02 sobre los runs reales del workflow. scripts/backfill_sync.py NO rellena huecos: recorre el listado de populares de TMDB por offset, con el cursor en sync_cursors. Los credits SÍ se escriben (el run 32937145403 reporta 6.000 series sincronizadas, 0 errores, 0 people_errors), pero sobre los ítems equivocados: el script avanza por ranking de popularidad de TMDB mientras que los ítems del catálogo SIN credits entraron por otros caminos (fan-out de búsqueda, trending, /similar) y están en posiciones arbitrarias del ranking o directamente fuera de él. Se pueden recorrer 6.000 posiciones sin tocar ninguno de los que faltan, y de paso se re-sincronizan cientos que ya estaban completos. Agravante: /movie/popular se reordena mientras se pagina, así que el recorrido por offset ni siquiera garantiza cubrir el conjunto. La alternativa es viable y está medida: en la DB de dev, 275 de las 276 series sin credits tienen su external_ids de TMDB guardado, así que el tmdb_id se resuelve con una query local sin adivinar nada. Un backfill dirigido por catálogo converge por construcción y está acotado por el hueco real (~977 ítems en dev) en vez de por 10.000 posiciones × 4 tipos. Bug de observabilidad a arreglar en la misma feature: run_backfill suma result['synced'] y result['errors'] pero TIRA result['people_errors']. Si los credits fallaran en todos los ítems el resumen del workflow seguiría diciendo '6000 synced, 0 errors' — el dato solo se ve en la línea de log del job, no en el resumen.",
+      "depends_on": [
+        84
+      ],
+      "acceptance": [
+        "Modo dirigido por catálogo (--only-missing-credits o equivalente): la lista de trabajo sale de una query local (LEFT JOIN credits ... WHERE NULL, unida a external_ids), no del cursor de popularidad",
+        "En ese modo no se pide el detalle del ítem: la fila ya existe y solo faltan los credits — solo se llama al endpoint de credits",
+        "Ítems paralelizados con asyncio.gather + Semaphore, mismo patrón que el fan-out de backlogg/search/service.py",
+        "people_errors se propaga al resumen de run_backfill y al log final del workflow, no solo a la línea de log del job",
+        "Decisión explícita y documentada sobre los ítems que legítimamente no tienen credits en TMDB: sin marcarlos (credits_synced_at o equivalente) cada run los reintentaría eternamente",
+        "El modo actual dirigido por ranking se conserva o se elimina de forma razonada, no por descuido",
+        "docs/operations.md actualizado con el modo nuevo",
+        "Issue #15 verificado como resuelto para movies, series Y books, con las cifras de cobertura antes/después medidas contra producción",
+        "Tests: catálogo con huecos produce exactamente la lista de huecos; un ítem sin external_id de TMDB no rompe el run",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 86,
+      "name": "tmdb_discover_quality_seeding",
+      "title": "Siembra de movies/series por umbral de calidad con /discover troceado por año (rompe el techo de 10.000)",
+      "description": "Investigación del 2026-09-02, documentada en docs/seeding-plan.md §1 y §3. Dos problemas del método actual, y el segundo es el que define el diseño. PROBLEMA 1 — TECHO: get_top_movies/get_top_series paginan /movie/popular y /tv/popular, y TMDB corta la paginación en la página 500 × 20 ítems = 10.000 y ni uno más (ya anotado en backlogg/movies/adapters/tmdb.py:144). SEED_TOP_N_* está en 10000, que no es una elección de producto sino exactamente el techo del método. Además /popular se reordena mientras se pagina, así que el recorrido por offset no cubre un conjunto estable. PROBLEMA 2 — popularity NO ES UNA SEÑAL DE CALIDAD. Se muestrearon 40 películas por banda de puesto y se pidió su vote_count real: puestos 1-2.000 mediana 4.779 votos (92% con >=50); 2.000-5.000 mediana 1.173 (92%); 5.000-10.000 mediana 77 (52%); 10.000-20.000 mediana 4 (38%); 20.000-40.000 mediana 3 (30%); 70.000-100.000 mediana 1 (10%). El acantilado está entre el puesto 5.000 y el 10.000, PERO un 30% de las películas del puesto 20.000-40.000 tiene >=50 votos: popularity mide interés reciente, no notoriedad, así que cortar por puesto tira miles de películas conocidas y a la vez mete grabaciones de teatro regional. DECISIÓN: el catálogo se define por umbral de vote_count, no por número de ítems. Umbral acordado con el usuario: vote_count >= 25, que da 57.135 movies y 10.880 series (total_results de /discover, cifra exacta). Otros umbrales medidos por si hay que recalibrar: >=10 da 105.336/19.358; >=50 da 36.317/6.883; >=100 da 23.275/4.354; >=200 da 14.867/2.538. Nota de calibración: TMDB solo tiene 19.358 series con >=10 votos, así que cualquier objetivo de series por encima de ~20.000 es aritméticamente imposible sin meter ruido puro. MÉTODO: /discover con vote_count.gte troceado por año de estreno (primary_release_date para movies, first_air_date para series). /discover tiene el mismo tope de 500 páginas, pero se verificó que ninguna rebanada anual se acerca: con vote_count >= 25 el año más cargado es 2019 con 2.175 movies y 2022 con 752 series, o sea el 22% del cupo — hay 4x de margen para bajar el umbral más adelante sin rediseñar. Si algún año llegara a apretar, se trocea por mes. Esto enumera el conjunto objetivo exacto y completo, sin techo y de forma reproducible. Los ficheros diarios de IDs de TMDB (files.tmdb.org/p/exports/) NO son la fuente de la siembra: no traen vote_count, así que no permiten aplicar el criterio de calidad. Su papel es el diff diario para detectar altas, y corresponde a la feature 88. HIDRATACIÓN: sigue siendo 1 petición por ítem (TMDB no tiene endpoint bulk de detalle), pero hoy son DOS —/movie/{id} y /movie/{id}/credits (backlogg/movies/adapters/tmdb.py:70-92)—. Con append_to_response=credits,external_ids es una sola. Mitad del HTTP, y encaja con la feature 74: SOURCE_AUTHOR sale del mismo payload sin peticiones adicionales.",
+      "depends_on": [
+        84
+      ],
+      "acceptance": [
+        "Enumeración vía /discover con vote_count.gte troceado por año, no vía /movie/popular ni /tv/popular",
+        "Umbral de vote_count configurable por env y por tipo, con el valor acordado (25) como default documentado",
+        "include_adult=false e include_video=false en la query de movies",
+        "Ninguna rebanada puede superar el tope de 500 páginas: comprobación explícita y troceo por mes como fallback si un año lo superase, con test",
+        "Hidratación con append_to_response=credits,external_ids — una sola petición por ítem, verificado contando peticiones en un test",
+        "Ítems paralelizados con asyncio.gather + Semaphore, quedándose en 30-40 req/s (el límite de TMDB ronda 50)",
+        "SEED_TOP_N_MOVIES/SEED_TOP_N_SERIES dejan de ser el criterio de corte, o se documenta explícitamente qué papel les queda: el catálogo lo define el umbral de calidad, no un número de ítems",
+        "La lista objetivo se persiste, de modo que un run interrumpido reanuda por diferencia contra el catálogo y no por un offset",
+        "docs/external-apis.md y docs/seeding-plan.md actualizados con lo que se implemente de verdad",
+        "Tests: construcción de la query por año, troceo por mes cuando la rebanada excede el cupo, y que la hidratación no dispara la petición de credits por separado",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 87,
+      "name": "openlibrary_dump_seeding",
+      "title": "Siembra de books desde los dumps mensuales de Open Library (saca search.json del camino crítico)",
+      "description": "Investigación del 2026-09-02, documentada en docs/seeding-plan.md §3. La siembra de libros depende hoy de search.json, que es la fuente de los 500 intermitentes que costaron el issue #9 y obligaron a montar un presupuesto de retries en el adaptador. Open Library publica dumps mensuales completos en TSV (columnas type, key, revision, last_modified, JSON) descargables desde openlibrary.org/data/ o por torrent desde archive.org/details/ol_exports: ol_dump_works_latest.txt.gz (~2,9 GB), ol_dump_authors_latest.txt.gz (~0,5 GB) y ol_dump_ratings_latest.txt.gz (~5 MB). Sembrar desde ahí elimina search.json del camino crítico y con él los 500 y los retries. AVISO DE DISEÑO: ddc y lcc viven en los registros de EDITION, no en los de WORK. La feature 72 los obtiene de search.json, donde Solr los agrega desde las ediciones. Para mantener ese criterio con dumps hace falta también ol_dump_editions_latest.txt.gz (~9,2 GB) — del que, como beneficio secundario, sale edition_count contando directamente, que es el discriminante de notoriedad de la feature 73. Es el único punto pesado de todo el plan de siembra. Alternativa si 9,2 GB resulta inmanejable: enumerar y clasificar desde works, y pedir ddc/lcc a search.json solo para los ítems seleccionados — sigue siendo una llamada por ítem, pero sobre 25.000 y no sobre el catálogo entero. La elección entre las dos vías es parte de esta feature y debe quedar razonada. || TECHO MEDIDO DEL FILTRO ACTUAL (2026-09-02, numFound de search.json): con los umbrales vigentes (readinglog_count >= 20 y edition_count >= 10 en inglés; >= 5 y >= 2 en castellano, más number_of_pages_median >= 100) hay 17.015 obras en inglés y 1.859 en castellano = 18.874 en total. Ese es el tamaño del catálogo de libros y SE ACEPTA TAL CUAL: al fijarse el catálogo de TMDB por umbral de calidad (vote_count >= 25 → 57.135 movies + 10.880 series) ya no hay ninguna presión por inflar books, y relajar el filtro de notoriedad de la feature 73 —fijado el 2026-08-30 tras corregir dos veces el diagnóstico del ruido— dejaría entrar material claramente peor. Para referencia futura, por si alguna vez se quiere recalibrar: con readinglog_count >= 5 y edition_count >= 3 el inglés sube a 140.535, y con >= 1 y >= 2 a 847.147.",
+      "depends_on": [
+        84
+      ],
+      "acceptance": [
+        "Dumps procesados en streaming, sin descomprimir a disco entero ni cargar en memoria",
+        "Decisión razonada y documentada sobre ddc/lcc: dump de editions (~9,2 GB) o search.json solo para los seleccionados",
+        "SEED_TOP_N_BOOKS coherente con lo que el filtro entrega de verdad (18.874), y el comentario de backlogg/core/config.py:23 ('comfortably above SEED_TOP_N_BOOKS') corregido: es falso en cuanto SEED_TOP_N_BOOKS sube",
+        "Los criterios de las features 72 (clasificación por ddc/lcc) y 73 (notoriedad por edition_count) se preservan, con test que lo demuestre sobre datos reales de dump",
+        "Autoría (rol AUTHOR) poblada desde ol_dump_authors, no desde el campo author_name del search doc",
+        "El pipeline es reanudable: un run interrumpido no obliga a volver a descargar ni a reprocesar desde cero",
+        "Coste en tiempo y en disco del run documentado en docs/operations.md (los runners de GitHub Actions tienen ~14 GB de disco libre)",
+        "search.json sigue funcionando para el fallback on-demand y la búsqueda: esta feature cambia la SIEMBRA, no el camino de la petición",
+        "docs/external-apis.md y docs/seeding-plan.md actualizados",
+        "Tests sobre un fragmento de dump fijado en el repo (no dependientes de la red)",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 88,
+      "name": "catalog_incremental_updates",
+      "title": "Capa incremental: estrenos y publicaciones nuevas sin barridos completos del catálogo",
+      "description": "Cierra el plan de docs/seeding-plan.md §6. Una vez sembrado el catálogo inicial de 100.000 ítems, mantenerlo al día NO puede seguir siendo re-recorrer /popular: cada fuente tiene su mecanismo nativo de novedades y de actualizaciones, y el volumen diario real son unos pocos cientos de ítems. TMDB: las novedades salen del diff del fichero diario de IDs contra el del día anterior (IDs que aparecen), y las actualizaciones de /movie/changes y /tv/changes, que devuelven los IDs cambiados con una ventana máxima de 14 días y 100 resultados por página. Open Library: diff del dump mensual, o /recentchanges. IGDB: la propia query language admite where created_at > <última ejecución> y where updated_at > <última ejecución>, así que es trivial. Beneficio colateral importante: esto CUMPLE LA VENTANA DE CACHÉ DE 6 MESES de TMDB por diseño. Hoy la única forma de mantener los datos frescos es el barrido completo del catálogo por slices; con /changes se sabe qué ha cambiado de verdad y el barrido deja de ser el mecanismo principal. Nota de dimensionado ya calculada: con 100.000 ítems repartidos en cuatro tipos, el nocturno actual (SYNC_SLICE_SIZE=200 por tipo y noche = 800/noche frente a los 556/día que exige la ventana) cabe con un 44% de margen, así que esta feature es mejora de margen y no rescate de una situación rota. || CONSECUENCIA DEL UMBRAL DE CALIDAD (2026-09-02): al definirse el catálogo por vote_count >= 25, el incremental NO puede usar ese umbral como puerta de entrada — un estreno no tiene votos el día que sale, así que no entraría ninguna novedad jamás. Hacen falta DOS caminos separados: (a) alta inmediata de estrenos por fecha, para tener las novedades desde el día uno; (b) barrido periódico de PROMOCIÓN, para los ítems que estaban por debajo del umbral y lo han cruzado — /discover con vote_count.gte sobre los últimos años, comparado con lo que ya está en el catálogo, lo resuelve sin estado extra. Sin (b) el catálogo se congela: una película de 2019 que gane tracción en 2027 no entraría nunca.",
+      "depends_on": [
+        86,
+        87
+      ],
+      "acceptance": [
+        "Novedades de TMDB por diff del fichero diario de IDs contra el estado local, no por re-paginar /popular",
+        "Actualizaciones de TMDB vía /movie/changes y /tv/changes, respetando la ventana máxima de 14 días y paginando de 100 en 100",
+        "Novedades y actualizaciones de IGDB vía created_at/updated_at en la propia query",
+        "Novedades de books vía diff del dump mensual o /recentchanges, con la elección razonada",
+        "Dos caminos de entrada implementados y distinguidos: alta inmediata de estrenos por fecha (sin exigir vote_count, que aún no existe) y barrido de promoción para ítems que cruzan el umbral a posteriori",
+        "Test de regresión de la promoción: un ítem por debajo del umbral que lo cruza acaba en el catálogo sin intervención manual",
+        "Los ítems nuevos pasan por el mismo filtro de calidad que la siembra (SEED_TOP_N/popularidad para TMDB, allowlist de game_type para IGDB, criterios de las features 72-73 para books) — un estreno no entra solo por ser nuevo",
+        "Marca de agua persistida por fuente (última ejecución), reanudable, y comportamiento definido si el hueco supera la ventana de 14 días de /changes",
+        "docs/operations.md y docs/seeding-plan.md actualizados con el runbook",
+        "Tests: diff de IDs produce solo los nuevos; ventana de /changes mayor de 14 días se trocea; ítem nuevo que no pasa el filtro de calidad no se persiste",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
