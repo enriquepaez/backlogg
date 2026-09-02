@@ -30,6 +30,7 @@
 | `docs/api.md`                  | Contratos de los endpoints REST                             | Al implementar rutas  |
 | `docs/external-apis.md`        | Referencia de TMDB, Open Library e IGDB                    | Al implementar adapters |
 | `docs/design-tokens.md`        | Paleta de colores de status/type (hex + OKLCH), rationale y trade-offs | Al tocar colores de badges en `apps/web` |
+| `docs/seeding-plan.md`         | Cómo se llena el catálogo de producción: límites de cada fuente, dimensionado a 100k, siembra inicial e incremental | Al tocar siembra, sync o backfill |
 | `CHECKPOINTS.md`               | Criterios objetivos de "estado final correcto"              | Para auto-evaluarte   |
 | `.claude/agents/`              | Definiciones de subagentes (leader, implementer, reviewer)  | Si orquestas trabajo  |
 | `backlogg/`                    | Código fuente de la aplicación                              | Para implementar      |
@@ -63,6 +64,13 @@
 5. Cambia su status a "in_progress" y guarda
 6. Anota en progress/current.md: feature, hora de inicio, plan breve
 ```
+
+> **Override activo (2026-09-02)**: mientras exista
+> `progress/priority_order.md` con entradas pendientes, **el paso 4 se sustituye
+> por el orden de ese archivo**. El criterio de menor id daría hoy una respuesta
+> equivocada: elegiría la feature 74, que está bloqueada de facto por el issue
+> #15. Cuando la lista se agote, borra el archivo y este bloque — instrucciones
+> en su apartado «Cómo desmontar esto».
 
 ## 5. Flujo por feature (workflow completo)
 

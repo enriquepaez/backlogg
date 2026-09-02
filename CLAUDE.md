@@ -57,3 +57,4 @@ Leer solo cuando la tarea lo requiera:
 - `docs/schema.md` — esquema completo de la DB
 - `docs/api.md` — contratos de los endpoints
 - `docs/external-apis.md` — referencia de APIs externas (TMDB, Open Library, IGDB)
+- `docs/seeding-plan.md` — plan de siembra del catálogo de producción (100k)
