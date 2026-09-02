@@ -297,7 +297,7 @@ CREATE TABLE credits (
     item_type       VARCHAR(20) NOT NULL,           -- MOVIE, SERIES, BOOK, GAME
     item_id         BIGINT NOT NULL,
     person_id       BIGINT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-    role            VARCHAR(50) NOT NULL,           -- DIRECTOR, ACTOR, CREATOR, AUTHOR
+    role            VARCHAR(50) NOT NULL,           -- DIRECTOR, ACTOR, CREATOR, AUTHOR, SOURCE_AUTHOR, WRITER
     character_name  VARCHAR(255),                   -- ACTOR only
     billing_order   INTEGER,                        -- 0 = top-billed
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -312,12 +312,33 @@ CREATE INDEX idx_credits_role ON credits (role);
 
 Supported roles by domain:
 
-| Domain  | Roles             | Notes                                      |
-|---------|-------------------|--------------------------------------------|
-| Movies  | DIRECTOR, ACTOR   | Actors limited to top 10 by billing_order  |
-| Series  | CREATOR, ACTOR    | Actors limited to top 10                   |
-| Books   | AUTHOR            | Supports co-authorship                     |
-| Games   | DIRECTOR          | Only when IGDB provides it                 |
+| Domain  | Roles                                        | Notes                                      |
+|---------|----------------------------------------------|--------------------------------------------|
+| Movies  | DIRECTOR, ACTOR, SOURCE_AUTHOR, WRITER       | Actors limited to top 10 by billing_order  |
+| Series  | CREATOR, ACTOR, SOURCE_AUTHOR, WRITER        | Actors limited to top 10                   |
+| Books   | AUTHOR                                       | Supports co-authorship                     |
+| Games   | DIRECTOR                                     | Only when IGDB provides it                 |
+
+### `SOURCE_AUTHOR` vs `WRITER` (movies and series)
+
+Both come from the `Writing` department of TMDB's `/credits`, but they are **not**
+interchangeable and the department alone is not a usable filter — TMDB tells them
+apart by `job`, and the same department also carries animation storyboard jobs
+(`Story Artist`, `Head of Story`, `Story Supervisor`), which must never be
+persisted as credits. Ingestion filters by an explicit `job` allowlist:
+
+| Role            | TMDB jobs                                                                                  | Purpose |
+|-----------------|--------------------------------------------------------------------------------------------|---------|
+| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Original Story`, `Characters` | Author of the **source work**. This is the book → film cross-type bridge: same `people` row as the book's `AUTHOR` credit |
+| `WRITER`        | `Screenplay`, `Writer`, `Teleplay`, `Adaptation`, `Dialogue`                                 | Screenwriter. Detail-page data only (Credits section), not a recommendation signal |
+
+`Story` and `Screenstory` are deliberately excluded from `SOURCE_AUTHOR`: in TMDB
+they mean "screen story" — original material written for the screen, not a prior work.
+
+Caveat: translators are credited with `job: "Book"` (e.g. *The Witcher* credits
+Danusia Stok and David French alongside Sapkowski) and the `job` does not tell them
+apart. Cross-type queries filter this by requiring the person to also hold an
+`AUTHOR` credit on a book in the catalog.
 
 ## Companies
 

@@ -28,8 +28,16 @@
   usuarios. Contacto: `sales@themoviedb.org`.
   - Consecuencia práctica para la **feature 75** (embeddings): generar
     embeddings sobre las sinopsis de TMDB podría caer bajo esa cláusula y
-    activar la licencia comercial **antes** de monetizar. Hay que preguntarlo
-    por escrito antes de implementar.
+    activar la licencia comercial **antes** de monetizar.
+  - **Decisión del usuario (2026-09-02): riesgo aceptado.** La feature 75 se
+    implementa embebiendo título, géneros y sinopsis de TMDB, sin consulta
+    previa a `sales@themoviedb.org`. Se descartó la opción conservadora
+    (embeber solo título y géneros para movies/series, sinopsis completa solo
+    en books/games, que son CC0 e IGDB). Exposición asumida: 149 $/mes
+    reclamados antes de monetizar. Plan de repliegue si TMDB reclama:
+    regenerar los vectores de movies/series sin la sinopsis, o limitar la capa
+    semántica a books y games — `item_embeddings` es polimórfica por
+    `item_type`, así que replegarse es reprocesar dos tipos, no rediseñar.
 - **⚠️ Caché**: prohibido cachear datos de TMDB más de **6 meses**. Con
   `SYNC_SLICE_SIZE=100` sobre 10.000 ítems el ciclo completo son 100 días —
   dentro de la ventana, pero sin margen. Subir `SEED_TOP_N_*` sin subir el
