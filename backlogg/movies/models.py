@@ -85,6 +85,13 @@ class Movie(Base):
         ARRAY(String), nullable=False, server_default="{}"
     )
     last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Feature 85 (backfill_credits_targeted): when the targeted credits
+    # backfill last completed a successful credits lookup for this row.
+    # NULL = never looked up. Stamped even when the source returned no
+    # credits, so items that legitimately have none are not retried forever.
+    credits_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

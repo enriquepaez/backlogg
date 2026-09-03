@@ -64,11 +64,26 @@ class TMDBSeriesClient:
             return data.get("results", [])
 
     @_tmdb_retry
-    async def get_series_detail(self, tmdb_id: int) -> dict | None:
+    async def get_series_detail(
+        self, tmdb_id: int, append_to_response: str | None = None
+    ) -> dict | None:
+        """Return the series detail payload, or None on 404.
+
+        ``append_to_response`` is TMDB's own way of folding sub-resources into
+        the detail call (``append_to_response=credits`` embeds the response of
+        ``/tv/{id}/credits`` under a ``credits`` key) at the cost of **the same
+        single request**. Optional and defaulting to None, so every existing
+        caller keeps issuing the exact request it did before; the targeted
+        credits backfill (feature 85) uses it to get cast *and* ``created_by``
+        (the source of CREATOR credits, which ``/tv/{id}/credits`` does not
+        carry) without a second round trip. See ``docs/seeding-plan.md`` §4.
+        """
+        params = {"append_to_response": append_to_response} if append_to_response else None
         async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/tv/{tmdb_id}",
                 headers=self._headers,
+                params=params,
             )
             if response.status_code == 404:
                 return None
