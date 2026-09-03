@@ -208,3 +208,110 @@
 2026-08-30 | books_seeding_quality_filter (id 73, rama feat/books_seeding_quality_filter) | La siembra de libros pedía `q=*:*&sort=readinglog`, que devuelve lo que más gente estantea en Open Library. El criterio del filtro se corrigió DOS VECES durante la sesión, y el diagnóstico inicial resultó ser erróneo. Ronda 1-2: se implementó y aprobó un filtro de clasificación literaria `(ddc:8* OR lcc:P*) AND NOT lcc:PE* AND NOT ddc:80*` contra el diagnóstico de la investigación de 2026-08-29 ("el ruido es autoayuda y BookTok"). La QA manual del leader lo desmontó: el usuario aclaró que el ruido real eran los cómics y las fichas confusas, y que autoayuda y ensayo SÍ deben entrar; poco después añadió que tampoco hay que excluir la novela gráfica, porque Watchmen, Maus, Persepolis y Heartstopper son catálogo legítimo. El filtro de la ronda 1 estaba invertido en las dos direcciones: excluía toda la no ficción (Atomic Habits ddc 155.24, Thinking Fast and Slow ddc 153.42, Educated, Becoming) y en cambio dejaba pasar los cómics, porque PN6700-6790 es 'Comic books, graphic novels' y casa con `lcc:P*`. Calibración nueva en vivo: el discriminante correcto no es el género sino la NOTORIEDAD, y se expresa con `edition_count` — hueco limpio entre las entregas sueltas de serialización (Ultimate Spider-Man Vol. 6 ed=3, Batman and Robin Vol. 1 ed=1, Encyclopaedia Eorzea ed=1) y la novela gráfica canónica (Bone 11, Death Note 12, Heartstopper 23, Watchmen 43, Maus 66). Se midió además que filtrar cómics en Solr NO es viable: el campo `lcc` no admite comodines de prefijo (`lcc:PN-67*` da 0 y, escapado, un prefijo más largo devuelve MÁS documentos) y `subject_facet` no es consultable. Query final: EN `language:eng AND number_of_pages_median:[100 TO *] AND readinglog_count:[20 TO *] AND edition_count:[10 TO *]` (16.965 obras) y ES `language:spa AND NOT language:eng ... readinglog_count:[5 TO *] AND edition_count:[2 TO *]` (1.858, casi el doble que con el criterio viejo; el suelo ES no puede subir a 3 porque Reina roja tiene ed=2 exacto, y hay test que lo clava). `edition_count:[10 TO *]` subsume además todas las señales de completitud: 0 fichas sin portada/año/autor en 4 de 5 muestras de 1.000. Se descartaron con datos el filtro por patrón de título (mataría Heartstopper V1, Akira V1 y Death Note V1 — el 33 % de las novelas gráficas canónicas — para una ganancia neta de 1 documento) y la deduplicación (<0,3 % real). Andamiaje conservado de las rondas 1-2: dos streams Solr disjuntos EN/ES intercalados determinísticamente por cuota (`is_spanish_slot(i) = i % N == N-1`, `spanish_offset(i) = i // N`, `english_offset(i) = i - i // N`) para que el castellano aparezca desde el primer slice, guarda de `numFound` que avisa si el pool queda por debajo de SEED_TOP_N_BOOKS (el código no leía `numFound` y el cursor habría envuelto a 0 en silencio) y fallback de agotamiento con guard `every_n > 0`. `jobs.py` sin cambios de comportamiento: el cursor sigue siendo un solo entero. Único filtro en código: descartar docs cuya `key` no acabe en `W` (keys de edición huérfanas como `/works/OL9394106M`, que search.json expone como si fueran obras — el caso del duplicado 'Metal Gear Solid vol. 1' / 'Metal Gear Solid Volume 1'), ubicado dentro de `_fetch_seed_stream` para que el descarte se auto-repare en vez de devolver página corta. Nuevo `backlogg/books/constants.py` (solo códigos de idioma tras retirar la clasificación) y 6 env: BOOKS_SEED_MIN_READINGLOG=20, _ES=5, _PAGES=100, _EDITIONS=10, _EDITIONS_ES=2, _ES_EVERY_N=10. Review en dos rondas de blockers: (1) `BOOKS_SEED_ES_EVERY_N=0` no desactivaba de verdad el stream ES porque la rama de backfill se cumplía trivialmente con `es_count == 0`; (2) el backfill de agotamiento calculaba el offset en espacio FILTRADO (`en_offset + len(en_docs)`), así que un descarte de key huérfana repedía un doc ya devuelto y duplicaba dentro de la misma página — justo el invariante que el docstring de `_fetch_seed_stream` declara imposible; corregido devolviendo el offset crudo. Reviewer: APPROVED, con regresión en vivo y verificación por mutación de los dos tests de regresión. `bash init.sh` verde: 1133 tests (+47). QA manual del leader contra API y DB reales: numFound 16.965/1.858, 11 controles positivos y 5 negativos correctos, 100 docs sin claves repetidas y todas /works/*W, slices consecutivos sin solapamiento, y `sync_books` end-to-end sembró 20 libros con portada y año en todos y géneros derivados de ddc/lcc.
 
 2026-09-03 | bulk_load_pipeline (id=84) | Punto 1 del Bloque A de `progress/priority_order.md` y prerrequisito duro de las features 85, 86 y 87. Capa genérica nueva `backlogg/shared/bulk_load.py` (~900 líneas): `COPY` vía `asyncpg.copy_records_to_table` a tablas temporales `ON COMMIT DROP` con clave natural + `INSERT ... SELECT ... ON CONFLICT`, y resolución de todas las personas de un lote con una sola query en vez del par `get_person_id_by_external` + `get_person_by_id` por persona. Tabla-agnóstica: un descriptor `*_BULK_SPEC` por tipo en el `repository.py` de cada dominio, cubriendo items, people, credits, external_ids y los cuatro joins de género. `scheduler/jobs.py` reescrito (los cuatro jobs) y `scripts/backfill_sync.py` migrados a la ruta nueva. `SYNC_SLICE_SIZE` pasa a ser configurable por tipo (`SYNC_SLICE_SIZE_{MOVIES,SERIES,BOOKS,GAMES}`, resolución argumento → per-tipo → global) con defaults a `None` para no cambiar producción en el deploy; nuevo `BULK_LOAD_BATCH_SIZE=500`. Semántica de fallo (D2): fila inválida se pre-valida antes del COPY, se descarta, se avisa y se cuenta; si el lote entero falla, rollback y reproceso por la ruta por ítem existente — una fila mala no puede tumbar 1.000 ítems. La ruta on-demand (D5) no cambia de comportamiento: extracción pura de los `collect_*`. Sin migración Alembic (todos los conflict targets ya existían) y sin tocar los adapters de TMDB (`append_to_response` y la paralelización son la feature 86). Cuatro bugs corregidos durante la implementación, dos de ellos serios: `locked_fields` no se respetaba (`varchar[] @> text[]` no existe en Postgres) y `CREATE TEMP TABLE ... ON COMMIT DROP` se emitía fuera de transacción — esto último hacía la feature inservible en producción **sin que ningún test pudiera verlo** (toda la suite corre bajo el fixture con transacción externa abierta); lo destapó el benchmark. Review: APPROVED (`progress/review_84.md`, cero bloqueantes, con verificación independiente mediante scripts propios que commitean de verdad); cinco de sus ocho no bloqueantes cerrados después, entre ellos la pérdida silenciosa de un género bajo escritura concurrente (`ON CONFLICT DO NOTHING` → `DO UPDATE ... RETURNING`). Benchmark (`scripts/bench_bulk_load.py`) contra un proxy TCP que inyecta latencia, con RTT medido de 40,5 ms (el de Neon): **51,2 → 0,25 round trips por ítem (205x menos) y 0,4 → 37,0 ítems/s (84x más rápido)**; la ruta por ítem da 2,27 s/ítem frente a los 3,1 s/ítem del run real de producción 32937145403, confirmando que el cuello era la chattiness contra Neon y no el rate limit de TMDB. Con eso, un slice de 350 movies pasa de ~13-18 min (en o por encima del tope de ~15 min de Render) a 9,5 s. QA end-to-end del leader contra la DB de dev con TMDB real: los cuatro tipos con 0 errores, segunda pasada de movies con recuentos idénticos (575/1983/575/1505) y cero tablas temporales huérfanas. El `people_errors=2` de series y books se persiguió hasta la causa: nombres en alfabeto no latino que slugifican a `''` — limitación preexistente de `_slugify` que esta feature solo hace visible, y cuyo manejo nuevo es estrictamente mejor que el anterior (que colapsaba a todas esas personas en una única fila `slug=''` con credits mal atribuidos: queda una en dev, `Фёдор Достоевский`, con 2 credits). Registrado como issue #18, no arreglado aquí por ser causa distinta y necesitar decisión de producto. `bash init.sh` verde (1155 tests, +22).
+
+
+---
+
+## 2026-09-03 — Feature 85 `backfill_credits_targeted` (issue #15)
+
+**Rama:** `feat/backfill-credits-targeted` · **Reviewer:** APPROVED (0 bloqueantes, 7 menores)
+
+### Problema
+
+El backfill recorria el ranking de populares de TMDB por offset, con el cursor en
+`sync_cursors`. Los credits SI se escribian, pero sobre los itemes equivocados: los del
+catalogo sin credits entraron por fan-out de busqueda, trending y `/similar`, y estan en
+posiciones arbitrarias del ranking o fuera de el. Se podian recorrer 6.000 posiciones sin
+tocar ninguno de los que faltaban.
+
+### Solucion
+
+Modo dirigido por el catalogo local (`--only-missing-credits`): la lista de trabajo sale de
+una query `LEFT JOIN credits ... WHERE NULL` unida a `external_ids`, converge por
+construccion y queda acotada por el hueco real.
+
+**Decisiones de diseno del leader, tomadas antes de implementar:**
+
+1. **Marcador `credits_synced_at`** (timestamptz nullable) en `movies`, `series` y `books`,
+   coherente con el `last_synced_at` que ya tenian. Lo sella solo el modo dirigido, tras un
+   fetch exitoso, haya o no credits. Asi un item que legitimamente no tiene credits en el
+   origen se visita una vez y no vuelve a entrar. `--recheck` fuerza el re-barrido.
+2. **El modo por ranking se conserva.** Es la unica ruta de siembra masiva hasta que aterrice
+   la feature 86, que es la que lo sustituye.
+3. **Una llamada HTTP por item, pero series usa `/tv/{id}?append_to_response=credits`.** Los
+   CREATOR salen de `created_by`, que vive en el payload de detalle y no en `/tv/{id}/credits`.
+   `append_to_response` cuesta la misma llamada y trae cast + creators. Con `/credits` a secas
+   todas las series se habrian quedado sin creators, que es el dato del que depende la 74.
+4. **Games fuera**, igual que en el issue #15: no tiene ingestion de credits de personas.
+
+### Archivos
+
+- `alembic/versions/0034_credits_synced_at.py` (nuevo) + los 3 modelos
+- `backlogg/scheduler/repository.py` — `get_credit_gaps`, `mark_credits_synced`, `CreditGaps`
+- `backlogg/scheduler/jobs.py` — `sync_missing_credits`
+- `backlogg/shared/bulk_load.py` — `bulk_load_credits`, extraido de `bulk_load_items`
+- `backlogg/series/adapters/tmdb.py` — `append_to_response` opcional, default `None`
+- `scripts/backfill_sync.py` — `--only-missing-credits`, `--recheck`, fix de `people_errors`
+- `tests/test_backfill_credits_targeted.py` (nuevo, 17 tests)
+- `docs/operations.md`, `docs/schema.md`, `.github/workflows/backfill-sync.yml`
+
+Bug de observabilidad arreglado en la misma feature: `run_backfill` sumaba `synced` y
+`errors` pero **tiraba** `people_errors`, asi que un fallo total de credits habria seguido
+reportando "0 errors". Ahora se propaga en **ambos** modos.
+
+### QA manual del leader (DB de dev)
+
+`init.sh` verde (1172 tests, +17). Migracion `0034` up -> down -> up limpia, un solo head.
+`game` rechazado en modo dirigido con mensaje explicito.
+
+| Tipo | Total | Sin credits ANTES | DESPUES | Sellados |
+|---|---|---|---|---|
+| MOVIE | 575 | 427 (74%) | 14 (2,4%) | 14 |
+| SERIES | 394 | 268 (68%) | 30 (7,6%) | 29 + 1 sin external_id |
+| BOOK | 389 | 269 (69%) | 6 (1,5%) | 6 |
+
+**964 huecos -> 50, y 49 de esos 50 no son huecos**: estan sellados porque no tienen credits
+en el origen. El unico hueco real es 1 serie sin external_id de TMDB — el caso que el propio
+diagnostico habia medido (275 de 276) y que el run salta sin romperse.
+
+Rendimiento: 427 movies en 17 s, 267 series en 12 s, 269 books en 210 s. Son **0,04 s/item**
+en TMDB frente a los **3,1 s/item** del run 32937145403. Books va mas lento porque Open
+Library obliga a una llamada por autor ademas del work.
+
+Comprobado en vivo, no solo en tests: convergencia (segunda pasada de `movie` -> 0 items,
+cero HTTP), `--recheck` (reincorpora los 14 sellados, confirma que siguen sin credits, los
+vuelve a sellar), decision 3 (159 series selladas tienen credits CREATOR; con `/credits` a
+secas serian 0) y ausencia de regresion en el adapter (los 5 llamadores previos de
+`get_series_detail` emiten la misma peticion).
+
+Los `people_errors` observados (1 movie, 3 series, 1 book) son el **issue #18** ya
+registrado: nombres en alfabetos no latinos que slugifican a cadena vacia.
+
+### Pendiente de operacion — criterio de aceptacion 8
+
+Las cifras de arriba son de **dev**. El criterio 8 pide medirlas contra produccion. La
+feature se marco `done` por decision explicita del usuario, pero **el issue #15 sigue
+abierto** hasta tener las cifras reales: cerrarlo antes repetiria el error que lo origino
+(el #7 se cerro sin verificar). Secuencia:
+
+```bash
+# 1. Migrar Neon ANTES de disparar nada
+DATABASE_URL=<neon> uv run alembic upgrade head
+
+# 2. Medir la cobertura antes (query en docs/operations.md, seccion de cobertura)
+
+# 3. Los tres dispatches en modo credits
+gh workflow run backfill-sync.yml -f content_type=movie  -f mode=credits
+gh workflow run backfill-sync.yml -f content_type=series -f mode=credits
+gh workflow run backfill-sync.yml -f content_type=book   -f mode=credits
+
+# 4. Volver a medir y anotar en issues_list.json: verification, resolved, resolution_ref
+```
+
+### Derivado
+
+**Issue #19** (nuevo, low): flake de tests — `DeadlockDetectedError` sobre `catalog_search`
+entre el fixture `db` y una conexion del engine real que pide `AccessExclusiveLock` al hacer
+`REFRESH MATERIALIZED VIEW`. Lo detecto el reviewer (1 de 9 corridas). No lo produce esta
+feature: `sync_missing_credits` no refresca esa vista y sus tests parchean
+`async_session_factory`. Precedente identico en la feature 59.
