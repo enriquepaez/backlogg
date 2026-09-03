@@ -18,6 +18,7 @@ from backlogg.series.schemas import (
     SimilarSeriesListOut,
     SimilarSeriesOut,
 )
+from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
@@ -54,46 +55,85 @@ async def _get_or_create_person_tmdb(
     Avoids IntegrityError on uq_external_id when the same TMDB person
     appears across multiple items with slightly different name variants.
     """
-    existing_id = await people_repo.get_person_id_by_external(db, "TMDB", str(tmdb_person_id))
-    if existing_id is not None:
-        return await people_repo.get_person_by_id(db, existing_id)
-
-    person = await people_repo.upsert_person(
-        db,
-        {
-            "name": name,
-            "slug": slug,
-            "profile_url": profile_url,
-            "last_synced_at": now,
-        },
+    return await people_repo.get_or_create_person_by_external(
+        db, "TMDB", str(tmdb_person_id), name, slug, profile_url, now
     )
-    await upsert_external_id(db, "PERSON", person.id, "TMDB", str(tmdb_person_id))
-    return person
 
 
-async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int) -> None:
-    """Fetch credits from TMDB and persist people + credits for a series."""
+def _tmdb_person_row(
+    member: dict,
+    role: str,
+    character_name: str | None = None,
+    billing_order: int | None = None,
+) -> BulkPerson | None:
+    """Map one TMDB cast/crew member to a ``BulkPerson``, or None if unusable."""
+    person_tmdb_id = member.get("id")
+    if not person_tmdb_id:
+        return None
+
+    name = member.get("name", "")
+    if not name:
+        return None
+
+    profile_path = member.get("profile_path")
+    return BulkPerson(
+        source="TMDB",
+        external_id=str(person_tmdb_id),
+        name=name,
+        slug=_slugify(name),
+        profile_url=f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None,
+        role=role,
+        character_name=character_name,
+        billing_order=billing_order,
+    )
+
+
+async def collect_series_credits(tmdb_id: int) -> list[BulkPerson]:
+    """Fetch a series' credits from TMDB and map them to bulk credit rows.
+
+    Cast only (top 10 by billing order): the credits endpoint carries no
+    meaningful directors for TV, and creators come from the detail payload's
+    ``created_by`` instead — see ``collect_series_creators``.  Split out for
+    feature 84 so the batch write path can gather a whole slice's people
+    before touching the database.
+    """
     credits_data = await _tmdb.get_series_credits(tmdb_id)
     if not credits_data:
-        return
+        return []
 
+    rows: list[BulkPerson] = []
+    for member in credits_data.get("cast", [])[:10]:
+        row = _tmdb_person_row(
+            member,
+            "ACTOR",
+            character_name=member.get("character") or None,
+            billing_order=member.get("order"),
+        )
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def collect_series_creators(created_by: list) -> list[BulkPerson]:
+    """Map a series detail's ``created_by`` entries to CREATOR credit rows."""
+    rows: list[BulkPerson] = []
+    for member in created_by or []:
+        row = _tmdb_person_row(member, "CREATOR")
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+async def _persist_series_credit_rows(
+    db: AsyncSession, series: Series, rows: list[BulkPerson]
+) -> None:
+    """Persist already-mapped credit rows one person at a time."""
     now = datetime.now(UTC)
 
-    # Cast — top 10 actors by billing order
-    for member in credits_data.get("cast", [])[:10]:
-        person_tmdb_id = member.get("id")
-        if not person_tmdb_id:
-            continue
-
-        name = member.get("name", "")
-        if not name:
-            continue
-
-        slug = _slugify(name)
-        profile_path = member.get("profile_path")
-        profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
-
-        person = await _get_or_create_person_tmdb(db, person_tmdb_id, name, slug, profile_url, now)
+    for row in rows:
+        person = await _get_or_create_person_tmdb(
+            db, int(row.external_id), row.name, row.slug, row.profile_url, now
+        )
         if person is None:
             continue
 
@@ -103,52 +143,25 @@ async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int)
                 "item_type": "SERIES",
                 "item_id": series.id,
                 "person_id": person.id,
-                "role": "ACTOR",
-                "character_name": member.get("character") or None,
-                "billing_order": member.get("order"),
+                "role": row.role,
+                "character_name": row.character_name,
+                "billing_order": row.billing_order,
             },
         )
 
-    # Crew — creators from series detail (created_by field in series detail response)
-    # Note: series detail includes created_by, but credits endpoint may not.
-    # We handle created_by from the series detail separately via the series_detail dict.
-    # Here we handle crew from the credits endpoint (directors are rare in TV, so we skip).
-    # created_by is handled in get_series by passing detail to this function via a different path.
-    # For simplicity, creators are handled via created_by field when available.
+
+async def _persist_series_people(db: AsyncSession, series: Series, tmdb_id: int) -> None:
+    """Fetch credits from TMDB and persist people + credits for a series.
+
+    On-demand route only — feature 84 leaves the single-item path writing one
+    person at a time on purpose; the nightly/backfill route batches instead.
+    """
+    await _persist_series_credit_rows(db, series, await collect_series_credits(tmdb_id))
 
 
 async def _persist_series_creators(db: AsyncSession, series: Series, created_by: list) -> None:
     """Persist creators (CREATOR role) from the series created_by field."""
-    now = datetime.now(UTC)
-
-    for member in created_by:
-        person_tmdb_id = member.get("id")
-        if not person_tmdb_id:
-            continue
-
-        name = member.get("name", "")
-        if not name:
-            continue
-
-        slug = _slugify(name)
-        profile_path = member.get("profile_path")
-        profile_url = f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None
-
-        person = await _get_or_create_person_tmdb(db, person_tmdb_id, name, slug, profile_url, now)
-        if person is None:
-            continue
-
-        await people_repo.upsert_credit(
-            db,
-            {
-                "item_type": "SERIES",
-                "item_id": series.id,
-                "person_id": person.id,
-                "role": "CREATOR",
-                "character_name": None,
-                "billing_order": None,
-            },
-        )
+    await _persist_series_credit_rows(db, series, collect_series_creators(created_by))
 
 
 async def list_series(

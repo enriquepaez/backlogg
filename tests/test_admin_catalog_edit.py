@@ -337,7 +337,7 @@ async def test_locked_field_survives_next_sync(db):
             "movie_to_dict",
             return_value=dict(synced_movie_data),
         ),
-        patch.object(sync_jobs, "_persist_movie_people", new_callable=AsyncMock),
+        patch.object(sync_jobs, "collect_movie_credits", new_callable=AsyncMock, return_value=[]),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock, return_value=0),
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),

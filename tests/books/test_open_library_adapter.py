@@ -1962,7 +1962,10 @@ async def test_persist_book_authors_handles_normalized_edition_authors():
             "backlogg.books.service.people_repo.upsert_person",
             AsyncMock(side_effect=lambda db, data: MagicMock(id=hash(data["slug"]) % 1000)),
         ),
-        patch("backlogg.books.service.upsert_external_id", AsyncMock()),
+        # The person's external-id link is written by people_repo since
+        # feature 84 (get_or_create_person_by_external), so that is the
+        # reference this test has to intercept.
+        patch("backlogg.people.repository.upsert_external_id", AsyncMock()),
         patch(
             "backlogg.books.service.people_repo.upsert_credit", AsyncMock()
         ) as mock_upsert_credit,

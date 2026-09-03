@@ -1,12 +1,12 @@
 """Direct backfill sync — run the slice-sync jobs in a loop, straight against the DB.
 
 The nightly sync goes through ``POST /admin/sync/{type}`` on Render, whose
-infrastructure caps each request at ~15 minutes, which forces a small
-``SYNC_SLICE_SIZE`` (~100 items/night/type).  This script bypasses Render
-entirely: it reuses the exact same job functions from
-``backlogg.scheduler.jobs`` (same upsert logic, same ``sync_cursors``
-cursor) but runs them directly against ``DATABASE_URL`` and the external
-APIs, iterating with a bigger slice until either:
+infrastructure caps each request at ~15 minutes, which forces a small nightly
+slice (``SYNC_SLICE_SIZE`` / ``SYNC_SLICE_SIZE_<TYPE>``, ~100-350
+items/night/type).  This script bypasses Render entirely: it reuses the exact
+same job functions from ``backlogg.scheduler.jobs`` — same write path, same
+``sync_cursors`` cursor — but runs them directly against ``DATABASE_URL`` and
+the external APIs, iterating with a bigger slice until either:
 
 - the persisted cursor wraps around to 0 (target reached or API exhausted), or
 - a configurable time budget runs out (default 300 min, safely below the
@@ -14,6 +14,16 @@ APIs, iterating with a bigger slice until either:
 
 Because progress is persisted in ``sync_cursors`` (shared with the nightly
 sync), re-running the script resumes where the previous run stopped.
+
+Since feature 84 those jobs write through the batch path
+(``backlogg.shared.bulk_load``): items are still fetched one by one, but each
+group of ``BULK_LOAD_BATCH_SIZE`` is written with a COPY into temp tables plus
+``INSERT ... SELECT ... ON CONFLICT``, and every person of the batch is
+resolved with a single query.  ``--slice-size`` passed here overrides both
+``SYNC_SLICE_SIZE_<TYPE>`` and the global ``SYNC_SLICE_SIZE``; it controls how
+much is fetched per iteration, while ``BULK_LOAD_BATCH_SIZE`` controls how
+much is written per transaction (and therefore how much a batch fallback has
+to redo).
 
 Usage::
 
@@ -39,6 +49,7 @@ from pathlib import Path
 # script runs standalone (uv run python scripts/backfill_sync.py).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backlogg.core.config import settings  # noqa: E402
 from backlogg.core.database import async_session_factory, engine  # noqa: E402
 from backlogg.scheduler import jobs  # noqa: E402
 from backlogg.scheduler.repository import get_sync_offset  # noqa: E402
@@ -97,10 +108,11 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     next_offset = await _read_cursor(item_type)
 
     logger.info(
-        "backfill %s: starting at offset %d (slice_size=%d, time_budget=%.0fs)",
+        "backfill %s: starting at offset %d (slice_size=%d, batch_size=%d, time_budget=%.0fs)",
         content_type,
         next_offset,
         slice_size,
+        settings.BULK_LOAD_BATCH_SIZE,
         time_budget_s,
     )
 
