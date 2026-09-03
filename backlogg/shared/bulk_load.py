@@ -11,8 +11,8 @@ round trips *per batch*:
     COPY records -> temp table               (asyncpg binary COPY)
     INSERT INTO <real> SELECT ... FROM <temp> ON CONFLICT ...
 
-plus a single ``SELECT ... WHERE (source, external_id) IN (...)`` that
-resolves *every* person of the batch at once, replacing the
+plus a single ``SELECT ... WHERE (item_type, source, external_id) IN (...)``
+that resolves *every* person of the batch at once, replacing the
 ``get_person_id_by_external`` + ``get_person_by_id`` pair that the per-item
 route issues for each of the ~7 credits of every item.
 
@@ -64,22 +64,23 @@ Batch size ceiling (``BULK_LOAD_BATCH_SIZE``)
 Everything here is O(1) round trips per batch *except* two lookups that are
 rendered as ``tuple_(...).in_(...)``: the person resolution in
 ``_resolve_people`` and the claim pre-check in ``_upsert_external_ids``.  Both
-spend **2 bind parameters per key**, and Postgres' extended query protocol
-caps a single statement at **32.767 parameters** (the count is a signed
-16-bit field on the wire).
+key on ``(item_type, source, external_id)`` since issue #20 put ``item_type``
+into ``uq_external_id``, so both spend **3 bind parameters per key**, and
+Postgres' extended query protocol caps a single statement at **32.767
+parameters** (the count is a signed 16-bit field on the wire).
 
 With the default of 500 items and the ~7 credits/item this catalog averages,
-``_resolve_people`` renders ~3.500 keys = ~7.000 parameters — comfortably
-below the cap.  The cliff sits at **~2.300 items per batch** at 7
-credits/item (32.767 / 2 / 7); an item type with fatter credit lists reaches
-it sooner, so the real bound is on *keys*, not on items.
+``_resolve_people`` renders ~3.500 keys = ~10.500 parameters — still
+comfortably below the cap.  The cliff moved from ~2.300 to **~1.560 items per
+batch** at 7 credits/item (32.767 / 3 / 7); an item type with fatter credit
+lists reaches it sooner, so the real bound is on *keys*, not on items.
 
 Crossing it is not a correctness problem — the statement raises, the batch
 raises with it, and ``_write_batch`` reprocesses those items through the
 per-item route, so no data is lost.  But that fallback is ~50x slower and
 announces itself only in the log, so an over-eager ``BULK_LOAD_BATCH_SIZE``
 degrades into a silent slowdown rather than an obvious failure.  Do not raise
-it past ~2.000 without splitting those two lookups into chunks first.
+it past ~1.400 without splitting those two lookups into chunks first.
 
 The on-demand path (``GET /movies/{slug}`` and friends) is deliberately left
 untouched: it writes one item and would gain nothing from batching.
@@ -605,34 +606,41 @@ async def _upsert_external_ids(
 
     Reproduces the per-item semantics exactly:
 
-    * a ``(source, external_id)`` pair already claimed by *any* row is left
-      alone — first claim wins (that pre-check is why the per-item helper
-      exists at all: the same TMDB person shows up in cast and crew);
+    * an ``(item_type, source, external_id)`` triple already claimed by
+      another row **of the same type** is left alone — first claim wins (that
+      pre-check is why the per-item helper exists at all: the same TMDB person
+      shows up in cast and crew);
     * otherwise insert, and on ``uq_item_source`` update the external id.
 
+    The pre-check keys on ``item_type`` because ``uq_external_id`` does
+    (issue #20). Comparing ``(source, external_id)`` alone made a PERSON row
+    holding TMDB id 110531 swallow the *series* 110531 without an exception, a
+    counter or a log line — 0,93% of the enumerated 2022 series measured
+    against the dev database, and growing with the size of ``people``.
+
     Within the batch the same two rules are applied as de-duplication: first
-    wins on ``(source, external_id)``, last wins on
+    wins on ``(item_type, source, external_id)``, last wins on
     ``(item_type, item_id, source)`` — the order a sequential per-item run
     would produce.
     """
     if not rows:
         return
-    by_pair: dict[tuple[str, str], tuple[str, int, str, str]] = {}
+    by_pair: dict[tuple[str, str, str], tuple[str, int, str, str]] = {}
     for row in rows:
-        by_pair.setdefault((row[2], row[3]), row)
+        by_pair.setdefault((row[0], row[2], row[3]), row)
     by_item: dict[tuple[str, int, str], tuple[str, int, str, str]] = {}
     for row in by_pair.values():
         by_item[(row[0], row[1], row[2])] = row
 
     candidates = list(by_item.values())
-    pairs = [(row[2], row[3]) for row in candidates]
+    keys = [(row[0], row[2], row[3]) for row in candidates]
     existing = await session.execute(
-        select(ExternalId.source, ExternalId.external_id).where(
-            tuple_(ExternalId.source, ExternalId.external_id).in_(pairs)
+        select(ExternalId.item_type, ExternalId.source, ExternalId.external_id).where(
+            tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys)
         )
     )
     claimed = set(existing.all())
-    fresh = [row for row in candidates if (row[2], row[3]) not in claimed]
+    fresh = [row for row in candidates if (row[0], row[2], row[3]) not in claimed]
     if not fresh:
         return
 
@@ -660,7 +668,8 @@ async def _resolve_people(
 ) -> dict[tuple[str, str], int]:
     """Resolve every person of the batch to a ``people.id``.
 
-    Acceptance #2: **one** ``SELECT ... WHERE (source, external_id) IN (...)``
+    Acceptance #2: **one**
+    ``SELECT ... WHERE (item_type, source, external_id) IN (...)``
     for the whole batch, instead of the ``get_person_id_by_external`` +
     ``get_person_by_id`` pair the per-item route issues per credit.  The
     people that query does not find are inserted with a single
@@ -670,11 +679,10 @@ async def _resolve_people(
     """
     if not people:
         return {}
-    keys = sorted({(person.source, person.external_id) for person in people})
+    keys = sorted({("PERSON", person.source, person.external_id) for person in people})
     found = await session.execute(
         select(ExternalId.source, ExternalId.external_id, ExternalId.item_id).where(
-            ExternalId.item_type == "PERSON",
-            tuple_(ExternalId.source, ExternalId.external_id).in_(keys),
+            tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys),
         )
     )
     resolved: dict[tuple[str, str], int] = {

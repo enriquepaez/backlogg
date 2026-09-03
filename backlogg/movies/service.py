@@ -59,6 +59,8 @@ async def _get_or_create_person_tmdb(
     Returns the Person instance, or None if the lookup/creation fails.
     Avoids IntegrityError on uq_external_id when the same TMDB person
     appears across multiple items with slightly different name variants.
+    The lookup is scoped to PERSON rows, so it never picks up the movie or
+    series that happens to carry the same TMDB number (issue #20).
     """
     return await people_repo.get_or_create_person_by_external(
         db, "TMDB", str(tmdb_person_id), name, slug, profile_url, now

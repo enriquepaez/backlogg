@@ -63,10 +63,13 @@ class Settings(BaseSettings):
     # retire a healthy target.
     #
     # This exists because a target can be *permanently* unlinkable through no
-    # fault of the seeding: ``uq_external_id`` is unique over
-    # ``(source, external_id)`` globally while TMDB numbers movies and series
-    # in independent sequences, so a series whose id a movie already claimed
-    # gets its row written but never linked.  Without retirement those targets
+    # fault of the seeding: the detail request resolves and the item still ends
+    # up with no ``external_ids`` row — two TMDB ids whose title and year
+    # slugify to the same value share a single row and only one of them keeps
+    # its link, for instance.  (Until migration 0036 there was a far more
+    # common shape: ``uq_external_id`` had no ``item_type``, so a PERSON id
+    # blocked the movie or series holding the same number — issue #20.)
+    # Without retirement those targets
     # would sit in the pending set forever, occupying a slot of every nightly
     # slice, keeping ``pending`` permanently above 0 — which would silently
     # disable the ``last_synced_at`` refresh rotation (and with it TMDB's

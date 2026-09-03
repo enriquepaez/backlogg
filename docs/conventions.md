@@ -87,8 +87,10 @@
 - **Tests de endpoint:** `TestClient` de FastAPI / `httpx.AsyncClient`.
 - Cada nuevo endpoint tiene **al menos un test** (happy path).
 - Los datos de test que usan `external_ids` deben tener IDs externos únicos
-  por test para evitar violaciones de `uq_external_id` cuando los tests
-  comparten la misma DB.
+  por test **dentro de cada `item_type`** para evitar violaciones de
+  `uq_external_id` (`item_type`, `source`, `external_id`) cuando los tests
+  comparten la misma DB. Un mismo id en dos tipos distintos ya no colisiona
+  — desde la migración `0036`, issue #20.
 
 ## Linting y formato
 

@@ -271,11 +271,13 @@ enlazarse nunca**:
 
 1. **404 en TMDB.** El id se enumeró pero TMDB ya no lo sirve (borrado o
    fusionado con otra ficha).
-2. **Id ya reclamado por otro tipo.** `uq_external_id` es único sobre
-   `(source, external_id)` **globalmente** y TMDB numera movies y series en
-   secuencias independientes, así que una serie puede encontrarse su id ya
-   reclamado por una película: la fila del ítem **sí** se escribe, el enlace en
-   `external_ids` no.
+2. **Resuelve bien y aun así no se enlaza.** El detalle se descarga sin
+   error y el ítem no acaba con fila en `external_ids`. Caso realista: la
+   colisión de slug — `slug` es único, así que dos ids de TMDB con el mismo
+   título y año comparten una sola fila y solo uno conserva su enlace.
+   Hasta la migración `0036` la causa masiva era otra: `uq_external_id` no
+   incluía `item_type` y un id de persona bastaba para bloquear la película o
+   serie con el mismo número (issue #20). Eso ya está arreglado.
 
 Si esos targets se quedan en el conjunto pendiente, `pending` tiene un **suelo
 permanente > 0**. Y las dos garantías del diseño dependen de que `pending`
@@ -297,12 +299,14 @@ Por eso se **retiran**, no solo se reordenan:
 El residuo **no desaparece de la vista**: se cuenta aparte y se reporta como
 `stuck` (desglosado en `gone` y `unlinkable`) en el resultado del job, en su
 log —con un `warning` explícito si hay `unlinkable`— y en el resumen del script
-de enumeración. Un catálogo que no converge por un defecto de esquema
-preexistente es justo lo que el operador necesita poder ver.
+de enumeración. Un catálogo que no converge es justo lo que el operador
+necesita poder ver, venga el atasco de donde venga.
 
-> El defecto de fondo (`uq_external_id` global entre tipos) es **preexistente** y
-> queda fuera del alcance de esta feature: arreglarlo es un cambio de esquema
-> transversal a los cuatro dominios. Ver `docs/schema.md`.
+> El defecto de fondo (`uq_external_id` global entre tipos) era
+> **preexistente** y quedó fuera del alcance de esta feature; se arregló
+> después, en la migración `0036` (issue #20), que además reabrió los targets
+> que había retirado. La retirada sigue siendo necesaria para el 404 y para la
+> colisión dentro de un mismo tipo. Ver `docs/schema.md`.
 
 #### Rotación de refresco
 

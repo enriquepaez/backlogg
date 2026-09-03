@@ -901,48 +901,31 @@ async def test_run_enumeration_persists_the_targets_it_finds(db):
 #
 # * TMDB answers 404 for an enumerated id (covered above by
 #   ``test_sync_movies_retires_an_id_tmdb_no_longer_serves``);
-# * ``uq_external_id`` is unique over ``(source, external_id)`` *globally* while
-#   TMDB numbers movies and series in independent sequences, so a series can
-#   find its id already claimed by a movie: the row is written, the link never
-#   happens.
+# * the fetch resolves fine and the item still never gets an ``external_ids``
+#   row — modelled below with two TMDB ids whose titles slugify to the same
+#   value: ``slug`` is unique, so one of the two wins the row and the other
+#   loses its link on every pass.
+#
+# Until migration 0036 the second cause had a far more common shape:
+# ``uq_external_id`` carried no ``item_type``, so a PERSON id was enough to
+# block the movie or series holding the same number (issue #20). That one is
+# fixed, and fixed at the root — but the retirement machinery is *not*
+# obsolete, because "resolves and does not link" is still reachable and the 404
+# always was.
 #
 # Both used to hold ``pending`` permanently above 0, which silently disabled the
 # ``last_synced_at`` refresh rotation — and with it TMDB's 6-month cache-window
 # obligation — and stopped ``scripts/backfill_sync.py`` from ever terminating.
 
 
-async def _claim_tmdb_id_for_a_movie(db, tmdb_id: str) -> None:
-    """Make ``tmdb_id`` unlinkable for any other item type, the way prod does."""
-    movie = Movie(
-        title=f"Claimer {tmdb_id}",
-        slug=f"claimer-{tmdb_id}-86",
-        last_synced_at=datetime.now(UTC),
-    )
-    db.add(movie)
-    await db.flush()
-    await upsert_external_id(db, "MOVIE", movie.id, "TMDB", tmdb_id)
-
-
-async def test_unlinkable_target_is_retired_so_pending_reaches_zero(db, monkeypatch):
-    """A target that resolves but never links leaves the work list after N passes.
-
-    Regression for review B1: ordering by ``attempts`` alone reordered the
-    queue without removing anything, so this target kept a slice slot and kept
-    ``pending`` at 1 on every single run, forever.
-    """
-    monkeypatch.setattr(sync_jobs.settings, "TMDB_SEED_MAX_ATTEMPTS", 2)
-    await _claim_tmdb_id_for_a_movie(db, "871001")
-    await upsert_seed_targets(
-        db, [SeedTargetRow("SERIES", "TMDB", "871001", vote_count=500, release_year=2022)]
-    )
-    await db.commit()
-
-    detail = {
-        "id": 871001,
-        "name": "Unlinkable Series",
-        "original_name": "Unlinkable Series",
+def _series_detail(tmdb_id: int, name: str, first_air_date: str = "2022-01-05") -> dict:
+    """A series detail body. Same ``name`` + year ⇒ same slug ⇒ one row for two ids."""
+    return {
+        "id": tmdb_id,
+        "name": name,
+        "original_name": name,
         "overview": "",
-        "first_air_date": "2022-01-05",
+        "first_air_date": first_air_date,
         "last_air_date": "2022-03-05",
         "number_of_seasons": 1,
         "number_of_episodes": 8,
@@ -957,13 +940,48 @@ async def test_unlinkable_target_is_retired_so_pending_reaches_zero(db, monkeypa
         "credits": {"cast": []},
     }
 
+
+def _series_detail_by_id(details: dict[int, dict]):
+    """``get_series_detail`` stand-in that answers per id."""
+
+    async def fake(tmdb_id, append_to_response=None):  # noqa: ARG001
+        return details[int(tmdb_id)]
+
+    return fake
+
+
+async def test_unlinkable_target_is_retired_so_pending_reaches_zero(db, monkeypatch):
+    """A target that resolves but never links leaves the work list after N passes.
+
+    Regression for review B1: ordering by ``attempts`` alone reordered the
+    queue without removing anything, so this target kept a slice slot and kept
+    ``pending`` at 1 on every single run, forever.
+
+    The unlinkable target here is a slug collision: 871001 and 871002 are two
+    different TMDB ids whose titles and years slugify to the same value, and
+    ``series.slug`` is unique. The pair is written as one row, which keeps the
+    link of whichever id the batch wrote last — 871001 resolves conclusively on
+    every pass and never gets an ``external_ids`` row of its own.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "TMDB_SEED_MAX_ATTEMPTS", 2)
+    await upsert_seed_targets(
+        db,
+        [
+            SeedTargetRow("SERIES", "TMDB", "871001", vote_count=900, release_year=2022),
+            SeedTargetRow("SERIES", "TMDB", "871002", vote_count=500, release_year=2022),
+        ],
+    )
+    await db.commit()
+
+    details = {
+        871001: _series_detail(871001, "Unlinkable Series"),
+        871002: _series_detail(871002, "Unlinkable Series"),
+    }
+
     results = []
     with (
         patch.object(
-            sync_jobs._tmdb_series,
-            "get_series_detail",
-            new_callable=AsyncMock,
-            return_value=detail,
+            sync_jobs._tmdb_series, "get_series_detail", new=_series_detail_by_id(details)
         ),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
         patch(
@@ -972,9 +990,10 @@ async def test_unlinkable_target_is_retired_so_pending_reaches_zero(db, monkeypa
         ),
     ):
         for _ in range(3):
-            results.append(await sync_jobs.sync_series(slice_size=1))
+            results.append(await sync_jobs.sync_series(slice_size=2))
 
-    # Pass 1 and 2 are conclusive-but-unlinked; the target retires on the 2nd.
+    # 871002 links on the first pass; 871001 spends passes 1 and 2 resolving
+    # without linking and retires on the 2nd.
     assert [r["pending"] for r in results] == [1, 0, 0]
     assert [r["stuck"] for r in results] == [0, 1, 1]
     # And it is really out of the work list, not merely at the back of it.
@@ -1026,7 +1045,6 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
     re-sync — was never visited.
     """
     monkeypatch.setattr(sync_jobs.settings, "TMDB_SEED_MAX_ATTEMPTS", 1)
-    await _claim_tmdb_id_for_a_movie(db, "873001")
     stale = Movie(
         title="Stale Rotation Movie",
         slug="stale-rotation-movie-86",
@@ -1034,39 +1052,26 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
     )
     db.add(stale)
     await db.flush()
-    await upsert_external_id(db, "MOVIE", stale.id, "TMDB", "873002")
+    await upsert_external_id(db, "MOVIE", stale.id, "TMDB", "873101")
     await upsert_seed_targets(
-        db, [SeedTargetRow("SERIES", "TMDB", "873001", vote_count=500, release_year=2022)]
+        db,
+        [
+            SeedTargetRow("SERIES", "TMDB", "873001", vote_count=900, release_year=2022),
+            SeedTargetRow("SERIES", "TMDB", "873002", vote_count=500, release_year=2022),
+        ],
     )
     await db.commit()
 
-    series_detail = {
-        "id": 873001,
-        "name": "Stuck Series",
-        "original_name": "Stuck Series",
-        "overview": "",
-        "first_air_date": "2022-01-05",
-        "last_air_date": "2022-03-05",
-        "number_of_seasons": 1,
-        "number_of_episodes": 8,
-        "status": "Ended",
-        "original_language": "en",
-        "poster_path": None,
-        "backdrop_path": None,
-        "vote_average": 7.9,
-        "vote_count": 500,
-        "genres": [],
-        "created_by": [],
-        "credits": {"cast": []},
+    # Same title and year for both ids ⇒ same slug ⇒ one row: 873002 keeps the
+    # link, 873001 resolves conclusively without ever linking and, with a budget
+    # of 1 pass, is retired on the spot.
+    series_details = {
+        873001: _series_detail(873001, "Stuck Series"),
+        873002: _series_detail(873002, "Stuck Series"),
     }
-    # A series row whose external id is claimed by the movie above: it is
-    # written, never linked, and after 1 conclusive pass it is retired.
     with (
         patch.object(
-            sync_jobs._tmdb_series,
-            "get_series_detail",
-            new_callable=AsyncMock,
-            return_value=series_detail,
+            sync_jobs._tmdb_series, "get_series_detail", new=_series_detail_by_id(series_details)
         ),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
         patch(
@@ -1074,9 +1079,9 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
             new=_mocked_session_factory(db),
         ),
     ):
-        first = await sync_jobs.sync_series(slice_size=1)
+        first = await sync_jobs.sync_series(slice_size=2)
 
-    assert first["refreshed"] == 0  # the slice went entirely to the stuck target
+    assert first["refreshed"] == 0  # the slice went entirely to the pending targets
     assert first["pending"] == 0
     assert first["stuck"] == 1
 
@@ -1098,7 +1103,7 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
     ):
         second = await sync_jobs.sync_movies(slice_size=1)
 
-    assert requested == [873002]  # the stale one, not the claimer
+    assert requested == [873101]  # the 400-day-old movie, nothing else
     assert second["refreshed"] == 1
 
 
@@ -1160,9 +1165,10 @@ async def test_hydration_never_exceeds_the_configured_concurrency(db, monkeypatc
 async def test_progress_counters_separate_pending_from_gone_and_unlinkable(db):
     """The residue is *visible*, not folded into pending (review B1).
 
-    A catalog that cannot converge because of the pre-existing global
-    ``uq_external_id`` is exactly what the operator needs to be able to see, so
-    it gets its own counters instead of an unmoving ``pending``.
+    A catalog that cannot converge — an id that is 404 at TMDB, or one that
+    resolves and still never gets an ``external_ids`` row — is exactly what the
+    operator needs to be able to see, so it gets its own counters instead of an
+    unmoving ``pending``.
     """
     await upsert_seed_targets(
         db,

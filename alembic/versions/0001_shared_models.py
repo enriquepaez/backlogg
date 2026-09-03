@@ -35,6 +35,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
+        # Superseded by migration 0036, which adds item_type to this key
+        # (issue #20). Left as it was: this file records history, not the
+        # current shape of the table.
         sa.UniqueConstraint("source", "external_id", name="uq_external_id"),
         sa.UniqueConstraint("item_type", "item_id", "source", name="uq_item_source"),
     )

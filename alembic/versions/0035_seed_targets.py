@@ -20,10 +20,12 @@ Column notes:
   of the catalog in rather than an arbitrary slice.
 - ``attempts``/``last_attempt_at``/``unreachable_at`` are the convergence
   guard.  A target can legitimately never yield an ``external_ids`` row, for
-  two unrelated reasons: ``uq_external_id`` is global over
-  ``(source, external_id)`` while TMDB numbers movies and series in
-  independent sequences (so a series can find its id already claimed by a
-  movie), and an enumerated id can simply be 404 at TMDB by the time it is
+  two unrelated reasons: its ``(source, external_id)`` pair being already
+  claimed by another item (at the time of this migration ``uq_external_id``
+  was global over ``(source, external_id)`` while TMDB numbers movies, series
+  and people in independent sequences, so *any* other type could claim the id
+  — migration ``0036`` narrows that to a collision within the same type, see
+  issue #20), and an enumerated id can simply be 404 at TMDB by the time it is
   hydrated.  Both would keep the pending set permanently above zero, which
   would disable the ``last_synced_at`` refresh rotation and stop the backfill
   loop from ever terminating.  ``unreachable_at`` records the 404 (a

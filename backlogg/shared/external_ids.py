@@ -23,7 +23,13 @@ class ExternalId(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "external_id", name="uq_external_id"),
+        # Unique **per item type**: TMDB numbers movies, series and people in
+        # independent sequences that overlap, so id 110531 can legitimately be
+        # both a person and a series.  Leaving ``item_type`` out of this key
+        # made the first claimant of a number block every other type from ever
+        # being linked — silently, since both upsert paths pre-check and skip
+        # (issue #20).
+        UniqueConstraint("item_type", "source", "external_id", name="uq_external_id"),
         UniqueConstraint("item_type", "item_id", "source", name="uq_item_source"),
         Index("idx_external_ids_item", "item_type", "item_id"),
     )
@@ -59,20 +65,28 @@ async def set_external_id(
 async def upsert_external_id(
     db: AsyncSession, item_type: str, item_id: int, source: str, external_id: str
 ) -> ExternalId:
-    # Check first if this (source, external_id) pair already exists.
-    # Prevents uq_external_id IntegrityError when the same external ID
+    # Check first if this (item_type, source, external_id) triple already
+    # exists. Prevents uq_external_id IntegrityError when the same external ID
     # appears more than once (e.g. same TMDB person in cast and crew).
+    #
+    # ``item_type`` is part of the lookup because it is part of the constraint:
+    # without it, a PERSON row claiming TMDB id 110531 made the *series* 110531
+    # unlinkable forever, and this pre-check returned that unrelated PERSON row
+    # instead of raising (issue #20). Two items of *different* types may now
+    # share a number; two items of the *same* type still may not, and for that
+    # case the pre-check keeps its original semantics — first claim wins.
     existing_check = await db.execute(
         select(ExternalId).where(
+            ExternalId.item_type == item_type,
             ExternalId.source == source,
             ExternalId.external_id == external_id,
         )
     )
     existing_row = existing_check.scalar_one_or_none()
     if existing_row is not None:
-        # Already linked. If it points to the same item, return as-is.
-        # If it points to a different item (item_id mismatch), keep the
-        # first claim to preserve data integrity.
+        # Already linked to an item of this type. If it points to the same
+        # item, return as-is. If it points to a different item (item_id
+        # mismatch), keep the first claim to preserve data integrity.
         return existing_row
 
     # Not yet linked — safe to insert.

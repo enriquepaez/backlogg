@@ -140,7 +140,10 @@ async def get_or_create_person_by_external(
     slug-keyed upsert plus the external-id link when the person is new.
     Looking the external id up first is what stops ``uq_external_id`` from
     blowing up when the same TMDB person shows up under slightly different
-    name variants across items.
+    name variants across items.  The lookup is scoped to ``item_type =
+    'PERSON'``, which is also the leading column of that constraint since
+    migration 0036 (issue #20): a movie or series holding the same TMDB number
+    is a different row and must not be mistaken for this person.
     """
     existing_id = await get_person_id_by_external(db, source, external_id)
     if existing_id is not None:
