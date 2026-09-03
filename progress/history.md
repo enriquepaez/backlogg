@@ -411,3 +411,83 @@ bloque A. Ver `issues_list.json` #20.
   `errors` visible, sin pérdida de datos). Seguimiento, no esta rama.
 - **Issue #18** reapareció en la QA: 4 `people_errors` por nombres en alfabeto no
   latino que slugifican a cadena vacía. Independiente y ya registrado.
+
+---
+
+## 2026-09-04 — Issue #20 `uq_external_id` gana `item_type`
+
+Bugfix, no feature: rama `fix/uq_external_id_item_type`, veredicto del reviewer
+solo como texto (`AGENTS.md` §5.4). Prerrequisito del bloque A que destapó la QA
+de la feature 86 y que **bloqueaba la siembra real de producción**.
+
+`uq_external_id` era `UNIQUE (source, external_id)` **sin `item_type`**, pero
+TMDB numera películas, series y personas en secuencias independientes que se
+solapan. Una fila `PERSON` con el id 110531 impedía enlazar la serie 110531 — y
+los dos caminos de escritura saltaban el par **en silencio**: sin excepción, sin
+contador, sin log. Medido: 7 de 752 series (0,93%), con la tasa creciendo porque
+`people` llena ese espacio numérico ~8-10× más rápido que el catálogo.
+
+Arreglo: la restricción pasa a `UNIQUE (item_type, source, external_id)`
+(migración `0036`, mismo nombre) y los dos pre-checks comparan la terna. La
+migración lleva además la **reparación de datos** en la misma transacción,
+reabriendo (`attempts = 0`) los `seed_targets` que el defecto había retirado.
+
+### QA manual del leader — contra la DB de dev y TMDB reales
+
+```
+reparación 0036   reabre exactamente los 7 targets del issue (los otros 745, intactos)
+diagnóstico       confirmado: los 7 ids estaban reclamados por filas PERSON
+hidratación real  sync_series(slice 10) -> synced=10 errors=0 people_errors=0
+                  pending=0 stuck=0 refreshed=3 en 1,4 s
+enlace            los 7 tienen ya fila SERIES conviviendo con la PERSON
+duplicados        0 — series sigue en 1.132 filas, 0 slugs duplicados
+residuo           12 -> 5 series + 1 libro
+init.sh           verde, 1220 tests
+```
+
+### Dos decisiones de diseño que merecen quedar escritas
+
+**`attempts > 0` en vez de `attempts >= TMDB_SEED_MAX_ATTEMPTS`** en el predicado
+de reparación: ese setting es una env var de runtime, y una migración cuyo efecto
+depende del entorno en que se ejecute no es reproducible. El superconjunto que
+atrapa es inocuo porque el predicado exige además `NOT EXISTS` en `external_ids`
+(en dev: 730 targets con `attempts=1`, **7 filas tocadas**).
+
+**El `downgrade` no se puede deshacer, y es deliberado.** Verificado por el leader
+*después* de hidratar: falla nombrando el par `(TMDB, 130567)`, sin `DELETE`
+silencioso, y hace **rollback atómico** — la DB queda en `0036` con la restricción
+intacta. Hallazgo añadido: revertir *solo el código* es **peor**, porque el
+`upsert_external_id` anterior termina en `scalar_one_or_none()` y lanza
+`MultipleResultsFound` con dos filas. Comprobado contra la DB de dev. La ventana
+de rollback seguro se cierra en el primer sync que escriba un par cruzado.
+Documentado en `docs/operations.md`.
+
+### Premisa del encargo que resultó falsa
+
+El leader pidió reconstruir dos tests de la feature 86 usando una colisión
+*dentro del mismo tipo* como causa de `unlinkable`. El implementer demostró que
+no es alcanzable: `_unlinked_targets_stmt` da un target por convergido en cuanto
+existe *alguna* fila con su terna, **sin mirar el `item_id`**, así que nunca
+acumula `attempts`. Verificado por el reviewer en el código. Los tests se
+reconstruyeron con la causa que sí sobrevive —la colisión de slug— conservando
+las aserciones duras.
+
+### Derivados registrados en esta sesión
+
+- **Issue #22** (high, nuevo): los saltos silenciosos que quedan, sin contador ni
+  log. Es el mecanismo que ya encadenó **#7 → #15 → #20**. Programado **antes de
+  la siembra**: es el único panel de instrumentos durante una carga de horas.
+- **Issue #18** elevado a high y programado antes de la siembra: sobre 118k ítems
+  deja un agujero permanente en credits, que es el dato de las features 74 y 82.
+- **Issue #21** creado y **resuelto el mismo día**: el residuo irreparable deja de
+  existir al decidir el usuario que producción se borra y se siembra desde cero.
+- **Credits de games podados**: `credits` tiene 0 filas `GAME` con 465 juegos, y
+  IGDB v4 **no expone credits de persona en absoluto** (todos sus endpoints de
+  autoría son de empresa). La nota «director data is sparse — only sync when
+  available» era falsa. Se dieron de alta la feature 89 y FE-70 y se borraron al
+  podarlas; `docs/schema.md` y `docs/external-apis.md` corregidos para que dejen
+  de prometer lo que nadie iba a construir.
+- **Issue #15 sigue `open` a propósito** pese a tener sus dos mitades resueltas
+  sobre el papel: el borrado y la siembra **no se han ejecutado**. Cerrarlo ahora
+  repetiría el error que lo originó (el #7 se cerró dando por hecho un backfill
+  que nunca se corrió).

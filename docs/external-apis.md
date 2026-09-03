@@ -553,7 +553,14 @@ por ítem), no de red.
   - `POST /involved_companies` — join between games and companies
 
 - **Slug strategy**: IGDB provides `slug` field directly.
-- **Coverage note**: director data is sparse — only sync when available.
+- **No person credits (verificado 2026-09-04)**: IGDB v4 **no expone credits a
+  nivel de persona**. Todos sus endpoints de autoría son de empresa
+  (`/companies`, `/involved_companies`). Esta línea decía antes "director data is
+  sparse — only sync when available", que era falso y engañoso en la dirección
+  peor: sugería que el dato llegaría a veces, cuando no llega nunca. Games tiene
+  0 filas en `credits` por este motivo, y la decisión del 2026-09-04 fue no
+  construir la ingesta desde otra fuente — ver `docs/schema.md`, "Games have no
+  person credits".
 - **external_ids source value**: `IGDB`
 - **"Trending" investigation (2026-08-26, feature 68)**: IGDB has no
   "trending this week/day" endpoint. `GET /trending?type=game` is therefore

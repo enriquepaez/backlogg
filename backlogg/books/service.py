@@ -53,6 +53,8 @@ async def _get_or_create_person_ol(
     Returns the Person instance, or None if the lookup/creation fails.
     Avoids IntegrityError on uq_external_id when the same OL author
     appears in multiple books with slightly different name variants.
+    Scoped to PERSON rows: since migration 0036 that constraint is unique per
+    item type, so an OL work key and an author key never collide (issue #20).
     """
     return await people_repo.get_or_create_person_by_external(
         db, "OPEN_LIBRARY", ol_id, name, slug, None, now

@@ -368,10 +368,12 @@ class _BatchWriter:
 #    resume mechanism.  No offset, no progress marker: whatever a crashed run
 #    left undone is exactly what the next one picks up.
 # 2. **Retirement, so that "nothing is pending" is reachable.**  Some targets
-#    can never link: TMDB may answer 404 for an enumerated id, and
-#    ``uq_external_id`` is unique over ``(source, external_id)`` *globally*
-#    while TMDB numbers movies and series separately, so a series can find its
-#    id already claimed by a movie.  Left in place they would occupy a slot of
+#    can never link: TMDB may answer 404 for an enumerated id, and a fetch that
+#    resolves is still no guarantee of a link — two ids whose title and year
+#    slugify to the same value share one row and only one keeps its link
+#    (before migration 0036 the common shape was different: ``uq_external_id``
+#    had no ``item_type``, so a PERSON id blocked a movie or a series —
+#    issue #20).  Left in place they would occupy a slot of
 #    every slice forever and hold ``pending`` above 0 permanently.  A 404 is
 #    stamped in ``unreachable_at`` on first sight; a target that keeps
 #    resolving without linking is retired after ``TMDB_SEED_MAX_ATTEMPTS``
@@ -669,11 +671,11 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
     )
     if after.unlinkable:
         # Not a failure of this run, but the operator has to be able to see it:
-        # these targets are enumerated, will never link, and the cause is the
-        # pre-existing global uq_external_id (docs/schema.md).
+        # these targets resolve at TMDB and still never end up with an
+        # external_ids row (docs/schema.md).
         logger.warning(
-            "%s: %d target(s) retired as unlinkable after %d conclusive passes — their "
-            "(source, external_id) pair is claimed by another item type",
+            "%s: %d target(s) retired as unlinkable after %d conclusive passes — they "
+            "resolve at the source but never get an external_ids row",
             spec.job_name,
             after.unlinkable,
             max(1, settings.TMDB_SEED_MAX_ATTEMPTS),

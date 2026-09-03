@@ -43,9 +43,8 @@ depends on the type, and since feature 86 the two are different:
   its job and not a backfill's).
 
   That stop condition is reachable because ``pending`` counts *workable*
-  targets only.  A target TMDB answers 404 for, or one whose
-  ``(source, external_id)`` pair another item type already claimed
-  (``uq_external_id`` is global — see ``docs/schema.md``), is retired from the
+  targets only.  A target TMDB answers 404 for, or one that resolves and still
+  never gets an ``external_ids`` row (see ``docs/schema.md``), is retired from the
   work list and reported apart in ``stuck``.  Without that, the loop would
   spin re-hydrating the same unlinkable items until the time budget expired:
   they *do* write their row, so ``synced > 0`` and the no-progress guard below

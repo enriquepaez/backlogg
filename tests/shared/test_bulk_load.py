@@ -253,6 +253,117 @@ async def test_batch_of_new_rows_writes_everything(db):
     assert person_link.scalar_one() is not None
 
 
+# ── Issue #20: uq_external_id is unique per item type ────────────────────────
+
+
+async def test_a_person_claiming_a_tmdb_id_does_not_block_a_movie(db):
+    """Regression for issue #20 on the *batch* pre-check.
+
+    ``_upsert_external_ids`` compared ``(source, external_id)`` and dropped any
+    pair already claimed by any row. A PERSON holding TMDB id 8400131 therefore
+    swallowed the movie with the same number: the ``movies`` row was written,
+    the ``external_ids`` row never was, and nothing said so — no exception, no
+    counter, no log line. Measured on the dev database as 7 of 752 series lost.
+    """
+    from backlogg.shared.external_ids import upsert_external_id
+
+    person = Person(
+        name="Bulk Collider Actor",
+        slug="bulk-collider-actor",
+        profile_url=None,
+        last_synced_at=datetime.now(UTC),
+    )
+    db.add(person)
+    await db.flush()
+    await upsert_external_id(db, "PERSON", person.id, "TMDB", "8400131")
+    await db.flush()
+
+    outcome = await bulk_load_items(
+        db,
+        _SPEC,
+        [
+            BulkItem(
+                data=_movie_payload("bulk-collider-movie", "Bulk Collider Movie"),
+                external_id="8400131",
+                people=[_person("8400132", "Bulk Collider Extra", "bulk-collider-extra")],
+            )
+        ],
+    )
+    assert outcome.written == 1
+
+    movie = await _movie(db, "bulk-collider-movie")
+    linked = await db.execute(
+        select(ExternalId.external_id).where(
+            ExternalId.item_type == "MOVIE", ExternalId.item_id == movie.id
+        )
+    )
+    assert linked.scalar_one() == "8400131"
+
+    # The person keeps their own link: both rows coexist under the same number.
+    person_link = await db.execute(
+        select(ExternalId.item_id).where(
+            ExternalId.item_type == "PERSON",
+            ExternalId.source == "TMDB",
+            ExternalId.external_id == "8400131",
+        )
+    )
+    assert person_link.scalar_one() == person.id
+
+
+async def test_batch_still_leaves_an_id_claimed_within_the_same_type_alone(db):
+    """First claim still wins *within* a type — the half of the rule that stays.
+
+    Two different movies cannot hold the same TMDB id, so the batch writer must
+    keep skipping that pair instead of raising on ``uq_external_id``.
+    """
+    from backlogg.shared.external_ids import upsert_external_id
+
+    first = await bulk_load_items(
+        db,
+        _SPEC,
+        [
+            BulkItem(
+                data=_movie_payload("bulk-claim-first", "Bulk Claim First"),
+                external_id="8400141",
+            )
+        ],
+    )
+    assert first.written == 1
+    claimer = await _movie(db, "bulk-claim-first")
+
+    second = await bulk_load_items(
+        db,
+        _SPEC,
+        [
+            BulkItem(
+                data=_movie_payload("bulk-claim-second", "Bulk Claim Second"),
+                external_id="8400141",
+            )
+        ],
+    )
+    assert second.written == 1
+    intruder = await _movie(db, "bulk-claim-second")
+
+    holder = await db.execute(
+        select(ExternalId.item_id).where(
+            ExternalId.item_type == "MOVIE",
+            ExternalId.source == "TMDB",
+            ExternalId.external_id == "8400141",
+        )
+    )
+    assert holder.scalar_one() == claimer.id
+    unlinked = await db.execute(
+        select(func.count())
+        .select_from(ExternalId)
+        .where(ExternalId.item_type == "MOVIE", ExternalId.item_id == intruder.id)
+    )
+    assert unlinked.scalar_one() == 0
+
+    # The per-item route agrees, which is what the fallback relies on.
+    same = await upsert_external_id(db, "MOVIE", intruder.id, "TMDB", "8400141")
+    assert same.item_id == claimer.id
+
+
 # ── Idempotency ──────────────────────────────────────────────────────────────
 
 

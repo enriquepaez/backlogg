@@ -265,9 +265,86 @@ Qué procesa cada run depende del tipo (feature 86):
 ### Targets retirados (`stuck`)
 
 Un target puede ser **imposible de enlazar**, por dos motivos independientes:
-TMDB responde 404 a un id enumerado, o el par `(source, external_id)` ya está
-reclamado por otro tipo de ítem (`uq_external_id` es único globalmente y TMDB
-numera movies y series por separado — ver `docs/schema.md`).
+TMDB responde 404 a un id enumerado, o el detalle se descarga bien y el ítem
+aun así no consigue fila en `external_ids` (típicamente una colisión de slug:
+dos ids de TMDB con el mismo título y año comparten una sola fila y solo uno
+conserva su enlace — ver `docs/schema.md`).
+
+> Antes de la migración `0036` (issue #20) `uq_external_id` no incluía
+> `item_type`, así que un id de persona de TMDB bloqueaba la película o serie
+> con el mismo número: era la causa masiva de `unlinkable`. La `0036` la
+> arregla y **reabre** los targets afectados (`attempts = 0` en todo target sin
+> enlazar que no sea 404), así que el primer `hydrate` posterior verá `pending`
+> subir y `unlinkable` bajar. Eso es lo esperado y no hay que hacer nada.
+> **Pero solo cubre lo que tenga fila en `seed_targets`** — ver el apartado
+> siguiente antes de dar el catálogo por reparado.
+
+### Ítems sin enlace que la `0036` **no** repara
+
+La reparación de la migración se apoya en `seed_targets`, que es lo único que
+recuerda qué ids quería el catálogo. Un ítem que entró por otra vía —el cursor
+de `/popular`, el fan-out de búsqueda, `/similar`— **no tiene fila ahí**, así que
+si perdió su enlace por el defecto del issue #20 se queda como estaba: fila en
+`series`/`movies`/`books`, ninguna en `external_ids`.
+
+Y no se autocura solo: `get_stale_catalog_external_ids` hace INNER JOIN contra
+`external_ids`, así que la rotación de refresco **nunca visita** esos ítems, y
+`get_credit_gaps` los descarta en `skipped_no_external_id`. Quedan congelados:
+sin re-sync, sin créditos y sin volver a intentarlo.
+
+Ojo con producción: `seed_targets` solo se puebla ejecutando la enumeración de
+la feature 86, que estaba bloqueada por este mismo issue. Si allí la tabla está
+vacía, el `UPDATE` de la `0036` actualiza **0 filas** y todo lo que se perdió
+sigue perdido.
+
+Medido en la DB de dev, ya en `0036`: 12 series sin enlace de 1.132 y 1 libro de
+389 (movies y games, 0). Solo las 7 de 2022 tienen fila en `seed_targets`; las
+otras 5 (`supernatural-2005`, `sesame-street-1969`, `kamen-rider-1971`,
+`the-secret-life-of-the-american-teenager-2008`,
+`operation-safed-sagar…-2026`) y `the-hobbit-1937` no. Es el 42% del residuo
+observable.
+
+Para medirlo, por tipo:
+
+```sql
+SELECT count(*) FROM series s WHERE NOT EXISTS (
+  SELECT 1 FROM external_ids e WHERE e.item_type='SERIES' AND e.item_id=s.id);
+```
+
+(igual para `movies`/`MOVIE`, `books`/`BOOK`, `games`/`GAME`; y cambiando el
+`count(*)` por `s.slug` se obtiene la lista.)
+
+El id externo de esas filas **no es recuperable desde la base de datos**: nunca
+llegó a escribirse. Recuperarlas exige un script que las vuelva a resolver por
+título contra la fuente, o volver a enumerarlas. No existe todavía: hoy hay que
+contarlas a mano con la consulta de arriba.
+
+> **Estado 2026-09-04.** Esto dejó de ser un problema a resolver: producción no
+> tiene datos reales y se borrará para sembrar desde cero con el esquema ya
+> arreglado, con lo que estos huérfanos no llegan a existir (issue #21, cerrado
+> por esa vía). Lo que sigue vigente es la limitación de fondo — un ítem que
+> pierda su enlace no tiene camino de vuelta — y por eso se ataca por el otro
+> lado: haciendo visible la pérdida en el momento en que ocurre (issue #22).
+
+### Volver atrás de la `0036` — no se puede, y hay que saberlo antes de desplegar
+
+La `0036` es una **puerta de un solo sentido** en cuanto la tabla contiene el
+primer par `(source, external_id)` compartido entre dos `item_type`. Las dos
+vías de vuelta atrás fallan, por motivos distintos:
+
+- **Revertir el esquema** (`alembic downgrade`) no puede reconstruir el índice
+  global: Postgres rechaza el `ALTER TABLE` nombrando el par duplicado. Es
+  deliberado y está explicado en el docstring de la migración.
+- **Revertir solo el código**, dejando el esquema nuevo, es *peor*: el
+  `upsert_external_id` anterior a la `0036` resuelve por `(source, external_id)`
+  sin `item_type` y termina en `scalar_one_or_none()`, que con dos filas lanza
+  `MultipleResultsFound`. Verificado contra la DB de dev. Eso rompe el sync de
+  los cuatro tipos y el fan-out de búsqueda: una caída, no un fallo silencioso.
+
+La ventana en la que el rollback todavía es seguro va desde el despliegue hasta
+el **primer sync que escriba un par cruzado**. A partir de ahí la única salida es
+hacia delante: un fix nuevo, no una reversión. (Hoy el riesgo es nulo porque no
+hay datos reales que perder; esta nota importa cuando los haya.)
 
 Esos targets se **retiran** de la lista de trabajo: el 404 se sella la primera
 vez que se observa, y el que resuelve bien pero no enlaza se retira tras
@@ -282,7 +359,9 @@ de caché de 6 meses de TMDB— y dejaría el backfill girando sin progresar.
 
 El residuo se reporta aparte, en `stuck`. Si crece de forma sostenida, mirar el
 desglose: `gone` (404 en TMDB, normal en pequeñas cantidades) frente a
-`unlinkable` (colisión de id, que es el defecto de esquema preexistente).
+`unlinkable` (el detalle se descarga bien y el ítem sigue sin fila en
+`external_ids`; desde la `0036` lo típico es una colisión de slug entre dos ids
+de TMDB con el mismo título y año).
 
 El progreso de movies/series se lee en la línea final del log del job
 (`N targets still pending, M stuck: G gone, U unlinkable`) o directamente contra

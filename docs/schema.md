@@ -207,7 +207,7 @@ CREATE TABLE external_ids (
     external_id     VARCHAR(100) NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_external_id UNIQUE (source, external_id),
+    CONSTRAINT uq_external_id UNIQUE (item_type, source, external_id),
     CONSTRAINT uq_item_source UNIQUE (item_type, item_id, source)
 );
 
@@ -215,6 +215,20 @@ CREATE INDEX idx_external_ids_item ON external_ids (item_type, item_id);
 ```
 
 No real FK to item tables — polymorphic reference, integrity enforced by application code.
+
+`uq_external_id` incluye `item_type` **a propósito**: TMDB numera películas,
+series y personas en secuencias independientes que se solapan, así que el id
+110531 puede ser a la vez una serie y un actor. Hasta la migración `0036` la
+restricción era `UNIQUE (source, external_id)` y el primero que reclamaba un
+número dejaba a los demás tipos sin poder enlazarse nunca — en silencio, porque
+ambas rutas de escritura hacen un pre-check y **saltan** el par ya reclamado
+(issue #20: 7 de 752 series de 2022 perdidas en dev, todas bloqueadas por filas
+`item_type='PERSON'`). Todo lector que resuelva un ítem por su id externo tiene
+que filtrar también por `item_type`; si no, puede devolver la fila de otro tipo.
+
+Lo que **sigue** prohibido es que dos ítems del **mismo** tipo compartan
+`(source, external_id)`: eso es un id duplicado de verdad y el pre-check
+conserva ahí su semántica de "gana el primero que lo reclamó".
 
 ## Genres
 
@@ -341,7 +355,30 @@ Supported roles by domain:
 | Movies  | DIRECTOR, ACTOR, SOURCE_AUTHOR, WRITER       | Actors limited to top 10 by billing_order  |
 | Series  | CREATOR, ACTOR, SOURCE_AUTHOR, WRITER        | Actors limited to top 10                   |
 | Books   | AUTHOR                                       | Supports co-authorship                     |
-| Games   | DIRECTOR                                     | Only when IGDB provides it                 |
+| Games   | *(none)*                                     | See note below — no person credits at all  |
+
+### Games have no person credits — by decision (2026-09-04)
+
+`credits` carries **no `GAME` rows at all**, and no ingestion path writes any.
+Measured against the dev database on 2026-09-04: 500 `BOOK`, 5.618 `MOVIE`,
+8.675 `SERIES`, **0 `GAME`** — with 465 games in the catalog.
+
+This table used to promise a `DIRECTOR` role for games "only when IGDB provides
+it". That was an intention from the start of the project that was never built,
+and the qualifier was wrong on the facts: **IGDB v4 exposes no person credits at
+all**. Its endpoints are `/games`, `/covers`, `/companies` and
+`/involved_companies` — every one of them about companies, not people. Nothing
+was ever going to arrive "when IGDB provides it".
+
+Building it would have meant a different source (Wikidata's P57/P178/P58/P86, or
+MobyGames) for a datum that is thin in nearly every source, whose only real
+payoff is the cross-type bridge game ↔ film by shared director — a product bet,
+not a requirement. **The decision was to drop it rather than carry it**, so this
+document now matches what the code does.
+
+What games *do* have is **company credits** (`DEVELOPER`, `PUBLISHER`), in the
+separate `company_credits` table, populated from IGDB's `involved_companies`.
+That is a different table with different semantics and it is unaffected.
 
 ### `SOURCE_AUTHOR` vs `WRITER` (movies and series)
 
@@ -547,10 +584,20 @@ exactamente el trabajo restante, muera como muera.
 enlazarse, por dos motivos sin relación entre sí:
 
 - **404 en la fuente**: el id se enumeró pero TMDB ya no lo sirve.
-- **Id ya reclamado por otro tipo**: `uq_external_id` es único sobre `(source,
-  external_id)` **globalmente**, mientras que TMDB numera películas y series en
-  secuencias independientes. Una serie puede encontrarse su id ya reclamado por
-  una película: la fila del ítem se escribe, el enlace no.
+- **Resuelve bien y aun así no se enlaza**: el detalle se descarga sin error
+  pero el ítem no acaba con fila en `external_ids`. El caso realista es la
+  colisión de slug: `slug` es único, así que dos ids de TMDB cuyo título y año
+  generan el mismo slug comparten **una sola fila**, y solo uno de los dos
+  conserva su enlace (`uq_item_source` admite un id por ítem y fuente). Lo
+  mismo pasa si el payload se rechaza por validación.
+
+  Antes de la migración `0036` había una tercera causa, y era la masiva: la
+  restricción no incluía `item_type`, así que una fila `PERSON` con el id de
+  TMDB de una serie la dejaba sin enlazar para siempre (issue #20). Esa ya no
+  existe. Ojo con el matiz: cuando la colisión es *dentro* del mismo tipo, el
+  target **sí** encuentra fila en el join y se cuenta como hecho aunque apunte
+  a otro `item_id`; lo que llega a `unlinkable` es solo lo que no consigue
+  ninguna fila.
 
 Dejarlos en el conjunto pendiente le pondría a `pending` un **suelo permanente
 > 0**, y de que `pending` llegue a 0 dependen las dos garantías del diseño: la
@@ -567,8 +614,9 @@ en `gone` y `unlinkable`) en el resultado del job y en su log. El orden por
 vaya detrás de todo lo no intentado en vez de acampar a la cabeza de la cola.
 
 > El defecto de fondo —`uq_external_id` único sobre `(source, external_id)` sin
-> incluir `item_type`— es **preexistente** y transversal a los cuatro dominios.
-> Esta feature lo mitiga y lo hace visible; no lo arregla.
+> incluir `item_type`— quedó arreglado en la migración `0036` (issue #20). La
+> maquinaria de retirada **no** sobra por ello: sigue haciendo falta para el
+> 404 y para el ítem que resuelve bien y aun así no consigue enlace.
 
 **Por qué `vote_count`/`release_year`.** Son gratis (viajan en el payload de
 `/discover`) y dan a la hidratación un orden por notoriedad, así que una

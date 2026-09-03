@@ -403,7 +403,7 @@ psql $DATABASE_URL -c "\d people"
 
 psql $DATABASE_URL -c "\d external_ids"
 # Esperado: columnas id, item_type, item_id, source, external_id, created_at
-#           constraints: uq_external_id (source, external_id), uq_item_source (item_type, item_id, source)
+#           constraints: uq_external_id (item_type, source, external_id), uq_item_source (item_type, item_id, source)
 ```
 
 ### 2. Migración reversible

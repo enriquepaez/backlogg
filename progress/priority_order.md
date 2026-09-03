@@ -36,26 +36,80 @@ esto» del final**.
 
 ---
 
-## Estado (2026-09-02)
+## Estado (2026-09-04)
 
-- **15 features backend pendientes** (ids 74-88). Ninguna en `in_progress`.
-- **5 features frontend en `blocked`** (FE-65 a FE-69): ninguna ejecutable hoy,
-  cada una espera a su feature backend pareja. Las 63 anteriores están `done`.
-  Índice en el apartado «Frontend».
-- **1 issue abierto**: #15 (credits vacíos en gran parte del catálogo). Deja de
-  ser un problema operativo «volver a lanzar el workflow» y pasa a resolverse
-  con las features 84 y 85 — ver `issues_list.json`.
+> Contado contra los tres archivos fuente, no de memoria. Si vuelves a tocar
+> esta sección, vuelve a contarlos.
 
-> **Actualización 2026-09-03 — prerrequisito nuevo del bloque A.** Las features
-> 84, 85 y 86 están `done`. Pero la QA de la 86 destapó el **issue #20** (high):
-> `uq_external_id` es único sobre `(source, external_id)` **sin `item_type`**, y
-> los ids de TMDB de *personas* bloquean el enlace de movies y series. Medido:
-> 7 de 752 series (0,93%) se pierden en silencio hoy, y la tasa **crece con la
-> siembra** porque `people` crece ~8-10× más rápido que el catálogo.
-> **No ejecutes la siembra real contra producción hasta arreglarlo**: sembrarías
-> un catálogo con un agujero grande y creciente. Va antes que la 87.
+- **12 features backend pendientes**: 74-83, 87 y 88. Ninguna en `in_progress`.
+  Las 84, 85 y 86 están `done`.
+- **5 features frontend en `blocked`** (FE-65 a FE-69, ids 64-68): ninguna
+  ejecutable hoy, cada una espera a su feature backend pareja. Las 63 anteriores
+  están `done`. Índice en el apartado «Frontend».
+- **5 issues abiertos**: #15, #18, #19, #20 y #22. Detalle y ubicación en la cola
+  justo debajo.
+
+### Issues abiertos y dónde caen en la cola
+
+| Issue | Sev. | Dónde está en la cola |
+|---|---|---|
+| **#20** `uq_external_id` sin `item_type` | high | **Punto 3.1 — hecho**: implementado, revisado y con QA manual el 2026-09-04, en la rama `fix/uq_external_id_item_type`. Sigue `open` a propósito: no se cierra hasta medirlo contra producción, para no repetir el error que originó el #15 |
+| **#22** saltos silenciosos sin contador ni log | high | **Punto 3.2 — antes de sembrar.** Es el panel de instrumentos de la siembra y el mecanismo que ya encadenó #7 → #15 → #20 |
+| **#18** slug vacío en alfabetos no latinos | high | **Punto 3.3 — antes de sembrar.** Decisión de producto pendiente: transliterar vs. derivar el slug del external_id |
+| **#15** credits vacíos en el catálogo | high | **Sus dos mitades están resueltas en el papel, pero sigue `open` a propósito** (ver más abajo): movies/series/books se disuelve con el borrado —que aún no se ha ejecutado— y games se **podó** el 2026-09-04 |
+| **#19** flake de `DeadlockDetectedError` | low | **Sin punto asignado, y es una decisión consciente.** No bloquea nada y no corrompe datos; el coste es CI rojo intermitente que entrena a ignorar un `init.sh` rojo. Se aborda cuando moleste |
+
+> **El issue #15, sus dos mitades.** Su parte operativa —«hay que correr el
+> backfill de credits contra Neon»— **desaparece con el borrado**: una siembra
+> desde cero escribe los credits durante la propia hidratación
+> (`append_to_response=credits`), así que no hay hueco que rellenar después.
+>
+> La otra mitad —**games no tiene ningún código que persista credits**, solo que
+> los lee— se **podó el 2026-09-04 por decisión del usuario**. Era una intención
+> del arranque del proyecto que nunca se implementó. El motivo de podarla y no
+> construirla: IGDB v4 **no expone credits de persona en absoluto** (todos sus
+> endpoints de autoría son de empresa), así que habría hecho falta una fuente
+> nueva —Wikidata tras la 79, o MobyGames— para un dato pobre en casi todas las
+> fuentes, cuyo único valor real es el puente cross-type juego ↔ película por
+> director compartido: apuesta de producto, no requisito.
+>
+> Se llegó a dar de alta como feature backend 89 y frontend FE-70 ese mismo día,
+> y ambas se **borraron** al podarla. Lo que queda como rastro permanente es la
+> corrección de los documentos, que es donde importaba: `docs/schema.md` ya no
+> promete un rol `DIRECTOR` para games —la tabla de roles pone `(none)` y explica
+> por qué— y `docs/external-apis.md` corrige la nota falsa «director data is
+> sparse — only sync when available». Games conserva sus **company credits**
+> (`DEVELOPER`/`PUBLISHER`), que son otra tabla y no se tocan.
+>
+> **Por qué el issue sigue `open` con las dos mitades resueltas**: el borrado y
+> la siembra **todavía no se han ejecutado**. Cerrarlo ahora repetiría
+> exactamente el error que lo originó — el issue #7 se cerró dando por hecho un
+> backfill que nunca se corrió. Se cierra cuando la siembra esté hecha y medida.
 
 ---
+
+> **Actualización 2026-09-04 — producción se borra y se siembra desde cero.**
+> El usuario confirmó que producción no tiene datos reales, solo de prueba, y que
+> puede borrarse por completo. Tres consecuencias sobre esta cola:
+>
+> 1. **El issue #21 queda resuelto sin escribir código** (residuo de ítems
+>    huérfanos irreparables): si la base se recrea con el esquema ya arreglado,
+>    esos ítems no llegan a existir.
+> 2. **El borrado es una fecha límite, no un atajo.** Resetea los datos, no el
+>    código: todo defecto que hoy pierde datos en silencio se hornearía en el
+>    catálogo nuevo, esta vez sobre 118.850 ítems. Es la única ocasión en la que
+>    no hay que reparar nada, porque se construye limpio.
+> 3. Por eso **los issues #18 y #22 entran antes de la siembra**, entre el
+>    arreglo del #20 y la feature 87. Ambos son pérdida silenciosa de datos:
+>    #18 descarta los credits de nombres en alfabeto no latino (mucho contenido
+>    CJK y cirílico entra con `vote_count >= 25`, y credits es el dato sobre el
+>    que corren las features 74 y 82); #22 es la ausencia de contador/log en los
+>    dos caminos de escritura de `external_ids` — el mecanismo que ya encadenó
+>    los issues #7, #15 y #20, y el único panel de instrumentos durante una
+>    siembra de varias horas.
+>
+> El borrado y la siembra de producción se ejecutan **como paso propio**, con
+> confirmación explícita del usuario, no dentro de otra tarea.
 
 ## Orden acordado con el usuario (2026-09-02)
 
@@ -75,6 +129,9 @@ Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
 | 1 | **84** `bulk_load_pipeline` | Prerrequisito duro de 85, 86 y 87. Además es **condición necesaria** para la ventana de caché de 6 meses de TMDB: con 57.135 movies hacen falta 318/noche frente a los 200 de `SYNC_SLICE_SIZE`, y a 3,1 s/ítem eso excede el tope de ~15 min de Render (`docs/seeding-plan.md` §2.3) |
 | 2 | **85** `backfill_credits_targeted` | Cierra el **issue #15**, que es lo que bloquea la 74. Sin esto la capa 0 de recomendación no tiene datos |
 | 3 | ~~**86** `tmdb_discover_quality_seeding`~~ ✅ **done 2026-09-03** | El catálogo real de movies/series (`vote_count ≥ 25` → 57.135 + 10.880). Rompe el techo de 10.000 de `/popular` |
+| 3.1 | **issue #20** `uq_external_id` gana `item_type` | ✅ implementado, revisado y con QA manual el 2026-09-04. Prerrequisito duro: sin él la siembra pierde catálogo en silencio y a tasa creciente |
+| 3.2 | **issue #22** hacer ruidosos los saltos silenciosos de `external_ids` | Antes de sembrar: es el panel de instrumentos de la siembra. Ver actualización del 2026-09-04 |
+| 3.3 | **issue #18** slug de nombres en alfabeto no latino | Antes de sembrar: si no, el catálogo nuevo nace con un agujero permanente en credits. Decisión de producto pendiente (transliterar vs. `tmdb-<id>`) |
 | 4 | **87** `openlibrary_dump_seeding` | El catálogo real de books (18.874). Saca `search.json` del camino crítico |
 | 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |
 | 6 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |
@@ -105,10 +162,14 @@ quedan satisfechas en secuencia.
 
 ## Frontend
 
-**A fecha de hoy no hay ninguna feature de frontend pendiente**: las 63 de
-`frontend_feature_list.json` están en `done` (la última, FE-64
-`item_detail_field_ordering`), y las rutas de `apps/web/src/app/[locale]/`
-cubren ya todo lo que expone el backend actual.
+**No hay ninguna feature de frontend *ejecutable* hoy** (estado a 2026-09-04):
+63 de las 68 entradas de `frontend_feature_list.json` están en `done` — la
+última, FE-64 `item_detail_field_ordering` — y las rutas de
+`apps/web/src/app/[locale]/` cubren ya todo lo que expone el backend actual.
+
+Las **5 restantes están `blocked`**, no `pending`: son trabajo real y contado,
+solo que ninguna puede arrancar todavía. Ninguna feature backend de esta cola ha
+pasado a `done` desde que se escribieron, así que las cinco siguen bloqueadas.
 
 Lo que sí hay es **el frontend que van a generar las features backend de esta
 cola**. Está en `frontend_feature_list.json` como **5 entradas con status
@@ -155,8 +216,9 @@ haya gente usando la app.
 
 ## Cómo desmontar esto
 
-Cuando las 15 features estén `done` (o se descarten), **borra todo rastro de
-este orden** — son tres sitios, ninguno más:
+Cuando las 12 features backend pendientes estén `done` (o se descarten) **y no
+queden issues con punto asignado en la cola**, **borra todo rastro de este
+orden** — son tres sitios, ninguno más:
 
 1. **Borra este archivo**: `rm progress/priority_order.md`.
 2. **Revierte el override en `AGENTS.md` §4**: elimina el bloque

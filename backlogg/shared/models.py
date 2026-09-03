@@ -108,9 +108,11 @@ class SeedTarget(Base):
 
     ``attempts``/``last_attempt_at``/``unreachable_at`` are the convergence
     guard.  Some targets can never produce an ``external_ids`` row, for two
-    unrelated reasons: the same ``(source, external_id)`` pair being already
-    claimed by another item type (``uq_external_id`` is global across types
-    while TMDB numbers movies and series in independent sequences), and the
+    unrelated reasons: the fetch resolving without the item ever getting linked
+    (two TMDB ids whose title and year slugify to the same value share one row
+    and only one of them keeps its link; until migration 0036 there was a much
+    more common shape — ``uq_external_id`` had no ``item_type``, so a PERSON id
+    blocked the movie or series with the same number, issue #20), and the
     enumerated id simply being 404 by the time it is hydrated.  Left in the
     pending set they would occupy a slot of every nightly slice forever and
     keep "pending" permanently above zero — which would silently disable the

@@ -268,9 +268,10 @@ class SeedTargetProgress:
     ``pending`` is deliberately **workable** pending, not "unlinked": it is the
     number the refresh rotation and the backfill loop key off, so it has to be
     able to reach 0.  Everything that has been retired is reported apart, in
-    ``gone`` and ``unlinkable``, so a catalog that cannot converge because of
-    the pre-existing global ``uq_external_id`` is *visible* to the operator
-    instead of hidden inside a number that never moves.
+    ``gone`` and ``unlinkable``, so a catalog that cannot converge — because an
+    id is 404 at the source, or because it resolves and still never gets an
+    ``external_ids`` row — is *visible* to the operator instead of hidden
+    inside a number that never moves.
     """
 
     total: int
@@ -293,7 +294,10 @@ def _unlinked_targets_stmt(item_type: str, source: str):
     halfway leaves the remaining work correctly described by this query alone.
 
     The join carries ``item_type`` as well as ``(source, external_id)``
-    because the same TMDB id can legitimately be a movie and a series.
+    because the same TMDB id can legitimately be a movie, a series and a
+    person — which is exactly what ``uq_external_id`` allows since migration
+    0036 (issue #20), so the join key here matches that constraint column for
+    column.
     """
     return (
         select(SeedTarget)
@@ -319,9 +323,14 @@ def _retired_clause(max_attempts: int):
     * ``unreachable_at`` — TMDB answered 404. Definitive; nothing will come
       back by asking again.
     * ``attempts >= max_attempts`` — the fetch keeps resolving fine and the
-      item keeps *not* getting linked, which in practice means its
-      ``(source, external_id)`` pair is already claimed by another item type
-      (``uq_external_id`` is global). Retrying forever changes nothing.
+      item keeps *not* getting linked. In practice that means two ids sharing
+      one row: ``series.slug``/``movies.slug`` are unique, so two TMDB entries
+      with the same title and year collapse into a single row and only one of
+      them keeps its ``external_ids`` link. Retrying forever changes nothing.
+      Before migration 0036 there was a much more common cause — ``uq_external_id``
+      carried no ``item_type``, so a PERSON row was enough to retire a movie or
+      a series (issue #20). That one is gone; the rest of this guard still
+      applies.
 
     Without this, ``pending`` would have a permanent floor: the refresh
     rotation (which only fires once nothing is pending) would never run and
