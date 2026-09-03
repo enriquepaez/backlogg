@@ -49,13 +49,17 @@ backlogg/
 │   └── repository.py      # Cursores de sync (tabla sync_cursors)
 ├── shared/
 │   ├── models.py          # Person, Credit (transversales a todos los dominios)
+│   ├── bulk_load.py       # Ruta de escritura por lotes (COPY + upserts) para
+│   │                      # ingesta masiva; el descriptor por tipo vive en
+│   │                      # cada <domain>/repository.py
 │   └── external_ids.py    # Utilidades polimórficas de external_ids
 └── core/
     ├── database.py        # Engine, SessionLocal, get_db dependency
     └── config.py          # Settings via pydantic-settings
 
 scripts/
-└── backfill_sync.py       # Backfill directo contra la DB (ver docs/operations.md)
+├── backfill_sync.py       # Backfill directo contra la DB (ver docs/operations.md)
+└── bench_bulk_load.py     # Benchmark ruta por ítem vs. ruta por lotes
 ```
 
 ## Principios

@@ -17,6 +17,24 @@ _SYNC_RESULT = {"synced": 5, "errors": 0, "offset": 0, "duration_s": 1.2}
 _VALID_KEY = "test-admin-secret"
 
 
+def _force_per_item_fallback():
+    """Drive the job's per-item fallback instead of the batch write path.
+
+    These tests run the job against an ``AsyncMock`` session, and the batch
+    route needs a real connection (it COPYs into a temp table).  Forcing the
+    documented fallback (feature 84, decision D2: a failed batch is
+    reprocessed item by item) keeps them deterministic and keeps their
+    subject — what the job fetches and how it counts — unchanged.  The batch
+    route itself is covered against the real database in
+    ``tests/shared/test_bulk_load.py``.
+    """
+    return patch(
+        "backlogg.scheduler.jobs.bulk_load_items",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("the batch route needs a real connection"),
+    )
+
+
 def _cursor_patches(offset: int = 0):
     """Patches for the sync-cursor repository: cursor at ``offset``, writes mocked."""
     return (
@@ -283,8 +301,9 @@ async def test_sync_movies_is_idempotent(db):
             new_callable=AsyncMock,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_movie_people",
+            "backlogg.scheduler.jobs.collect_movie_credits",
             new_callable=AsyncMock,
+            return_value=[],
         ),
         # Use the test DB session factory so writes land in the test DB
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
@@ -308,7 +327,12 @@ async def test_sync_movies_is_idempotent(db):
 
 
 async def test_sync_books_calls_get_work_detail_for_authors():
-    """sync_books must call get_work_detail to fetch authors for each book with a work_id."""
+    """sync_books must call get_work_detail to collect authors for each book with a work_id.
+
+    Since feature 84 the job collects the authors during the fetch phase
+    (``collect_book_authors``) and hands them to the write path inside the
+    batch, instead of persisting them one by one after each item.
+    """
     popular_raw = [
         {
             "key": "/works/OL123W",
@@ -346,12 +370,16 @@ async def test_sync_books_calls_get_work_detail_for_authors():
             new_callable=AsyncMock,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_book_authors",
+            "backlogg.scheduler.jobs.collect_book_authors",
             new_callable=AsyncMock,
-        ) as mock_persist_authors,
+            return_value=[],
+        ) as mock_collect_authors,
     ):
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
+        # expunge_all is a sync method on AsyncSession — the write path calls
+        # it after a rollback and after a successful batch.
+        mock_session.expunge_all = MagicMock()
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -366,6 +394,7 @@ async def test_sync_books_calls_get_work_detail_for_authors():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_book = MagicMock()
             mock_book.id = 1
@@ -373,13 +402,18 @@ async def test_sync_books_calls_get_work_detail_for_authors():
             result = await sync_jobs.sync_books()
 
     mock_work_detail.assert_called_once_with("OL123W")
-    mock_persist_authors.assert_called_once()
+    mock_collect_authors.assert_called_once_with(work_detail_data)
     assert result["synced"] == 1
     assert result["errors"] == 0
 
 
-async def test_sync_movies_calls_persist_movie_people():
-    """sync_movies must call _persist_movie_people once per successfully upserted movie."""
+async def test_sync_movies_collects_credits_per_item():
+    """sync_movies must collect TMDB credits once per successfully upserted movie.
+
+    Feature 84 moved the credit *fetch* to the slice's fetch phase and the
+    credit *write* into the batch, so what the job calls per item is
+    ``collect_movie_credits``; the rows it returns travel with the item.
+    """
     movie_raw = {
         "id": 88801,
         "title": "Credits Test Movie",
@@ -415,9 +449,10 @@ async def test_sync_movies_calls_persist_movie_people():
             return_value=movie_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_movie_people",
+            "backlogg.scheduler.jobs.collect_movie_credits",
             new_callable=AsyncMock,
-        ) as mock_persist_people,
+            return_value=[],
+        ) as mock_collect_credits,
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
@@ -426,6 +461,9 @@ async def test_sync_movies_calls_persist_movie_people():
     ):
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
+        # expunge_all is a sync method on AsyncSession — the write path calls
+        # it after a rollback and after a successful batch.
+        mock_session.expunge_all = MagicMock()
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -440,21 +478,20 @@ async def test_sync_movies_calls_persist_movie_people():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_movie = MagicMock()
             mock_movie.id = 10
             mock_upsert.return_value = mock_movie
             result = await sync_jobs.sync_movies()
 
-    mock_persist_people.assert_called_once()
-    call_args = mock_persist_people.call_args
-    assert call_args.args[2] == 88801  # tmdb_id passed correctly
+    mock_collect_credits.assert_awaited_once_with(88801)  # tmdb_id passed correctly
     assert result["synced"] == 1
     assert result["errors"] == 0
 
 
 async def test_sync_movies_persist_people_failure_does_not_increment_errors():
-    """If _persist_movie_people raises, errors counter stays 0 and sync continues."""
+    """If the credits step raises, errors stays 0 and the movie is still synced."""
     movie_raw = {
         "id": 88802,
         "title": "Credits Failure Movie",
@@ -490,7 +527,7 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
             return_value=movie_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_movie_people",
+            "backlogg.scheduler.jobs.collect_movie_credits",
             new_callable=AsyncMock,
             side_effect=RuntimeError("credits API down"),
         ),
@@ -519,13 +556,14 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_movie = MagicMock()
             mock_movie.id = 11
             mock_upsert.return_value = mock_movie
             result = await sync_jobs.sync_movies()
 
-    # The upsert succeeded, so synced=1 even though people persistence failed
+    # The upsert succeeded, so synced=1 even though the credits step failed
     assert result["synced"] == 1
     # errors must NOT be incremented by people persistence failure
     assert result["errors"] == 0
@@ -533,8 +571,12 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
     assert result["people_errors"] == 1
 
 
-async def test_sync_series_calls_persist_series_people_and_creators():
-    """sync_series must call _persist_series_people and _persist_series_creators per item."""
+async def test_sync_series_collects_credits_and_creators():
+    """sync_series must collect both the cast and the ``created_by`` creators.
+
+    Feature 84: both lists are gathered during the fetch phase and written
+    together with the item in the batch.
+    """
     series_raw = {
         "id": 77701,
         "name": "Credits Test Series",
@@ -571,13 +613,14 @@ async def test_sync_series_calls_persist_series_people_and_creators():
             return_value=series_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_series_people",
+            "backlogg.scheduler.jobs.collect_series_credits",
             new_callable=AsyncMock,
-        ) as mock_persist_people,
+            return_value=[],
+        ) as mock_collect_credits,
         patch(
-            "backlogg.scheduler.jobs._persist_series_creators",
-            new_callable=AsyncMock,
-        ) as mock_persist_creators,
+            "backlogg.scheduler.jobs.collect_series_creators",
+            return_value=[],
+        ) as mock_collect_creators,
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
@@ -586,6 +629,9 @@ async def test_sync_series_calls_persist_series_people_and_creators():
     ):
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
+        # expunge_all is a sync method on AsyncSession — the write path calls
+        # it after a rollback and after a successful batch.
+        mock_session.expunge_all = MagicMock()
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -600,20 +646,21 @@ async def test_sync_series_calls_persist_series_people_and_creators():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_series = MagicMock()
             mock_series.id = 20
             mock_upsert.return_value = mock_series
             result = await sync_jobs.sync_series()
 
-    mock_persist_people.assert_called_once()
-    mock_persist_creators.assert_called_once()
+    mock_collect_credits.assert_awaited_once_with(77701)
+    mock_collect_creators.assert_called_once_with(series_raw["created_by"])
     assert result["synced"] == 1
     assert result["errors"] == 0
 
 
 async def test_sync_series_persist_people_failure_does_not_increment_errors():
-    """If _persist_series_people raises, errors stays 0 but people_errors increments."""
+    """If the credits step raises, errors stays 0 but people_errors increments."""
     series_raw = {
         "id": 77702,
         "name": "Credits Failure Series",
@@ -650,7 +697,7 @@ async def test_sync_series_persist_people_failure_does_not_increment_errors():
             return_value=series_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_series_people",
+            "backlogg.scheduler.jobs.collect_series_credits",
             new_callable=AsyncMock,
             side_effect=RuntimeError("credits API down"),
         ),
@@ -677,6 +724,7 @@ async def test_sync_series_persist_people_failure_does_not_increment_errors():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_series = MagicMock()
             mock_series.id = 21
@@ -689,7 +737,7 @@ async def test_sync_series_persist_people_failure_does_not_increment_errors():
 
 
 async def test_sync_books_persist_authors_failure_does_not_increment_errors():
-    """If _persist_book_authors raises, errors stays 0 but people_errors increments."""
+    """If the authors step raises, errors stays 0 but people_errors increments."""
     popular_raw = [
         {
             "key": "/works/OL999W",
@@ -721,7 +769,7 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
             return_value=work_detail_data,
         ),
         patch(
-            "backlogg.scheduler.jobs._persist_book_authors",
+            "backlogg.scheduler.jobs.collect_book_authors",
             new_callable=AsyncMock,
             side_effect=RuntimeError("authors API down"),
         ),
@@ -748,6 +796,7 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
                 "backlogg.scheduler.jobs.upsert_external_id",
                 new_callable=AsyncMock,
             ),
+            _force_per_item_fallback(),
         ):
             mock_book = MagicMock()
             mock_book.id = 2

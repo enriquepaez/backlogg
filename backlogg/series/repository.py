@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.series.models import Series, SeriesGenre, series_genres_join
 from backlogg.series.schemas import SeriesSortEnum
+from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
@@ -194,3 +195,29 @@ async def admin_update_series(db: AsyncSession, series: Series, updates: dict) -
 
     await db.flush()
     return series
+
+
+# ── Batch write path (feature 84) ─────────────────────────────────────────────
+
+
+async def _bulk_fallback_upsert(db: AsyncSession, data: dict) -> Series:
+    """Per-item fallback for the batch loader — resolves ``upsert_series`` late."""
+    return await upsert_series(db, data)
+
+
+SERIES_BULK_SPEC = BulkLoadSpec(
+    item_type="SERIES",
+    source="TMDB",
+    table=Series.__table__,
+    upsert_item=_bulk_fallback_upsert,
+    lookups=(
+        LookupJoinSpec(
+            data_key="genres",
+            lookup_table=SeriesGenre.__table__,
+            lookup_columns=("name", "slug"),
+            join_table=series_genres_join,
+            item_column="series_id",
+            lookup_column="genre_id",
+        ),
+    ),
+)

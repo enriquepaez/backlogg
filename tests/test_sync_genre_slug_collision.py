@@ -167,6 +167,12 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
     The bad item genuinely aborts the transaction (real duplicate-key error),
     reproducing the production poisoning.  The two good items must still be
     persisted and the cursor must advance.
+
+    Since feature 84 the slice is written in batches, so this exercises the
+    per-item *fallback*: the batch route is forced to fail (the failure mode
+    it is designed for — an unexpected error the pre-validation could not
+    anticipate) and the job reprocesses those same items one by one, which is
+    where the per-item isolation this test guards still lives.
     """
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
@@ -207,7 +213,16 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
         ),
         patch.object(sync_jobs.movies_repo, "upsert_movie", new=poisoned_upsert),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs._persist_movie_people", new_callable=AsyncMock),
+        patch(
+            "backlogg.scheduler.jobs.collect_movie_credits",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "backlogg.scheduler.jobs.bulk_load_items",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("batch route unavailable"),
+        ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

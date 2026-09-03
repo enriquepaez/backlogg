@@ -42,7 +42,25 @@ class Settings(BaseSettings):
     BOOKS_SEED_MIN_EDITIONS_ES: int = 2
     BOOKS_SEED_ES_EVERY_N: int = 10
 
+    # Nightly slice size. SYNC_SLICE_SIZE is the global fallback; the four
+    # per-type overrides exist because the types have genuinely different
+    # needs (feature 84, docs/seeding-plan.md §2.3): TMDB forbids caching its
+    # data for more than 6 months, so 57.135 movies have to be re-synced every
+    # 180 days = ~318/night, while series only need ~61. Resolution order in
+    # _read_slice is: explicit argument -> per-type setting -> global.
+    # All four default to None so this release changes nothing in production;
+    # raising them is a configuration decision for the seeding features.
     SYNC_SLICE_SIZE: int = 200
+    SYNC_SLICE_SIZE_MOVIES: int | None = None
+    SYNC_SLICE_SIZE_SERIES: int | None = None
+    SYNC_SLICE_SIZE_BOOKS: int | None = None
+    SYNC_SLICE_SIZE_GAMES: int | None = None
+
+    # How many items one batch of the bulk write path (feature 84) covers.
+    # Each batch is a single transaction: bigger means fewer round trips,
+    # smaller means less work lost if a batch has to fall back to the
+    # per-item route.
+    BULK_LOAD_BATCH_SIZE: int = 500
 
     SYNC_CRON: str = "0 3 * * *"
 

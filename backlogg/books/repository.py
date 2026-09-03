@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.books.models import Book, BookGenre, book_genres_join
 from backlogg.books.schemas import BookSortEnum
+from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 from backlogg.shared.models import Credit
 
@@ -304,3 +305,29 @@ async def get_books_by_genre_overlap(
     )
     result = await db.execute(stmt)
     return [row[0] for row in result.all()]
+
+
+# ── Batch write path (feature 84) ─────────────────────────────────────────────
+
+
+async def _bulk_fallback_upsert(db: AsyncSession, data: dict) -> Book:
+    """Per-item fallback for the batch loader — resolves ``upsert_book`` late."""
+    return await upsert_book(db, data)
+
+
+BOOK_BULK_SPEC = BulkLoadSpec(
+    item_type="BOOK",
+    source="OPEN_LIBRARY",
+    table=Book.__table__,
+    upsert_item=_bulk_fallback_upsert,
+    lookups=(
+        LookupJoinSpec(
+            data_key="genres",
+            lookup_table=BookGenre.__table__,
+            lookup_columns=("name", "slug"),
+            join_table=book_genres_join,
+            item_column="book_id",
+            lookup_column="genre_id",
+        ),
+    ),
+)

@@ -15,6 +15,7 @@ from backlogg.games.models import (
     game_platforms_join,
 )
 from backlogg.games.schemas import CompanyCreditOut, GameSortEnum
+from backlogg.shared.bulk_load import BulkLoadSpec, EntityCreditSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
@@ -315,3 +316,51 @@ async def admin_update_game(db: AsyncSession, game: Game, updates: dict) -> Game
 
     await db.flush()
     return game
+
+
+# ── Batch write path (feature 84) ─────────────────────────────────────────────
+
+
+async def _bulk_fallback_upsert(db: AsyncSession, data: dict) -> Game:
+    """Per-item fallback for the batch loader — resolves ``upsert_game`` late."""
+    return await upsert_game(db, data)
+
+
+GAME_BULK_SPEC = BulkLoadSpec(
+    item_type="GAME",
+    source="IGDB",
+    table=Game.__table__,
+    upsert_item=_bulk_fallback_upsert,
+    lookups=(
+        LookupJoinSpec(
+            data_key="genres",
+            lookup_table=GameGenre.__table__,
+            lookup_columns=("name", "slug"),
+            join_table=game_genres_join,
+            item_column="game_id",
+            lookup_column="genre_id",
+        ),
+        # Platforms are not admin-editable (see backlogg/admin/service.py's
+        # editable-field table) so they are never lockable.
+        LookupJoinSpec(
+            data_key="platforms",
+            lookup_table=GamePlatform.__table__,
+            lookup_columns=("name", "slug"),
+            join_table=game_platforms_join,
+            item_column="game_id",
+            lookup_column="platform_id",
+            lockable=False,
+        ),
+    ),
+    entity_credits=(
+        EntityCreditSpec(
+            data_key="companies",
+            entity_table=Company.__table__,
+            entity_columns=("name", "slug", "last_synced_at"),
+            entity_defaults=(("last_synced_at", lambda: datetime.now(UTC)),),
+            credit_table=CompanyCredit.__table__,
+            entity_fk="company_id",
+            constraint="uq_company_credit",
+        ),
+    ),
+)

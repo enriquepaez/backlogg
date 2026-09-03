@@ -9,6 +9,7 @@ from backlogg.books.models import Book
 from backlogg.movies.models import Movie
 from backlogg.people.schemas import CreditOut, PersonOut
 from backlogg.series.models import Series
+from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Credit, Person
 
 
@@ -121,6 +122,43 @@ async def get_person_by_id(db: AsyncSession, person_id: int) -> Person | None:
     """Return a Person by primary key, or None."""
     result = await db.execute(select(Person).where(Person.id == person_id))
     return result.scalar_one_or_none()
+
+
+async def get_or_create_person_by_external(
+    db: AsyncSession,
+    source: str,
+    external_id: str,
+    name: str,
+    slug: str,
+    profile_url: str | None,
+    now: datetime,
+) -> Person:
+    """Resolve a person by their external id, creating the row if unknown.
+
+    The per-item counterpart of the batch person resolution in
+    ``backlogg/shared/bulk_load.py``: one lookup by external id, then a
+    slug-keyed upsert plus the external-id link when the person is new.
+    Looking the external id up first is what stops ``uq_external_id`` from
+    blowing up when the same TMDB person shows up under slightly different
+    name variants across items.
+    """
+    existing_id = await get_person_id_by_external(db, source, external_id)
+    if existing_id is not None:
+        person = await get_person_by_id(db, existing_id)
+        if person is not None:
+            return person
+
+    person = await upsert_person(
+        db,
+        {
+            "name": name,
+            "slug": slug,
+            "profile_url": profile_url,
+            "last_synced_at": now,
+        },
+    )
+    await upsert_external_id(db, "PERSON", person.id, source, external_id)
+    return person
 
 
 async def upsert_person(db: AsyncSession, data: dict) -> Person:

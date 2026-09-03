@@ -402,7 +402,11 @@ async def test_rerunning_same_slice_is_idempotent(db, monkeypatch):
             return_value=movie_raw,
         ),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs._persist_movie_people", new_callable=AsyncMock),
+        patch(
+            "backlogg.scheduler.jobs.collect_movie_credits",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

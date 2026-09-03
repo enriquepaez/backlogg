@@ -1675,7 +1675,7 @@
         "Tests: lote con filas nuevas, lote con filas ya existentes (idempotencia), lote mixto, lote con una fila inválida",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 85,

@@ -19,6 +19,7 @@ from backlogg.books.schemas import (
 )
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
+from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
@@ -53,29 +54,22 @@ async def _get_or_create_person_ol(
     Avoids IntegrityError on uq_external_id when the same OL author
     appears in multiple books with slightly different name variants.
     """
-    existing_id = await people_repo.get_person_id_by_external(db, "OPEN_LIBRARY", ol_id)
-    if existing_id is not None:
-        return await people_repo.get_person_by_id(db, existing_id)
-
-    person = await people_repo.upsert_person(
-        db,
-        {
-            "name": name,
-            "slug": slug,
-            "profile_url": None,
-            "last_synced_at": now,
-        },
+    return await people_repo.get_or_create_person_by_external(
+        db, "OPEN_LIBRARY", ol_id, name, slug, None, now
     )
-    await upsert_external_id(db, "PERSON", person.id, "OPEN_LIBRARY", ol_id)
-    return person
 
 
-async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict) -> None:
-    """Fetch authors from Open Library and persist them as people + credits."""
-    authors = work_detail.get("authors", [])
-    now = datetime.now(UTC)
+async def collect_book_authors(work_detail: dict) -> list[BulkPerson]:
+    """Resolve a work's authors against Open Library and map them to rows.
 
-    for entry in authors:
+    One ``/authors/{id}`` call per author, then pure mapping.  A failing or
+    unknown author is skipped instead of aborting the work (the same graceful
+    degradation ``_persist_book_authors`` has always had).  Split out for
+    feature 84 so the batch write path can gather a whole slice's authors
+    before touching the database.
+    """
+    rows: list[BulkPerson] = []
+    for entry in work_detail.get("authors", []):
         try:
             author_key = entry.get("author", {}).get("key", "")
             if not author_key:
@@ -90,9 +84,33 @@ async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict)
             if not name:
                 continue
 
-            slug = _slugify(name)
+            rows.append(
+                BulkPerson(
+                    source="OPEN_LIBRARY",
+                    external_id=author_id,
+                    name=name,
+                    slug=_slugify(name),
+                    profile_url=None,
+                    role="AUTHOR",
+                )
+            )
+        except Exception:
+            logger.exception("collect_book_authors: error for entry=%s", entry)
+            # Graceful degradation: continue with next author
+    return rows
 
-            person = await _get_or_create_person_ol(db, author_id, name, slug, now)
+
+async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict) -> None:
+    """Fetch authors from Open Library and persist them as people + credits.
+
+    On-demand route only — feature 84 leaves the single-item path writing one
+    person at a time on purpose; the nightly/backfill route batches instead.
+    """
+    now = datetime.now(UTC)
+
+    for row in await collect_book_authors(work_detail):
+        try:
+            person = await _get_or_create_person_ol(db, row.external_id, row.name, row.slug, now)
             if person is None:
                 continue
 
@@ -102,13 +120,13 @@ async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict)
                     "item_type": "BOOK",
                     "item_id": book.id,
                     "person_id": person.id,
-                    "role": "AUTHOR",
+                    "role": row.role,
                     "character_name": None,
                     "billing_order": None,
                 },
             )
         except Exception:
-            logger.exception("_persist_book_authors: error for entry=%s", entry)
+            logger.exception("_persist_book_authors: error for author=%s", row.external_id)
             # Graceful degradation: continue with next author
 
 

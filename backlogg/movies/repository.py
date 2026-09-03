@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
 from backlogg.movies.schemas import MovieSortEnum
+from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
 
 
@@ -189,3 +190,34 @@ async def admin_update_movie(db: AsyncSession, movie: Movie, updates: dict) -> M
 
     await db.flush()
     return movie
+
+
+# ── Batch write path (feature 84) ─────────────────────────────────────────────
+
+
+async def _bulk_fallback_upsert(db: AsyncSession, data: dict) -> Movie:
+    """Per-item fallback for the batch loader — resolves ``upsert_movie`` late.
+
+    Looking the name up at call time (instead of capturing the function in the
+    spec below) keeps the fallback patchable in tests, the same way the
+    nightly job's direct call is.
+    """
+    return await upsert_movie(db, data)
+
+
+MOVIE_BULK_SPEC = BulkLoadSpec(
+    item_type="MOVIE",
+    source="TMDB",
+    table=Movie.__table__,
+    upsert_item=_bulk_fallback_upsert,
+    lookups=(
+        LookupJoinSpec(
+            data_key="genres",
+            lookup_table=MovieGenre.__table__,
+            lookup_columns=("name", "slug"),
+            join_table=movie_genres_join,
+            item_column="movie_id",
+            lookup_column="genre_id",
+        ),
+    ),
+)
