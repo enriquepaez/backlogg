@@ -25,7 +25,11 @@ from backlogg.games.repository import _get_or_create_genre as get_or_create_game
 from backlogg.games.repository import _get_or_create_platform as get_or_create_game_platform
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
-from backlogg.scheduler.repository import get_sync_offset, set_sync_offset
+from backlogg.scheduler.repository import (
+    SeedTargetRow,
+    set_sync_offset,
+    upsert_seed_targets,
+)
 
 # ── Repository: slug collisions reuse the existing genre (real test DB) ──────
 
@@ -158,25 +162,38 @@ def _movie_detail(tmdb_id: int, title: str) -> dict:
         "vote_average": 7.0,
         "vote_count": 10,
         "genres": [],
+        "credits": {"cast": [], "crew": []},
     }
 
 
-async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypatch):
+async def test_sync_movies_bad_item_does_not_block_slice(db, monkeypatch):
     """An IntegrityError in the middle of a slice must not block later items.
 
     The bad item genuinely aborts the transaction (real duplicate-key error),
     reproducing the production poisoning.  The two good items must still be
-    persisted and the cursor must advance.
+    persisted.
 
     Since feature 84 the slice is written in batches, so this exercises the
     per-item *fallback*: the batch route is forced to fail (the failure mode
     it is designed for — an unexpected error the pre-validation could not
     anticipate) and the job reprocesses those same items one by one, which is
     where the per-item isolation this test guards still lives.
+
+    Since feature 86 the slice comes from ``seed_targets`` instead of from the
+    popularity cursor, so the fixture seeds three targets and the cursor
+    assertions are gone with the cursor — what remains under test (per-item
+    isolation inside a failed batch) is untouched by that change.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    await set_sync_offset(db, "MOVIE", 0)
+    await upsert_seed_targets(
+        db,
+        [
+            SeedTargetRow("MOVIE", "TMDB", "86101", vote_count=30, release_year=2021),
+            SeedTargetRow("MOVIE", "TMDB", "86102", vote_count=20, release_year=2021),
+            SeedTargetRow("MOVIE", "TMDB", "86103", vote_count=10, release_year=2021),
+        ],
+    )
+    await db.commit()
 
     details = {
         86101: _movie_detail(86101, "Isolation Good Alpha"),
@@ -198,26 +215,13 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
             )
         return await real_upsert(session, data)
 
+    async def fake_detail(tmdb_id, append_to_response=None):  # noqa: ARG001
+        return details[tmdb_id]
+
     with (
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 86101}, {"id": 86102}, {"id": 86103}],
-        ),
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_movie_detail",
-            new_callable=AsyncMock,
-            side_effect=lambda tmdb_id: details[tmdb_id],
-        ),
+        patch.object(sync_jobs._tmdb_movies, "get_movie_detail", new=fake_detail),
         patch.object(sync_jobs.movies_repo, "upsert_movie", new=poisoned_upsert),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
-        patch(
-            "backlogg.scheduler.jobs.collect_movie_credits",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
         patch(
             "backlogg.scheduler.jobs.bulk_load_items",
             new_callable=AsyncMock,
@@ -230,11 +234,10 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
         mock_cm.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_cm
 
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_movies(slice_size=3)
 
     assert result["synced"] == 2
     assert result["errors"] == 1
-    assert result["offset"] == 0
 
     # Good items before AND after the poisoned one are persisted
     count_result = await db.execute(
@@ -250,13 +253,9 @@ async def test_sync_movies_bad_item_does_not_block_slice_or_cursor(db, monkeypat
     )
     assert poison_result.scalar_one() == 0
 
-    # The cursor advanced on a healthy session (full slice of 3 fetched)
-    assert await get_sync_offset(db, "MOVIE") == 3
-
-    # _persist_cursor commits, so remove the row we left in the shared test
-    # DB — other tests assert on the cursor being absent.
-    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'MOVIE'"))
-    await db.commit()
+    # The two good items linked their external ids, so only the poisoned one
+    # is still pending — the work list converged without any cursor.
+    assert result["pending"] == 1
 
 
 async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):

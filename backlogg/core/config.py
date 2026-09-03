@@ -11,10 +11,70 @@ class Settings(BaseSettings):
     TWITCH_CLIENT_ID: str = ""
     TWITCH_CLIENT_SECRET: str = ""
 
+    # Ranking-walk target per type: how many items of the external API's
+    # popular listing one full cursor cycle covers before wrapping to 0.
+    #
+    # ⚠️ Since feature 86 SEED_TOP_N_MOVIES and SEED_TOP_N_SERIES are INERT.
+    # Movies and series are no longer enumerated by walking /movie/popular and
+    # /tv/popular: their catalog is defined by a *quality threshold*
+    # (TMDB_SEED_MIN_VOTES_*) and enumerated with /discover into the
+    # ``seed_targets`` table, so there is no item-count cutoff left to
+    # configure and no cursor left to wrap. They are kept (rather than
+    # deleted) because they are still set as environment variables on Render
+    # and in .github/workflows/backfill-sync.yml, and removing a name that
+    # deployments export would break nothing but read as an accident. The two
+    # that are still live are BOOKS and GAMES, whose enumeration is unchanged.
+    # See docs/seeding-plan.md §3 and docs/operations.md.
     SEED_TOP_N_MOVIES: int = 100
     SEED_TOP_N_SERIES: int = 100
     SEED_TOP_N_BOOKS: int = 100
     SEED_TOP_N_GAMES: int = 100
+
+    # TMDB catalog definition (feature 86, docs/seeding-plan.md §1 and §3).
+    # The catalog is defined by a vote_count threshold, not by a number of
+    # items: popularity rank is a measure of *recent interest*, and 30% of the
+    # movies ranked 20.000-40.000 still have >=50 votes, so cutting by rank
+    # throws away thousands of legitimately known titles while letting in
+    # regional theatre recordings. 25 is the value agreed with the user and it
+    # yields 57.135 movies and 10.880 series (exact total_results measured
+    # against /discover on 2026-09-02). Per type because the two catalogs have
+    # very different sizes and could need independent recalibration; measured
+    # alternatives are tabulated in docs/seeding-plan.md §2.1.
+    TMDB_SEED_MIN_VOTES_MOVIES: int = 25
+    TMDB_SEED_MIN_VOTES_SERIES: int = 25
+
+    # Release-year range the /discover enumeration slices over. 1874 is the
+    # oldest release year TMDB carries; the end of the range defaults to the
+    # current year plus one (there are already-dated future releases in TMDB)
+    # when TMDB_SEED_END_YEAR is left unset.
+    TMDB_SEED_START_YEAR: int = 1874
+    TMDB_SEED_END_YEAR: int | None = None
+
+    # Fan-out width for the TMDB seeding calls (enumeration pages and item
+    # hydration alike), as asyncio.gather + Semaphore. TMDB documents ~50
+    # req/s and docs/seeding-plan.md §4 says to stay at 30-40: with the ~250 ms
+    # round trip TMDB averages, 8 in-flight requests land at ~32 req/s.
+    TMDB_SEED_CONCURRENCY: int = 8
+
+    # How many *conclusive* hydration passes a seed target gets before it is
+    # retired from the work list as unlinkable.  A pass counts only when the
+    # fetch actually resolved (item written, or 404): a network failure leaves
+    # the counter alone and is retried for free, so a TMDB outage can never
+    # retire a healthy target.
+    #
+    # This exists because a target can be *permanently* unlinkable through no
+    # fault of the seeding: ``uq_external_id`` is unique over
+    # ``(source, external_id)`` globally while TMDB numbers movies and series
+    # in independent sequences, so a series whose id a movie already claimed
+    # gets its row written but never linked.  Without retirement those targets
+    # would sit in the pending set forever, occupying a slot of every nightly
+    # slice, keeping ``pending`` permanently above 0 — which would silently
+    # disable the ``last_synced_at`` refresh rotation (and with it TMDB's
+    # 6-month cache-window obligation) and stop the backfill loop from ever
+    # terminating.  Retired targets are not forgotten: they are reported
+    # separately as ``stuck``.  3 rather than 1 so an unforeseen transient
+    # costs three slice slots once instead of a target forever.
+    TMDB_SEED_MAX_ATTEMPTS: int = 3
 
     # Quality thresholds for the Open Library seed query (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the

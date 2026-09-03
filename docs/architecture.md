@@ -46,7 +46,10 @@ backlogg/
 │   └── auth.py            # X-API-Key dependency para /v1/admin/*
 ├── scheduler/
 │   ├── jobs.py            # sync_movies/series/books/games (por tramos)
-│   └── repository.py      # Cursores de sync (tabla sync_cursors)
+│   ├── discovery.py       # Enumeración de TMDB por /discover: troceo por año,
+│   │                      # guardia del tope de 500 páginas, fallback mensual
+│   └── repository.py      # Cursores de sync (sync_cursors) y lista objetivo
+│                          # de TMDB (seed_targets)
 ├── shared/
 │   ├── models.py          # Person, Credit (transversales a todos los dominios)
 │   ├── bulk_load.py       # Ruta de escritura por lotes (COPY + upserts) para
@@ -59,6 +62,7 @@ backlogg/
 
 scripts/
 ├── backfill_sync.py       # Backfill directo contra la DB (ver docs/operations.md)
+├── seed_tmdb_targets.py   # Enumeración de la lista objetivo de TMDB (/discover)
 └── bench_bulk_load.py     # Benchmark ruta por ítem vs. ruta por lotes
 ```
 
@@ -115,13 +119,25 @@ PostgreSQL
 
 El catálogo se puebla por dos caminos además del fallback on-demand:
 
-- **Nightly** (GitHub Actions → `POST /v1/admin/sync/{type}`): cada noche avanza
-  un tramo de `SYNC_SLICE_SIZE` items por tipo, con cursor persistido en
-  `sync_cursors`.
+- **Nightly** (GitHub Actions → `POST /v1/admin/sync/{type}`): cada noche
+  procesa un tramo de `SYNC_SLICE_SIZE` items por tipo.
 - **Backfill** (GitHub Actions → `scripts/backfill_sync.py`): reutiliza los
   mismos jobs de `scheduler/jobs.py` pero escribe directo contra la DB en
   bucle, para poblar el catálogo completo en horas en lugar de meses.
   Comandos y procedimiento en `docs/operations.md`.
+
+De dónde sale ese tramo depende del tipo, porque **la enumeración está separada
+de la hidratación** (feature 86):
+
+- **Books y games** siguen recorriendo el listado de su fuente por offset, con
+  el cursor persistido en `sync_cursors`.
+- **Movies y series** se alimentan de `seed_targets`, la lista objetivo que
+  `scripts/seed_tmdb_targets.py` enumera desde `/discover` bajo un umbral de
+  `vote_count`. Lo pendiente es la diferencia contra `external_ids`, no un
+  offset; los targets que no pueden enlazarse nunca se retiran de esa
+  diferencia (y se cuentan aparte) para que llegue a 0, y entonces la rebanada
+  la llenan los ítems con `last_synced_at` más antiguo. Ver
+  `docs/seeding-plan.md`.
 
 ## APIs externas
 

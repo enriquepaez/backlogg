@@ -201,24 +201,30 @@ def _mocked_session_factory():
     return MagicMock(return_value=mock_cm)
 
 
+def _empty_seed_progress():
+    """A TMDB target list with nothing left to do (feature 86)."""
+    from backlogg.scheduler.repository import SeedTargetProgress
+
+    return SeedTargetProgress(total=0, pending=0, gone=0, unlinkable=0)
+
+
 async def test_sync_job_increments_syncs_counter(monkeypatch):
     """AC3: running a sync job increments backlogg_syncs_total{type=...}."""
     from backlogg.scheduler import jobs as sync_jobs
 
     get_metrics().reset()
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
 
+    # Since feature 86 the movie job's first read is the seed_targets work
+    # list, not the popularity listing; an empty list is enough to prove the
+    # counter is incremented at the start of the job.
     with (
-        patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock, return_value=0),
-        patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
             new_callable=AsyncMock,
-            return_value=[{"id": None}],
+            return_value=([], [], _empty_seed_progress()),
         ),
     ):
         await sync_jobs.sync_movies()

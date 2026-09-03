@@ -1,14 +1,22 @@
 """Tests for feature 23 — seed_config_wiring.
 
-Each sync job must read its fetch limit from ``settings.SEED_TOP_N_*`` at
-execution time instead of a hardcoded value.  We monkeypatch the setting to a
-value different from the default (100) and assert that the adapter receives
-exactly that value.
+The cursor-driven jobs (``book`` and ``game``) must read their fetch limit
+from ``settings.SEED_TOP_N_*`` at execution time instead of from a hardcoded
+value.  We monkeypatch the setting to a value different from the default
+(100) and assert that the adapter receives exactly that value.
 
 With the slice-cursor flow (feature 24) the effective limit is
 ``min(SYNC_SLICE_SIZE, SEED_TOP_N_* - offset)``; the cursor is mocked at 0
 and ``SEED_TOP_N_*`` is below the default slice size, so the adapter must
 still receive exactly the configured seed value.
+
+⚠️ **Movies and series are no longer covered by this file** (feature 86).
+Their catalog stopped being "the first N items of a popularity ranking" and
+became "every item over a ``vote_count`` threshold", enumerated into
+``seed_targets``; there is no fetch limit for ``SEED_TOP_N_*`` to configure
+and the setting is inert for them.  What sizes their slice now is
+``SYNC_SLICE_SIZE_<TYPE>``, and that is asserted below and in
+``tests/test_tmdb_discover_seeding.py``.
 
 All external API clients are mocked so no real network calls are made, and
 ``async_session_factory`` / ``_refresh_catalog_search`` / the sync-cursor
@@ -18,6 +26,7 @@ repository are mocked so no real DB access happens.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backlogg.scheduler import jobs as sync_jobs
+from backlogg.scheduler.repository import SeedTargetProgress
 
 _CUSTOM_LIMIT = 7
 
@@ -47,18 +56,22 @@ def _cursor_patches():
     )
 
 
-async def test_sync_movies_limit_comes_from_settings(monkeypatch):
-    """sync_movies passes settings.SEED_TOP_N_MOVIES as limit to the adapter."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", _CUSTOM_LIMIT)
-    get_cursor, set_cursor = _cursor_patches()
+def _seed_work_list_patch():
+    """Patch the seed work-list read, capturing the slice size it is asked for."""
+    return patch(
+        "backlogg.scheduler.jobs._read_seed_work_list",
+        new_callable=AsyncMock,
+        return_value=([], [], SeedTargetProgress(total=0, pending=0, gone=0, unlinkable=0)),
+    )
+
+
+async def test_sync_movies_slice_size_comes_from_the_per_type_setting(monkeypatch):
+    """Feature 86: SEED_TOP_N_MOVIES is inert; SYNC_SLICE_SIZE_MOVIES sizes the slice."""
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 1)
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_MOVIES", _CUSTOM_LIMIT)
 
     with (
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[],
-        ) as mock_fetch,
+        _seed_work_list_patch() as mock_work_list,
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
@@ -67,27 +80,21 @@ async def test_sync_movies_limit_comes_from_settings(monkeypatch):
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
-        get_cursor,
-        set_cursor,
     ):
         result = await sync_jobs.sync_movies()
 
-    mock_fetch.assert_awaited_once_with(limit=_CUSTOM_LIMIT, offset=0)
+    # SEED_TOP_N_MOVIES=1 must not shrink anything — the slice is 7, not 1.
+    mock_work_list.assert_awaited_once_with("MOVIE", "TMDB", _CUSTOM_LIMIT)
     assert result["errors"] == 0
 
 
-async def test_sync_series_limit_comes_from_settings(monkeypatch):
-    """sync_series passes settings.SEED_TOP_N_SERIES as limit to the adapter."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_SERIES", _CUSTOM_LIMIT)
-    get_cursor, set_cursor = _cursor_patches()
+async def test_sync_series_slice_size_comes_from_the_per_type_setting(monkeypatch):
+    """Same for series: SYNC_SLICE_SIZE_SERIES, not SEED_TOP_N_SERIES."""
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_SERIES", 1)
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_SERIES", _CUSTOM_LIMIT)
 
     with (
-        patch.object(
-            sync_jobs._tmdb_series,
-            "get_top_series",
-            new_callable=AsyncMock,
-            return_value=[],
-        ) as mock_fetch,
+        _seed_work_list_patch() as mock_work_list,
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
@@ -96,13 +103,38 @@ async def test_sync_series_limit_comes_from_settings(monkeypatch):
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
-        get_cursor,
-        set_cursor,
     ):
         result = await sync_jobs.sync_series()
 
-    mock_fetch.assert_awaited_once_with(limit=_CUSTOM_LIMIT, offset=0)
+    mock_work_list.assert_awaited_once_with("SERIES", "TMDB", _CUSTOM_LIMIT)
     assert result["errors"] == 0
+
+
+async def test_sync_movies_ignores_seed_top_n(monkeypatch):
+    """SEED_TOP_N_MOVIES is documented as inert — prove it changes nothing."""
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_MOVIES", 25)
+    sizes = []
+
+    async def capture(item_type, source, slice_size):
+        sizes.append((item_type, source, slice_size))
+        return [], [], SeedTargetProgress(total=0, pending=0, gone=0, unlinkable=0)
+
+    for seed_top_n in (1, 10_000):
+        monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", seed_top_n)
+        with (
+            patch("backlogg.scheduler.jobs._read_seed_work_list", new=capture),
+            patch(
+                "backlogg.scheduler.jobs._refresh_catalog_search",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "backlogg.scheduler.jobs.async_session_factory",
+                new=_mocked_session_factory(),
+            ),
+        ):
+            await sync_jobs.sync_movies()
+
+    assert sizes == [("MOVIE", "TMDB", 25), ("MOVIE", "TMDB", 25)]
 
 
 async def test_sync_books_limit_comes_from_settings(monkeypatch):

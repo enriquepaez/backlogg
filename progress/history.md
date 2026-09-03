@@ -315,3 +315,99 @@ entre el fixture `db` y una conexion del engine real que pide `AccessExclusiveLo
 `REFRESH MATERIALIZED VIEW`. Lo detecto el reviewer (1 de 9 corridas). No lo produce esta
 feature: `sync_missing_credits` no refresca esa vista y sus tests parchean
 `async_session_factory`. Precedente identico en la feature 59.
+
+---
+
+## 2026-09-03 — Feature 86 `tmdb_discover_quality_seeding`
+
+Rama `feat/tmdb_discover_quality_seeding`. Punto 3 del bloque A de
+`progress/priority_order.md`. Reviewer: **APPROVED** (2ª ronda). QA manual del
+leader: verde. `bash init.sh` verde, **1213 tests**.
+
+### Qué cambia
+
+La siembra de movies/series deja de recorrer `/movie/popular` y `/tv/popular` por
+offset. El catálogo pasa a definirse por **umbral de `vote_count`** (25 por
+defecto, por tipo y por env), enumerado con `/discover` troceado por año hacia una
+tabla objetivo persistida (`seed_targets`, migración `0035`), e hidratado con
+**una sola petición por ítem** (`append_to_response=credits,external_ids`) en
+paralelo con `gather` + `Semaphore(8)`.
+
+- **Techo roto**: el método anterior no podía pasar de 10.000 ítems por tipo
+  (página 500 × 20). El objetivo real son 57.135 movies + 10.880 series.
+- **Guardia de 500 páginas**: año → doce meses; un mes que aún se pase no aborta
+  el run, trunca y lo reporta (exit 2 del script).
+- **Reanudación por diferencia contra el catálogo** (`LEFT JOIN external_ids`),
+  no por offset. `sync_cursors` sale del camino de movies/series; books y games
+  lo conservan intacto.
+- **Rotación de refresco** por `last_synced_at` más antiguo cuando no quedan
+  targets trabajables. Es lo que conserva la ventana de caché de 6 meses de TMDB
+  que el cursor de `/popular` daba por efecto colateral.
+- `SEED_TOP_N_MOVIES`/`_SERIES` quedan **inertes**, no borradas (Render y el
+  workflow las exportan). Las de books y games siguen vivas.
+- Sin endpoints HTTP nuevos: `SyncResponse`, `bruno/` y `nightly-sync.yml` sin
+  cambios. `backfill-sync.yml` gana el modo `enumerate` y `ranking` → `hydrate`.
+
+### El bloqueante de la 1ª ronda (B1) y su arreglo
+
+El reviewer demostró empíricamente que `pending` **nunca convergía a 0**: los
+targets cuyo id ya está reclamado en `external_ids`, y los que dan 404 en TMDB,
+seguían en la cola para siempre. Consecuencia: la rotación de refresco no se
+ejecutaba jamás (se perdía la ventana de 6 meses) y `run_backfill` giraba sin
+progresar sin que saltara la guardia de `BackfillError`, porque los ítems
+atascados **sí** se escriben (`synced > 0`).
+
+Arreglo: separar "pendiente" de "pendiente **trabajable**", retirando de verdad y
+con dos señales distintas para dos causas distintas — `unreachable_at` sellado al
+**primer** 404 (respuesta definitiva) y `attempts >= TMDB_SEED_MAX_ATTEMPTS`
+(default 3) para el id reclamado, donde no hay señal directa. Detalle que hace
+esto seguro: **`attempts` solo cuenta pasadas concluyentes**, así que una caída de
+TMDB no retira un catálogo sano en tres noches. El residuo es visible al operador
+(`stuck` = `gone` + `unlinkable`, con warning nombrando la causa y query en
+`docs/operations.md`).
+
+### QA manual del leader — contra TMDB y la DB de dev reales
+
+```
+enumeración series 2022  -> 752 results, 38 páginas, 0 troceos, exit 0
+                            (docs/seeding-plan.md §3 dice 752: coincide exacto)
+hidratación 25 ítems     -> 2,0 s = 0,08 s/ítem  (antes: 3,1 s/ítem)
+hidratación 700 ítems    -> 35,5 s = 0,05 s/ítem
+convergencia             -> pending 737 → 712 → 687 → 7, monótono, sin re-pedir
+rotación de refresco     -> refreshed=13 en cuanto pending < slice_size
+credits                  -> ACTOR 170 + CREATOR 27
+migración 0035           -> upgrade/downgrade verificados con unreachable_at
+```
+
+Los `CREATOR` confirman lo que la petición única aporta de más: `created_by` no
+está en `/tv/{id}/credits`, así que la llamada que sustituye a dos es además
+estrictamente más informativa.
+
+### Derivado — issue #20 (high), hallado en esta QA
+
+Los 7 targets de 752 que quedaron sin enlazar (0,93%, con `errors=0`) no
+colisionaban con una película, como se había teorizado: **con filas
+`item_type='PERSON'`**. `uq_external_id` es `UNIQUE (source, external_id)` sin
+`item_type`, y TMDB numera películas, series y personas en secuencias
+independientes que se solapan. Medido en dev: 4.396 de 11.319 personas caen en la
+banda de ids de series (1,32% de ocupación), coherente con el 0,93% observado.
+Como la tabla `people` crece ~8-10× más rápido que la de ítems, **la tasa de
+colisión crece con la siembra**: no es un caso borde.
+
+La feature 86 no lo introduce — lo hace **visible** por primera vez, porque su
+lista objetivo persistida permite comparar lo enumerado contra lo enlazado; con
+el cursor de `/popular`, un ítem no enlazado era indistinguible de uno no
+visitado.
+
+**Bloquea la siembra real de producción**: es el prerrequisito que le faltaba al
+bloque A. Ver `issues_list.json` #20.
+
+### Otros hallazgos anotados, no bloqueantes
+
+- **N7** (reviewer): el presupuesto de `attempts` sí lo quema un fallo de
+  **escritura** — un ítem entra en `resolved` al resolver el fetch, antes de
+  saber si la escritura funcionó, y se etiquetaría como `unlinkable` con
+  diagnóstico incorrecto. Sigue siendo mejor que antes de B1 (3 runs con
+  `errors` visible, sin pérdida de datos). Seguimiento, no esta rama.
+- **Issue #18** reapareció en la QA: 4 `people_errors` por nombres en alfabeto no
+  latino que slugifican a cadena vacía. Independiente y ya registrado.

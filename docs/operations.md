@@ -27,8 +27,15 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 
 | Env var | Valor actual | Notas |
 |---|---|---|
-| `SEED_TOP_N_*` | 10000 | Objetivo de catálogo por tipo (movies/series/books/games) |
+| `SEED_TOP_N_BOOKS` / `SEED_TOP_N_GAMES` | 10000 | Objetivo de catálogo de los tipos con cursor |
+| `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES` | 10000 | **Inertes desde la feature 86.** El catálogo de movies/series lo define `TMDB_SEED_MIN_VOTES_*`, no un número de ítems. Se dejan puestas para que la config de Render y la del workflow de backfill sigan siendo idénticas |
+| `TMDB_SEED_MIN_VOTES_MOVIES` / `_SERIES` | 25 | Umbral `vote_count` que **define** el catálogo de TMDB: 57.135 movies y 10.880 series |
+| `TMDB_SEED_START_YEAR` / `_END_YEAR` | 1874 / (vacío) | Rango de años que trocea la enumeración `/discover`. Vacío = año actual + 1 |
+| `TMDB_SEED_CONCURRENCY` | 8 | Peticiones TMDB en vuelo (`Semaphore`) en enumeración e hidratación; ≈32 req/s frente al límite de ~50 |
+| `TMDB_SEED_MAX_ATTEMPTS` | 3 | Pasadas concluyentes que recibe un target antes de retirarse como no enlazable. Es lo que hace que `pending` converja a 0 y que la rotación de refresco llegue a ejecutarse |
 | `SYNC_SLICE_SIZE` | 100 | Tramo por request de sync; >100 arriesga el timeout de ~15 min por request de Render |
+| `SYNC_SLICE_SIZE_MOVIES` | ~350 | Override por tipo. Movies necesita ~318/noche para cubrir 57.135 ítems dentro de la ventana de caché de 6 meses de TMDB; con la ruta de escritura por lotes (feature 84) cabe de sobra en los ~15 min de Render |
+| `SYNC_SLICE_SIZE_SERIES` | ~100 | Ídem; series necesita ~61/noche |
 | `ADMIN_API_KEY` | (secret) | Protege `/v1/admin/*` |
 | `CORS_ORIGINS` | (opcional) | Orígenes permitidos, comma-separated |
 | `JWT_SECRET_KEY` | (secret) | Firma los JWT de `/v1/auth/*`. Sin configurar, `POST /v1/auth/register`/`login` fallan con 500 (PyJWT rechaza clave HMAC vacía) |
@@ -246,8 +253,63 @@ gh workflow run nightly-sync.yml
 gh run list --workflow=nightly-sync.yml --limit 3
 ```
 
-Cada run avanza el cursor de cada tipo en `SYNC_SLICE_SIZE` items
-(tabla `sync_cursors`, compartida con el backfill).
+Qué procesa cada run depende del tipo (feature 86):
+
+- **`book` y `game`**: avanzan el cursor de su tipo en `SYNC_SLICE_SIZE` items
+  (tabla `sync_cursors`, compartida con el backfill).
+- **`movie` y `series`**: toman `SYNC_SLICE_SIZE_<TIPO>` targets pendientes de
+  `seed_targets` (los que aún no tienen fila en `external_ids`) y, si no quedan,
+  rellenan la rebanada con los ítems de `last_synced_at` más antiguo. No hay
+  cursor: el campo `offset` de la respuesta es siempre `0` para estos dos tipos.
+
+### Targets retirados (`stuck`)
+
+Un target puede ser **imposible de enlazar**, por dos motivos independientes:
+TMDB responde 404 a un id enumerado, o el par `(source, external_id)` ya está
+reclamado por otro tipo de ítem (`uq_external_id` es único globalmente y TMDB
+numera movies y series por separado — ver `docs/schema.md`).
+
+Esos targets se **retiran** de la lista de trabajo: el 404 se sella la primera
+vez que se observa, y el que resuelve bien pero no enlaza se retira tras
+`TMDB_SEED_MAX_ATTEMPTS` pasadas concluyentes (default 3; una petición fallida
+no cuenta, así que una caída de TMDB no retira nada sano).
+
+**Por qué importa**: `pending` tiene que poder llegar a 0. La rotación de
+refresco solo se dispara cuando no queda nada pendiente, y el bucle del backfill
+solo termina cuando no queda nada pendiente. Sin la retirada, un suelo
+permanente de targets atascados desactivaría la rotación —y con ella la ventana
+de caché de 6 meses de TMDB— y dejaría el backfill girando sin progresar.
+
+El residuo se reporta aparte, en `stuck`. Si crece de forma sostenida, mirar el
+desglose: `gone` (404 en TMDB, normal en pequeñas cantidades) frente a
+`unlinkable` (colisión de id, que es el defecto de esquema preexistente).
+
+El progreso de movies/series se lee en la línea final del log del job
+(`N targets still pending, M stuck: G gone, U unlinkable`) o directamente contra
+la base de datos:
+
+```bash
+psql "$DATABASE_URL" -c "
+SELECT st.item_type,
+       COUNT(*) AS targets,
+       COUNT(*) FILTER (WHERE ei.id IS NULL
+                          AND st.unreachable_at IS NULL
+                          AND st.attempts < 3)          AS pendientes,
+       COUNT(*) FILTER (WHERE ei.id IS NULL
+                          AND st.unreachable_at IS NOT NULL) AS gone,
+       COUNT(*) FILTER (WHERE ei.id IS NULL
+                          AND st.unreachable_at IS NULL
+                          AND st.attempts >= 3)         AS unlinkable
+FROM seed_targets st
+LEFT JOIN external_ids ei
+  ON ei.item_type = st.item_type
+ AND ei.source = st.source
+ AND ei.external_id = st.external_id
+GROUP BY st.item_type ORDER BY st.item_type;
+"
+```
+
+(El `3` es `TMDB_SEED_MAX_ATTEMPTS`; ajústalo si lo cambias en Render.)
 
 ## Backfill del catálogo
 
@@ -257,8 +319,15 @@ timeout). Procesa tramos de 500 en bucle hasta wraparound del cursor o
 presupuesto de tiempo (5 h por defecto; `timeout-minutes: 350` en el job).
 
 ```bash
-# Lanzar el backfill de un tipo (movie/series/book/game)
-gh workflow run backfill-sync.yml -f content_type=movie -f seed_top_n=10000
+# Sembrar la lista objetivo de TMDB (movie/series) — hacerlo ANTES del primer
+# hydrate de esos dos tipos
+gh workflow run backfill-sync.yml -f content_type=movie -f mode=enumerate
+
+# Hidratar: bajar los ítems que la lista objetivo pide y el catálogo no tiene
+gh workflow run backfill-sync.yml -f content_type=movie -f mode=hydrate
+
+# Tipos con cursor (book/game): seed_top_n debe coincidir con Render
+gh workflow run backfill-sync.yml -f content_type=book -f mode=hydrate -f seed_top_n=10000
 
 # Ver los últimos runs y su estado
 gh run list --workflow=backfill-sync.yml --limit 3
@@ -271,9 +340,14 @@ gh run view <run-id> --log | grep backfill
 ```
 
 - `seed_top_n` **debe coincidir** con `SEED_TOP_N_*` en Render — si difiere,
-  el cursor compartido haría wraparound antes de tiempo.
+  el cursor compartido haría wraparound antes de tiempo. Aplica **solo a
+  `book` y `game`**: `SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la
+  feature 86.
 - El log termina con `stop_reason`: `wraparound` = objetivo alcanzado o API
-  agotada; `time_budget` = relanzar el dispatch (reanuda desde el cursor).
+  agotada (book/game); `exhausted` = el catálogo ya tiene todos los targets
+  enumerados **trabajables** (movie/series; los retirados se reportan aparte en
+  `stuck`); `time_budget` = relanzar el dispatch (reanuda desde el cursor o
+  recalculando la diferencia contra el catálogo).
 - Un error de API externa que persiste tras los reintentos deja el **run en
   rojo** (exit 1) con el cursor intacto — relanzar cuando la API se recupere.
 - Los backfills de tipos distintos pueden correr **en paralelo** (tablas y
@@ -282,34 +356,64 @@ gh run view <run-id> --log | grep backfill
 También ejecutable en local (usa el `DATABASE_URL` del entorno/`.env`):
 
 ```bash
-uv run python scripts/backfill_sync.py movie
+uv run python scripts/seed_tmdb_targets.py movie          # enumeración
+uv run python scripts/backfill_sync.py movie              # hidratación
 uv run python scripts/backfill_sync.py game --slice-size 500 --time-budget-minutes 60
 ```
 
 Defaults configurables por env: `BACKFILL_SLICE_SIZE` (500) y
 `BACKFILL_TIME_BUDGET_MINUTES` (300).
 
-### Los dos modos: `ranking` vs `credits`
+### Enumeración de la lista objetivo de TMDB (`mode=enumerate`)
 
-El workflow tiene un input `mode`. Los dos modos resuelven problemas
-distintos y **no** se sustituyen entre sí:
+`scripts/seed_tmdb_targets.py` **solo enumera**: recorre `/discover` con
+`vote_count.gte`, troceando por año de estreno, y escribe la lista objetivo en
+`seed_targets`. No pide ningún detalle y no escribe ninguna fila de catálogo.
 
-| | `ranking` (por defecto) | `credits` (`--only-missing-credits`) |
-|---|---|---|
-| Lista de trabajo | listado de populares de la API externa, por offset | query local: ítems del catálogo **sin ninguna fila en `credits`**, unida a `external_ids` |
-| Estado entre runs | cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
-| Llamadas HTTP por ítem | detalle + credits | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
-| Escribe la fila del ítem | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |
-| Condición de parada | wraparound del cursor o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
-| Para qué sirve | sembrar catálogo nuevo | cerrar agujeros de credits (issue #15) |
-| `game` | soportado | **rechazado** |
+```bash
+uv run python scripts/seed_tmdb_targets.py movie
+uv run python scripts/seed_tmdb_targets.py series --min-votes 50
+uv run python scripts/seed_tmdb_targets.py movie --start-year 2000 --end-year 2026
+```
 
-**Cuándo usar cada uno.** Si faltan *ítems*, `ranking`. Si los ítems están
-pero les faltan *credits*, `credits`: el modo `ranking` no cierra ese hueco
-(issue #15) porque avanza por popularidad y los ítems sin credits entraron
-por otros caminos —fan-out de búsqueda, trending, `/similar`— y están en
-posiciones arbitrarias del ranking o fuera de él; se pueden recorrer 6.000
-posiciones sin tocar ninguno.
+- Coste: ~2.900 peticiones para movies y ~600 para series a ~32 req/s →
+  **~2 minutos**. Barato y repetible.
+- **Idempotente**: los targets se upsertan por `(item_type, source,
+  external_id)` conservando su contador de intentos, así que re-enumerar solo
+  añade lo que ha cruzado el umbral y refresca `vote_count`/`release_year`.
+  Cada página se persiste según llega: un run interrumpido conserva lo hecho.
+- Cuándo relanzarla: antes de la primera siembra, al cambiar
+  `TMDB_SEED_MIN_VOTES_*`, y periódicamente para el barrido de promoción
+  (ítems que estaban por debajo del umbral y lo han cruzado —
+  `docs/seeding-plan.md` §6).
+- **Exit code 2** = alguna ventana chocó con el tope de 500 páginas de TMDB
+  incluso tras el troceo mensual. La lista enumerada está **incompleta**: hay
+  que subir el umbral o añadir un nivel de troceo más fino antes de fiarse de
+  ella. El log dice qué ventanas.
+- Solo `movie` y `series`. Books usa dumps de Open Library y games una única
+  query a IGDB; el workflow rechaza esos tipos en este modo.
+
+### Los tres modos: `enumerate`, `hydrate` y `credits`
+
+El workflow tiene un input `mode`. Resuelven problemas distintos y **no** se
+sustituyen entre sí:
+
+| | `enumerate` (movie/series) | `hydrate` (por defecto) | `credits` (`--only-missing-credits`) |
+|---|---|---|---|
+| Lista de trabajo | `/discover` por año bajo `vote_count.gte` | movie/series: targets de `seed_targets` sin fila en `external_ids`; book/game: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits`**, unida a `external_ids` |
+| Estado entre runs | la propia tabla `seed_targets` | movie/series: ninguno (diferencia en vivo); book/game: cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
+| Llamadas HTTP por ítem | 0 (20 ítems por petición de lista) | **una**: `/{tipo}/{id}?append_to_response=credits,external_ids` | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
+| Escribe la fila del ítem | **no**: solo la lista objetivo | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |
+| Condición de parada | ventanas agotadas | `pending == 0` (movie/series; los targets retirados no cuentan), wraparound del cursor (book/game) o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
+| Para qué sirve | decidir **qué** quiere el catálogo | bajar lo que falta | cerrar agujeros de credits (issue #15) |
+| `book`/`game` | **rechazados** | soportados | `game` **rechazado** |
+
+**Cuándo usar cada uno.** Si el catálogo de movies/series está vacío o el
+umbral ha cambiado, `enumerate` primero y `hydrate` después. Si faltan
+*ítems*, `hydrate`. Si los ítems están pero les faltan *credits*, `credits`:
+`hydrate` no cierra ese hueco (issue #15) — con la lista objetivo ya
+hidratada, `pending` es 0 y el run termina de inmediato sin tocar los ítems
+incompletos.
 
 ```bash
 # Cerrar el hueco de credits de series desde Actions
@@ -393,8 +497,11 @@ servicio → `503`.
 
 ## Estado de los cursores de sync
 
-Los cursores viven en la tabla `sync_cursors` (ver `docs/schema.md`).
-Consulta rápida contra Neon desde el repo:
+Los cursores viven en la tabla `sync_cursors` (ver `docs/schema.md`). Desde la
+feature 86 **solo `BOOK` y `GAME` los usan**: las filas `MOVIE`/`SERIES` que
+haya quedado son vestigiales y no las lee ni las escribe nadie (el progreso de
+esos dos tipos se mide con la consulta de `seed_targets` de la sección «Sync
+nocturno»). Consulta rápida contra Neon desde el repo:
 
 ```bash
 bash -c 'set -a; source .env; set +a; uv run python -c "

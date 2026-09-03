@@ -67,11 +67,27 @@ class TMDBClient:
             return data.get("results", [])
 
     @_tmdb_retry
-    async def get_movie_detail(self, tmdb_id: int) -> dict | None:
+    async def get_movie_detail(
+        self, tmdb_id: int, append_to_response: str | None = None
+    ) -> dict | None:
+        """Return the movie detail payload, or None on 404.
+
+        ``append_to_response`` is TMDB's own way of folding sub-resources into
+        the detail call (``append_to_response=credits,external_ids`` embeds the
+        bodies of ``/movie/{id}/credits`` and ``/movie/{id}/external_ids``
+        under those keys) for the price of **the same single request**.
+        Optional and defaulting to None so every existing caller issues the
+        exact request it did before; the seeding/hydration path (feature 86)
+        passes it and thereby halves the HTTP of a full catalog pass — 57.135
+        movies stop costing 114.270 requests. Mirrors
+        ``TMDBSeriesClient.get_series_detail``. See ``docs/seeding-plan.md`` §4.
+        """
+        params = {"append_to_response": append_to_response} if append_to_response else None
         async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
             response = await client.get(
                 f"{_TMDB_BASE}/movie/{tmdb_id}",
                 headers=self._headers,
+                params=params,
             )
             if response.status_code == 404:
                 return None
@@ -133,8 +149,68 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
+    async def discover_movies_page(
+        self,
+        *,
+        page: int,
+        min_votes: int,
+        date_gte: date,
+        date_lte: date,
+    ) -> dict:
+        """Fetch one raw page of ``/discover/movie`` for a release-date window.
+
+        Raw pagination only: the caller (``backlogg.scheduler.discovery``)
+        owns the slicing and the 500-page guard. Returns the whole payload —
+        ``results``, ``page``, ``total_pages`` and ``total_results`` — because
+        the orchestrator needs ``total_pages`` to decide whether the window
+        has to be split (``docs/seeding-plan.md`` §3).
+
+        This is the enumeration route that replaces ``get_top_movies``: it is
+        driven by ``vote_count.gte`` (quality) instead of by popularity rank,
+        and slicing by ``primary_release_date`` keeps every window far below
+        TMDB's hard cap of 500 pages, so the catalog is no longer capped at
+        10.000 items.
+
+        ``include_adult=false`` and ``include_video=false`` are explicit: the
+        first keeps pornography out of the catalog, the second keeps out the
+        "video" entries (direct-to-video/promotional recordings) that TMDB
+        flags but still ranks.  ``sort_by=primary_release_date.asc`` is a
+        *stable* ordering — sorting by popularity is exactly what makes the
+        ``/popular`` walk skip items, since the ranking reorders while it is
+        being paginated.
+        """
+        params = {
+            "page": page,
+            "include_adult": "false",
+            "include_video": "false",
+            "sort_by": "primary_release_date.asc",
+            "vote_count.gte": min_votes,
+            "primary_release_date.gte": date_gte.isoformat(),
+            "primary_release_date.lte": date_lte.isoformat(),
+        }
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/discover/movie",
+                headers=self._headers,
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_top_movies(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """Fetch top-rated movies from TMDB for nightly sync.
+        """Fetch top popular movies from TMDB by rank.
+
+        ⚠️ **No longer the seeding route** (feature 86). ``/movie/popular``
+        caps pagination at page 500 × 20 = 10.000 items, reorders itself while
+        it is being paginated (so an offset walk does not even cover those
+        10.000), and ranks by *recent interest* rather than notoriety. The
+        catalog of movies is now enumerated by ``discover_movies_page`` under a
+        ``vote_count`` threshold — see ``docs/seeding-plan.md`` §1 and §3.
+
+        Kept as a thin, documented client for ``/movie/popular`` because it is
+        still a legitimate read of that endpoint and the enumeration described
+        in feature 88 may want it back; nothing in the sync path calls it.
 
         Uses the /movie/popular endpoint and paginates to collect up to
         ``limit`` results starting at ``offset`` (TMDB returns 20 per page,

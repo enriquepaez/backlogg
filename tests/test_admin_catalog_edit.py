@@ -23,6 +23,7 @@ from backlogg.core.database import get_db
 from backlogg.main import app
 from backlogg.movies import repository as movies_repo
 from backlogg.scheduler import jobs as sync_jobs
+from backlogg.scheduler.repository import SeedTargetRow, upsert_seed_targets
 
 _VALID_KEY = "test-admin-secret"
 
@@ -319,28 +320,25 @@ async def test_locked_field_survives_next_sync(db):
         "genres": [],
     }
 
+    # The slice comes from the seed target list since feature 86.
+    await upsert_seed_targets(
+        db, [SeedTargetRow("MOVIE", "TMDB", "555001", vote_count=200, release_year=2021)]
+    )
+    await db.commit()
+
     with (
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 555001}],
-        ),
         patch.object(
             sync_jobs._tmdb_movies,
             "get_movie_detail",
             new_callable=AsyncMock,
-            return_value={"id": 555001},
+            return_value={"id": 555001, "credits": {"cast": [], "crew": []}},
         ),
         patch.object(
             sync_jobs._tmdb_movies,
             "movie_to_dict",
             return_value=dict(synced_movie_data),
         ),
-        patch.object(sync_jobs, "collect_movie_credits", new_callable=AsyncMock, return_value=[]),
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock, return_value=0),
-        patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()
@@ -348,7 +346,7 @@ async def test_locked_field_survives_next_sync(db):
         mock_cm.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_cm
 
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_movies(slice_size=5)
 
     assert result["synced"] == 1
 

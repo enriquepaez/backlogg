@@ -145,8 +145,57 @@ class TMDBSeriesClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
+    async def discover_series_page(
+        self,
+        *,
+        page: int,
+        min_votes: int,
+        date_gte: date,
+        date_lte: date,
+    ) -> dict:
+        """Fetch one raw page of ``/discover/tv`` for a first-air-date window.
+
+        Raw pagination only: the caller (``backlogg.scheduler.discovery``)
+        owns the slicing and the 500-page guard. Returns the whole payload
+        (``results``, ``page``, ``total_pages``, ``total_results``) because the
+        orchestrator needs ``total_pages`` to decide whether a window must be
+        split (``docs/seeding-plan.md`` §3).
+
+        The date field is ``first_air_date`` — TV has no
+        ``primary_release_date`` — and the sort is
+        ``first_air_date.asc`` for the same reason movies sort by release
+        date: a popularity sort reorders while it is being paginated.
+        ``/discover/tv`` has no ``include_video`` and its adult content is not
+        surfaced by this endpoint, so the two movie-only flags have no
+        counterpart here.
+        """
+        params = {
+            "page": page,
+            "sort_by": "first_air_date.asc",
+            "vote_count.gte": min_votes,
+            "first_air_date.gte": date_gte.isoformat(),
+            "first_air_date.lte": date_lte.isoformat(),
+        }
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/discover/tv",
+                headers=self._headers,
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_top_series(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """Fetch popular TV series from TMDB for nightly sync.
+        """Fetch popular TV series from TMDB by rank.
+
+        ⚠️ **No longer the seeding route** (feature 86), for the same three
+        reasons as ``TMDBClient.get_top_movies``: the 10.000-item cap, the
+        ranking reordering under the offset walk, and popularity not being a
+        quality signal. Series are now enumerated by ``discover_series_page``
+        under a ``vote_count`` threshold — ``docs/seeding-plan.md`` §1 and §3.
+        Kept as a documented client of ``/tv/popular``; nothing in the sync
+        path calls it.
 
         Uses the /tv/popular endpoint and paginates to collect up to
         ``limit`` results starting at ``offset`` (TMDB returns 20 per page,
