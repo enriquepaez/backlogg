@@ -566,9 +566,6 @@ async def _snapshot(db, slug: str) -> dict:
         "rating_count_internal": movie.rating_count_internal,
         "locked_fields": list(movie.locked_fields),
         "last_synced_at": movie.last_synced_at,
-        # Feature 85: neither write route touches it (it belongs to the
-        # targeted credits backfill), so both must leave it NULL.
-        "credits_synced_at": movie.credits_synced_at,
         "genres": await _genre_slugs(db, movie.id),
         "external_ids": sorted(tuple(row) for row in external.all()),
         "credits": await _credits_of(db, movie.id),

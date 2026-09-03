@@ -27,7 +27,6 @@ CREATE TABLE movies (
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
     locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
-    credits_synced_at       TIMESTAMPTZ,              -- feature 85, see below
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -59,7 +58,6 @@ CREATE TABLE series (
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
     locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
-    credits_synced_at       TIMESTAMPTZ,              -- feature 85, see below
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -94,7 +92,6 @@ CREATE TABLE books (
     rating_count_internal   INTEGER NOT NULL DEFAULT 0,
     locked_fields           TEXT[] NOT NULL DEFAULT '{}', -- admin-edited columns, see below
     last_synced_at          TIMESTAMPTZ NOT NULL,
-    credits_synced_at       TIMESTAMPTZ,              -- feature 85, see below
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -150,27 +147,6 @@ similar-games, search fan-out). Rows persisted before this feature shipped
 that fall outside the allowlist are **not** purged automatically — see
 `progress/history.md` (feature 65) for the documented row counts and the
 decision on whether/when to purge them.
-
-### `credits_synced_at` (feature 85 — backfill_credits_targeted)
-
-Present on `movies`, `series` and `books` (not on `games`: games have no
-people-credit ingestion, only company credits).
-
-The targeted credits backfill (`scripts/backfill_sync.py <type>
---only-missing-credits`) builds its work list with `LEFT JOIN credits ...
-WHERE NULL`. That predicate alone cannot tell "credits never fetched" from
-"this item genuinely has no credits at the source" (a TMDB entry with empty
-`cast`/`crew`, an Open Library work with no resolvable author), so those
-items would be re-fetched on every run forever.
-
-- Written **only** by the targeted backfill, after a *successful* credits
-  fetch — whether or not the fetch produced any row. The nightly/ranking
-  sync does not touch it: items it fills drop out of the work list through
-  the `LEFT JOIN` anyway.
-- A **failed** fetch leaves it NULL on purpose, so the next run retries it.
-- `NULL` = never looked up. The work list filters
-  `no rows in credits AND credits_synced_at IS NULL`; `--recheck` ignores
-  the second half and forces a full re-sweep.
 
 ### `locked_fields` (feature 49 — catalog_manual_edit)
 

@@ -88,14 +88,16 @@ def _tmdb_person_row(
     )
 
 
-def map_series_cast(credits_data: dict | None) -> list[BulkPerson]:
-    """Map an already-fetched TMDB credits payload to ACTOR credit rows.
+async def collect_series_credits(tmdb_id: int) -> list[BulkPerson]:
+    """Fetch a series' credits from TMDB and map them to bulk credit rows.
 
-    Pure mapping, no network: split out from ``collect_series_credits`` for
-    feature 85, whose targeted backfill gets the same payload embedded in the
-    detail response (``/tv/{id}?append_to_response=credits``) and must not
-    spend a second request to re-fetch it.
+    Cast only (top 10 by billing order): the credits endpoint carries no
+    meaningful directors for TV, and creators come from the detail payload's
+    ``created_by`` instead — see ``collect_series_creators``.  Split out for
+    feature 84 so the batch write path can gather a whole slice's people
+    before touching the database.
     """
+    credits_data = await _tmdb.get_series_credits(tmdb_id)
     if not credits_data:
         return []
 
@@ -110,18 +112,6 @@ def map_series_cast(credits_data: dict | None) -> list[BulkPerson]:
         if row is not None:
             rows.append(row)
     return rows
-
-
-async def collect_series_credits(tmdb_id: int) -> list[BulkPerson]:
-    """Fetch a series' credits from TMDB and map them to bulk credit rows.
-
-    Cast only (top 10 by billing order): the credits endpoint carries no
-    meaningful directors for TV, and creators come from the detail payload's
-    ``created_by`` instead — see ``collect_series_creators``.  Split out for
-    feature 84 so the batch write path can gather a whole slice's people
-    before touching the database.
-    """
-    return map_series_cast(await _tmdb.get_series_credits(tmdb_id))
 
 
 def collect_series_creators(created_by: list) -> list[BulkPerson]:

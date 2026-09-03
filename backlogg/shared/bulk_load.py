@@ -113,7 +113,6 @@ __all__ = [
     "BulkPerson",
     "EntityCreditSpec",
     "LookupJoinSpec",
-    "bulk_load_credits",
     "bulk_load_items",
     "copy_round_trips",
     "rollback_quietly",
@@ -892,47 +891,17 @@ async def bulk_load_items(
         await _load_entity_credits(session, staging, spec, entity, valid, ids_by_slug)
 
     # ── People + credits ────────────────────────────────────────────────────
-    await _load_people_credits(
-        session,
-        staging,
-        spec.item_type,
-        [
-            (ids_by_slug[item.data["slug"]], item.people)
-            for item in valid
-            if item.people and item.data["slug"] in ids_by_slug
-        ],
-        outcome,
-        now,
-    )
-
-    return outcome
-
-
-async def _load_people_credits(
-    session: AsyncSession,
-    staging: _Staging,
-    item_type: str,
-    entries: Sequence[tuple[int, Sequence[BulkPerson]]],
-    outcome: BulkLoadResult,
-    now: datetime,
-) -> None:
-    """Write the people + credits of a whole batch, item ids already known.
-
-    Split out of ``bulk_load_items`` for feature 85: the targeted credits
-    backfill has the item rows already persisted and only needs this half of
-    the batch route, so the two callers must not drift apart.  Incomplete
-    person payloads and credits whose person could not be resolved are
-    dropped and counted in ``outcome.people_rejected`` — same contract the
-    per-item route has always had.  Does not commit.
-    """
     people: list[BulkPerson] = []
     credit_rows: list[tuple[int, BulkPerson]] = []
-    for item_id, persons in entries:
-        for person in persons:
+    for item in valid:
+        item_id = ids_by_slug.get(item.data["slug"])
+        if item_id is None:
+            continue
+        for person in item.people:
             if not person.external_id or not person.name or not person.slug or not person.role:
                 logger.warning(
                     "bulk_load: dropping credit on %s id=%s — incomplete person payload",
-                    item_type,
+                    spec.item_type,
                     item_id,
                 )
                 outcome.people_rejected += 1
@@ -940,83 +909,55 @@ async def _load_people_credits(
             people.append(person)
             credit_rows.append((item_id, person))
 
-    if not credit_rows:
-        return
+    if credit_rows:
+        resolved = await _resolve_people(session, staging, people, now)
+        credit_table = Credit.__table__
+        credit_columns = (
+            "item_type",
+            "item_id",
+            "person_id",
+            "role",
+            "character_name",
+            "billing_order",
+        )
+        deduped: dict[tuple[str, int, int, str], tuple] = {}
+        for item_id, person in credit_rows:
+            person_id = resolved.get((person.source, person.external_id))
+            if person_id is None:
+                outcome.people_rejected += 1
+                continue
+            data = {
+                "item_type": spec.item_type,
+                "item_id": item_id,
+                "person_id": person_id,
+                "role": person.role,
+                "character_name": person.character_name,
+                "billing_order": person.billing_order,
+            }
+            try:
+                record = _build_record(credit_table, credit_columns, data)
+            except RowRejected as exc:
+                logger.warning("bulk_load: dropping credit %r — %s", data, exc)
+                outcome.people_rejected += 1
+                continue
+            deduped[(spec.item_type, item_id, person_id, person.role)] = record
+        if deduped:
+            credit_records = list(deduped.values())
+            temp_name = staging.add(credit_table, credit_columns, credit_records)
+            await staging.flush()
+            await _insert_from_temp(
+                session,
+                credit_table,
+                credit_columns,
+                temp_name,
+                conflict=(
+                    "ON CONFLICT ON CONSTRAINT uq_credit DO UPDATE SET "
+                    '"character_name" = excluded."character_name", '
+                    '"billing_order" = excluded."billing_order"'
+                ),
+            )
+            outcome.people_written = len(credit_records)
 
-    resolved = await _resolve_people(session, staging, people, now)
-    credit_table = Credit.__table__
-    credit_columns = (
-        "item_type",
-        "item_id",
-        "person_id",
-        "role",
-        "character_name",
-        "billing_order",
-    )
-    deduped: dict[tuple[str, int, int, str], tuple] = {}
-    for item_id, person in credit_rows:
-        person_id = resolved.get((person.source, person.external_id))
-        if person_id is None:
-            outcome.people_rejected += 1
-            continue
-        data = {
-            "item_type": item_type,
-            "item_id": item_id,
-            "person_id": person_id,
-            "role": person.role,
-            "character_name": person.character_name,
-            "billing_order": person.billing_order,
-        }
-        try:
-            record = _build_record(credit_table, credit_columns, data)
-        except RowRejected as exc:
-            logger.warning("bulk_load: dropping credit %r — %s", data, exc)
-            outcome.people_rejected += 1
-            continue
-        deduped[(item_type, item_id, person_id, person.role)] = record
-    if not deduped:
-        return
-
-    credit_records = list(deduped.values())
-    temp_name = staging.add(credit_table, credit_columns, credit_records)
-    await staging.flush()
-    await _insert_from_temp(
-        session,
-        credit_table,
-        credit_columns,
-        temp_name,
-        conflict=(
-            "ON CONFLICT ON CONSTRAINT uq_credit DO UPDATE SET "
-            '"character_name" = excluded."character_name", '
-            '"billing_order" = excluded."billing_order"'
-        ),
-    )
-    outcome.people_written += len(credit_records)
-
-
-async def bulk_load_credits(
-    session: AsyncSession,
-    item_type: str,
-    entries: Sequence[tuple[int, Sequence[BulkPerson]]],
-) -> BulkLoadResult:
-    """Write only people + credits for items that already exist (feature 85).
-
-    The targeted credits backfill knows the ``item_id`` of every row it works
-    on (it got them from the local gap query) and must **not** re-write the
-    item itself — the row is already there, only its credits are missing.
-    This is ``bulk_load_items`` minus the item/lookup/external-id stages:
-    same COPY-into-temp-table plus ``INSERT ... SELECT ... ON CONFLICT``
-    route, same single query resolving every person of the batch.
-
-    Does not commit: the caller owns the transaction so a failure can be
-    rolled back and retried through the per-item route.
-    """
-    outcome = BulkLoadResult()
-    if not entries:
-        return outcome
-    await _load_people_credits(
-        session, _Staging(session), item_type, entries, outcome, datetime.now(UTC)
-    )
     return outcome
 
 

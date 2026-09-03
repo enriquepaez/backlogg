@@ -1697,7 +1697,7 @@
         "Tests: catálogo con huecos produce exactamente la lista de huecos; un ítem sin external_id de TMDB no rompe el run",
         "bash init.sh en verde"
       ],
-      "status": "done"
+      "status": "pending"
     },
     {
       "id": 86,

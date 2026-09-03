@@ -12,21 +12,8 @@ on:
           - series
           - book
           - game
-      mode:
-        description: 'ranking = walk the popularity listing (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
-        required: true
-        type: choice
-        default: ranking
-        options:
-          - ranking
-          - credits
-      recheck:
-        description: 'credits mode only — re-visit items already stamped with credits_synced_at'
-        required: false
-        type: boolean
-        default: false
       seed_top_n:
-        description: 'ranking mode only — sync target per type, must match SEED_TOP_N_* on Render'
+        description: 'Sync target per type — must match SEED_TOP_N_* on Render'
         required: false
         type: string
         default: '10000'
@@ -66,20 +53,5 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run backfill (ranking mode)
-        if: ${{ github.event.inputs.mode == 'ranking' }}
+      - name: Run backfill
         run: uv run python scripts/backfill_sync.py "${{ github.event.inputs.content_type }}"
-
-      # Targeted credits backfill (feature 85): the work list comes from a
-      # local query over the catalog, not from sync_cursors, so SEED_TOP_N_*
-      # is irrelevant here and re-dispatching simply re-computes the gap.
-      - name: Run backfill (targeted credits mode)
-        if: ${{ github.event.inputs.mode == 'credits' }}
-        run: |
-          if [ "${{ github.event.inputs.content_type }}" = "game" ]; then
-            echo "::error::credits mode is not supported for 'game' — games have no people credits"
-            exit 1
-          fi
-          uv run python scripts/backfill_sync.py "${{ github.event.inputs.content_type }}" \
-            --only-missing-credits \
-            ${{ github.event.inputs.recheck == 'true' && '--recheck' || '' }}

@@ -37,12 +37,6 @@ bad row never takes the slice down with it.
 After a successful slice every job refreshes the catalog_search materialized
 view so search results stay current.
 
-Besides the four ranking jobs this module exposes ``sync_missing_credits``
-(feature 85): a *targeted* pass whose work list comes from the local catalog
-(``LEFT JOIN credits ... WHERE NULL``) instead of the popularity ranking,
-used to close credit holes the ranking route structurally cannot reach
-(issue #15).  See the section at the bottom of this file.
-
 Each job returns a dict with ``synced``, ``errors``, ``offset`` (the offset
 of the processed slice), ``duration_s`` and ``people_errors`` so the admin
 endpoint can expose the result synchronously. ``people_errors`` counts
@@ -53,7 +47,6 @@ slice), so ``people_errors`` is the only way to see them in
 ``POST /admin/sync/{type}``'s response.
 """
 
-import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -72,26 +65,14 @@ from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.service import collect_movie_credits
 from backlogg.people import repository as people_repo
-from backlogg.scheduler.repository import (
-    CREDIT_GAP_SOURCES,
-    CreditGap,
-    get_credit_gaps,
-    get_sync_offset,
-    mark_credits_synced,
-    set_sync_offset,
-)
+from backlogg.scheduler.repository import get_sync_offset, set_sync_offset
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.service import (
-    collect_series_creators,
-    collect_series_credits,
-    map_series_cast,
-)
+from backlogg.series.service import collect_series_creators, collect_series_credits
 from backlogg.shared.bulk_load import (
     BulkItem,
     BulkLoadSpec,
     BulkPerson,
-    bulk_load_credits,
     bulk_load_items,
     rollback_quietly,
 )
@@ -111,14 +92,6 @@ _SLICE_SETTING: dict[str, str] = {
     "SERIES": "SYNC_SLICE_SIZE_SERIES",
     "BOOK": "SYNC_SLICE_SIZE_BOOKS",
     "GAME": "SYNC_SLICE_SIZE_GAMES",
-}
-
-# CLI/content name -> polymorphic item_type used across the schema.
-_ITEM_TYPES_BY_CONTENT: dict[str, str] = {
-    "movie": "MOVIE",
-    "series": "SERIES",
-    "book": "BOOK",
-    "game": "GAME",
 }
 
 
@@ -728,283 +701,4 @@ async def sync_games(slice_size: int | None = None) -> dict:
         "errors": errors,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
-    }
-
-
-# ── Targeted credits backfill (feature 85) ───────────────────────────────────
-#
-# The jobs above walk the external API's *popularity ranking*.  That is the
-# wrong instrument for filling credit holes (issue #15): the items missing
-# credits entered the catalog through other paths (search fan-out, trending,
-# /similar) and sit at arbitrary ranking positions — or outside the ranking
-# altogether — so thousands of positions can be walked without touching a
-# single one of them.  ``sync_missing_credits`` is driven by the *local*
-# catalog instead: the work list is the gap query in
-# ``scheduler/repository.get_credit_gaps``, which converges by construction
-# and is bounded by the real hole.
-#
-# Three deliberate differences from the jobs above:
-#
-# 1. **No item detail is fetched or re-written.**  The row already exists;
-#    only its credits are missing.  One HTTP call per item, and the write
-#    goes through ``bulk_load_credits`` (the credits half of the feature-84
-#    batch route), never through the item upsert.
-# 2. **No ``sync_cursors``.**  There is no ranking to resume: the stop
-#    condition is "gap list exhausted" or "time budget spent".
-# 3. **``credits_synced_at`` is stamped after every *successful* fetch**,
-#    with or without credits, so items that legitimately have none are
-#    visited once instead of on every run.  A failed fetch stamps nothing
-#    and counts in ``people_errors``.
-
-# Fetch concurrency, mirroring the search fan-out's ``Semaphore`` + ``gather``
-# pattern (``backlogg/search/service.py``).  TMDB documents ~50 req/s and
-# ``docs/seeding-plan.md`` §4 recommends staying at 30-40, well above what 8
-# in-flight detail calls produce.  Open Library is unauthenticated, throttles
-# harder, and spends one extra ``/authors/{id}`` call per author inside each
-# task, so it gets a lower bound.
-_CREDITS_FETCH_CONCURRENCY: dict[str, int] = {"MOVIE": 8, "SERIES": 8, "BOOK": 4}
-
-
-async def _fetch_movie_credit_rows(external_id: str) -> list[BulkPerson]:
-    """``/movie/{id}/credits`` — the only call this item needs."""
-    return await collect_movie_credits(int(external_id))
-
-
-async def _fetch_series_credit_rows(external_id: str) -> list[BulkPerson]:
-    """``/tv/{id}?append_to_response=credits`` — cast *and* creators, one call.
-
-    CREATOR credits come from ``created_by``, which lives in the detail
-    payload and not in ``/tv/{id}/credits``; ``append_to_response`` brings
-    both back for the price of the single request (``docs/seeding-plan.md``
-    §4).  The detail body is used only for those two keys — the series row
-    itself is deliberately not re-mapped nor re-written.
-    """
-    detail = await _tmdb_series.get_series_detail(int(external_id), append_to_response="credits")
-    if not detail:
-        return []
-    rows = map_series_cast(detail.get("credits"))
-    rows += collect_series_creators(detail.get("created_by", []))
-    return rows
-
-
-async def _fetch_book_credit_rows(external_id: str) -> list[BulkPerson]:
-    """Open Library work detail + its authors."""
-    work_detail = await _ol_client.get_work_detail(external_id)
-    if not work_detail:
-        return []
-    return await collect_book_authors(work_detail)
-
-
-_CREDIT_FETCHERS = {
-    "MOVIE": _fetch_movie_credit_rows,
-    "SERIES": _fetch_series_credit_rows,
-    "BOOK": _fetch_book_credit_rows,
-}
-
-
-async def _fetch_credits_guarded(
-    sem: asyncio.Semaphore, item_type: str, gap: CreditGap
-) -> list[BulkPerson]:
-    """Fetch one item's credits under *sem*; exceptions propagate to ``gather``.
-
-    Errors are **not** swallowed here on purpose: the caller has to tell a
-    failed fetch (retry next run, ``people_errors``) from a successful one
-    that returned nothing (stamp ``credits_synced_at`` and never look again).
-    """
-    async with sem:
-        return await _CREDIT_FETCHERS[item_type](gap.external_id)
-
-
-async def _write_credits_individually(
-    session,
-    item_type: str,
-    people_by_item: dict[int, list[BulkPerson]],
-    item_ids: list[int],
-    now: datetime,
-) -> tuple[int, int]:
-    """Per-item fallback for a credits batch that failed — same contract as
-    ``_write_items_individually``: a batch failure costs speed, never data.
-
-    Returns ``(credits_written, people_errors)``.
-    """
-    written = 0
-    errors = 0
-    for item_id in item_ids:
-        people = people_by_item.get(item_id, [])
-        try:
-            await _persist_people_individually(session, item_type, item_id, people)
-            await mark_credits_synced(session, item_type, [item_id], now)
-            await session.commit()
-            written += len(people)
-        except Exception:
-            logger.exception(
-                "sync_missing_credits: failed to persist credits for %s id=%s", item_type, item_id
-            )
-            errors += 1
-            await rollback_quietly(session, "sync_missing_credits")
-    return written, errors
-
-
-async def _write_credits_batch(
-    session,
-    item_type: str,
-    entries: list[tuple[int, list[BulkPerson]]],
-    item_ids: list[int],
-) -> tuple[int, int]:
-    """Write one chunk of credits + stamp ``credits_synced_at``, atomically.
-
-    The stamp travels in the same transaction as the credits it certifies: a
-    rollback must not leave an item marked as done with no credits written.
-    Returns ``(credits_written, people_errors)``.
-    """
-    if not item_ids:
-        return 0, 0
-    now = datetime.now(UTC)
-    try:
-        outcome = await bulk_load_credits(session, item_type, entries)
-        await mark_credits_synced(session, item_type, item_ids, now)
-        await session.commit()
-        # The batch wrote with raw SQL: drop anything stale in the identity map.
-        session.expunge_all()
-    except Exception:
-        logger.exception(
-            "sync_missing_credits: batch of %d items failed — retrying per item",
-            len(item_ids),
-        )
-        await rollback_quietly(session, "sync_missing_credits")
-        return await _write_credits_individually(session, item_type, dict(entries), item_ids, now)
-
-    if outcome.people_rejected:
-        logger.warning(
-            "sync_missing_credits: batch dropped %d invalid credits", outcome.people_rejected
-        )
-    return outcome.people_written, outcome.people_rejected
-
-
-async def sync_missing_credits(
-    content_type: str,
-    *,
-    recheck: bool = False,
-    time_budget_s: float | None = None,
-    concurrency: int | None = None,
-) -> dict:
-    """Fill the credit holes of ``content_type``, driven by the local catalog.
-
-    ``content_type`` is the lowercase CLI name (``movie``/``series``/
-    ``book``); ``game`` is rejected — games have no people-credit ingestion
-    at all, only company credits that travel inside the item payload.
-
-    Work list: every item with zero rows in ``credits`` and (unless
-    ``recheck``) a NULL ``credits_synced_at``.  Items with no external id for
-    the type's source cannot be fetched and are reported in
-    ``skipped_no_external_id`` instead of failing the run.
-
-    Processing: chunks of ``BULK_LOAD_BATCH_SIZE``.  Inside a chunk the
-    fetches run in parallel under a ``Semaphore`` (same pattern as the search
-    fan-out) and the write is sequential — ``AsyncSession`` is not safe for
-    concurrent use.
-
-    Returns a summary dict with ``content_type``, ``considered``,
-    ``processed``, ``with_credits``, ``sealed_without_credits``,
-    ``credits_written``, ``people_errors``, ``skipped_no_external_id``,
-    ``duration_s`` and ``stop_reason`` (``"exhausted"`` or ``"time_budget"``).
-    """
-    item_type = _ITEM_TYPES_BY_CONTENT.get(content_type)
-    if item_type is None or item_type not in CREDIT_GAP_SOURCES:
-        raise ValueError(
-            f"sync_missing_credits: unsupported content type {content_type!r} — "
-            f"supported: {', '.join(sorted(_CREDIT_FETCHERS))} (lowercased). "
-            "games have no people credits, only company credits."
-        )
-
-    # Deliberately not incrementing ``backlogg_syncs_total``: that series
-    # counts catalog syncs, and a targeted credits pass syncs no item.
-    start = time.monotonic()
-
-    async with async_session_factory() as session:
-        gap_set = await get_credit_gaps(session, item_type, recheck=recheck)
-
-    logger.info(
-        "sync_missing_credits %s: %d items without credits (%d workable, "
-        "%d without external id), recheck=%s",
-        content_type,
-        gap_set.considered,
-        len(gap_set.gaps),
-        gap_set.skipped_no_external_id,
-        recheck,
-    )
-
-    limit = concurrency or _CREDITS_FETCH_CONCURRENCY.get(item_type, 5)
-    sem = asyncio.Semaphore(limit)
-    chunk_size = max(1, settings.BULK_LOAD_BATCH_SIZE)
-
-    processed = 0
-    with_credits = 0
-    sealed_without_credits = 0
-    credits_written = 0
-    people_errors = 0
-    stop_reason = "exhausted"
-
-    async with async_session_factory() as session:
-        for start_index in range(0, len(gap_set.gaps), chunk_size):
-            if time_budget_s is not None and time.monotonic() - start >= time_budget_s:
-                stop_reason = "time_budget"
-                break
-
-            chunk = gap_set.gaps[start_index : start_index + chunk_size]
-
-            # Fetch phase — parallel, bounded by the semaphore.
-            fetched = await asyncio.gather(
-                *(_fetch_credits_guarded(sem, item_type, gap) for gap in chunk),
-                return_exceptions=True,
-            )
-
-            # Persist phase — sequential: AsyncSession is not concurrency-safe.
-            entries: list[tuple[int, list[BulkPerson]]] = []
-            item_ids: list[int] = []
-            for gap, outcome in zip(chunk, fetched, strict=True):
-                if isinstance(outcome, BaseException):
-                    logger.warning(
-                        "sync_missing_credits %s: fetch failed for external_id=%s (%s) — "
-                        "not stamping, will retry next run",
-                        content_type,
-                        gap.external_id,
-                        outcome,
-                    )
-                    people_errors += 1
-                    continue
-                item_ids.append(gap.item_id)
-                if outcome:
-                    entries.append((gap.item_id, outcome))
-                    with_credits += 1
-                else:
-                    sealed_without_credits += 1
-
-            written, errors = await _write_credits_batch(session, item_type, entries, item_ids)
-            credits_written += written
-            people_errors += errors
-            processed += len(item_ids)
-
-            logger.info(
-                "sync_missing_credits %s: %d/%d items processed, %d credits written, "
-                "%d people_errors (%.0fs elapsed)",
-                content_type,
-                processed,
-                len(gap_set.gaps),
-                credits_written,
-                people_errors,
-                time.monotonic() - start,
-            )
-
-    return {
-        "content_type": content_type,
-        "considered": gap_set.considered,
-        "processed": processed,
-        "with_credits": with_credits,
-        "sealed_without_credits": sealed_without_credits,
-        "credits_written": credits_written,
-        "people_errors": people_errors,
-        "skipped_no_external_id": gap_set.skipped_no_external_id,
-        "duration_s": round(time.monotonic() - start, 1),
-        "stop_reason": stop_reason,
     }
