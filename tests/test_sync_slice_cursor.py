@@ -3,9 +3,19 @@
 Covers:
 - the sync-cursor repository against the real test database;
 - the offset support in each external adapter (HTTP layer mocked);
-- the slice logic in the sync jobs (adapters and cursor repo mocked):
-  intermediate slice advances the cursor, final slice wraps to 0, a short
-  API response wraps to 0, and re-running the same slice is idempotent.
+- the slice logic in the cursor-driven sync jobs (adapters and cursor repo
+  mocked): intermediate slice advances the cursor, final slice wraps to 0, and
+  a short API response wraps to 0.
+
+⚠️ Since feature 86 the cursor drives **books and games only**.  Movies and
+series are hydrated from the ``seed_targets`` work list and never read or
+write ``sync_cursors``, so the four job-slice cases below — which used to be
+written against ``sync_movies`` — are now written against ``sync_games``: the
+logic under test (``_read_slice``/``_next_offset``) is shared and unchanged,
+only its remaining callers moved.  The movie/series equivalents live in
+``tests/test_tmdb_discover_seeding.py``.  The adapter offset tests for
+``get_top_movies``/``get_top_series`` stay: those methods still exist as
+documented clients of ``/movie/popular`` and ``/tv/popular``.
 """
 
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -18,7 +28,12 @@ from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
-from backlogg.scheduler.repository import get_sync_offset, set_sync_offset
+from backlogg.scheduler.repository import (
+    SeedTargetRow,
+    get_sync_offset,
+    set_sync_offset,
+    upsert_seed_targets,
+)
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
 
 # ── Cursor repository (real test DB) ─────────────────────────────────────────
@@ -175,18 +190,18 @@ def _job_patches(cursor_offset: int):
     )
 
 
-async def test_sync_movies_intermediate_slice_advances_cursor(monkeypatch):
+async def test_intermediate_slice_advances_cursor(monkeypatch):
     """A full intermediate slice advances the cursor by the fetched count."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=3)
 
-    # Items without a TMDB id are skipped by the upsert loop but still
+    # Items without an external id are skipped by the upsert loop but still
     # count as fetched for cursor advancement.
     with (
         patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
+            sync_jobs._igdb_client,
+            "get_top_games",
             new_callable=AsyncMock,
             return_value=[{"id": None}] * 3,
         ) as mock_fetch,
@@ -195,24 +210,24 @@ async def test_sync_movies_intermediate_slice_advances_cursor(monkeypatch):
         refresh,
         factory,
     ):
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_games()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=3)
-    mock_set.assert_awaited_once_with(ANY, "MOVIE", 6)
+    mock_set.assert_awaited_once_with(ANY, "GAME", 6)
     assert result["offset"] == 3
     assert result["errors"] == 0
 
 
-async def test_sync_movies_final_slice_wraps_to_zero(monkeypatch):
-    """Reaching SEED_TOP_N_MOVIES wraps the cursor back to 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
+async def test_final_slice_wraps_to_zero(monkeypatch):
+    """Reaching SEED_TOP_N_GAMES wraps the cursor back to 0."""
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=8)
 
     with (
         patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
+            sync_jobs._igdb_client,
+            "get_top_games",
             new_callable=AsyncMock,
             return_value=[{"id": None}] * 2,
         ) as mock_fetch,
@@ -221,24 +236,24 @@ async def test_sync_movies_final_slice_wraps_to_zero(monkeypatch):
         refresh,
         factory,
     ):
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_games()
 
     # Only target - offset = 2 items are requested for the final slice
     mock_fetch.assert_awaited_once_with(limit=2, offset=8)
-    mock_set.assert_awaited_once_with(ANY, "MOVIE", 0)
+    mock_set.assert_awaited_once_with(ANY, "GAME", 0)
     assert result["offset"] == 8
 
 
-async def test_sync_movies_short_fetch_wraps_to_zero(monkeypatch):
+async def test_short_fetch_wraps_to_zero(monkeypatch):
     """The API returning fewer items than requested wraps the cursor to 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=3)
 
     with (
         patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
+            sync_jobs._igdb_client,
+            "get_top_games",
             new_callable=AsyncMock,
             return_value=[{"id": None}],  # 1 < slice of 3 → catalog exhausted
         ) as mock_fetch,
@@ -247,23 +262,23 @@ async def test_sync_movies_short_fetch_wraps_to_zero(monkeypatch):
         refresh,
         factory,
     ):
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_games()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=3)
-    mock_set.assert_awaited_once_with(ANY, "MOVIE", 0)
+    mock_set.assert_awaited_once_with(ANY, "GAME", 0)
     assert result["offset"] == 3
 
 
-async def test_sync_movies_stale_cursor_normalises_to_zero(monkeypatch):
+async def test_stale_cursor_normalises_to_zero(monkeypatch):
     """A cursor at or beyond the target (e.g. after lowering SEED_TOP_N) restarts at 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=25)
 
     with (
         patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
+            sync_jobs._igdb_client,
+            "get_top_games",
             new_callable=AsyncMock,
             return_value=[{"id": None}] * 3,
         ) as mock_fetch,
@@ -272,36 +287,11 @@ async def test_sync_movies_stale_cursor_normalises_to_zero(monkeypatch):
         refresh,
         factory,
     ):
-        result = await sync_jobs.sync_movies()
+        result = await sync_jobs.sync_games()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=0)
-    mock_set.assert_awaited_once_with(ANY, "MOVIE", 3)
+    mock_set.assert_awaited_once_with(ANY, "GAME", 3)
     assert result["offset"] == 0
-
-
-async def test_sync_series_slice_uses_cursor(monkeypatch):
-    """sync_series fetches from its cursor and advances it."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_SERIES", 20)
-    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 5)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=5)
-
-    with (
-        patch.object(
-            sync_jobs._tmdb_series,
-            "get_top_series",
-            new_callable=AsyncMock,
-            return_value=[{"id": None}] * 5,
-        ) as mock_fetch,
-        get_cursor,
-        set_cursor as mock_set,
-        refresh,
-        factory,
-    ):
-        result = await sync_jobs.sync_series()
-
-    mock_fetch.assert_awaited_once_with(limit=5, offset=5)
-    mock_set.assert_awaited_once_with(ANY, "SERIES", 10)
-    assert result["offset"] == 5
 
 
 async def test_sync_books_slice_uses_cursor(monkeypatch):
@@ -358,18 +348,21 @@ async def test_sync_games_slice_uses_cursor(monkeypatch):
 # ── Idempotency of re-running the same slice (real test DB) ──────────────────
 
 
-async def test_rerunning_same_slice_is_idempotent(db, monkeypatch):
-    """Re-executing the same slice does not duplicate items and keeps cursor at 0.
+async def test_rerunning_the_same_movie_slice_is_idempotent(db, monkeypatch):
+    """Re-executing the same movie slice does not duplicate items.
 
-    With the default settings (SEED_TOP_N_MOVIES=100 < SYNC_SLICE_SIZE=200)
-    a single slice covers the whole target: the adapter returns fewer items
-    than requested, so the cursor wraps to 0 and the next run re-processes
-    the same slice — which must be a no-op thanks to the upserts.
+    Rewritten for feature 86: there is no cursor to wrap any more, so what
+    makes the second run process the same item is the refresh rotation — once
+    the single target is hydrated nothing is pending, and the slice is filled
+    with the least recently synced movie, which is that very item.  The upsert
+    must make that a no-op.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_MOVIES", 100)
-    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 200)
-    # Deterministic starting point regardless of what earlier tests committed
-    await set_sync_offset(db, "MOVIE", 0)
+    await upsert_seed_targets(
+        db,
+        [SeedTargetRow("MOVIE", "TMDB", "97701", vote_count=42, release_year=2023)],
+    )
+    await db.commit()
+
     movie_raw = {
         "id": 97701,
         "title": "Slice Cursor Test Movie",
@@ -386,27 +379,17 @@ async def test_rerunning_same_slice_is_idempotent(db, monkeypatch):
         "vote_average": 6.5,
         "vote_count": 42,
         "genres": [],
+        "credits": {"cast": [], "crew": []},
     }
 
     with (
         patch.object(
             sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 97701}],
-        ) as mock_fetch,
-        patch.object(
-            sync_jobs._tmdb_movies,
             "get_movie_detail",
             new_callable=AsyncMock,
             return_value=movie_raw,
-        ),
+        ) as mock_detail,
         patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
-        patch(
-            "backlogg.scheduler.jobs.collect_movie_credits",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()
@@ -414,19 +397,16 @@ async def test_rerunning_same_slice_is_idempotent(db, monkeypatch):
         mock_cm.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_cm
 
-        result1 = await sync_jobs.sync_movies()
-        result2 = await sync_jobs.sync_movies()
+        result1 = await sync_jobs.sync_movies(slice_size=5)
+        result2 = await sync_jobs.sync_movies(slice_size=5)
 
-    # Both runs process the same slice starting at 0 (wraparound after run 1)
-    assert result1["offset"] == 0
-    assert result2["offset"] == 0
-    assert mock_fetch.await_count == 2
-    for call in mock_fetch.await_args_list:
-        assert call.kwargs == {"limit": 100, "offset": 0}
+    # First run works the pending target, second one the refresh rotation.
+    assert result1["refreshed"] == 0
+    assert result2["refreshed"] == 1
+    assert result1["pending"] == 0
+    assert result2["pending"] == 0
+    assert mock_detail.await_count == 2
 
     # No duplicates
     result = await db.execute(select(func.count()).where(Movie.title == "Slice Cursor Test Movie"))
     assert result.scalar_one() == 1
-
-    # The persisted cursor wrapped to 0 (1 item < slice of 100)
-    assert await get_sync_offset(db, "MOVIE") == 0

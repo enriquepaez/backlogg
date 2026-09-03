@@ -395,26 +395,34 @@ def _mocked_session_factory():
     return MagicMock(return_value=mock_cm)
 
 
-def _job_result(synced: int, people_errors: int, offset: int = 0) -> dict:
-    return {
+def _job_result(
+    synced: int, people_errors: int, offset: int = 0, pending: int | None = None
+) -> dict:
+    result = {
         "synced": synced,
         "errors": 0,
         "people_errors": people_errors,
         "offset": offset,
         "duration_s": 0.1,
     }
+    if pending is not None:
+        result["pending"] = pending
+    return result
 
 
 async def test_run_backfill_summary_reports_people_errors():
-    """The ranking mode's summary carries people_errors instead of dropping it."""
-    results = [_job_result(synced=500, people_errors=7), _job_result(synced=300, people_errors=5)]
+    """The default mode's summary carries people_errors instead of dropping it.
+
+    Driven here through ``movie``, which since feature 86 loops on the
+    pending-target count rather than on the cursor — the people_errors
+    accumulation is the same either way.
+    """
+    results = [
+        _job_result(synced=500, people_errors=7, pending=300),
+        _job_result(synced=300, people_errors=5, pending=0),
+    ]
     with (
-        patch.object(
-            backfill_sync,
-            "get_sync_offset",
-            new_callable=AsyncMock,
-            side_effect=[0, 500, 0],
-        ),
+        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
         patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
         patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results),
     ):

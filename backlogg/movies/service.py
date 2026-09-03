@@ -93,16 +93,17 @@ def _tmdb_person_row(
     )
 
 
-async def collect_movie_credits(tmdb_id: int) -> list[BulkPerson]:
-    """Fetch a movie's credits from TMDB and map them to bulk credit rows.
+def map_movie_credits(credits_data: dict | None) -> list[BulkPerson]:
+    """Map an already-fetched TMDB credits payload to bulk credit rows.
 
-    One network call plus pure mapping: the top-10 billed cast and every
-    director, exactly the selection ``_persist_movie_people`` has always
-    persisted.  Split out for feature 84 so the batch write path can gather a
-    whole slice's people before touching the database — the mapping stays in
-    one place, used by both routes.
+    Pure mapping, no network: the top-10 billed cast and every director,
+    exactly the selection ``_persist_movie_people`` has always persisted.
+    Split out from ``collect_movie_credits`` for feature 86, whose seeding
+    path gets this very payload embedded in the detail response
+    (``/movie/{id}?append_to_response=credits,external_ids``) and must not
+    spend a second request to re-fetch it.  Mirrors
+    ``backlogg.series.service.map_series_cast``.
     """
-    credits_data = await _tmdb.get_movie_credits(tmdb_id)
     if not credits_data:
         return []
 
@@ -127,6 +128,19 @@ async def collect_movie_credits(tmdb_id: int) -> list[BulkPerson]:
             rows.append(row)
 
     return rows
+
+
+async def collect_movie_credits(tmdb_id: int) -> list[BulkPerson]:
+    """Fetch a movie's credits from TMDB and map them to bulk credit rows.
+
+    One network call plus ``map_movie_credits``.  This is the route the
+    on-demand paths use (``GET /movies/{slug}``, ``/similar``, the search
+    fan-out) and the one the targeted credits backfill uses, where the item
+    row already exists and only its credits are missing.  The seeding path
+    does **not** call it: it already holds the payload from the detail
+    response and calls ``map_movie_credits`` directly.
+    """
+    return map_movie_credits(await _tmdb.get_movie_credits(tmdb_id))
 
 
 async def _persist_movie_people(db: AsyncSession, movie: Movie, tmdb_id: int) -> None:

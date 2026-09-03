@@ -465,7 +465,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Apply to: movies, series, books, games, people, companies
+-- Apply to: movies, series, books, games, people, companies, seed_targets
 CREATE TRIGGER set_updated_at_movies BEFORE UPDATE ON movies
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 ```
@@ -487,6 +487,103 @@ CREATE TABLE sync_cursors (
 
 `updated_at` is refreshed by the application on every cursor upsert
 (no trigger — the row is only written by the sync jobs).
+
+> ⚠️ **Desde la feature 86 solo `BOOK` y `GAME` usan esta tabla.** Movies y
+> series pasaron a la lista objetivo de `seed_targets` (abajo): no hay offset
+> que avanzar porque no hay ranking que recorrer. Las filas `MOVIE`/`SERIES`
+> que ya existan **se conservan** y simplemente dejan de leerse y escribirse —
+> borrarlas dejaría un `downgrade` de la migración 0035 apuntando a un catálogo
+> que el código anterior no sabría reanudar.
+
+## Seed targets (feature 86)
+
+La lista objetivo de TMDB: **qué ítems quiere el catálogo**, enumerada por
+`/discover` bajo el umbral de calidad antes de hidratar ninguno. Separa la
+*enumeración* (~3.600 peticiones baratas) de la *hidratación* (una petición de
+detalle por ítem), que es lo que permite reanudar, ordenar y auditar la
+segunda de forma independiente de la primera.
+
+```sql
+CREATE TABLE seed_targets (
+    id              BIGSERIAL PRIMARY KEY,
+    item_type       VARCHAR(20)  NOT NULL,   -- MOVIE | SERIES
+    source          VARCHAR(20)  NOT NULL,   -- TMDB
+    external_id     VARCHAR(100) NOT NULL,   -- id del ítem en la fuente
+    vote_count      INTEGER,                 -- observado al enumerar
+    release_year    INTEGER,                 -- observado al enumerar
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TIMESTAMPTZ,
+    unreachable_at  TIMESTAMPTZ,             -- 404 en la fuente
+    discovered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_seed_target UNIQUE (item_type, source, external_id)
+);
+
+CREATE INDEX idx_seed_targets_work_order
+    ON seed_targets (item_type, source, attempts);
+```
+
+**Cómo se reanuda.** No hay marcador de progreso. Lo pendiente es una
+*diferencia contra el catálogo*, calculada en vivo:
+
+```sql
+SELECT st.external_id
+FROM seed_targets st
+LEFT JOIN external_ids ei
+  ON ei.item_type = st.item_type
+ AND ei.source     = st.source
+ AND ei.external_id = st.external_id
+WHERE st.item_type = 'MOVIE' AND st.source = 'TMDB' AND ei.id IS NULL
+  AND st.unreachable_at IS NULL
+  AND st.attempts < :max_attempts
+ORDER BY st.attempts ASC, st.vote_count DESC NULLS LAST, st.id ASC
+LIMIT :slice_size;
+```
+
+Un run que muera a mitad no deja nada que arreglar: la consulta describe
+exactamente el trabajo restante, muera como muera.
+
+**Por qué `attempts` y `unreachable_at`.** Hay targets que **nunca** podrán
+enlazarse, por dos motivos sin relación entre sí:
+
+- **404 en la fuente**: el id se enumeró pero TMDB ya no lo sirve.
+- **Id ya reclamado por otro tipo**: `uq_external_id` es único sobre `(source,
+  external_id)` **globalmente**, mientras que TMDB numera películas y series en
+  secuencias independientes. Una serie puede encontrarse su id ya reclamado por
+  una película: la fila del ítem se escribe, el enlace no.
+
+Dejarlos en el conjunto pendiente le pondría a `pending` un **suelo permanente
+> 0**, y de que `pending` llegue a 0 dependen las dos garantías del diseño: la
+rotación de refresco (que solo actúa cuando no queda nada pendiente) y la
+terminación del bucle de backfill. Así que se **retiran** de la lista de
+trabajo: `unreachable_at` sella el 404 la primera vez que se observa (respuesta
+definitiva), y `attempts` cuenta pasadas **concluyentes** —una petición fallida
+no cuenta, así que una caída de TMDB no retira un target sano— con retirada al
+llegar a `TMDB_SEED_MAX_ATTEMPTS`.
+
+El residuo no se esconde: se cuenta aparte y se reporta como `stuck` (desglosado
+en `gone` y `unlinkable`) en el resultado del job y en su log. El orden por
+`attempts` se conserva para que, antes de retirarse, un target problemático
+vaya detrás de todo lo no intentado en vez de acampar a la cabeza de la cola.
+
+> El defecto de fondo —`uq_external_id` único sobre `(source, external_id)` sin
+> incluir `item_type`— es **preexistente** y transversal a los cuatro dominios.
+> Esta feature lo mitiga y lo hace visible; no lo arregla.
+
+**Por qué `vote_count`/`release_year`.** Son gratis (viajan en el payload de
+`/discover`) y dan a la hidratación un orden por notoriedad, así que una
+siembra interrumpida deja dentro lo mejor del catálogo y no una rebanada
+arbitraria.
+
+**Rotación de refresco.** Cuando no queda nada pendiente **trabajable** —lo que
+es alcanzable gracias a la retirada de arriba—, la rebanada nocturna se llena
+con los ítems del catálogo de `last_synced_at` más antiguo
+(`get_stale_catalog_external_ids`). Es lo que sustituye —mejorándola— a la
+cobertura que el cursor de `/popular` daba por efecto colateral, y lo que
+mantiene el catálogo dentro de la ventana de caché de 6 meses de TMDB.
+
+`updated_at` sí tiene trigger (`set_updated_at_seed_targets`, reutilizando
+`trigger_set_updated_at()` de la migración 0001).
 
 ## Users
 

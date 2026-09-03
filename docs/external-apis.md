@@ -4,16 +4,76 @@
 
 - **Auth**: API key via header `Authorization: Bearer <TMDB_API_KEY>`
 - **Base URL**: `https://api.themoviedb.org/3`
-- **Rate limits**: generous free tier, no hard concerns for seed/sync workloads
+- **Rate limits**: ~50 req/s documentado. La siembra se queda en 30-40
+  (`TMDB_SEED_CONCURRENCY=8` ≈ 32 req/s con el RTT medio de TMDB).
 - **Key endpoints used**:
-  - `GET /movie/popular` — seed top-N movies
-  - `GET /movie/{tmdb_id}` — movie detail
+  - `GET /discover/movie` — **enumeración del catálogo de películas** (feature 86)
+  - `GET /discover/tv` — **enumeración del catálogo de series** (feature 86)
+  - `GET /movie/{tmdb_id}?append_to_response=credits,external_ids` — hidratación
+    de una sola petición (detalle + reparto + ids externos)
+  - `GET /tv/{tmdb_id}?append_to_response=credits,external_ids` — ídem para series
   - `GET /search/movie?query=` — on-demand fallback search
-  - `GET /tv/popular` — seed top-N series
-  - `GET /tv/{tmdb_id}` — series detail
   - `GET /search/tv?query=` — on-demand fallback
-  - `GET /movie/{tmdb_id}/credits` — cast & crew for credits sync
+  - `GET /movie/{tmdb_id}/credits` — cast & crew; sigue en uso **solo** en la
+    ruta on-demand y en el backfill dirigido (feature 85), donde la fila ya
+    existe y solo faltan los credits
+  - `GET /tv/{tmdb_id}/credits` — ídem
   - `GET /person/{person_id}` — person detail
+  - `GET /movie/popular`, `GET /tv/popular` — **ya no se usan para sembrar**.
+    Los métodos `get_top_movies`/`get_top_series` siguen existiendo como
+    clientes documentados de esos endpoints, pero ningún job los llama.
+
+### Enumeración por `/discover` (feature 86)
+
+El catálogo de movies y series se define por **umbral de `vote_count`**, no
+por número de ítems. La enumeración trocea por año de estreno:
+
+```
+GET /discover/movie?page=N
+    &include_adult=false&include_video=false
+    &sort_by=primary_release_date.asc
+    &vote_count.gte=25
+    &primary_release_date.gte=YYYY-01-01&primary_release_date.lte=YYYY-12-31
+
+GET /discover/tv?page=N
+    &sort_by=first_air_date.asc
+    &vote_count.gte=25
+    &first_air_date.gte=YYYY-01-01&first_air_date.lte=YYYY-12-31
+```
+
+Detalles que importan:
+
+- `include_adult=false` e `include_video=false` **solo existen en
+  `/discover/movie`**. `/discover/tv` no tiene `include_video` y no expone
+  contenido adulto por esta vía, así que no hay parámetro equivalente.
+- `sort_by` es por **fecha**, no por popularidad. Un orden por popularidad se
+  reordena mientras se pagina, que es exactamente el defecto que hundía el
+  recorrido por offset de `/popular`.
+- **Tope de 500 páginas**, igual que `/popular`. La guardia es explícita:
+  `backlogg/scheduler/discovery.py` lee `total_pages` de la primera página de
+  cada ventana y, si supera el tope, **trocea el año en sus doce meses**. Si un
+  mes siguiera pasándose, el run no aborta: enumera las 500 páginas que TMDB
+  sirve y **reporta la ventana truncada** (`EnumerationStats.truncated_windows`,
+  y el script sale con código 2). Medido con `vote_count ≥ 25` el peor año usa
+  el 22% del cupo, así que hoy no se dispara nunca.
+- **Limitación conocida**: un ítem sin fecha de estreno no cae en ninguna
+  ventana y por tanto no se enumera. Con `vote_count ≥ 25` es un caso residual;
+  esos ítems siguen entrando por el fallback on-demand y por el fan-out de
+  búsqueda.
+
+### `append_to_response` (feature 86)
+
+`GET /movie/{id}?append_to_response=credits,external_ids` devuelve el detalle,
+el cuerpo de `/movie/{id}/credits` bajo la clave `credits` y el de
+`/movie/{id}/external_ids` bajo `external_ids`, **al precio de una sola
+petición**. La hidratación pasó de 2 peticiones por ítem a 1: sobre 57.135
+movies son 57.135 peticiones ahorradas.
+
+Consecuencia operativa: en el job nocturno de movies/series ya no existe un
+fallo *independiente* de credits. Si la petición falla, falla el ítem entero y
+cuenta en `errors`. `people_errors` sigue vivo pero ahora solo recoge fallos de
+**escritura** de people/credits (filas rechazadas por el lote, o el fallback
+por ítem), no de red.
 
 - **⚠️ Slug strategy**: la afirmación histórica de este documento («TMDB
   provides its own `slug` field, use it directly») **es incorrecta**. El
@@ -38,10 +98,16 @@
     regenerar los vectores de movies/series sin la sinopsis, o limitar la capa
     semántica a books y games — `item_embeddings` es polimórfica por
     `item_type`, así que replegarse es reprocesar dos tipos, no rediseñar.
-- **⚠️ Caché**: prohibido cachear datos de TMDB más de **6 meses**. Con
-  `SYNC_SLICE_SIZE=100` sobre 10.000 ítems el ciclo completo son 100 días —
-  dentro de la ventana, pero sin margen. Subir `SEED_TOP_N_*` sin subir el
-  slice sacaría al proyecto de los términos.
+- **⚠️ Caché**: prohibido cachear datos de TMDB más de **6 meses**. Desde la
+  feature 86 esto lo cubre la **rotación de refresco**: cuando no quedan
+  targets pendientes trabajables, la rebanada nocturna se llena con los ítems de
+  `last_synced_at` más antiguo (`get_stale_catalog_external_ids`). Que esa
+  condición sea alcanzable depende de la retirada de targets inalcanzables
+  (`docs/seeding-plan.md` §3): sin ella la rotación no se dispararía nunca y la
+  obligación de los 6 meses se perdería. Para cubrir
+  57.135 movies en 180 días hacen falta ~318/noche, así que
+  `SYNC_SLICE_SIZE_MOVIES` debe estar en ~350; series necesita ~61. Ver
+  `docs/seeding-plan.md` §2.3.
 - **external_ids source value**: `TMDB`
 
 ## Open Library (Books)
@@ -629,10 +695,16 @@
 | `TMDB_API_KEY`         | TMDB client   | Bearer token for TMDB API                        |
 | `TWITCH_CLIENT_ID`     | IGDB client   | Twitch app client ID                             |
 | `TWITCH_CLIENT_SECRET` | IGDB client   | Twitch app client secret                         |
-| `SEED_TOP_N_MOVIES`    | Sync job      | How many movies to seed (default: 100)           |
-| `SEED_TOP_N_SERIES`    | Sync job      | How many series to seed (default: 100)           |
+| `SEED_TOP_N_MOVIES`    | — | **INERTE desde la feature 86.** El catálogo de movies lo define `TMDB_SEED_MIN_VOTES_MOVIES`, no un número de ítems. Se conserva porque Render y el workflow de backfill la exportan (default: 100) |
+| `SEED_TOP_N_SERIES`    | — | **INERTE desde la feature 86**, ídem (default: 100) |
 | `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
 | `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
+| `TMDB_SEED_MIN_VOTES_MOVIES` | Enumeración TMDB | Umbral `vote_count.gte` que define el catálogo de películas (default: 25 → 57.135 movies) |
+| `TMDB_SEED_MIN_VOTES_SERIES` | Enumeración TMDB | Ídem para series (default: 25 → 10.880 series) |
+| `TMDB_SEED_START_YEAR` | Enumeración TMDB | Primer año de estreno a enumerar (default: 1874, el más antiguo de TMDB) |
+| `TMDB_SEED_END_YEAR`   | Enumeración TMDB | Último año; vacío = año actual + 1 (TMDB ya trae estrenos futuros fechados) |
+| `TMDB_SEED_CONCURRENCY`| Enumeración + hidratación TMDB | Peticiones TMDB en vuelo (`Semaphore`). Default 8 ≈ 32 req/s frente al límite de ~50 |
+| `TMDB_SEED_MAX_ATTEMPTS`| Hidratación TMDB | Pasadas **concluyentes** que recibe un target antes de retirarse de la lista de trabajo como no enlazable (default: 3). Una petición fallida no cuenta, así que una caída de TMDB no retira targets sanos |
 | `BOOKS_SEED_MIN_READINGLOG`    | Open Library seed | Mínimo `readinglog_count` del stream inglés (default: 20 → 16.959 obras) |
 | `BOOKS_SEED_MIN_READINGLOG_ES` | Open Library seed | Ídem para el stream en castellano; la señal es ~10× menor, por eso es distinto (default: 5 → 1.858 obras) |
 | `BOOKS_SEED_MIN_PAGES`         | Open Library seed | Mínimo `number_of_pages_median`; descarta folletos (default: 100) |
@@ -640,6 +712,7 @@
 | `BOOKS_SEED_MIN_EDITIONS_ES`   | Open Library seed | Ídem para el stream en castellano. **No subir a 3**: *Reina roja* tiene exactamente 2 ediciones (default: 2) |
 | `BOOKS_SEED_ES_EVERY_N`        | Open Library seed | Una obra en castellano cada N huecos sembrados; 0 desactiva el stream ES (default: 10) |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
+| `SYNC_SLICE_SIZE_MOVIES` / `_SERIES` / `_BOOKS` / `_GAMES` | Sync job | Override por tipo del anterior. Movies necesita ~350/noche y series ~61 para la ventana de 6 meses de TMDB (default: sin valor → cae al global) |
 
 ### Roadmap — variables planificadas (features 35-40)
 

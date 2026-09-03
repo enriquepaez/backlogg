@@ -46,6 +46,15 @@ esto» del final**.
   ser un problema operativo «volver a lanzar el workflow» y pasa a resolverse
   con las features 84 y 85 — ver `issues_list.json`.
 
+> **Actualización 2026-09-03 — prerrequisito nuevo del bloque A.** Las features
+> 84, 85 y 86 están `done`. Pero la QA de la 86 destapó el **issue #20** (high):
+> `uq_external_id` es único sobre `(source, external_id)` **sin `item_type`**, y
+> los ids de TMDB de *personas* bloquean el enlace de movies y series. Medido:
+> 7 de 752 series (0,93%) se pierden en silencio hoy, y la tasa **crece con la
+> siembra** porque `people` crece ~8-10× más rápido que el catálogo.
+> **No ejecutes la siembra real contra producción hasta arreglarlo**: sembrarías
+> un catálogo con un agujero grande y creciente. Va antes que la 87.
+
 ---
 
 ## Orden acordado con el usuario (2026-09-02)
@@ -65,7 +74,7 @@ Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
 |---|---|---|
 | 1 | **84** `bulk_load_pipeline` | Prerrequisito duro de 85, 86 y 87. Además es **condición necesaria** para la ventana de caché de 6 meses de TMDB: con 57.135 movies hacen falta 318/noche frente a los 200 de `SYNC_SLICE_SIZE`, y a 3,1 s/ítem eso excede el tope de ~15 min de Render (`docs/seeding-plan.md` §2.3) |
 | 2 | **85** `backfill_credits_targeted` | Cierra el **issue #15**, que es lo que bloquea la 74. Sin esto la capa 0 de recomendación no tiene datos |
-| 3 | **86** `tmdb_discover_quality_seeding` | El catálogo real de movies/series (`vote_count ≥ 25` → 57.135 + 10.880). Rompe el techo de 10.000 de `/popular` |
+| 3 | ~~**86** `tmdb_discover_quality_seeding`~~ ✅ **done 2026-09-03** | El catálogo real de movies/series (`vote_count ≥ 25` → 57.135 + 10.880). Rompe el techo de 10.000 de `/popular` |
 | 4 | **87** `openlibrary_dump_seeding` | El catálogo real de books (18.874). Saca `search.json` del camino crítico |
 | 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |
 | 6 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |

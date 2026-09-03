@@ -991,10 +991,18 @@ POST /v1/admin/sync/{type}   type ∈ {movie, series, book, game}
 El endpoint **bloquea hasta que el sync termina** y devuelve el resultado real.
 Usar `--max-time 600` en curl para evitar timeout de cliente.
 
-Cada ejecución procesa un **tramo** de hasta `SYNC_SLICE_SIZE` items del
-listado popular, empezando en el offset persistido en `sync_cursors` para el
-tipo. El cursor avanza al terminar y vuelve a 0 al alcanzar `SEED_TOP_N_*`
-o cuando la API externa devuelve menos items de los pedidos.
+Cada ejecución procesa un **tramo** de hasta `SYNC_SLICE_SIZE` items. De dónde
+sale ese tramo depende del tipo (feature 86):
+
+- **`book` y `game`** — del listado popular de la API externa, empezando en el
+  offset persistido en `sync_cursors` para el tipo. El cursor avanza al
+  terminar y vuelve a 0 al alcanzar `SEED_TOP_N_*` o cuando la API externa
+  devuelve menos items de los pedidos.
+- **`movie` y `series`** — de la lista objetivo de `seed_targets`: los targets
+  que aún no tienen fila en `external_ids` y, si no queda ninguno, los ítems
+  del catálogo con `last_synced_at` más antiguo. **No hay cursor.** Los targets
+  que no pueden enlazarse nunca (404 en TMDB, o id ya reclamado por otro tipo)
+  se retiran de esa lista y se contabilizan aparte — ver `docs/operations.md`.
 
 Response:
 ```json
@@ -1002,15 +1010,23 @@ Response:
   "type": "movie",
   "synced": 94,
   "errors": 6,
-  "offset": 200,
+  "offset": 0,
   "duration_s": 87
 }
 ```
 
 - `synced` — número de items insertados/actualizados correctamente.
 - `errors` — número de items que fallaron (logged en servidor).
-- `offset` — offset (0-based) del tramo procesado en esta ejecución.
+- `offset` — offset (0-based) del tramo procesado en esta ejecución. **Siempre
+  `0` para `movie` y `series`**: no hay cursor detrás desde la feature 86. El
+  campo se mantiene porque el contrato lo declara obligatorio; el progreso de
+  esos dos tipos se lee en el log del job (`N targets still pending`) o
+  consultando `seed_targets` (ver `docs/operations.md`).
 - `duration_s` — segundos que tardó el sync.
+- `people_errors` — items cuyo detalle se guardó pero cuyos credits fallaron al
+  **persistirse**. Desde la feature 86 movies y series traen los credits en la
+  misma petición del detalle, así que ya no existe un fallo *de red*
+  independiente para ellos: un fallo de fetch cuenta en `errors`.
 
 **Auth**: requiere el header `X-API-Key` con el valor de la env var
 `ADMIN_API_KEY`. Header ausente o incorrecto → `401`; `ADMIN_API_KEY` sin

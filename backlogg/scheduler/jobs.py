@@ -3,12 +3,19 @@
 Each job is an independent async coroutine.  Errors are logged but never
 propagated so that a failure in one job does not abort the others.
 
-Every run processes a slice of the external API's popular listing: it reads
-the persisted cursor for its type from ``sync_cursors`` (0 if absent),
-fetches up to the type's slice size starting at that offset (never beyond
-``settings.SEED_TOP_N_<TYPE>``) and advances the cursor at the end.  The
-cursor wraps around to 0 when the target is reached or when the API returns
-fewer items than requested.
+Two enumeration models live here since feature 86:
+
+* **Books and games** keep the original one: each run processes a slice of
+  the external API's popular listing, reading the persisted cursor for its
+  type from ``sync_cursors`` (0 if absent), fetching up to the type's slice
+  size starting at that offset (never beyond ``settings.SEED_TOP_N_<TYPE>``)
+  and advancing the cursor at the end.  The cursor wraps around to 0 when the
+  target is reached or when the API returns fewer items than requested.
+* **Movies and series** are driven by the enumerated target list in
+  ``seed_targets`` instead (feature 86).  There is no cursor and no offset:
+  the work list is the *difference* between what the catalog wants and what
+  it has, and once that difference is empty the slice is filled by
+  ``last_synced_at`` rotation.  See the section at the bottom of this file.
 
 Slice size is resolved per type (feature 84): an explicit ``slice_size``
 argument wins (that is how ``scripts/backfill_sync.py`` processes bigger
@@ -37,7 +44,7 @@ bad row never takes the slice down with it.
 After a successful slice every job refreshes the catalog_search materialized
 view so search results stay current.
 
-Besides the four ranking jobs this module exposes ``sync_missing_credits``
+Besides the four sync jobs this module exposes ``sync_missing_credits``
 (feature 85): a *targeted* pass whose work list comes from the local catalog
 (``LEFT JOIN credits ... WHERE NULL``) instead of the popularity ranking,
 used to close credit holes the ranking route structurally cannot reach
@@ -56,6 +63,8 @@ slice), so ``people_errors`` is the only way to see them in
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import text
@@ -70,23 +79,26 @@ from backlogg.games import repository as games_repo
 from backlogg.games.adapters.igdb import IGDBClient
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
-from backlogg.movies.service import collect_movie_credits
+from backlogg.movies.service import collect_movie_credits, map_movie_credits
 from backlogg.people import repository as people_repo
 from backlogg.scheduler.repository import (
     CREDIT_GAP_SOURCES,
+    SEED_TARGET_SOURCES,
     CreditGap,
+    SeedTargetProgress,
+    count_seed_target_progress,
     get_credit_gaps,
+    get_pending_seed_targets,
+    get_stale_catalog_external_ids,
     get_sync_offset,
     mark_credits_synced,
+    mark_seed_targets_attempted,
+    mark_seed_targets_unreachable,
     set_sync_offset,
 )
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.service import (
-    collect_series_creators,
-    collect_series_credits,
-    map_series_cast,
-)
+from backlogg.series.service import collect_series_creators, map_series_cast
 from backlogg.shared.bulk_load import (
     BulkItem,
     BulkLoadSpec,
@@ -339,202 +351,381 @@ class _BatchWriter:
         self.people_errors += people_errors
 
 
-# ── Jobs ─────────────────────────────────────────────────────────────────────
+# ── TMDB jobs: target-driven hydration (feature 86) ───────────────────────────
+#
+# ``sync_movies``/``sync_series`` used to walk ``/movie/popular`` and
+# ``/tv/popular`` by offset.  That is gone, for the three reasons
+# ``docs/seeding-plan.md`` §1 measures: the listing caps at 10.000 items, it
+# reorders itself while being paginated (so the offset walk does not even
+# cover those 10.000), and ``popularity`` ranks *recent interest* rather than
+# notoriety.  The catalog is now defined by a ``vote_count`` threshold,
+# enumerated into ``seed_targets`` by ``scripts/seed_tmdb_targets.py``.
+#
+# What a slice does, in order:
+#
+# 1. **Pending targets first.**  ``get_pending_seed_targets`` is the
+#    difference between the enumerated target list and ``external_ids`` — the
+#    resume mechanism.  No offset, no progress marker: whatever a crashed run
+#    left undone is exactly what the next one picks up.
+# 2. **Retirement, so that "nothing is pending" is reachable.**  Some targets
+#    can never link: TMDB may answer 404 for an enumerated id, and
+#    ``uq_external_id`` is unique over ``(source, external_id)`` *globally*
+#    while TMDB numbers movies and series separately, so a series can find its
+#    id already claimed by a movie.  Left in place they would occupy a slot of
+#    every slice forever and hold ``pending`` above 0 permanently.  A 404 is
+#    stamped in ``unreachable_at`` on first sight; a target that keeps
+#    resolving without linking is retired after ``TMDB_SEED_MAX_ATTEMPTS``
+#    *conclusive* passes (a failed fetch does not count, so an outage cannot
+#    retire a healthy target).  The residue is not hidden: it comes back as
+#    ``stuck`` in the result and as a warning in the log.
+# 3. **Refresh rotation to fill the rest.**  Once nothing is pending the slice
+#    is filled with the catalog items whose ``last_synced_at`` is oldest.
+#    Without this the removal of the cursor would have *lost* something the
+#    old walk provided as a side effect: TMDB forbids caching its data beyond
+#    6 months (``docs/seeding-plan.md`` §2.3), and the wrapping cursor was
+#    what eventually revisited everything.  Rotating by ``last_synced_at`` is
+#    the same guarantee, stated directly instead of emerging from a ranking.
+#    It only works because of step 2.
+# 4. **One request per item.**  ``append_to_response=credits,external_ids``
+#    folds what used to be a second ``/{id}/credits`` call into the detail
+#    request, halving the HTTP of a full catalog pass.
+# 5. **Parallel fetch, sequential write.**  ``asyncio.gather`` under a
+#    ``Semaphore`` (``TMDB_SEED_CONCURRENCY``, default 8 ≈ 32 req/s against
+#    TMDB's ~50 limit), then the feature-84 batch writer — ``AsyncSession`` is
+#    not safe for concurrent use.
+#
+# ``SEED_TOP_N_MOVIES``/``SEED_TOP_N_SERIES`` take no part in any of this: the
+# catalog is defined by ``TMDB_SEED_MIN_VOTES_*`` and the nightly volume by
+# ``SYNC_SLICE_SIZE_*``.  See ``backlogg/core/config.py``.
+
+# Sub-resources folded into the detail request.  ``external_ids`` is not read
+# yet — feature 74 (SOURCE_AUTHOR) is what consumes it — but it rides along
+# for free and asking for it now means that feature costs zero extra requests.
+_TMDB_APPEND_TO_RESPONSE = "credits,external_ids"
+
+
+async def _fetch_movie_payload(external_id: str) -> tuple[dict, list[BulkPerson]] | None:
+    """Detail + credits for one movie in a single request. None on a 404."""
+    detail = await _tmdb_movies.get_movie_detail(
+        int(external_id), append_to_response=_TMDB_APPEND_TO_RESPONSE
+    )
+    if detail is None:
+        return None
+    return _tmdb_movies.movie_to_dict(detail), map_movie_credits(detail.get("credits"))
+
+
+async def _fetch_series_payload(external_id: str) -> tuple[dict, list[BulkPerson]] | None:
+    """Detail + cast + creators for one series in a single request. None on a 404.
+
+    CREATOR credits come from ``created_by``, which lives in the detail body
+    and not in ``/tv/{id}/credits`` — so the single request is strictly more
+    informative than the two it replaces, not just cheaper.
+    """
+    detail = await _tmdb_series.get_series_detail(
+        int(external_id), append_to_response=_TMDB_APPEND_TO_RESPONSE
+    )
+    if detail is None:
+        return None
+    people = map_series_cast(detail.get("credits"))
+    people += collect_series_creators(detail.get("created_by", []))
+    return _tmdb_series.series_to_dict(detail), people
+
+
+@dataclass(frozen=True, slots=True)
+class _TmdbSeedSpec:
+    """The three things that differ between the movie and the series job."""
+
+    item_type: str
+    job_name: str
+    metric_label: str
+    bulk_spec: BulkLoadSpec
+    fetch: Callable[[str], Awaitable[tuple[dict, list[BulkPerson]] | None]]
+
+
+def _movie_seed_spec() -> _TmdbSeedSpec:
+    return _TmdbSeedSpec(
+        item_type="MOVIE",
+        job_name="sync_movies",
+        metric_label="movie",
+        bulk_spec=movies_repo.MOVIE_BULK_SPEC,
+        fetch=_fetch_movie_payload,
+    )
+
+
+def _series_seed_spec() -> _TmdbSeedSpec:
+    return _TmdbSeedSpec(
+        item_type="SERIES",
+        job_name="sync_series",
+        metric_label="series",
+        bulk_spec=series_repo.SERIES_BULK_SPEC,
+        fetch=_fetch_series_payload,
+    )
+
+
+async def _read_seed_work_list(
+    item_type: str, source: str, slice_size: int
+) -> tuple[list[str], list[str], SeedTargetProgress]:
+    """Return ``(pending_ids, refresh_ids, progress)`` for one slice.
+
+    The two lists are disjoint by construction: pending targets are the ones
+    *without* an ``external_ids`` row and the refresh rotation only walks
+    items that have one.
+
+    The rotation fills whatever the pending targets leave over.  That is only
+    a real guarantee because ``pending`` is *workable* pending: retired
+    targets (404 at TMDB, or an id another item type already claimed) are out
+    of both the list and the count, so the condition below can actually be
+    met.  Before retirement existed, a permanent floor of unlinkable targets
+    would have kept this branch from ever running — and with it TMDB's
+    6-month cache-window obligation from ever being met.
+    """
+    max_attempts = max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
+    async with async_session_factory() as session:
+        progress = await count_seed_target_progress(session, item_type, source, max_attempts)
+        pending = await get_pending_seed_targets(
+            session, item_type, source, slice_size, max_attempts
+        )
+        refresh: list[str] = []
+        if len(pending) < slice_size:
+            refresh = await get_stale_catalog_external_ids(
+                session, item_type, source, slice_size - len(pending)
+            )
+    return pending, refresh, progress
+
+
+async def _fetch_seed_item_guarded(
+    sem: asyncio.Semaphore, spec: _TmdbSeedSpec, external_id: str
+) -> tuple[dict, list[BulkPerson]] | None:
+    """Fetch one item under *sem*; exceptions propagate to ``gather``."""
+    async with sem:
+        return await spec.fetch(external_id)
+
+
+def _seed_failure_result(start: float) -> dict:
+    """Result dict for a slice that could not even build its work list.
+
+    ``pending`` and ``stuck`` are ``None``, not 0: the work list could not be
+    read, so how much work is left is *unknown*.  Reporting 0 would tell every
+    consumer — the log line, the backfill loop's stop condition — that the
+    catalog is complete because the database was down.
+    """
+    return {
+        "synced": 0,
+        "errors": 1,
+        "people_errors": 0,
+        "offset": 0,
+        "duration_s": round(time.monotonic() - start, 1),
+        "pending": None,
+        "stuck": None,
+        "refreshed": 0,
+    }
+
+
+async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) -> dict:
+    """Hydrate one slice of ``spec.item_type`` from the enumerated target list.
+
+    Returns the same keys the ranking jobs return — ``synced``, ``errors``,
+    ``people_errors``, ``offset`` and ``duration_s``, which is the contract
+    ``POST /admin/sync/{type}`` and ``.github/workflows/nightly-sync.yml``
+    consume — plus ``pending`` and ``refreshed``.
+
+    ``offset`` is kept at a constant 0: there is no cursor behind these two
+    types any more, but ``SyncResponse`` declares the field as required and
+    silently dropping it would turn a 200 into a 500.  ``pending`` (workable
+    targets still missing from the catalog after this slice) is what replaces
+    it as the progress signal, and it is what ``scripts/backfill_sync.py``
+    loops on; ``stuck`` is the residue that was retired from the work list and
+    will not come back on its own.
+    """
+    logger.info("%s: starting", spec.job_name)
+    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": spec.metric_label})
+    start = time.monotonic()
+    source = SEED_TARGET_SOURCES[spec.item_type]
+    size = max(1, _resolve_slice_size(spec.item_type, slice_size))
+
+    try:
+        pending, refresh, progress = await _read_seed_work_list(spec.item_type, source, size)
+    except Exception:
+        logger.exception("%s: failed to read the seed work list", spec.job_name)
+        return _seed_failure_result(start)
+
+    work = pending + refresh
+    logger.info(
+        "%s: %d workable target(s) pending (%d gone from TMDB, %d unlinkable) — this "
+        "slice takes %d of them plus %d refresh item(s) by oldest last_synced_at",
+        spec.job_name,
+        progress.pending,
+        progress.gone,
+        progress.unlinkable,
+        len(pending),
+        len(refresh),
+    )
+    if not work:
+        logger.info("%s: nothing to do — no pending targets and an empty catalog", spec.job_name)
+        return {
+            "synced": 0,
+            "errors": 0,
+            "people_errors": 0,
+            "offset": 0,
+            "duration_s": round(time.monotonic() - start, 1),
+            "pending": progress.pending,
+            "stuck": progress.stuck,
+            "refreshed": 0,
+        }
+
+    sem = asyncio.Semaphore(max(1, settings.TMDB_SEED_CONCURRENCY))
+    chunk_size = max(1, settings.BULK_LOAD_BATCH_SIZE)
+    errors = 0
+    # Targets from the pending list whose fetch reached a *conclusive* answer,
+    # split by which answer.  A fetch that raised belongs to neither: it is
+    # retried next run without spending any of the target's budget.
+    resolved: list[str] = []
+    gone: list[str] = []
+    pending_targets = set(pending)
+
+    async with async_session_factory() as session:
+        writer = _BatchWriter(session, spec.bulk_spec, spec.job_name)
+        for chunk_start in range(0, len(work), chunk_size):
+            chunk = work[chunk_start : chunk_start + chunk_size]
+
+            # Fetch phase — parallel, bounded by the semaphore.
+            fetched = await asyncio.gather(
+                *(_fetch_seed_item_guarded(sem, spec, external_id) for external_id in chunk),
+                return_exceptions=True,
+            )
+
+            # Persist phase — sequential: AsyncSession is not concurrency-safe.
+            for external_id, outcome in zip(chunk, fetched, strict=True):
+                if isinstance(outcome, BaseException):
+                    logger.warning(
+                        "%s: fetch failed for external_id=%s (%s) — not counted as an "
+                        "attempt, will retry next run",
+                        spec.job_name,
+                        external_id,
+                        outcome,
+                    )
+                    errors += 1
+                    continue
+                if outcome is None:
+                    # 404 at TMDB: the id was enumerated but has since been
+                    # deleted or merged. Not an error — nothing to write, and
+                    # a definitive answer, so the target is retired now rather
+                    # than re-asked on every future run.
+                    logger.info(
+                        "%s: external_id=%s is gone from TMDB (404) — retiring the target",
+                        spec.job_name,
+                        external_id,
+                    )
+                    if external_id in pending_targets:
+                        gone.append(external_id)
+                    continue
+                data, people = outcome
+                if external_id in pending_targets:
+                    resolved.append(external_id)
+                await writer.add(BulkItem(data=data, external_id=external_id, people=people))
+            await writer.flush()
+
+        # Book-keeping for the pending targets this slice actually resolved.
+        # Counting only conclusive outcomes is what makes retirement safe: a
+        # TMDB outage costs nothing, while a target that keeps resolving and
+        # never linking runs out of passes and leaves the work list.
+        try:
+            now = datetime.now(UTC)
+            await mark_seed_targets_attempted(session, spec.item_type, source, resolved, now)
+            await mark_seed_targets_unreachable(session, spec.item_type, source, gone, now)
+            await session.commit()
+        except Exception:
+            logger.exception("%s: failed to stamp seed target outcomes", spec.job_name)
+            await rollback_quietly(session, spec.job_name)
+
+        after = progress
+        try:
+            after = await count_seed_target_progress(
+                session, spec.item_type, source, max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
+            )
+        except Exception:
+            logger.exception("%s: failed to recount seed target progress", spec.job_name)
+
+        try:
+            await _refresh_catalog_search(session)
+        except Exception:
+            logger.exception("%s: failed to refresh catalog_search", spec.job_name)
+
+    synced = writer.synced
+    errors += writer.errors
+    people_errors = writer.people_errors
+    logger.info(
+        "%s: done — %d items upserted, %d errors, %d people_errors, %d gone from TMDB "
+        "(%d targets still pending, %d stuck: %d gone, %d unlinkable)",
+        spec.job_name,
+        synced,
+        errors,
+        people_errors,
+        len(gone),
+        after.pending,
+        after.stuck,
+        after.gone,
+        after.unlinkable,
+    )
+    if after.unlinkable:
+        # Not a failure of this run, but the operator has to be able to see it:
+        # these targets are enumerated, will never link, and the cause is the
+        # pre-existing global uq_external_id (docs/schema.md).
+        logger.warning(
+            "%s: %d target(s) retired as unlinkable after %d conclusive passes — their "
+            "(source, external_id) pair is claimed by another item type",
+            spec.job_name,
+            after.unlinkable,
+            max(1, settings.TMDB_SEED_MAX_ATTEMPTS),
+        )
+    return {
+        "synced": synced,
+        "errors": errors,
+        "people_errors": people_errors,
+        "offset": 0,
+        "duration_s": round(time.monotonic() - start, 1),
+        "pending": after.pending,
+        "stuck": after.stuck,
+        "refreshed": len(refresh),
+    }
 
 
 async def sync_movies(slice_size: int | None = None) -> dict:
-    """Fetch a slice of top popular movies from TMDB and upsert them locally.
+    """Hydrate a slice of the enumerated movie catalog from TMDB.
 
-    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_MOVIES`` (which itself
-    overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
-    ``offset`` and ``duration_s``.
+    Work list: the movie targets in ``seed_targets`` that the catalog does not
+    have yet (``TMDB_SEED_MIN_VOTES_MOVIES`` decides which items are targets
+    at all), topped up by the least recently synced movies once none are
+    pending.  ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_MOVIES``
+    (which itself overrides the global ``settings.SYNC_SLICE_SIZE``).
+
+    Returns a dict with ``synced``, ``errors``, ``people_errors``, ``offset``
+    (always 0 — no cursor), ``duration_s``, ``pending`` (workable targets left),
+    ``stuck`` (targets retired as unreachable/unlinkable) and ``refreshed``.
     """
-    logger.info("sync_movies: starting")
-    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "movie"})
-    start = time.monotonic()
-    errors = 0
-    people_errors = 0
-    target = settings.SEED_TOP_N_MOVIES
-
-    try:
-        offset, slice_size = await _read_slice("MOVIE", target, slice_size)
-    except Exception:
-        logger.exception("sync_movies: failed to read sync cursor")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "offset": 0,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
-
-    try:
-        raw_list = await _tmdb_movies.get_top_movies(limit=slice_size, offset=offset)
-    except Exception:
-        logger.exception("sync_movies: failed to fetch from TMDB")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "offset": offset,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
-
-    async with async_session_factory() as session:
-        writer = _BatchWriter(session, movies_repo.MOVIE_BULK_SPEC, "sync_movies")
-        for raw in raw_list:
-            try:
-                tmdb_id = raw.get("id")
-                if not tmdb_id:
-                    continue
-
-                detail = await _tmdb_movies.get_movie_detail(tmdb_id)
-                if detail is None:
-                    continue
-
-                movie_data = _tmdb_movies.movie_to_dict(detail)
-            except Exception:
-                logger.exception("sync_movies: error fetching tmdb_id=%s", raw.get("id"))
-                errors += 1
-                continue
-
-            try:
-                people = await collect_movie_credits(tmdb_id)
-            except Exception:
-                # A credits failure must not cost the item itself.
-                logger.exception("sync_movies: failed to fetch credits for tmdb_id=%s", tmdb_id)
-                people_errors += 1
-                people = []
-
-            await writer.add(BulkItem(data=movie_data, external_id=str(tmdb_id), people=people))
-        await writer.flush()
-
-        await _persist_cursor(
-            session, "MOVIE", _next_offset(offset, len(raw_list), slice_size, target), "sync_movies"
-        )
-
-        try:
-            await _refresh_catalog_search(session)
-        except Exception:
-            logger.exception("sync_movies: failed to refresh catalog_search")
-
-    synced = writer.synced
-    errors += writer.errors
-    people_errors += writer.people_errors
-    logger.info(
-        "sync_movies: done — %d items upserted, %d errors, %d people_errors (offset %d)",
-        synced,
-        errors,
-        people_errors,
-        offset,
-    )
-    return {
-        "synced": synced,
-        "errors": errors,
-        "people_errors": people_errors,
-        "offset": offset,
-        "duration_s": round(time.monotonic() - start, 1),
-    }
+    return await _sync_tmdb_type(_movie_seed_spec(), slice_size)
 
 
 async def sync_series(slice_size: int | None = None) -> dict:
-    """Fetch a slice of popular TV series from TMDB and upsert them locally.
+    """Hydrate a slice of the enumerated series catalog from TMDB.
 
-    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_SERIES`` (which itself
-    overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
-    ``offset`` and ``duration_s``.
+    Same shape as ``sync_movies``, with ``TMDB_SEED_MIN_VOTES_SERIES`` and
+    ``settings.SYNC_SLICE_SIZE_SERIES``.  Series need a far smaller nightly
+    slice than movies (10.880 items against 57.135, so ~61/night against ~318
+    to stay inside TMDB's 6-month cache window), which is exactly why the
+    slice size is configurable per type.
     """
-    logger.info("sync_series: starting")
-    get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "series"})
-    start = time.monotonic()
-    errors = 0
-    people_errors = 0
-    target = settings.SEED_TOP_N_SERIES
+    return await _sync_tmdb_type(_series_seed_spec(), slice_size)
 
-    try:
-        offset, slice_size = await _read_slice("SERIES", target, slice_size)
-    except Exception:
-        logger.exception("sync_series: failed to read sync cursor")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "offset": 0,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
 
-    try:
-        raw_list = await _tmdb_series.get_top_series(limit=slice_size, offset=offset)
-    except Exception:
-        logger.exception("sync_series: failed to fetch from TMDB")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "offset": offset,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
-
-    async with async_session_factory() as session:
-        writer = _BatchWriter(session, series_repo.SERIES_BULK_SPEC, "sync_series")
-        for raw in raw_list:
-            try:
-                tmdb_id = raw.get("id")
-                if not tmdb_id:
-                    continue
-
-                detail = await _tmdb_series.get_series_detail(tmdb_id)
-                if detail is None:
-                    continue
-
-                series_data = _tmdb_series.series_to_dict(detail)
-            except Exception:
-                logger.exception("sync_series: error fetching tmdb_id=%s", raw.get("id"))
-                errors += 1
-                continue
-
-            try:
-                people = await collect_series_credits(tmdb_id)
-                people += collect_series_creators(detail.get("created_by", []))
-            except Exception:
-                logger.exception("sync_series: failed to fetch credits for tmdb_id=%s", tmdb_id)
-                people_errors += 1
-                people = []
-
-            await writer.add(BulkItem(data=series_data, external_id=str(tmdb_id), people=people))
-        await writer.flush()
-
-        await _persist_cursor(
-            session,
-            "SERIES",
-            _next_offset(offset, len(raw_list), slice_size, target),
-            "sync_series",
-        )
-
-        try:
-            await _refresh_catalog_search(session)
-        except Exception:
-            logger.exception("sync_series: failed to refresh catalog_search")
-
-    synced = writer.synced
-    errors += writer.errors
-    people_errors += writer.people_errors
-    logger.info(
-        "sync_series: done — %d items upserted, %d errors, %d people_errors (offset %d)",
-        synced,
-        errors,
-        people_errors,
-        offset,
-    )
-    return {
-        "synced": synced,
-        "errors": errors,
-        "people_errors": people_errors,
-        "offset": offset,
-        "duration_s": round(time.monotonic() - start, 1),
-    }
+# ── Ranking jobs: books and games ────────────────────────────────────────────
+#
+# These two keep the cursor walk unchanged.  Open Library's seed query is
+# already a *filtered* search (feature 73's notoriety thresholds), not a raw
+# popularity ranking, and IGDB returns 500 fully-hydrated games per request
+# with its own quality clause — neither suffers the problems that forced
+# movies and series off ``/popular``.  Books get their own enumeration rework
+# in feature 87 (Open Library dumps); games need none.
 
 
 async def sync_books(slice_size: int | None = None) -> dict:

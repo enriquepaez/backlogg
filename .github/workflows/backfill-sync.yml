@@ -13,20 +13,26 @@ on:
           - book
           - game
       mode:
-        description: 'ranking = walk the popularity listing (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
+        description: 'enumerate = fill seed_targets from /discover (movie/series only, feature 86); hydrate = run the sync job in a loop (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
         required: true
         type: choice
-        default: ranking
+        default: hydrate
         options:
-          - ranking
+          - enumerate
+          - hydrate
           - credits
+      min_votes:
+        description: 'enumerate mode only — vote_count.gte threshold (blank = TMDB_SEED_MIN_VOTES_* default, 25)'
+        required: false
+        type: string
+        default: ''
       recheck:
         description: 'credits mode only — re-visit items already stamped with credits_synced_at'
         required: false
         type: boolean
         default: false
       seed_top_n:
-        description: 'ranking mode only — sync target per type, must match SEED_TOP_N_* on Render'
+        description: 'hydrate mode, book/game only — cursor wraparound target, must match SEED_TOP_N_* on Render (inert for movie/series since feature 86)'
         required: false
         type: string
         default: '10000'
@@ -46,8 +52,12 @@ jobs:
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-      # Wraparound target — must match production's SEED_TOP_N_* (Render),
-      # otherwise the shared sync_cursors cursor wraps too early.
+      # Wraparound target for the cursor-driven types — must match
+      # production's SEED_TOP_N_* (Render), otherwise the shared sync_cursors
+      # cursor wraps too early. SEED_TOP_N_MOVIES/_SERIES are inert since
+      # feature 86 (movies and series are driven by seed_targets, not by a
+      # cursor); they are still exported so the two configurations stay
+      # literally identical and nothing drifts unnoticed.
       SEED_TOP_N_MOVIES: ${{ github.event.inputs.seed_top_n }}
       SEED_TOP_N_SERIES: ${{ github.event.inputs.seed_top_n }}
       SEED_TOP_N_BOOKS: ${{ github.event.inputs.seed_top_n }}
@@ -66,8 +76,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run backfill (ranking mode)
-        if: ${{ github.event.inputs.mode == 'ranking' }}
+      # Enumeration (feature 86): fills seed_targets from /discover under the
+      # vote_count threshold, sliced by release year. Fetches no item detail
+      # and writes no catalog row — it only decides *which* items the catalog
+      # wants. Must run before the first hydrate of movie/series, and again
+      # whenever the threshold changes or new titles cross it (promotion, see
+      # docs/seeding-plan.md §6). Exit code 2 = a window hit the 500-page cap
+      # and the list is incomplete.
+      - name: Enumerate seed targets
+        if: ${{ github.event.inputs.mode == 'enumerate' }}
+        run: |
+          case "${{ github.event.inputs.content_type }}" in
+            movie|series) ;;
+            *)
+              echo "::error::enumerate mode only supports 'movie' and 'series' — books use Open Library dumps and games a single IGDB query"
+              exit 1
+              ;;
+          esac
+          uv run python scripts/seed_tmdb_targets.py "${{ github.event.inputs.content_type }}" \
+            ${{ github.event.inputs.min_votes != '' && format('--min-votes {0}', github.event.inputs.min_votes) || '' }}
+
+      - name: Run backfill (hydrate mode)
+        if: ${{ github.event.inputs.mode == 'hydrate' }}
         run: uv run python scripts/backfill_sync.py "${{ github.event.inputs.content_type }}"
 
       # Targeted credits backfill (feature 85): the work list comes from a

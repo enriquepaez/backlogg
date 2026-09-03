@@ -25,12 +25,31 @@ much is fetched per iteration, while ``BULK_LOAD_BATCH_SIZE`` controls how
 much is written per transaction (and therefore how much a batch fallback has
 to redo).
 
-Two modes (feature 85)
-----------------------
+Two work lists (features 85 and 86)
+-----------------------------------
 
-**Ranking mode** (default) is everything described above: it walks the
-external API's popular listing by offset and is, until feature 86 lands, the
-only mass-seeding route the project has.
+**Default mode** runs the type's sync job in a loop.  What that job walks
+depends on the type, and since feature 86 the two are different:
+
+- ``book`` and ``game`` walk the external API's popular listing by offset,
+  with the cursor in ``sync_cursors``; the loop stops when it wraps to 0.
+- ``movie`` and ``series`` walk the enumerated target list in ``seed_targets``
+  — the difference between the catalog the quality threshold defines and the
+  catalog that exists.  There is no cursor: the job reports how many targets
+  are still ``pending`` and the loop stops when that reaches 0.  Fill that
+  list first with ``scripts/seed_tmdb_targets.py``; with an empty list there
+  is nothing pending and the run ends immediately (the nightly job would then
+  spend its slice on the ``last_synced_at`` refresh rotation instead, which is
+  its job and not a backfill's).
+
+  That stop condition is reachable because ``pending`` counts *workable*
+  targets only.  A target TMDB answers 404 for, or one whose
+  ``(source, external_id)`` pair another item type already claimed
+  (``uq_external_id`` is global — see ``docs/schema.md``), is retired from the
+  work list and reported apart in ``stuck``.  Without that, the loop would
+  spin re-hydrating the same unlinkable items until the time budget expired:
+  they *do* write their row, so ``synced > 0`` and the no-progress guard below
+  would not fire either.
 
 **Targeted credits mode** (``--only-missing-credits``) exists because the
 ranking mode cannot close credit holes (issue #15): the items missing credits
@@ -47,6 +66,7 @@ that stamp).  ``game`` is rejected: games have no people credits.
 
 Usage::
 
+    uv run python scripts/seed_tmdb_targets.py movie   # enumerate first
     uv run python scripts/backfill_sync.py movie
     uv run python scripts/backfill_sync.py game --slice-size 500 --time-budget-minutes 300
     uv run python scripts/backfill_sync.py series --only-missing-credits
@@ -96,6 +116,10 @@ _JOB_NAMES: dict[str, str] = {
     "game": "sync_games",
 }
 
+# Types whose progress is a pending-target count instead of a cursor offset
+# (feature 86).  ``sync_cursors`` is not read or written for these at all.
+_TARGET_DRIVEN: frozenset[str] = frozenset({"movie", "series"})
+
 
 class BackfillError(RuntimeError):
     """Raised when an iteration fails without syncing anything (no progress)."""
@@ -110,14 +134,16 @@ async def _read_cursor(item_type: str) -> int:
 async def run_backfill(content_type: str, slice_size: int, time_budget_s: float) -> dict:
     """Run the sync job for ``content_type`` in a loop until done or out of budget.
 
-    Stops when the persisted cursor wraps around to 0 (target reached or the
-    external API exhausted) or when ``time_budget_s`` elapses.  Raises
-    :class:`BackfillError` if an iteration finishes with errors and zero
-    synced items — retrying the same slice would loop forever.
+    Stops when there is no work left — the persisted cursor wrapping around
+    to 0 for ``book``/``game``, the pending-target count reaching 0 for
+    ``movie``/``series`` (feature 86) — or when ``time_budget_s`` elapses.
+    Raises :class:`BackfillError` if an iteration finishes with errors and
+    zero synced items — retrying the same slice would loop forever.
 
     Returns a summary dict with ``content_type``, ``iterations``, ``synced``,
-    ``errors``, ``people_errors``, ``next_offset``, ``elapsed_s`` and
-    ``stop_reason`` (``"wraparound"`` or ``"time_budget"``).
+    ``errors``, ``people_errors``, ``next_offset``, ``pending``, ``stuck``,
+    ``elapsed_s`` and ``stop_reason`` (``"wraparound"``, ``"exhausted"`` or
+    ``"time_budget"``).
 
     ``people_errors`` counts items whose credits could not be persisted while
     the item itself was upserted fine.  It used to be read off each job result
@@ -127,6 +153,7 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     people credits), hence the ``.get`` default.
     """
     item_type = _ITEM_TYPES[content_type]
+    target_driven = content_type in _TARGET_DRIVEN
     # Resolved at call time (not captured in a dict) so tests can patch the job.
     job = getattr(jobs, _JOB_NAMES[content_type])
 
@@ -136,12 +163,14 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     total_errors = 0
     total_people_errors = 0
     stop_reason = "time_budget"
-    next_offset = await _read_cursor(item_type)
+    next_offset = 0 if target_driven else await _read_cursor(item_type)
+    pending: int | None = None
+    stuck: int | None = None
 
     logger.info(
-        "backfill %s: starting at offset %d (slice_size=%d, batch_size=%d, time_budget=%.0fs)",
+        "backfill %s: starting (%s, slice_size=%d, batch_size=%d, time_budget=%.0fs)",
         content_type,
-        next_offset,
+        "seed_targets work list" if target_driven else f"cursor offset {next_offset}",
         slice_size,
         settings.BULK_LOAD_BATCH_SIZE,
         time_budget_s,
@@ -160,23 +189,41 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
                 f"({result['errors']} errors, 0 synced) — aborting"
             )
 
-        next_offset = await _read_cursor(item_type)
+        if not target_driven:
+            next_offset = await _read_cursor(item_type)
+        pending = result.get("pending")
+        stuck = result.get("stuck")
         elapsed = time.monotonic() - start
         logger.info(
             "backfill %s: iteration %d — %d synced, %d errors, %d people_errors in %.1fs "
-            "(slice offset %d, next offset %d, elapsed %.0fs)",
+            "(%s, elapsed %.0fs)",
             content_type,
             iterations,
             result["synced"],
             result["errors"],
             result.get("people_errors", 0),
             result["duration_s"],
-            result["offset"],
-            next_offset,
+            f"{pending} targets pending, {stuck} stuck"
+            if target_driven
+            else f"slice offset {result['offset']}, next offset {next_offset}",
             elapsed,
         )
 
-        if next_offset == 0:
+        if target_driven:
+            # Stop as soon as the catalog holds every workable target. Any
+            # further iteration would only re-sync the oldest items — that is
+            # the nightly refresh rotation's job, not a backfill's, and it
+            # would never terminate.
+            #
+            # Compared against 0 explicitly, never truthiness: a job that could
+            # not read its work list reports ``pending: None``, and treating
+            # "unknown" as "done" would turn a database outage into a green
+            # run. (That path also raises BackfillError above, but the stop
+            # condition must not depend on the order of two guards.)
+            if pending == 0:
+                stop_reason = "exhausted"
+                break
+        elif next_offset == 0:
             stop_reason = "wraparound"
             break
         if elapsed >= time_budget_s:
@@ -190,6 +237,8 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
         "errors": total_errors,
         "people_errors": total_people_errors,
         "next_offset": next_offset,
+        "pending": pending,
+        "stuck": stuck,
         "elapsed_s": round(time.monotonic() - start, 1),
         "stop_reason": stop_reason,
     }
@@ -340,14 +389,17 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info(
         "backfill %s: finished (%s) — %d iterations, %d synced, %d errors, "
-        "%d people_errors, next offset %d, %.0fs elapsed",
+        "%d people_errors, %s, %.0fs elapsed",
         summary["content_type"],
         summary["stop_reason"],
         summary["iterations"],
         summary["synced"],
         summary["errors"],
         summary.get("people_errors", 0),
-        summary["next_offset"],
+        f"{summary['pending']} targets pending, {summary.get('stuck')} stuck "
+        f"(retired: 404 at the source or id claimed by another type)"
+        if args.content_type in _TARGET_DRIVEN
+        else f"next offset {summary['next_offset']}",
         summary["elapsed_s"],
     )
     return 0

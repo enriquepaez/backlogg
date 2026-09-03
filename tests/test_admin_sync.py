@@ -12,6 +12,11 @@ from sqlalchemy import func, select
 from backlogg.main import app
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
+from backlogg.scheduler.repository import (
+    SeedTargetProgress,
+    SeedTargetRow,
+    upsert_seed_targets,
+)
 
 _SYNC_RESULT = {"synced": 5, "errors": 0, "offset": 0, "duration_s": 1.2}
 _VALID_KEY = "test-admin-secret"
@@ -32,6 +37,32 @@ def _force_per_item_fallback():
         "backlogg.scheduler.jobs.bulk_load_items",
         new_callable=AsyncMock,
         side_effect=RuntimeError("the batch route needs a real connection"),
+    )
+
+
+def _mocked_session_factory():
+    """Session factory whose context manager yields an AsyncMock session."""
+    mock_session = AsyncMock()
+    mock_session.flush = AsyncMock()
+    # expunge_all is a sync method on AsyncSession.
+    mock_session.expunge_all = MagicMock()
+    # execute() must hand back a *sync* result object: a plain AsyncMock child
+    # would make .scalar_one() return a coroutine and the pending recount
+    # nonsense.
+    mock_session.execute = AsyncMock(return_value=MagicMock(**{"scalar_one.return_value": 0}))
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_cm.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=mock_cm)
+
+
+def _seed_work_list(pending: list[str]):
+    """Patch the seed work list so the job works on exactly ``pending``."""
+    progress = SeedTargetProgress(total=len(pending), pending=len(pending), gone=0, unlinkable=0)
+    return patch(
+        "backlogg.scheduler.jobs._read_seed_work_list",
+        new_callable=AsyncMock,
+        return_value=(pending, [], progress),
     )
 
 
@@ -141,34 +172,29 @@ async def test_sync_empty_type_returns_422(client):
 # ── Error isolation ───────────────────────────────────────────────────────────
 
 
+def _work_list_failure():
+    """Make the seed work-list read blow up (feature 86's first failure point)."""
+    return patch(
+        "backlogg.scheduler.jobs._read_seed_work_list",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("the database is down"),
+    )
+
+
 async def test_sync_movies_error_does_not_affect_sync_series():
     """A failure in sync_movies does not prevent sync_series from running.
 
     This validates acceptance criterion C19: errors are swallowed per job.
-    Both jobs must complete without raising even when the external API is down.
+    Both jobs must complete without raising even when their data source is
+    down.  Since feature 86 the first thing either TMDB job does is read its
+    work list from ``seed_targets``, so that is where the failure is injected.
     """
-    get_cursor, set_cursor = _cursor_patches()
-    with (
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("TMDB movies is down"),
-        ),
-        patch.object(
-            sync_jobs._tmdb_series,
-            "get_top_series",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("TMDB series is down"),
-        ),
-        get_cursor,
-        set_cursor,
-    ):
+    with _work_list_failure():
         # Neither call must raise — each job swallows its own exceptions
         result_movies = await sync_jobs.sync_movies()
         result_series = await sync_jobs.sync_series()
 
-    # When the initial fetch fails the job returns errors=1
+    # When the work list cannot be read the job returns errors=1
     assert result_movies["synced"] == 0
     assert result_movies["errors"] == 1
     assert result_series["synced"] == 0
@@ -176,17 +202,28 @@ async def test_sync_movies_error_does_not_affect_sync_series():
 
 
 async def test_sync_movies_job_catches_external_error():
-    """sync_movies logs and returns a result dict when the external API raises."""
-    get_cursor, set_cursor = _cursor_patches()
+    """sync_movies logs and returns a result dict when a per-item fetch raises."""
     with (
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
+            new_callable=AsyncMock,
+            return_value=(
+                ["424242"],
+                [],
+                SeedTargetProgress(total=1, pending=1, gone=0, unlinkable=0),
+            ),
+        ),
         patch.object(
             sync_jobs._tmdb_movies,
-            "get_top_movies",
+            "get_movie_detail",
             new_callable=AsyncMock,
             side_effect=RuntimeError("network error"),
         ),
-        get_cursor,
-        set_cursor,
+        patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
         result = await sync_jobs.sync_movies()
 
@@ -237,16 +274,27 @@ async def test_sync_books_job_catches_external_error():
 
 async def test_sync_series_job_catches_external_error():
     """sync_series logs and returns a result dict when TMDB raises."""
-    get_cursor, set_cursor = _cursor_patches()
     with (
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
+            new_callable=AsyncMock,
+            return_value=(
+                ["424242"],
+                [],
+                SeedTargetProgress(total=1, pending=1, gone=0, unlinkable=0),
+            ),
+        ),
         patch.object(
             sync_jobs._tmdb_series,
-            "get_top_series",
+            "get_series_detail",
             new_callable=AsyncMock,
             side_effect=RuntimeError("tmdb down"),
         ),
-        get_cursor,
-        set_cursor,
+        patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
         result = await sync_jobs.sync_series()
 
@@ -280,15 +328,15 @@ async def test_sync_movies_is_idempotent(db):
         "vote_average": 7.0,
         "vote_count": 100,
         "genres": [],
+        "credits": {"cast": [], "crew": []},
     }
 
+    await upsert_seed_targets(
+        db, [SeedTargetRow("MOVIE", "TMDB", "99901", vote_count=100, release_year=2020)]
+    )
+    await db.commit()
+
     with (
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 99901}],
-        ),
         patch.object(
             sync_jobs._tmdb_movies,
             "get_movie_detail",
@@ -300,11 +348,6 @@ async def test_sync_movies_is_idempotent(db):
             "_refresh_catalog_search",
             new_callable=AsyncMock,
         ),
-        patch(
-            "backlogg.scheduler.jobs.collect_movie_credits",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
         # Use the test DB session factory so writes land in the test DB
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
@@ -314,14 +357,15 @@ async def test_sync_movies_is_idempotent(db):
         mock_cm.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_cm
 
-        result1 = await sync_jobs.sync_movies()
-        result2 = await sync_jobs.sync_movies()
+        result1 = await sync_jobs.sync_movies(slice_size=5)
+        result2 = await sync_jobs.sync_movies(slice_size=5)
 
     result = await db.execute(select(func.count()).where(Movie.title == "Idempotent Test Movie"))
     count = result.scalar_one()
     assert count == 1, f"Expected 1 row, got {count} — upsert is not idempotent"
 
-    # Both runs must report synced=1 (the upsert counts as success each time)
+    # Both runs must report synced=1: the first from the pending target, the
+    # second from the refresh rotation (the upsert counts as success each time)
     assert result1["synced"] == 1
     assert result2["synced"] == 1
 
@@ -407,12 +451,14 @@ async def test_sync_books_calls_get_work_detail_for_authors():
     assert result["errors"] == 0
 
 
-async def test_sync_movies_collects_credits_per_item():
-    """sync_movies must collect TMDB credits once per successfully upserted movie.
+async def test_sync_movies_maps_credits_from_the_detail_payload():
+    """The credits of a slice item come from the detail response, not a 2nd call.
 
-    Feature 84 moved the credit *fetch* to the slice's fetch phase and the
-    credit *write* into the batch, so what the job calls per item is
-    ``collect_movie_credits``; the rows it returns travel with the item.
+    Feature 84 moved the credit *write* into the batch; feature 86 moved the
+    credit *fetch* into the detail request itself
+    (``append_to_response=credits,external_ids``).  So the job calls
+    ``map_movie_credits`` — pure mapping over the payload it already has — and
+    never ``collect_movie_credits``, which would spend a second request.
     """
     movie_raw = {
         "id": 88801,
@@ -430,45 +476,35 @@ async def test_sync_movies_collects_credits_per_item():
         "vote_average": 8.0,
         "vote_count": 200,
         "genres": [],
+        "credits": {"cast": [], "crew": []},
+        "external_ids": {"imdb_id": "tt88801"},
     }
 
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 88801}],
-        ),
+        _seed_work_list(["88801"]),
         patch.object(
             sync_jobs._tmdb_movies,
             "get_movie_detail",
             new_callable=AsyncMock,
             return_value=movie_raw,
-        ),
+        ) as mock_detail,
+        patch(
+            "backlogg.scheduler.jobs.map_movie_credits",
+            return_value=[],
+        ) as mock_map_credits,
         patch(
             "backlogg.scheduler.jobs.collect_movie_credits",
             new_callable=AsyncMock,
-            return_value=[],
         ) as mock_collect_credits,
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
         ),
-        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
-        mock_session = AsyncMock()
-        mock_session.flush = AsyncMock()
-        # expunge_all is a sync method on AsyncSession — the write path calls
-        # it after a rollback and after a successful batch.
-        mock_session.expunge_all = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_cm
-
         with (
             patch(
                 "backlogg.movies.repository.upsert_movie",
@@ -485,13 +521,20 @@ async def test_sync_movies_collects_credits_per_item():
             mock_upsert.return_value = mock_movie
             result = await sync_jobs.sync_movies()
 
-    mock_collect_credits.assert_awaited_once_with(88801)  # tmdb_id passed correctly
+    mock_detail.assert_awaited_once_with(88801, append_to_response="credits,external_ids")
+    mock_map_credits.assert_called_once_with(movie_raw["credits"])
+    mock_collect_credits.assert_not_awaited()  # no second request
     assert result["synced"] == 1
     assert result["errors"] == 0
 
 
-async def test_sync_movies_persist_people_failure_does_not_increment_errors():
-    """If the credits step raises, errors stays 0 and the movie is still synced."""
+async def test_sync_movies_people_write_failure_does_not_increment_errors():
+    """If persisting people fails, errors stays 0 and people_errors counts it.
+
+    Since feature 86 there is no separate credits *request* left to fail — the
+    payload arrives with the detail — so the remaining failure mode is the
+    *write*, exercised here through the documented per-item fallback.
+    """
     movie_raw = {
         "id": 88802,
         "title": "Credits Failure Movie",
@@ -508,18 +551,14 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
         "vote_average": 7.5,
         "vote_count": 50,
         "genres": [],
+        "credits": {
+            "cast": [{"id": 1, "name": "Someone", "character": "Lead", "order": 0}],
+            "crew": [],
+        },
     }
 
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
-        patch.object(
-            sync_jobs._tmdb_movies,
-            "get_top_movies",
-            new_callable=AsyncMock,
-            return_value=[{"id": 88802}],
-        ),
+        _seed_work_list(["88802"]),
         patch.object(
             sync_jobs._tmdb_movies,
             "get_movie_detail",
@@ -527,26 +566,19 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
             return_value=movie_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs.collect_movie_credits",
+            "backlogg.scheduler.jobs._persist_people_individually",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("credits API down"),
+            side_effect=RuntimeError("people write failed"),
         ),
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
         ),
-        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
-        mock_session = AsyncMock()
-        mock_session.flush = AsyncMock()
-        # expunge_all is a sync method on AsyncSession — the job calls it
-        # after the per-item rollback that follows the people failure.
-        mock_session.expunge_all = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_cm
-
         with (
             patch(
                 "backlogg.movies.repository.upsert_movie",
@@ -563,7 +595,7 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
             mock_upsert.return_value = mock_movie
             result = await sync_jobs.sync_movies()
 
-    # The upsert succeeded, so synced=1 even though the credits step failed
+    # The upsert succeeded, so synced=1 even though the people write failed
     assert result["synced"] == 1
     # errors must NOT be incremented by people persistence failure
     assert result["errors"] == 0
@@ -571,12 +603,8 @@ async def test_sync_movies_persist_people_failure_does_not_increment_errors():
     assert result["people_errors"] == 1
 
 
-async def test_sync_series_collects_credits_and_creators():
-    """sync_series must collect both the cast and the ``created_by`` creators.
-
-    Feature 84: both lists are gathered during the fetch phase and written
-    together with the item in the batch.
-    """
+async def test_sync_series_maps_cast_and_creators_from_one_payload():
+    """Series get cast *and* ``created_by`` out of the single detail request."""
     series_raw = {
         "id": 77701,
         "name": "Credits Test Series",
@@ -594,29 +622,21 @@ async def test_sync_series_collects_credits_and_creators():
         "vote_count": 500,
         "genres": [],
         "created_by": [{"id": 999, "name": "A Creator", "profile_path": None}],
+        "credits": {"cast": []},
     }
 
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
-        patch.object(
-            sync_jobs._tmdb_series,
-            "get_top_series",
-            new_callable=AsyncMock,
-            return_value=[{"id": 77701}],
-        ),
+        _seed_work_list(["77701"]),
         patch.object(
             sync_jobs._tmdb_series,
             "get_series_detail",
             new_callable=AsyncMock,
             return_value=series_raw,
-        ),
+        ) as mock_detail,
         patch(
-            "backlogg.scheduler.jobs.collect_series_credits",
-            new_callable=AsyncMock,
+            "backlogg.scheduler.jobs.map_series_cast",
             return_value=[],
-        ) as mock_collect_credits,
+        ) as mock_map_cast,
         patch(
             "backlogg.scheduler.jobs.collect_series_creators",
             return_value=[],
@@ -625,18 +645,11 @@ async def test_sync_series_collects_credits_and_creators():
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
         ),
-        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
-        mock_session = AsyncMock()
-        mock_session.flush = AsyncMock()
-        # expunge_all is a sync method on AsyncSession — the write path calls
-        # it after a rollback and after a successful batch.
-        mock_session.expunge_all = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_cm
-
         with (
             patch(
                 "backlogg.series.repository.upsert_series",
@@ -653,14 +666,15 @@ async def test_sync_series_collects_credits_and_creators():
             mock_upsert.return_value = mock_series
             result = await sync_jobs.sync_series()
 
-    mock_collect_credits.assert_awaited_once_with(77701)
+    mock_detail.assert_awaited_once_with(77701, append_to_response="credits,external_ids")
+    mock_map_cast.assert_called_once_with(series_raw["credits"])
     mock_collect_creators.assert_called_once_with(series_raw["created_by"])
     assert result["synced"] == 1
     assert result["errors"] == 0
 
 
-async def test_sync_series_persist_people_failure_does_not_increment_errors():
-    """If the credits step raises, errors stays 0 but people_errors increments."""
+async def test_sync_series_people_write_failure_does_not_increment_errors():
+    """Series: a failing people write costs people_errors, never errors."""
     series_raw = {
         "id": 77702,
         "name": "Credits Failure Series",
@@ -677,19 +691,12 @@ async def test_sync_series_persist_people_failure_does_not_increment_errors():
         "vote_average": 6.5,
         "vote_count": 40,
         "genres": [],
-        "created_by": [],
+        "created_by": [{"id": 999, "name": "A Creator", "profile_path": None}],
+        "credits": {"cast": []},
     }
 
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
-        patch.object(
-            sync_jobs._tmdb_series,
-            "get_top_series",
-            new_callable=AsyncMock,
-            return_value=[{"id": 77702}],
-        ),
+        _seed_work_list(["77702"]),
         patch.object(
             sync_jobs._tmdb_series,
             "get_series_detail",
@@ -697,24 +704,19 @@ async def test_sync_series_persist_people_failure_does_not_increment_errors():
             return_value=series_raw,
         ),
         patch(
-            "backlogg.scheduler.jobs.collect_series_credits",
+            "backlogg.scheduler.jobs._persist_people_individually",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("credits API down"),
+            side_effect=RuntimeError("people write failed"),
         ),
         patch(
             "backlogg.scheduler.jobs._refresh_catalog_search",
             new_callable=AsyncMock,
         ),
-        patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
-        mock_session = AsyncMock()
-        mock_session.flush = AsyncMock()
-        mock_session.expunge_all = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_cm
-
         with (
             patch(
                 "backlogg.series.repository.upsert_series",

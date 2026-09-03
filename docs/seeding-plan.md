@@ -23,6 +23,14 @@ endpoints y límites de cada proveedor vive en `docs/external-apis.md`.
 
 ## 1. Por qué el método actual no llega
 
+> ✅ **Resuelto para movies y series por la feature 86.** Los tres defectos de
+> abajo eran del recorrido por offset de `/popular`, que ya no está en el
+> camino de la siembra: `sync_movies`/`sync_series` se alimentan de la lista
+> objetivo de `seed_targets` (§3). Se conserva el diagnóstico porque es lo que
+> justifica el diseño y lo que evita que alguien lo deshaga por comodidad.
+> Books y games nunca tuvieron este problema: su enumeración no es un ranking
+> de popularidad.
+
 ### Techo duro de 10.000 por tipo
 
 `get_top_movies` / `get_top_series` paginan `/movie/popular` y `/tv/popular`.
@@ -181,11 +189,25 @@ del recorrido y la imposibilidad de saber qué falta.
 
 ### TMDB — `/discover` con `vote_count.gte`, troceado por año
 
+> ✅ **Implementado en la feature 86.** Lo que sigue describe el código real:
+> `backlogg/scheduler/discovery.py` (troceo y guardia),
+> `TMDBClient.discover_movies_page` / `TMDBSeriesClient.discover_series_page`
+> (paginación cruda) y `scripts/seed_tmdb_targets.py` (CLI).
+
 ```
-GET /discover/movie?include_adult=false&include_video=false
+GET /discover/movie?page=N
+    &include_adult=false&include_video=false
+    &sort_by=primary_release_date.asc
     &vote_count.gte=25
     &primary_release_date.gte=YYYY-01-01&primary_release_date.lte=YYYY-12-31
 ```
+
+Para series el campo de fecha es `first_air_date` y el orden
+`first_air_date.asc`; `/discover/tv` no tiene `include_video` ni expone
+contenido adulto por esta vía, así que los dos flags son solo de movies.
+
+El `sort_by` por fecha es deliberado: ordenar por popularidad reintroduciría
+el defecto que hunde a `/popular`, que se reordena mientras se pagina.
 
 `/discover` tiene el mismo tope de 500 páginas que `/popular`, **pero troceando
 por año de estreno ninguna rebanada se acerca**. Medido con `vote_count ≥ 25`:
@@ -199,15 +221,107 @@ por año de estreno ninguna rebanada se acerca**. Medido con `vote_count ≥ 25`
 | 2024 | 1.406 | 569 |
 
 El peor año usa el 22% del cupo de 10.000. Hay **4× de margen**, suficiente para
-bajar el umbral más adelante sin rediseñar nada. Si algún año llegara a apretar,
-se trocea por mes.
+bajar el umbral más adelante sin rediseñar nada.
+
+**La guardia del tope es explícita, no una suposición.** El orquestador lee
+`total_pages` de la primera página de cada ventana:
+
+1. Si el año la supera → se trocea en sus **doce meses** y se enumeran uno a uno
+   (un mes lleva ~1/12 de los ítems, así que el año tendría que traer >60.000
+   para que un mes también se pasara).
+2. Si un mes *aun así* la supera → **el run no aborta**. Enumera las 500 páginas
+   que TMDB sirve y marca la ventana en `EnumerationStats.truncated_windows`;
+   el script sale con **código 2** y un `logger.error` con las etiquetas
+   afectadas. Tirar una pasada entera de siembra por una ventana mala sería
+   peor; encogar el catálogo en silencio, mucho peor todavía.
 
 Esto enumera el **conjunto objetivo exacto y completo**, sin techo, sin descargar
 1,18 M de IDs para descartar el 95%, y de forma reproducible: mismos parámetros →
 misma lista.
 
-Para series el campo de fecha es `first_air_date` en lugar de
-`primary_release_date`.
+**Limitación conocida:** un ítem sin fecha de estreno no cae en ninguna ventana
+y no se enumera. Con `vote_count ≥ 25` es residual, y esos ítems siguen
+entrando por el fallback on-demand y por el fan-out de búsqueda.
+
+#### La lista objetivo se persiste: `seed_targets`
+
+La enumeración **no hidrata nada**: escribe en la tabla `seed_targets`
+(`item_type, source, external_id, vote_count, release_year, attempts, ...`,
+esquema completo en `docs/schema.md`). Cada página se persiste según llega, así
+que una enumeración interrumpida conserva todo lo que ya había enumerado.
+
+Lo pendiente **no es un offset**, es una diferencia contra el catálogo:
+
+```sql
+seed_targets LEFT JOIN external_ids USING (item_type, source, external_id)
+WHERE external_ids.id IS NULL
+  AND unreachable_at IS NULL              -- no retirado por 404
+  AND attempts < TMDB_SEED_MAX_ATTEMPTS   -- no retirado por no enlazable
+ORDER BY attempts ASC, vote_count DESC NULLS LAST, id ASC
+```
+
+Un run que muera a mitad no deja estado que reconciliar. El orden por
+`vote_count` hace que una siembra interrumpida deje dentro lo mejor del
+catálogo.
+
+#### Retirada de targets inalcanzables — por qué `pending` converge
+
+Hay dos motivos, sin relación entre sí, por los que un target puede **no
+enlazarse nunca**:
+
+1. **404 en TMDB.** El id se enumeró pero TMDB ya no lo sirve (borrado o
+   fusionado con otra ficha).
+2. **Id ya reclamado por otro tipo.** `uq_external_id` es único sobre
+   `(source, external_id)` **globalmente** y TMDB numera movies y series en
+   secuencias independientes, así que una serie puede encontrarse su id ya
+   reclamado por una película: la fila del ítem **sí** se escribe, el enlace en
+   `external_ids` no.
+
+Si esos targets se quedan en el conjunto pendiente, `pending` tiene un **suelo
+permanente > 0**. Y las dos garantías del diseño dependen de que `pending`
+llegue a 0: la rotación de refresco solo se dispara cuando no queda nada
+pendiente, y el bucle de `scripts/backfill_sync.py` solo termina cuando no queda
+nada pendiente. Con un suelo del orden de miles frente a una rebanada de ~61 en
+series, la rotación **no volvería a ejecutarse jamás** y el backfill giraría
+gastando peticiones a TMDB sin progresar.
+
+Por eso se **retiran**, no solo se reordenan:
+
+- El 404 se sella en `unreachable_at` **la primera vez** que se observa. Es una
+  respuesta definitiva: volver a preguntar no la cambia.
+- El target que resuelve bien y sigue sin enlazarse se retira tras
+  `TMDB_SEED_MAX_ATTEMPTS` pasadas **concluyentes** (default 3). Una petición
+  que *falla* no cuenta como pasada, así que una caída de TMDB no puede retirar
+  un target sano.
+
+El residuo **no desaparece de la vista**: se cuenta aparte y se reporta como
+`stuck` (desglosado en `gone` y `unlinkable`) en el resultado del job, en su
+log —con un `warning` explícito si hay `unlinkable`— y en el resumen del script
+de enumeración. Un catálogo que no converge por un defecto de esquema
+preexistente es justo lo que el operador necesita poder ver.
+
+> El defecto de fondo (`uq_external_id` global entre tipos) es **preexistente** y
+> queda fuera del alcance de esta feature: arreglarlo es un cambio de esquema
+> transversal a los cuatro dominios. Ver `docs/schema.md`.
+
+#### Rotación de refresco
+
+Cuando no quedan targets pendientes **trabajables** —lo que es alcanzable
+gracias a la retirada de arriba—, la rebanada nocturna se llena con los ítems
+del catálogo de **`last_synced_at` más antiguo**. Sin esto, retirar el cursor de
+`/popular` habría *perdido* algo que el recorrido daba por efecto colateral: la
+cobertura de la ventana de caché de 6 meses de TMDB (§2.3). La rotación
+explícita es la misma garantía, dicha directamente en vez de emerger de un
+ranking.
+
+#### `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES`
+
+Dejan de ser el criterio de corte y quedan **inertes**. El catálogo lo define
+`TMDB_SEED_MIN_VOTES_*`; el tamaño de la rebanada nocturna,
+`SYNC_SLICE_SIZE_*`. Se conservan (en vez de borrarse) porque Render y
+`.github/workflows/backfill-sync.yml` siguen exportándolas, y quitar un nombre
+que los despliegues declaran se leería como un descuido. `SEED_TOP_N_BOOKS` y
+`SEED_TOP_N_GAMES` siguen vivas: sus enumeraciones no cambian.
 
 ### TMDB — los ficheros diarios de IDs son para el incremental
 
@@ -267,24 +381,49 @@ hacen falta.
 
 ### Una petición por ítem en vez de dos (solo TMDB)
 
+> ✅ **Implementado en la feature 86.**
+
 TMDB no tiene endpoint bulk de detalle: la hidratación es 1 petición por ítem,
-inevitablemente. Pero hoy son **dos** — `/movie/{id}` y `/movie/{id}/credits`
-(`backlogg/movies/adapters/tmdb.py:70-92`). Con
+inevitablemente. Pero eran **dos** — `/movie/{id}` y `/movie/{id}/credits`. Con
 [`append_to_response`](https://developer.themoviedb.org/docs/append-to-response)
 es una sola:
 
 ```
 GET /movie/{id}?append_to_response=credits,external_ids
+GET /tv/{id}?append_to_response=credits,external_ids
 ```
 
 Mitad del HTTP, y encaja directamente con la feature 74: `SOURCE_AUTHOR` sale del
-mismo payload sin ninguna petición adicional.
+mismo payload sin ninguna petición adicional (por eso se pide `external_ids`
+aunque todavía no se lea).
+
+Dos consecuencias que conviene tener presentes:
+
+- **En series el cambio además añade información**: los créditos `CREATOR`
+  vienen de `created_by`, que vive en el detalle y **no** en
+  `/tv/{id}/credits`. La petición única es estrictamente más informativa que
+  las dos que sustituye.
+- **En el job nocturno ya no existe un fallo independiente de credits.** Si la
+  petición falla, falla el ítem y cuenta en `errors`. `people_errors` sigue
+  vivo, pero ahora solo recoge fallos de *escritura* de people/credits. Los
+  caminos on-demand y el backfill dirigido (feature 85) siguen usando
+  `/movie/{id}/credits` porque ahí la fila ya existe y solo faltan los credits.
 
 ### Paralelizar
 
-`asyncio.gather` + `Semaphore(8-10)`, el patrón que ya usa el fan-out de búsqueda
+> ✅ **Implementado en la feature 86.**
+
+`asyncio.gather` + `Semaphore`, el patrón que ya usa el fan-out de búsqueda
 (`backlogg/search/service.py`, `Semaphore(5)`). El límite documentado de TMDB
-ronda las 50 req/s: conviene quedarse en 30-40 y no apurar.
+ronda las 50 req/s: conviene quedarse en 30-40 y no apurar, así que
+`TMDB_SEED_CONCURRENCY` va a **8** por defecto (≈32 req/s con el RTT medio de
+TMDB) y gobierna tanto las páginas de `/discover` como la hidratación.
+
+En la enumeración las **ventanas se recorren en serie** y son las *páginas de
+dentro* las que van en paralelo: al revés, la enumeración entera estaría en
+vuelo a la vez y el número de peticiones simultáneas dependería del número de
+años, no del semáforo. En la hidratación el fetch es paralelo y la **escritura
+secuencial** — `AsyncSession` no es segura en concurrencia.
 
 ### Escribir por lotes — esto es lo que de verdad importa
 
@@ -361,9 +500,9 @@ Volumen diario real: unos pocos cientos de ítems.
 
 | # | Feature | Por qué en este orden |
 |---|---|---|
-| 1 | **84 `bulk_load_pipeline`** (`COPY` + upserts agrupados) | Prerrequisito de todo. Sin esto ningún método de enumeración sirve, es condición necesaria para la ventana de 6 meses de movies (§2.3), y además arregla el backfill dirigido a huecos (issue #15) |
-| 2 | **85 `backfill_credits_targeted`** | Cierra el issue #15, que hoy bloquea la feature 74 |
-| 3 | **86 `tmdb_discover_quality_seeding`** | Rompe el techo de 10.000 y aplica el criterio de `vote_count` |
+| 1 | **84 `bulk_load_pipeline`** (`COPY` + upserts agrupados) ✅ | Prerrequisito de todo. Sin esto ningún método de enumeración sirve, es condición necesaria para la ventana de 6 meses de movies (§2.3), y además arregla el backfill dirigido a huecos (issue #15) |
+| 2 | **85 `backfill_credits_targeted`** ✅ | Cierra el issue #15, que hoy bloquea la feature 74 |
+| 3 | **86 `tmdb_discover_quality_seeding`** ✅ | Rompe el techo de 10.000 y aplica el criterio de `vote_count` |
 | 4 | **87 `openlibrary_dump_seeding`** | Elimina `search.json` del camino crítico |
 | 5 | **88 `catalog_incremental_updates`** | Mantiene el catálogo sin barridos completos, incluida la promoción por umbral |
 
