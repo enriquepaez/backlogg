@@ -55,7 +55,9 @@ backlogg/
 │   ├── bulk_load.py       # Ruta de escritura por lotes (COPY + upserts) para
 │   │                      # ingesta masiva; el descriptor por tipo vive en
 │   │                      # cada <domain>/repository.py
-│   └── external_ids.py    # Utilidades polimórficas de external_ids
+│   ├── external_ids.py    # Utilidades polimórficas de external_ids
+│   └── slugs.py           # Generación de slugs: el fold a ASCII y el fallback
+│                          # por id externo cuando queda vacío (issue #18)
 └── core/
     ├── database.py        # Engine, SessionLocal, get_db dependency
     └── config.py          # Settings via pydantic-settings

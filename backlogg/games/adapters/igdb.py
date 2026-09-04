@@ -1,9 +1,7 @@
 """IGDB API client with automatic Twitch OAuth2 token management."""
 
 import asyncio
-import re
 import time
-import unicodedata
 from datetime import UTC, date, datetime
 
 import httpx
@@ -11,6 +9,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from backlogg.core.config import settings
 from backlogg.games.constants import ALLOWED_GAME_CATEGORY_IDS, GAME_TYPE_MAP
+from backlogg.shared.slugs import external_id_slug, slugify
 
 _TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 _IGDB_BASE = "https://api.igdb.com/v4"
@@ -42,13 +41,6 @@ _igdb_retry = retry(
 # IGDB category filter clause for get_top_games — e.g. "0,1,2,4,6,7,8,9".
 # See backlogg.games.constants for the allowlist this is derived from.
 _ALLOWED_CATEGORY_CLAUSE = ",".join(str(i) for i in sorted(ALLOWED_GAME_CATEGORY_IDS))
-
-
-def _slugify(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[-\s]+", "-", text).strip("-")
 
 
 class IGDBClient:
@@ -170,7 +162,10 @@ class IGDBClient:
     def game_to_dict(self, raw: dict) -> dict:
         """Convert an IGDB game object to a DB-ready dict."""
         title = raw.get("name", "")
-        slug = raw.get("slug", _slugify(title))
+        # IGDB ships its own slug; only fold the name when it does not.  If
+        # neither survives the ASCII fold, fall back to the IGDB id (issue #18)
+        # instead of persisting an empty slug.
+        slug = raw.get("slug", slugify(title)) or external_id_slug("IGDB", raw.get("id"))
 
         # Release date: IGDB gives Unix timestamp (seconds)
         release_date: date | None = None
@@ -210,7 +205,7 @@ class IGDBClient:
         for g in raw.get("genres") or []:
             if not isinstance(g, dict):
                 continue
-            g_slug = g.get("slug") or _slugify(g.get("name", ""))
+            g_slug = g.get("slug") or slugify(g.get("name", ""))
             if g_slug and g_slug not in seen_genres:
                 genres.append({"name": g.get("name", g_slug), "slug": g_slug})
                 seen_genres.add(g_slug)
@@ -221,7 +216,7 @@ class IGDBClient:
         for p in raw.get("platforms") or []:
             if not isinstance(p, dict):
                 continue
-            p_slug = p.get("slug") or _slugify(p.get("name", ""))
+            p_slug = p.get("slug") or slugify(p.get("name", ""))
             if p_slug and p_slug not in seen_platforms:
                 platforms.append({"name": p.get("name", p_slug), "slug": p_slug})
                 seen_platforms.add(p_slug)
@@ -235,7 +230,7 @@ class IGDBClient:
             company = ic.get("company")
             if not isinstance(company, dict):
                 continue
-            c_slug = company.get("slug") or _slugify(company.get("name", ""))
+            c_slug = company.get("slug") or slugify(company.get("name", ""))
             c_name = company.get("name", c_slug)
             if ic.get("developer"):
                 key = (c_slug, "DEVELOPER")

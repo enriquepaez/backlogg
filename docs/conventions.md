@@ -9,6 +9,50 @@
   - ✅ `GET /movies/the-matrix-1999`
   - ❌ `GET /movies/42`
 - Los slugs se generan al persistir el ítem y no cambian.
+- **Un slug se construye siempre con `backlogg/shared/slugs.py`.** No copies el
+  fold a ASCII en un módulo nuevo: vivía duplicado en cinco sitios y el issue
+  #18 hubo que arreglarlo en los cinco a la vez.
+
+  | Función | Cuándo |
+  |---------|--------|
+  | `slugify(text)` | Texto sin identidad externa (nombres de géneros, plataformas, compañías). |
+  | `slug_with_external_fallback(text, source, external_id)` | Personas: cualquier `BulkPerson` o llamada a `get_or_create_person_by_external`. |
+  | `titled_slug(title, year, source, external_id)` | Ítems de catálogo: sustituye a `f"{slugify(title)}-{year}"`. |
+
+- **Nunca persistas un slug vacío.** `slugify` folda a ASCII, así que un título
+  o un nombre íntegramente en CJK, cirílico, árabe, griego o hebreo devuelve
+  `""`. Eso no es cosmético: `people` hace upsert sobre `uq_people_slug` (todas
+  las personas no latinas colapsaban en una fila y se robaban los credits) y
+  los ítems concatenaban `f"-{year}"`, de modo que todos los títulos no latinos
+  de un mismo año caían en el mismo slug. Cuando el fold queda **totalmente
+  vacío**, el slug se deriva del id externo: `tmdb-1234567`,
+  `open-library-ol123w`, `igdb-4567` — único por construcción, determinista y
+  estable ante renombrados. En ese caso el slug de ítem **no** lleva sufijo de
+  año: el id ya es único.
+
+  El fallback cubre el fold vacío, **no el ambiguo**: si sobrevive algo, por
+  poco que sea, manda el fold (`宮崎駿 Jr` → `jr`, `初次尝鲜 Season 2` →
+  `season-2`). Dos nombres así siguen fundiéndose por `uq_people_slug`, igual
+  que dos homónimos latinos (issue #24, abierto). Es deliberado: un slug
+  legible vale más que uno opaco cuando hay algo legible.
+
+  **Quién hace cumplir «nunca vacío».** No es una regla de honor: lo aplican
+  las dos fronteras de escritura de ítems. `bulk_load_items` lo descarta como
+  `RowRejected` y lo suma a `rejected`;
+  `scheduler.jobs._write_items_individually` lanza y lo suma a `errors`. Un
+  ítem sin slug tiene el fold vacío **y** ningún id externo, así que tampoco
+  podría enlazarse en `external_ids`: no se refrescaría nunca y se duplicaría
+  en cada sync — descartarlo y contarlo es más honesto que inventarle un slug.
+  `titled_slug` **no** lanza —sigue pudiendo devolver `""`— para no convertir
+  en 500 los caminos on-demand, que por construcción entran con un id externo
+  en la mano y no pueden alcanzar el caso. En personas la red está en
+  `people/repository.py::get_or_create_person_by_external`, que deriva el slug
+  del id externo si le llega vacío.
+- **No transliterar** (`unidecode`, `anyascii`, `pypinyin`). Decisión de
+  producto de 2026-09-04: colapsa identidades distintas (`张伟` y `章伟` →
+  `zhang-wei`) y, con el upsert por slug, funde dos personas en una fila. Eso
+  cambia «perder un credit» por «atribuirlo a otra persona», que es peor porque
+  no se ve. El nombre para mostrar sigue íntegro en `people.name` / `title`.
 
 ## FastAPI
 

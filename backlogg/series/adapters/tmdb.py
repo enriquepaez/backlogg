@@ -1,23 +1,15 @@
-import re
-import unicodedata
 from datetime import UTC, date, datetime
 
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from backlogg.core.config import settings
+from backlogg.shared.slugs import slugify, titled_slug
 
 _TMDB_BASE = "https://api.themoviedb.org/3"
 _TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 _TMDB_TIMEOUT = 10.0
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-
-
-def _slugify(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[-\s]+", "-", text).strip("-")
 
 
 def _is_retryable_error(exc: BaseException) -> bool:
@@ -251,9 +243,10 @@ class TMDBSeriesClient:
             except ValueError:
                 last_air_date = None
 
-        # Build slug from name and year
-        slug_base = _slugify(title)
-        slug = f"{slug_base}-{year}" if year else slug_base
+        # Build slug from name and year.  ``titled_slug`` falls back to the
+        # TMDB id when the name folds to nothing (issue #18) — see the twin
+        # comment in the movies adapter.
+        slug = titled_slug(title, year, "TMDB", raw.get("id"))
 
         # Build image URLs
         poster_path = raw.get("poster_path")
@@ -265,7 +258,7 @@ class TMDBSeriesClient:
         genres = []
         for g in raw.get("genres", []):
             name = g["name"]
-            genres.append({"name": name, "slug": _slugify(name)})
+            genres.append({"name": name, "slug": slugify(name)})
 
         # Rating — TMDB uses vote_average (0–10), Numeric(3,1) stores 1 decimal
         vote_average = raw.get("vote_average")

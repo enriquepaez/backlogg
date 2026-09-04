@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
-from backlogg.series.adapters.tmdb import TMDBSeriesClient, _slugify
+from backlogg.series.adapters.tmdb import TMDBSeriesClient
 from backlogg.series.models import Series
 from backlogg.series.schemas import (
     SeriesGenreOut,
@@ -24,6 +24,7 @@ from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
 from backlogg.shared.rating_sort import rating_desc_sort_key
+from backlogg.shared.slugs import slug_with_external_fallback, titled_slug
 
 _tmdb = TMDBSeriesClient()
 
@@ -78,11 +79,15 @@ def _tmdb_person_row(
         return None
 
     profile_path = member.get("profile_path")
+    # Issue #18: see the twin comment in backlogg/movies/service.py — a name in
+    # a non-Latin script folds to "" and collapses on uq_people_slug, so the
+    # slug falls back to the TMDB person id.  Covers both cast and
+    # ``created_by`` creators, which come through this same mapper.
     return BulkPerson(
         source="TMDB",
         external_id=str(person_tmdb_id),
         name=name,
-        slug=_slugify(name),
+        slug=slug_with_external_fallback(name, "TMDB", person_tmdb_id),
         profile_url=f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None,
         role=role,
         character_name=character_name,
@@ -305,8 +310,7 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
             except ValueError:
                 pass
 
-        slug_base = _slugify(title)
-        rec_slug = f"{slug_base}-{year}" if year else slug_base
+        rec_slug = titled_slug(title, year, "TMDB", rec_tmdb_id)
 
         # Try local DB first
         rec_series = await repo.get_series_by_slug(db, rec_slug)

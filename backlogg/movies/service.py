@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.library import service as library_service
 from backlogg.movies import repository as repo
-from backlogg.movies.adapters.tmdb import TMDBClient, _slugify
+from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.models import Movie
 from backlogg.movies.schemas import (
     GenreOut,
@@ -23,6 +23,7 @@ from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
+from backlogg.shared.slugs import slug_with_external_fallback, titled_slug
 
 _tmdb = TMDBClient()
 
@@ -83,11 +84,15 @@ def _tmdb_person_row(
         return None
 
     profile_path = member.get("profile_path")
+    # Issue #18: a name written entirely in a non-Latin script folds to "",
+    # and people upsert on uq_people_slug — every such person used to collapse
+    # into one row (and, since feature 84, have their credit dropped instead).
+    # The TMDB person id is right here, so derive the slug from it.
     return BulkPerson(
         source="TMDB",
         external_id=str(person_tmdb_id),
         name=name,
-        slug=_slugify(name),
+        slug=slug_with_external_fallback(name, "TMDB", person_tmdb_id),
         profile_url=f"{_TMDB_IMAGE_BASE}{profile_path}" if profile_path else None,
         role=role,
         character_name=character_name,
@@ -295,8 +300,7 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
             except ValueError:
                 pass
 
-        slug_base = _slugify(title)
-        rec_slug = f"{slug_base}-{year}" if year else slug_base
+        rec_slug = titled_slug(title, year, "TMDB", rec_tmdb_id)
 
         # Try local DB first
         rec_movie = await repo.get_movie_by_slug(db, rec_slug)

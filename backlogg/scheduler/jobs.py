@@ -258,6 +258,15 @@ async def _write_items_individually(
     people_errors = 0
     for item in items:
         try:
+            if not item.data.get("slug"):
+                # Same issue #18 invariant the batch route enforces: an empty
+                # slug is the ON CONFLICT key, so it would merge unrelated
+                # items into one row.  Raising here lands in the ``except``
+                # below, which logs it and counts it in ``errors``.
+                raise ValueError(
+                    f"{spec.item_type}: empty slug — the title folds to nothing "
+                    "and the payload carries no external id"
+                )
             # The per-item upserts pop the relation keys off the dict they are
             # given, so hand them a copy and keep the batch payload intact.
             entity = await spec.upsert_item(session, dict(item.data))
