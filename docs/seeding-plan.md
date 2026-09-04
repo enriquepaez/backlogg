@@ -470,6 +470,36 @@ Aun así conviene **partir el workflow en una matrix por tipo**: cuatro jobs en
 paralelo, cada uno con su margen frente al tope de 6 h, y un fallo en books no
 tumba la siembra de movies.
 
+### 5.1 Qué mirar mientras corre (panel de instrumentos)
+
+Una siembra dura horas. Los contadores que devuelve cada tramo son la única
+forma de saber si se está perdiendo catálogo **antes** de que la carga termine;
+cuando acaba, ya está horneada. Los tres que hay que leer en cada iteración del
+log de `scripts/backfill_sync.py` (y en la respuesta de
+`POST /v1/admin/sync/{type}`):
+
+| Contador | Qué significa | Qué hacer si sube |
+|---|---|---|
+| `errors` | Ítems que fallaron y no se escribieron | Si `synced == 0` y `errors > 0` el backfill aborta solo. Si convive con `synced` alto, mirar el log del ítem concreto |
+| `people_errors` | El ítem se guardó pero sus credits no | No aborta el tramo (un credit ausente no puede tumbar la slice). Se recupera después con `backfill_sync.py --only-missing-credits` |
+| `skipped_links` | El ítem se guardó **sin enlace en `external_ids`**: la terna `(item_type, source, external_id)` ya la tenía otro ítem del mismo tipo (issue #22) | **Es el que importa durante la siembra.** Cada unidad es una fila del catálogo que ya no se encontrará por id externo, no se refrescará nunca y puede duplicarse. Si crece tramo a tramo hay un fallo sistemático: parar y mirar los `WARNING` de `backlogg.shared.external_ids`, que nombran la terna, el ítem pretendiente y el que ya la tiene |
+
+`skipped_links` **no** cuenta las re-escrituras idempotentes del mismo enlace al
+mismo ítem (la misma persona en cast y crew, un tramo re-ejecutado): esas son
+normales y contarlas convertiría el número en ruido. Solo cuenta el robo de
+enlace entre dos ítems distintos.
+
+Por qué está aquí y no en un panel aparte: el mismo mecanismo ciego produjo los
+issues #7, #15 y #20, y en los tres casos los datos se perdieron durante meses
+y el hallazgo fue accidental, en una QA que casualmente comparaba lo enumerado
+contra lo enlazado.
+
+Lo que estos contadores **no** cubren todavía: `seed_targets` da por convergido
+un target si existe *alguna* fila con su terna, sin mirar a qué `item_id`
+apunta, así que un target robado se cuenta como hecho y no aparece en `stuck`.
+Arreglarlo obliga a decidir qué `item_id` es el dueño legítimo — decisión de
+datos, no de instrumentación.
+
 ---
 
 ## 6. Mantenimiento: estrenos y publicaciones

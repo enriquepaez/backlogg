@@ -140,9 +140,9 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     zero synced items — retrying the same slice would loop forever.
 
     Returns a summary dict with ``content_type``, ``iterations``, ``synced``,
-    ``errors``, ``people_errors``, ``next_offset``, ``pending``, ``stuck``,
-    ``elapsed_s`` and ``stop_reason`` (``"wraparound"``, ``"exhausted"`` or
-    ``"time_budget"``).
+    ``errors``, ``people_errors``, ``skipped_links``, ``next_offset``,
+    ``pending``, ``stuck``, ``elapsed_s`` and ``stop_reason``
+    (``"wraparound"``, ``"exhausted"`` or ``"time_budget"``).
 
     ``people_errors`` counts items whose credits could not be persisted while
     the item itself was upserted fine.  It used to be read off each job result
@@ -150,6 +150,13 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     failed still reported "6000 synced, 0 errors", and the only trace was a
     per-iteration log line.  ``sync_games`` does not report it (games carry no
     people credits), hence the ``.get`` default.
+
+    ``skipped_links`` (issue #22) is aggregated for the same reason and is the
+    one number a *seeding* run needs live: it counts items written to their
+    table whose ``external_ids`` link was refused because the triple already
+    belonged to another item of the same type.  Those items are invisible to
+    every id-based lookup afterwards, and a backfill of 118.850 items lasts
+    hours — reading it only at the end means finding out when it is baked.
     """
     item_type = _ITEM_TYPES[content_type]
     target_driven = content_type in _TARGET_DRIVEN
@@ -161,6 +168,7 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     total_synced = 0
     total_errors = 0
     total_people_errors = 0
+    total_skipped_links = 0
     stop_reason = "time_budget"
     next_offset = 0 if target_driven else await _read_cursor(item_type)
     pending: int | None = None
@@ -181,6 +189,7 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
         total_synced += result["synced"]
         total_errors += result["errors"]
         total_people_errors += result.get("people_errors", 0)
+        total_skipped_links += result.get("skipped_links", 0)
 
         if result["synced"] == 0 and result["errors"] > 0:
             raise BackfillError(
@@ -194,13 +203,14 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
         stuck = result.get("stuck")
         elapsed = time.monotonic() - start
         logger.info(
-            "backfill %s: iteration %d — %d synced, %d errors, %d people_errors in %.1fs "
-            "(%s, elapsed %.0fs)",
+            "backfill %s: iteration %d — %d synced, %d errors, %d people_errors, "
+            "%d skipped_links in %.1fs (%s, elapsed %.0fs)",
             content_type,
             iterations,
             result["synced"],
             result["errors"],
             result.get("people_errors", 0),
+            result.get("skipped_links", 0),
             result["duration_s"],
             f"{pending} targets pending, {stuck} stuck"
             if target_driven
@@ -235,6 +245,7 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
         "synced": total_synced,
         "errors": total_errors,
         "people_errors": total_people_errors,
+        "skipped_links": total_skipped_links,
         "next_offset": next_offset,
         "pending": pending,
         "stuck": stuck,
@@ -287,6 +298,7 @@ async def run_credits_backfill(
         "sealed_without_credits": result["sealed_without_credits"],
         "credits_written": result["credits_written"],
         "people_errors": result["people_errors"],
+        "skipped_links": result.get("skipped_links", 0),
         "skipped_no_external_id": result["skipped_no_external_id"],
         "elapsed_s": round(time.monotonic() - start, 1),
         "stop_reason": result["stop_reason"],
@@ -371,8 +383,8 @@ def main(argv: list[str] | None = None) -> int:
         logger.info(
             "backfill %s: finished targeted credits mode (%s) — %d considered, "
             "%d processed, %d with credits, %d stamped without credits, "
-            "%d credits written, %d people_errors, %d skipped (no external id), "
-            "%.0fs elapsed",
+            "%d credits written, %d people_errors, %d skipped_links, "
+            "%d skipped (no external id), %.0fs elapsed",
             summary["content_type"],
             summary["stop_reason"],
             summary["considered"],
@@ -381,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
             summary["sealed_without_credits"],
             summary["credits_written"],
             summary["people_errors"],
+            summary.get("skipped_links", 0),
             summary["skipped_no_external_id"],
             summary["elapsed_s"],
         )
@@ -388,13 +401,14 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info(
         "backfill %s: finished (%s) — %d iterations, %d synced, %d errors, "
-        "%d people_errors, %s, %.0fs elapsed",
+        "%d people_errors, %d skipped_links, %s, %.0fs elapsed",
         summary["content_type"],
         summary["stop_reason"],
         summary["iterations"],
         summary["synced"],
         summary["errors"],
         summary.get("people_errors", 0),
+        summary.get("skipped_links", 0),
         f"{summary['pending']} targets pending, {summary.get('stuck')} stuck "
         f"(retired: 404 at the source or id claimed by another type)"
         if args.content_type in _TARGET_DRIVEN

@@ -344,13 +344,55 @@
       "title": "Los dos caminos de escritura de external_ids siguen saltando un enlace sin contador ni log — el mecanismo que encadenó #7, #15 y #20",
       "area": "backend",
       "severity": "high",
-      "status": "open",
+      "status": "resolved",
       "discovered": "2026-09-04",
       "symptom": "No es un fallo observable: es la ausencia de señal. Cuando upsert_external_id (backlogg/shared/external_ids.py) o _upsert_external_ids (backlogg/shared/bulk_load.py) encuentran el triple (item_type, source, external_id) ya reclamado por OTRO item_id del mismo tipo, devuelven la fila existente y siguen: sin excepción, sin contador, sin línea de log. El ítem se escribe en su tabla y nunca recibe enlace. Agravante medido por el implementer de la #20: _unlinked_targets_stmt (backlogg/scheduler/repository.py) decide si un seed_target está hecho mirando si existe ALGUNA fila con su terna, sin comprobar a qué item_id apunta — así que ese target se cuenta como convergido, nunca acumula attempts y nunca aparece en el contador stuck.",
       "cause": "Diseño de los dos pre-checks ('gana el primero') heredado de cuando la restricción era global. El arreglo del issue #20 estrecha muchísimo el caso (desaparece la colisión ENTRE tipos, que era la masiva) pero no lo cierra: dentro de un mismo tipo sigue existiendo, por colisión de slug (dos ids de TMDB con mismo título y año colapsan en una fila y solo uno conserva el enlace) o por payload rechazado en validación.",
       "impact": "El coste real no es el volumen de datos perdidos —ya es pequeño— sino la CEGUERA. Es literalmente el mismo mecanismo que ha producido tres issues encadenados: #7 (2026-08-13), #15 (2026-08-25) y #20 (2026-09-03). En los tres casos se perdieron datos en silencio durante meses y el hallazgo fue accidental, en una QA que casualmente comparaba lo enumerado contra lo enlazado. || Urgencia añadida por la siembra: durante una carga de 118.850 ítems que dura horas, estos contadores son el ÚNICO panel de instrumentos para saber si se está perdiendo catálogo mientras corre. Sin ellos, un fallo sistemático se descubre cuando ya está horneado.",
       "solution": "Propuesta, no implementada: que ambos caminos incrementen un contador de enlaces saltados y lo propaguen a la respuesta del sync, exactamente igual que ya se hace con people_errors, más un log que nombre el ítem y el reclamante actual. Revisar además si _unlinked_targets_stmt debe comprobar item_id (hacerlo obliga a decidir qué item_id es el dueño legítimo, que es un problema aparte y probablemente otro issue).",
-      "notes": "Anotado por el leader el 2026-09-04 durante la finalización del arreglo del issue #20. Origen: hallazgo §7.1 del implementer en progress/impl_issue-20.md, confirmado por el reviewer. Decisión del usuario ese mismo día: se arregla ANTES de la siembra de producción, junto con el issue #18 — ver progress/priority_order.md."
+      "notes": "Anotado por el leader el 2026-09-04 durante la finalización del arreglo del issue #20. Origen: hallazgo §7.1 del implementer en progress/impl_issue-20.md, confirmado por el reviewer. Decisión del usuario ese mismo día: se arregla ANTES de la siembra de producción, junto con el issue #18 — ver progress/priority_order.md.",
+      "resolved": "2026-09-04",
+      "resolution_ref": "rama fix/external_ids_skipped_link_observability (progress/impl_issue-22.md)",
+      "verification": "Un tramo de sync que salte un enlace tiene que devolver skipped_links > 0 en el dict del job y en el body de POST /v1/admin/sync/{type}, con una línea WARNING de backlogg.shared.external_ids nombrando la terna, el item_id pretendiente y el reclamante; el caso idempotente (misma persona en cast y crew, tramo re-ejecutado) tiene que seguir contando 0. Verificado el 2026-09-04 contra la DB de dev y TMDB en vivo: sync_series(slice_size=5) devolvió skipped_links=1 sobre un salto real (serie 284753 renombrada, ver issue #23), y el camino per-item pasó las seis comprobaciones del script de QA. Lo que este issue NO cubre y se derivó a issues propios: #23 (el duplicado huérfano que causa el salto), #24 (falso negativo por colisión de slug en _resolve_people) y #25 (_unlinked_targets_stmt no comprueba item_id)."
+    },
+    {
+      "id": 23,
+      "title": "Un ítem renombrado en la fuente deja una fila duplicada huérfana que nunca podrá tener external_id",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-09-04",
+      "symptom": "Cuando el título de un ítem cambia en la fuente (TMDB/Open Library/IGDB), el upsert resuelve por slug, el slug nuevo no encuentra la fila vieja y se escribe una SEGUNDA fila de catálogo. El id externo sigue en la fila antigua, así que la nueva no puede recibirlo: el pre-check de (item_type, source, external_id) lo encuentra reclamado y salta. Resultado: dos filas para un mismo ítem real, la nueva sin enlace y por tanto irresoluble por id externo, invisible para el refresco y para get_credit_gaps.",
+      "cause": "La identidad del ítem en el upsert es el slug, que se deriva del título y por tanto no es estable en el tiempo, mientras que la identidad real de la fuente es el external_id. Cuando ambas discrepan gana el slug al crear la fila y gana el external_id al enlazarla, y no queda nadie que reconcilie las dos.",
+      "impact": "Duplicado permanente en el catálogo más un ítem congelado. Hoy el volumen es desconocido; con el issue #22 ya resuelto es MEDIBLE por primera vez: es el mecanismo que de verdad va a hacer subir el contador skipped_links durante la siembra, así que la siembra de producción dará la primera cifra real.",
+      "solution": "Propuesta, no implementada: resolver el upsert por external_id ANTES que por slug cuando el ítem viene de una fuente externa, de modo que un renombrado actualice la fila existente (incluido su slug) en vez de crear una nueva. Hay que decidir qué hacer con los duplicados ya creados y con el slug antiguo, que puede estar publicado en URLs.",
+      "notes": "Detectado por el implementer del issue #22 (§6.4 de progress/impl_issue-22.md) al construir el escenario end-to-end del robo de enlace, y confirmado por el reviewer. No se arregla en la rama del #22: eso es instrumentación, esto es identidad de datos. Registrado por el leader el 2026-09-04. Medido por el leader en la QA del #22 contra la DB de dev (2026-09-04): un tramo de sync_series de solo 5 ítems de refresco devolvió skipped_links=1. El caso es exactamente este issue — la serie de TMDB 284753 pasó de «Operation Safed Sagar: The Highest Air Force Mission» (series.id=4, con el enlace) a «... The Untold Story of the Kargil War» (series.id=1265, sin enlace y ya duplicada). Es decir: el mecanismo no es teórico y aparece a la primera en cuanto hay un contador que lo mire."
+    },
+    {
+      "id": 24,
+      "title": "La colisión de slug en _resolve_people pierde un id externo de persona sin contarlo — falso negativo del contador del #22",
+      "area": "backend",
+      "severity": "low",
+      "status": "open",
+      "discovered": "2026-09-04",
+      "symptom": "En el camino batch, dos personas con (source, external_id) DISTINTOS pueden resolver al MISMO people.id por el ON CONFLICT ON CONSTRAINT uq_people_slug de _resolve_people (backlogg/shared/bulk_load.py: 'two different external ids slugifying to the same name'). Eso produce dos filas candidatas con igual (item_type, item_id, source) y distinto external_id; la deduplicación by_item de _upsert_external_ids conserva la última y el otro id de TMDB se queda SIN fila en external_ids, irresoluble. El contador skipped_links del issue #22 no lo ve: descarta by_item por diseño, porque ahí el item_id es el mismo.",
+      "cause": "Dos identidades distintas de la fuente colapsan en una sola fila de people por slug, y a partir de ahí solo cabe un external_id por (item_type, item_id, source) — lo impone uq_item_source. No es una regresión del #22: el camino per-item hace lo mismo vía on_conflict_do_update sobre uq_item_source.",
+      "impact": "Bajo en volumen y sin duplicados, pero es exactamente la colisión de slug que el propio issue #22 nombra como causa residual una vez arreglado el #20, y es el hueco que queda en el panel de instrumentos: durante la siembra esa pérdida no aparece en ningún contador.",
+      "solution": "Propuesta, no implementada: decidir primero si dos personas homónimas deben ser una sola fila (hoy lo son) o dos. Si siguen siendo una, al menos instrumentar la pérdida como una clase propia de salto para que la siembra la vea; si pasan a ser dos, el arreglo es de identidad de people y el contador deja de tener nada que ver.",
+      "notes": "Hallazgo H2 del reviewer del issue #22 (2026-09-04), explícitamente derivado a issue propio en vez de ampliar aquella rama. Emparenta con el issue #18 (slug vacío en alfabetos no latinos): ambos son el slug haciendo de identidad cuando no puede."
+    },
+    {
+      "id": 25,
+      "title": "_unlinked_targets_stmt da por convergido un seed_target sin comprobar a qué item_id apunta la fila",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-09-04",
+      "symptom": "_unlinked_targets_stmt (backlogg/scheduler/repository.py) decide si un seed_target ya está hecho mirando si existe ALGUNA fila en external_ids con su terna (item_type, source, external_id), sin comprobar si esa fila apunta al ítem que el target pretendía sembrar. Si otro ítem del mismo tipo reclamó antes esa terna, el target se cuenta como convergido: sale de la work list, nunca acumula attempts, nunca aparece en el contador stuck y nunca se reintenta.",
+      "cause": "La consulta usa la terna como prueba de que el target se sembró, cuando la terna solo prueba que ALGUIEN la tiene. Heredado de cuando el pre-check era global y no había forma de distinguir dueños.",
+      "impact": "El target desaparece del panel de control sin haber sembrado nada. Es el agravante que documenta el issue #22 en su síntoma: por eso la pérdida no aparecía tampoco en pending/stuck/unlinkable, los tres números en los que se confía para saber si un tramo de siembra ha convergido.",
+      "solution": "Propuesta, no implementada: comprobar item_id además de la terna. El motivo de no haberlo hecho en la rama del #22 es que hacerlo obliga a decidir QUÉ item_id es el dueño legítimo de la terna — si el target vuelve a la work list sin cambiar la regla de 'gana el primero', reintentará eternamente sin poder enlazar nunca, que es peor que el estado actual. Va acoplado a la decisión del issue #23.",
+      "notes": "Registrado por el leader el 2026-09-04 al cerrar la rama del issue #22, donde quedó explícitamente fuera de scope (§6.5 de progress/impl_issue-22.md y confirmado por el reviewer). La limitación está documentada como conocida en docs/seeding-plan.md §5.1."
     }
   ]
 }

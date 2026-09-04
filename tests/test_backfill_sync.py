@@ -394,6 +394,47 @@ async def test_backfill_terminates_even_with_permanently_stuck_targets():
     assert summary["stuck"] == 7
 
 
+async def test_backfill_adds_up_the_skipped_links_of_every_iteration():
+    """Issue #22: the seeding panel light survives the loop.
+
+    A backfill of 118.850 items runs for hours over dozens of iterations. If
+    the script read ``skipped_links`` off each job result and threw it away
+    (which is exactly what it used to do with ``people_errors``), a run losing
+    catalog on every single slice would still finish reporting "N synced, 0
+    errors" and the loss would only be findable by hand afterwards.
+    """
+    results = [
+        _job_result(synced=500, offset=0) | {"skipped_links": 3},
+        _job_result(synced=500, offset=500) | {"skipped_links": 0},
+        _job_result(synced=200, offset=1000) | {"skipped_links": 4},
+    ]
+    get_cursor, factory = _backfill_patches(cursor_reads=[0, 500, 1000, 0])
+
+    with (
+        patch("backlogg.scheduler.jobs.sync_books", new_callable=AsyncMock, side_effect=results),
+        get_cursor,
+        factory,
+    ):
+        summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
+
+    assert summary["skipped_links"] == 7
+
+
+async def test_backfill_reports_zero_skipped_links_for_a_job_that_omits_the_key():
+    """A job result without the key must not blow the aggregation up."""
+    results = [_job_result(synced=200, offset=0)]
+    get_cursor, factory = _backfill_patches(cursor_reads=[0, 0])
+
+    with (
+        patch("backlogg.scheduler.jobs.sync_books", new_callable=AsyncMock, side_effect=results),
+        get_cursor,
+        factory,
+    ):
+        summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
+
+    assert summary["skipped_links"] == 0
+
+
 async def test_backfill_does_not_treat_unknown_progress_as_done():
     """Review N1: ``pending: None`` (work list unreadable) is not "exhausted".
 
