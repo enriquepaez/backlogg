@@ -14,6 +14,13 @@ class SyncResponse(BaseModel):
     # Default 0 because sync_games does not return this key — games have no
     # separate people/credits persistence step to fail independently.
     people_errors: int = 0
+    # Links this run wanted to write into ``external_ids`` and could not: the
+    # (item_type, source, external_id) triple was already claimed by a
+    # *different* item of the same type, so the item is in its table with no
+    # link and no id-based lookup will ever find it (issue #22). Idempotent
+    # re-links of the same item are not counted. Defaulted for the same reason
+    # as ``people_errors``: a job that does not report it must not 500.
+    skipped_links: int = 0
 
 
 class ContentStats(BaseModel):

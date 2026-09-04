@@ -153,6 +153,37 @@ async def test_sync_game_returns_200(client):
     assert body["duration_s"] == 1.2
 
 
+async def test_sync_response_carries_skipped_links(client):
+    """Issue #22: the counter has to reach the operator, not just the log.
+
+    ``POST /admin/sync/{type}`` blocks until the slice ends and is what the
+    nightly workflow and a seeding run read. A number that stays in the server
+    log is exactly the situation issues #7, #15 and #20 were each found in,
+    months late.
+    """
+    result = dict(_SYNC_RESULT, skipped_links=4)
+    mock_handler = AsyncMock(return_value=result)
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"movie": mock_handler}):
+        response = await client.post("/v1/admin/sync/movie", headers={"X-API-Key": _VALID_KEY})
+
+    assert response.status_code == 200
+    assert response.json()["skipped_links"] == 4
+
+
+async def test_sync_response_defaults_skipped_links_to_zero(client):
+    """A job that does not report the key must not turn a 200 into a 500.
+
+    Same criterion as ``people_errors``: the field is declared with a default
+    so the contract can grow without every producer having to move first.
+    """
+    mock_handler = AsyncMock(return_value=dict(_SYNC_RESULT))
+    with patch.dict("backlogg.admin.router._SYNC_HANDLERS", {"game": mock_handler}):
+        response = await client.post("/v1/admin/sync/game", headers={"X-API-Key": _VALID_KEY})
+
+    assert response.status_code == 200
+    assert response.json()["skipped_links"] == 0
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 
 

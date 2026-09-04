@@ -53,6 +53,10 @@ jobs:
           if [ "$people_errors" -gt 0 ]; then
             echo "::warning::sync/movie: $people_errors item(s) failed to persist credits/people"
           fi
+          skipped_links=$(echo "$response" | jq -r '.skipped_links // 0')
+          if [ "$skipped_links" -gt 0 ]; then
+            echo "::warning::sync/movie: $skipped_links link(s) skipped — the row was written but its external id stayed with another item, so it can never be resolved again (issue #22)"
+          fi
 
       - name: Sync series
         if: ${{ !cancelled() }}
@@ -73,6 +77,10 @@ jobs:
           people_errors=$(echo "$response" | jq -r '.people_errors // 0')
           if [ "$people_errors" -gt 0 ]; then
             echo "::warning::sync/series: $people_errors item(s) failed to persist credits/people"
+          fi
+          skipped_links=$(echo "$response" | jq -r '.skipped_links // 0')
+          if [ "$skipped_links" -gt 0 ]; then
+            echo "::warning::sync/series: $skipped_links link(s) skipped — the row was written but its external id stayed with another item, so it can never be resolved again (issue #22)"
           fi
 
       - name: Sync books
@@ -95,6 +103,10 @@ jobs:
           if [ "$people_errors" -gt 0 ]; then
             echo "::warning::sync/book: $people_errors item(s) failed to persist authors"
           fi
+          skipped_links=$(echo "$response" | jq -r '.skipped_links // 0')
+          if [ "$skipped_links" -gt 0 ]; then
+            echo "::warning::sync/book: $skipped_links link(s) skipped — the row was written but its external id stayed with another item, so it can never be resolved again (issue #22)"
+          fi
 
       - name: Sync games
         if: ${{ !cancelled() }}
@@ -111,6 +123,10 @@ jobs:
             echo "::warning::sync/game: $errors error(s), retrying once (upserts are idempotent)"
             response=$(sync_games)
             echo "$response" | jq .
+          fi
+          skipped_links=$(echo "$response" | jq -r '.skipped_links // 0')
+          if [ "$skipped_links" -gt 0 ]; then
+            echo "::warning::sync/game: $skipped_links link(s) skipped — the row was written but its external id stayed with another item, so it can never be resolved again (issue #22)"
           fi
 
       # Fails if any content type has not synced in the last 2 hours, so a

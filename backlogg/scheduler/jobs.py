@@ -51,13 +51,25 @@ used to close credit holes the ranking route structurally cannot reach
 (issue #15).  See the section at the bottom of this file.
 
 Each job returns a dict with ``synced``, ``errors``, ``offset`` (the offset
-of the processed slice), ``duration_s`` and ``people_errors`` so the admin
-endpoint can expose the result synchronously. ``people_errors`` counts
-failures persisting people/credits (cast, crew, authors) for an otherwise
-successfully upserted item — those failures are logged but intentionally do
-not increment ``errors`` (a missing credit must not abort the rest of the
-slice), so ``people_errors`` is the only way to see them in
-``POST /admin/sync/{type}``'s response.
+of the processed slice), ``duration_s``, ``people_errors`` and
+``skipped_links`` so the admin endpoint can expose the result synchronously.
+``people_errors`` counts failures persisting people/credits (cast, crew,
+authors) for an otherwise successfully upserted item — those failures are
+logged but intentionally do not increment ``errors`` (a missing credit must
+not abort the rest of the slice), so ``people_errors`` is the only way to see
+them in ``POST /admin/sync/{type}``'s response.
+
+``skipped_links`` (issue #22) counts the ``external_ids`` rows this run wanted
+to write and could not because the ``(item_type, source, external_id)`` triple
+was already claimed by a *different* item of the same type — the item lands in
+its table with no link, so it is invisible to every id-based lookup afterwards.
+Idempotent re-offers of a link that already points at the same item are **not**
+counted. Both write paths feed it through the ``collect_link_skips()``
+accumulator in ``backlogg.shared.external_ids``; the job only opens the block
+and reads the total. It is the panel light for a seeding run: a number that
+grows slice after slice means catalog is being dropped *while* the run is
+still going, which is exactly what issues #7, #15 and #20 each cost months to
+notice.
 """
 
 import asyncio
@@ -107,7 +119,7 @@ from backlogg.shared.bulk_load import (
     bulk_load_items,
     rollback_quietly,
 )
-from backlogg.shared.external_ids import upsert_external_id
+from backlogg.shared.external_ids import collect_link_skips, upsert_external_id
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +527,7 @@ def _seed_failure_result(start: float) -> dict:
         "synced": 0,
         "errors": 1,
         "people_errors": 0,
+        "skipped_links": 0,
         "offset": 0,
         "duration_s": round(time.monotonic() - start, 1),
         "pending": None,
@@ -568,6 +581,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
             "synced": 0,
             "errors": 0,
             "people_errors": 0,
+            "skipped_links": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
             "pending": progress.pending,
@@ -585,84 +599,87 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
     gone: list[str] = []
     pending_targets = set(pending)
 
-    async with async_session_factory() as session:
-        writer = _BatchWriter(session, spec.bulk_spec, spec.job_name)
-        for chunk_start in range(0, len(work), chunk_size):
-            chunk = work[chunk_start : chunk_start + chunk_size]
+    with collect_link_skips() as link_skips:
+        async with async_session_factory() as session:
+            writer = _BatchWriter(session, spec.bulk_spec, spec.job_name)
+            for chunk_start in range(0, len(work), chunk_size):
+                chunk = work[chunk_start : chunk_start + chunk_size]
 
-            # Fetch phase — parallel, bounded by the semaphore.
-            fetched = await asyncio.gather(
-                *(_fetch_seed_item_guarded(sem, spec, external_id) for external_id in chunk),
-                return_exceptions=True,
-            )
+                # Fetch phase — parallel, bounded by the semaphore.
+                fetched = await asyncio.gather(
+                    *(_fetch_seed_item_guarded(sem, spec, external_id) for external_id in chunk),
+                    return_exceptions=True,
+                )
 
-            # Persist phase — sequential: AsyncSession is not concurrency-safe.
-            for external_id, outcome in zip(chunk, fetched, strict=True):
-                if isinstance(outcome, BaseException):
-                    logger.warning(
-                        "%s: fetch failed for external_id=%s (%s) — not counted as an "
-                        "attempt, will retry next run",
-                        spec.job_name,
-                        external_id,
-                        outcome,
-                    )
-                    errors += 1
-                    continue
-                if outcome is None:
-                    # 404 at TMDB: the id was enumerated but has since been
-                    # deleted or merged. Not an error — nothing to write, and
-                    # a definitive answer, so the target is retired now rather
-                    # than re-asked on every future run.
-                    logger.info(
-                        "%s: external_id=%s is gone from TMDB (404) — retiring the target",
-                        spec.job_name,
-                        external_id,
-                    )
+                # Persist phase — sequential: AsyncSession is not concurrency-safe.
+                for external_id, outcome in zip(chunk, fetched, strict=True):
+                    if isinstance(outcome, BaseException):
+                        logger.warning(
+                            "%s: fetch failed for external_id=%s (%s) — not counted as an "
+                            "attempt, will retry next run",
+                            spec.job_name,
+                            external_id,
+                            outcome,
+                        )
+                        errors += 1
+                        continue
+                    if outcome is None:
+                        # 404 at TMDB: the id was enumerated but has since been
+                        # deleted or merged. Not an error — nothing to write, and
+                        # a definitive answer, so the target is retired now rather
+                        # than re-asked on every future run.
+                        logger.info(
+                            "%s: external_id=%s is gone from TMDB (404) — retiring the target",
+                            spec.job_name,
+                            external_id,
+                        )
+                        if external_id in pending_targets:
+                            gone.append(external_id)
+                        continue
+                    data, people = outcome
                     if external_id in pending_targets:
-                        gone.append(external_id)
-                    continue
-                data, people = outcome
-                if external_id in pending_targets:
-                    resolved.append(external_id)
-                await writer.add(BulkItem(data=data, external_id=external_id, people=people))
-            await writer.flush()
+                        resolved.append(external_id)
+                    await writer.add(BulkItem(data=data, external_id=external_id, people=people))
+                await writer.flush()
 
-        # Book-keeping for the pending targets this slice actually resolved.
-        # Counting only conclusive outcomes is what makes retirement safe: a
-        # TMDB outage costs nothing, while a target that keeps resolving and
-        # never linking runs out of passes and leaves the work list.
-        try:
-            now = datetime.now(UTC)
-            await mark_seed_targets_attempted(session, spec.item_type, source, resolved, now)
-            await mark_seed_targets_unreachable(session, spec.item_type, source, gone, now)
-            await session.commit()
-        except Exception:
-            logger.exception("%s: failed to stamp seed target outcomes", spec.job_name)
-            await rollback_quietly(session, spec.job_name)
+            # Book-keeping for the pending targets this slice actually resolved.
+            # Counting only conclusive outcomes is what makes retirement safe: a
+            # TMDB outage costs nothing, while a target that keeps resolving and
+            # never linking runs out of passes and leaves the work list.
+            try:
+                now = datetime.now(UTC)
+                await mark_seed_targets_attempted(session, spec.item_type, source, resolved, now)
+                await mark_seed_targets_unreachable(session, spec.item_type, source, gone, now)
+                await session.commit()
+            except Exception:
+                logger.exception("%s: failed to stamp seed target outcomes", spec.job_name)
+                await rollback_quietly(session, spec.job_name)
 
-        after = progress
-        try:
-            after = await count_seed_target_progress(
-                session, spec.item_type, source, max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
-            )
-        except Exception:
-            logger.exception("%s: failed to recount seed target progress", spec.job_name)
+            after = progress
+            try:
+                after = await count_seed_target_progress(
+                    session, spec.item_type, source, max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
+                )
+            except Exception:
+                logger.exception("%s: failed to recount seed target progress", spec.job_name)
 
-        try:
-            await _refresh_catalog_search(session)
-        except Exception:
-            logger.exception("%s: failed to refresh catalog_search", spec.job_name)
+            try:
+                await _refresh_catalog_search(session)
+            except Exception:
+                logger.exception("%s: failed to refresh catalog_search", spec.job_name)
 
     synced = writer.synced
     errors += writer.errors
     people_errors = writer.people_errors
+    skipped_links = link_skips.count
     logger.info(
-        "%s: done — %d items upserted, %d errors, %d people_errors, %d gone from TMDB "
-        "(%d targets still pending, %d stuck: %d gone, %d unlinkable)",
+        "%s: done — %d items upserted, %d errors, %d people_errors, %d skipped_links, "
+        "%d gone from TMDB (%d targets still pending, %d stuck: %d gone, %d unlinkable)",
         spec.job_name,
         synced,
         errors,
         people_errors,
+        skipped_links,
         len(gone),
         after.pending,
         after.stuck,
@@ -684,6 +701,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
         "synced": synced,
         "errors": errors,
         "people_errors": people_errors,
+        "skipped_links": skipped_links,
         "offset": 0,
         "duration_s": round(time.monotonic() - start, 1),
         "pending": after.pending,
@@ -736,7 +754,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_BOOKS`` (which itself
     overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
     Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
-    ``offset`` and ``duration_s``.
+    ``skipped_links``, ``offset`` and ``duration_s``.
     """
     logger.info("sync_books: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "book"})
@@ -753,6 +771,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
             "synced": 0,
             "errors": 1,
             "people_errors": 0,
+            "skipped_links": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -765,83 +784,94 @@ async def sync_books(slice_size: int | None = None) -> dict:
             "synced": 0,
             "errors": 1,
             "people_errors": 0,
+            "skipped_links": 0,
             "offset": offset,
             "duration_s": round(time.monotonic() - start, 1),
         }
 
-    async with async_session_factory() as session:
-        writer = _BatchWriter(session, books_repo.BOOK_BULK_SPEC, "sync_books")
-        for raw in raw_list:
-            try:
-                work_key = raw.get("key", "")
-                work_id = work_key.removeprefix("/works/") if work_key else None
-
-                # ⚠️ This search_doc is rebuilt by hand instead of passing
-                # ``raw`` straight through, so every field book_to_dict reads
-                # must be copied here explicitly. Forgetting one silently
-                # degrades the nightly job while the on-demand path keeps
-                # working (that was Issue #17 with ``isbn``). Keep in sync
-                # with ``_OL_SEARCH_FIELDS`` in the Open Library adapter.
-                # ``edition_count`` is in that field set but deliberately not
-                # copied: it is the feature-73 seed filter's discriminant,
-                # requested only so a page can be audited, and book_to_dict
-                # never reads it — copying it would add a dead key.
-                search_doc: dict = {
-                    "title": raw.get("title", ""),
-                    "key": work_key,
-                    "first_publish_year": raw.get("first_publish_year"),
-                    "cover_i": raw.get("cover_i") or raw.get("cover_id"),
-                    "author_name": raw.get("author_name", []),
-                    "isbn": raw.get("isbn", []),
-                    "ddc": raw.get("ddc", []),
-                    "lcc": raw.get("lcc", []),
-                    "subject_facet": raw.get("subject_facet", []),
-                }
-
-                book_data = _ol_client.book_to_dict(search_doc, None)
-                if not book_data.get("title"):
-                    continue
-            except Exception:
-                logger.exception("sync_books: error mapping work_key=%s", raw.get("key"))
-                errors += 1
-                continue
-
-            people: list[BulkPerson] = []
-            if work_id:
+    with collect_link_skips() as link_skips:
+        async with async_session_factory() as session:
+            writer = _BatchWriter(session, books_repo.BOOK_BULK_SPEC, "sync_books")
+            for raw in raw_list:
                 try:
-                    work_detail = await _ol_client.get_work_detail(work_id)
-                    if work_detail:
-                        people = await collect_book_authors(work_detail)
+                    work_key = raw.get("key", "")
+                    work_id = work_key.removeprefix("/works/") if work_key else None
+
+                    # ⚠️ This search_doc is rebuilt by hand instead of passing
+                    # ``raw`` straight through, so every field book_to_dict reads
+                    # must be copied here explicitly. Forgetting one silently
+                    # degrades the nightly job while the on-demand path keeps
+                    # working (that was Issue #17 with ``isbn``). Keep in sync
+                    # with ``_OL_SEARCH_FIELDS`` in the Open Library adapter.
+                    # ``edition_count`` is in that field set but deliberately not
+                    # copied: it is the feature-73 seed filter's discriminant,
+                    # requested only so a page can be audited, and book_to_dict
+                    # never reads it — copying it would add a dead key.
+                    search_doc: dict = {
+                        "title": raw.get("title", ""),
+                        "key": work_key,
+                        "first_publish_year": raw.get("first_publish_year"),
+                        "cover_i": raw.get("cover_i") or raw.get("cover_id"),
+                        "author_name": raw.get("author_name", []),
+                        "isbn": raw.get("isbn", []),
+                        "ddc": raw.get("ddc", []),
+                        "lcc": raw.get("lcc", []),
+                        "subject_facet": raw.get("subject_facet", []),
+                    }
+
+                    book_data = _ol_client.book_to_dict(search_doc, None)
+                    if not book_data.get("title"):
+                        continue
                 except Exception:
-                    logger.exception("sync_books: failed to fetch authors for work_id=%s", work_id)
-                    people_errors += 1
+                    logger.exception("sync_books: error mapping work_key=%s", raw.get("key"))
+                    errors += 1
+                    continue
 
-            await writer.add(BulkItem(data=book_data, external_id=work_id, people=people))
-        await writer.flush()
+                people: list[BulkPerson] = []
+                if work_id:
+                    try:
+                        work_detail = await _ol_client.get_work_detail(work_id)
+                        if work_detail:
+                            people = await collect_book_authors(work_detail)
+                    except Exception:
+                        logger.exception(
+                            "sync_books: failed to fetch authors for work_id=%s", work_id
+                        )
+                        people_errors += 1
 
-        await _persist_cursor(
-            session, "BOOK", _next_offset(offset, len(raw_list), slice_size, target), "sync_books"
-        )
+                await writer.add(BulkItem(data=book_data, external_id=work_id, people=people))
+            await writer.flush()
 
-        try:
-            await _refresh_catalog_search(session)
-        except Exception:
-            logger.exception("sync_books: failed to refresh catalog_search")
+            await _persist_cursor(
+                session,
+                "BOOK",
+                _next_offset(offset, len(raw_list), slice_size, target),
+                "sync_books",
+            )
+
+            try:
+                await _refresh_catalog_search(session)
+            except Exception:
+                logger.exception("sync_books: failed to refresh catalog_search")
 
     synced = writer.synced
     errors += writer.errors
     people_errors += writer.people_errors
+    skipped_links = link_skips.count
     logger.info(
-        "sync_books: done — %d items upserted, %d errors, %d people_errors (offset %d)",
+        "sync_books: done — %d items upserted, %d errors, %d people_errors, "
+        "%d skipped_links (offset %d)",
         synced,
         errors,
         people_errors,
+        skipped_links,
         offset,
     )
     return {
         "synced": synced,
         "errors": errors,
         "people_errors": people_errors,
+        "skipped_links": skipped_links,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
     }
@@ -852,8 +882,9 @@ async def sync_games(slice_size: int | None = None) -> dict:
 
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_GAMES`` (which itself
     overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``offset`` and
-    ``duration_s``.
+    Returns a dict with keys ``synced``, ``errors``, ``skipped_links``,
+    ``offset`` and ``duration_s``.  There is no ``people_errors``: games carry
+    no people credits, only company credits that travel inside the payload.
     """
     logger.info("sync_games: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "game"})
@@ -868,6 +899,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "skipped_links": 0,
             "offset": 0,
             "duration_s": round(time.monotonic() - start, 1),
         }
@@ -879,46 +911,57 @@ async def sync_games(slice_size: int | None = None) -> dict:
         return {
             "synced": 0,
             "errors": 1,
+            "skipped_links": 0,
             "offset": offset,
             "duration_s": round(time.monotonic() - start, 1),
         }
 
-    async with async_session_factory() as session:
-        writer = _BatchWriter(session, games_repo.GAME_BULK_SPEC, "sync_games")
-        for raw in raw_list:
-            try:
-                igdb_id = raw.get("id")
-                if not igdb_id:
+    with collect_link_skips() as link_skips:
+        async with async_session_factory() as session:
+            writer = _BatchWriter(session, games_repo.GAME_BULK_SPEC, "sync_games")
+            for raw in raw_list:
+                try:
+                    igdb_id = raw.get("id")
+                    if not igdb_id:
+                        continue
+
+                    game_data = _igdb_client.game_to_dict(raw)
+                except Exception:
+                    logger.exception("sync_games: error mapping igdb_id=%s", raw.get("id"))
+                    errors += 1
                     continue
 
-                game_data = _igdb_client.game_to_dict(raw)
+                # Games carry no people: developers/publishers are company credits
+                # and travel inside ``game_data`` itself.
+                await writer.add(BulkItem(data=game_data, external_id=str(igdb_id)))
+            await writer.flush()
+
+            await _persist_cursor(
+                session,
+                "GAME",
+                _next_offset(offset, len(raw_list), slice_size, target),
+                "sync_games",
+            )
+
+            try:
+                await _refresh_catalog_search(session)
             except Exception:
-                logger.exception("sync_games: error mapping igdb_id=%s", raw.get("id"))
-                errors += 1
-                continue
-
-            # Games carry no people: developers/publishers are company credits
-            # and travel inside ``game_data`` itself.
-            await writer.add(BulkItem(data=game_data, external_id=str(igdb_id)))
-        await writer.flush()
-
-        await _persist_cursor(
-            session, "GAME", _next_offset(offset, len(raw_list), slice_size, target), "sync_games"
-        )
-
-        try:
-            await _refresh_catalog_search(session)
-        except Exception:
-            logger.exception("sync_games: failed to refresh catalog_search")
+                logger.exception("sync_games: failed to refresh catalog_search")
 
     synced = writer.synced
     errors += writer.errors
+    skipped_links = link_skips.count
     logger.info(
-        "sync_games: done — %d items upserted, %d errors (offset %d)", synced, errors, offset
+        "sync_games: done — %d items upserted, %d errors, %d skipped_links (offset %d)",
+        synced,
+        errors,
+        skipped_links,
+        offset,
     )
     return {
         "synced": synced,
         "errors": errors,
+        "skipped_links": skipped_links,
         "offset": offset,
         "duration_s": round(time.monotonic() - start, 1),
     }
@@ -1099,8 +1142,14 @@ async def sync_missing_credits(
 
     Returns a summary dict with ``content_type``, ``considered``,
     ``processed``, ``with_credits``, ``sealed_without_credits``,
-    ``credits_written``, ``people_errors``, ``skipped_no_external_id``,
-    ``duration_s`` and ``stop_reason`` (``"exhausted"`` or ``"time_budget"``).
+    ``credits_written``, ``people_errors``, ``skipped_links``,
+    ``skipped_no_external_id``, ``duration_s`` and ``stop_reason``
+    (``"exhausted"`` or ``"time_budget"``).
+
+    ``skipped_links`` counts the *people* links this pass could not write
+    because the TMDB/Open Library person id was already claimed by another
+    ``people`` row — the credit still lands, but that person stays unresolvable
+    by external id.
     """
     item_type = _ITEM_TYPES_BY_CONTENT.get(content_type)
     if item_type is None or item_type not in CREDIT_GAP_SOURCES:
@@ -1138,57 +1187,60 @@ async def sync_missing_credits(
     people_errors = 0
     stop_reason = "exhausted"
 
-    async with async_session_factory() as session:
-        for start_index in range(0, len(gap_set.gaps), chunk_size):
-            if time_budget_s is not None and time.monotonic() - start >= time_budget_s:
-                stop_reason = "time_budget"
-                break
+    with collect_link_skips() as link_skips:
+        async with async_session_factory() as session:
+            for start_index in range(0, len(gap_set.gaps), chunk_size):
+                if time_budget_s is not None and time.monotonic() - start >= time_budget_s:
+                    stop_reason = "time_budget"
+                    break
 
-            chunk = gap_set.gaps[start_index : start_index + chunk_size]
+                chunk = gap_set.gaps[start_index : start_index + chunk_size]
 
-            # Fetch phase — parallel, bounded by the semaphore.
-            fetched = await asyncio.gather(
-                *(_fetch_credits_guarded(sem, item_type, gap) for gap in chunk),
-                return_exceptions=True,
-            )
+                # Fetch phase — parallel, bounded by the semaphore.
+                fetched = await asyncio.gather(
+                    *(_fetch_credits_guarded(sem, item_type, gap) for gap in chunk),
+                    return_exceptions=True,
+                )
 
-            # Persist phase — sequential: AsyncSession is not concurrency-safe.
-            entries: list[tuple[int, list[BulkPerson]]] = []
-            item_ids: list[int] = []
-            for gap, outcome in zip(chunk, fetched, strict=True):
-                if isinstance(outcome, BaseException):
-                    logger.warning(
-                        "sync_missing_credits %s: fetch failed for external_id=%s (%s) — "
-                        "not stamping, will retry next run",
-                        content_type,
-                        gap.external_id,
-                        outcome,
-                    )
-                    people_errors += 1
-                    continue
-                item_ids.append(gap.item_id)
-                if outcome:
-                    entries.append((gap.item_id, outcome))
-                    with_credits += 1
-                else:
-                    sealed_without_credits += 1
+                # Persist phase — sequential: AsyncSession is not concurrency-safe.
+                entries: list[tuple[int, list[BulkPerson]]] = []
+                item_ids: list[int] = []
+                for gap, outcome in zip(chunk, fetched, strict=True):
+                    if isinstance(outcome, BaseException):
+                        logger.warning(
+                            "sync_missing_credits %s: fetch failed for external_id=%s (%s) — "
+                            "not stamping, will retry next run",
+                            content_type,
+                            gap.external_id,
+                            outcome,
+                        )
+                        people_errors += 1
+                        continue
+                    item_ids.append(gap.item_id)
+                    if outcome:
+                        entries.append((gap.item_id, outcome))
+                        with_credits += 1
+                    else:
+                        sealed_without_credits += 1
 
-            written, errors = await _write_credits_batch(session, item_type, entries, item_ids)
-            credits_written += written
-            people_errors += errors
-            processed += len(item_ids)
+                written, errors = await _write_credits_batch(session, item_type, entries, item_ids)
+                credits_written += written
+                people_errors += errors
+                processed += len(item_ids)
 
-            logger.info(
-                "sync_missing_credits %s: %d/%d items processed, %d credits written, "
-                "%d people_errors (%.0fs elapsed)",
-                content_type,
-                processed,
-                len(gap_set.gaps),
-                credits_written,
-                people_errors,
-                time.monotonic() - start,
-            )
+                logger.info(
+                    "sync_missing_credits %s: %d/%d items processed, %d credits written, "
+                    "%d people_errors, %d skipped_links (%.0fs elapsed)",
+                    content_type,
+                    processed,
+                    len(gap_set.gaps),
+                    credits_written,
+                    people_errors,
+                    link_skips.count,
+                    time.monotonic() - start,
+                )
 
+    skipped_links = link_skips.count
     return {
         "content_type": content_type,
         "considered": gap_set.considered,
@@ -1197,6 +1249,7 @@ async def sync_missing_credits(
         "sealed_without_credits": sealed_without_credits,
         "credits_written": credits_written,
         "people_errors": people_errors,
+        "skipped_links": skipped_links,
         "skipped_no_external_id": gap_set.skipped_no_external_id,
         "duration_s": round(time.monotonic() - start, 1),
         "stop_reason": stop_reason,

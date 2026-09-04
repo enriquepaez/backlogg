@@ -46,15 +46,19 @@ esto» del final**.
 - **5 features frontend en `blocked`** (FE-65 a FE-69, ids 64-68): ninguna
   ejecutable hoy, cada una espera a su feature backend pareja. Las 63 anteriores
   están `done`. Índice en el apartado «Frontend».
-- **5 issues abiertos**: #15, #18, #19, #20 y #22. Detalle y ubicación en la cola
-  justo debajo.
+- **7 issues abiertos**: #15, #18, #19, #20, #23, #24 y #25. El **#22 pasó a
+  `resolved` el 2026-09-04**; los #23, #24 y #25 nacieron de su arreglo. Detalle y
+  ubicación en la cola justo debajo.
 
 ### Issues abiertos y dónde caen en la cola
 
 | Issue | Sev. | Dónde está en la cola |
 |---|---|---|
 | **#20** `uq_external_id` sin `item_type` | high | **Punto 3.1 — hecho**: implementado, revisado y con QA manual el 2026-09-04, en la rama `fix/uq_external_id_item_type`. Sigue `open` a propósito: no se cierra hasta medirlo contra producción, para no repetir el error que originó el #15 |
-| **#22** saltos silenciosos sin contador ni log | high | **Punto 3.2 — antes de sembrar.** Es el panel de instrumentos de la siembra y el mecanismo que ya encadenó #7 → #15 → #20 |
+| **#22** saltos silenciosos sin contador ni log | high | **Punto 3.2 — hecho y `resolved`**: implementado, revisado (APPROVED) y con QA manual el 2026-09-04, en la rama `fix/external_ids_skipped_link_observability`. A diferencia del #20, este sí se cierra: la instrumentación es el entregable y se verificó contra un salto real |
+| **#23** duplicado huérfano por renombrado en la fuente | medium | **Sin punto asignado todavía.** Es el mecanismo que de verdad dispara el salto: medido en la QA del #22 con datos reales. Decidir si entra antes de la siembra —cuando la siembra lo dimensione— o después |
+| **#24** colisión de slug en `_resolve_people` pierde un id de persona | low | **Sin punto asignado.** Falso negativo del contador del #22; emparenta con el #18 (el slug haciendo de identidad cuando no puede) |
+| **#25** `_unlinked_targets_stmt` no comprueba `item_id` | medium | **Sin punto asignado.** Acoplado a la decisión del #23: reabrir los targets sin cambiar «gana el primero» sería peor que el estado actual |
 | **#18** slug vacío en alfabetos no latinos | high | **Punto 3.3 — antes de sembrar.** Decisión de producto pendiente: transliterar vs. derivar el slug del external_id |
 | **#15** credits vacíos en el catálogo | high | **Sus dos mitades están resueltas en el papel, pero sigue `open` a propósito** (ver más abajo): movies/series/books se disuelve con el borrado —que aún no se ha ejecutado— y games se **podó** el 2026-09-04 |
 | **#19** flake de `DeadlockDetectedError` | low | **Sin punto asignado, y es una decisión consciente.** No bloquea nada y no corrompe datos; el coste es CI rojo intermitente que entrena a ignorar un `init.sh` rojo. Se aborda cuando moleste |
@@ -130,7 +134,7 @@ Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
 | 2 | **85** `backfill_credits_targeted` | Cierra el **issue #15**, que es lo que bloquea la 74. Sin esto la capa 0 de recomendación no tiene datos |
 | 3 | ~~**86** `tmdb_discover_quality_seeding`~~ ✅ **done 2026-09-03** | El catálogo real de movies/series (`vote_count ≥ 25` → 57.135 + 10.880). Rompe el techo de 10.000 de `/popular` |
 | 3.1 | **issue #20** `uq_external_id` gana `item_type` | ✅ implementado, revisado y con QA manual el 2026-09-04. Prerrequisito duro: sin él la siembra pierde catálogo en silencio y a tasa creciente |
-| 3.2 | **issue #22** hacer ruidosos los saltos silenciosos de `external_ids` | Antes de sembrar: es el panel de instrumentos de la siembra. Ver actualización del 2026-09-04 |
+| 3.2 | ~~**issue #22** hacer ruidosos los saltos silenciosos de `external_ids`~~ ✅ **resolved 2026-09-04** | Era el panel de instrumentos de la siembra. `skipped_links` viaja ya del job al endpoint, al `backfill_sync.py` y al `::warning::` del workflow nocturno |
 | 3.3 | **issue #18** slug de nombres en alfabeto no latino | Antes de sembrar: si no, el catálogo nuevo nace con un agujero permanente en credits. Decisión de producto pendiente (transliterar vs. `tmdb-<id>`) |
 | 4 | **87** `openlibrary_dump_seeding` | El catálogo real de books (18.874). Saca `search.json` del camino crítico |
 | 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |

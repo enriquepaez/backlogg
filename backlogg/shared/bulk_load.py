@@ -101,7 +101,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import sqltypes
 
-from backlogg.shared.external_ids import ExternalId
+from backlogg.shared.external_ids import ExternalId, record_link_skip
 from backlogg.shared.models import Credit, Person
 
 logger = logging.getLogger(__name__)
@@ -622,12 +622,29 @@ async def _upsert_external_ids(
     wins on ``(item_type, source, external_id)``, last wins on
     ``(item_type, item_id, source)`` — the order a sequential per-item run
     would produce.
+
+    Both drops — the one against a pre-existing row and the one *inside* the
+    batch — are counted and logged through ``record_link_skip`` when the
+    incumbent is a **different** ``item_id`` (issue #22).  Same ``item_id`` is
+    idempotency (the same TMDB person in cast and crew of the same item, a
+    re-run of the slice) and stays silent.  That discriminant is why the
+    ``SELECT`` below also reads ``item_id``: it is the same query with one more
+    column, not an extra round trip — the batch route's whole point is its
+    round-trip budget (see the module docstring).
     """
     if not rows:
         return
     by_pair: dict[tuple[str, str, str], tuple[str, int, str, str]] = {}
     for row in rows:
-        by_pair.setdefault((row[0], row[2], row[3]), row)
+        key = (row[0], row[2], row[3])
+        incumbent = by_pair.get(key)
+        if incumbent is None:
+            by_pair[key] = row
+        elif incumbent[1] != row[1]:
+            # Two different items of the same type offered the same triple in
+            # one batch (colliding slugs, a duplicated payload). The per-item
+            # route would have let the first one win too; it just never said so.
+            record_link_skip(row[0], row[2], row[3], row[1], incumbent[1])
     by_item: dict[tuple[str, int, str], tuple[str, int, str, str]] = {}
     for row in by_pair.values():
         by_item[(row[0], row[1], row[2])] = row
@@ -635,12 +652,24 @@ async def _upsert_external_ids(
     candidates = list(by_item.values())
     keys = [(row[0], row[2], row[3]) for row in candidates]
     existing = await session.execute(
-        select(ExternalId.item_type, ExternalId.source, ExternalId.external_id).where(
-            tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys)
-        )
+        select(
+            ExternalId.item_type,
+            ExternalId.source,
+            ExternalId.external_id,
+            ExternalId.item_id,
+        ).where(tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys))
     )
-    claimed = set(existing.all())
-    fresh = [row for row in candidates if (row[0], row[2], row[3]) not in claimed]
+    claimed: dict[tuple[str, str, str], int] = {
+        (item_type, source, external_id): item_id
+        for item_type, source, external_id, item_id in existing.all()
+    }
+    fresh: list[tuple[str, int, str, str]] = []
+    for row in candidates:
+        holder = claimed.get((row[0], row[2], row[3]))
+        if holder is None:
+            fresh.append(row)
+        elif holder != row[1]:
+            record_link_skip(row[0], row[2], row[3], row[1], holder)
     if not fresh:
         return
 

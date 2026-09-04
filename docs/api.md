@@ -1010,6 +1010,8 @@ Response:
   "type": "movie",
   "synced": 94,
   "errors": 6,
+  "people_errors": 0,
+  "skipped_links": 0,
   "offset": 0,
   "duration_s": 87
 }
@@ -1027,6 +1029,17 @@ Response:
   **persistirse**. Desde la feature 86 movies y series traen los credits en la
   misma petición del detalle, así que ya no existe un fallo *de red*
   independiente para ellos: un fallo de fetch cuenta en `errors`.
+- `skipped_links` — enlaces de `external_ids` que este tramo quiso escribir y no
+  pudo porque la terna `(item_type, source, external_id)` ya la tenía **otro
+  ítem del mismo tipo** (issue #22). El ítem sí queda escrito en su tabla, pero
+  sin enlace: a partir de ahí es invisible para cualquier búsqueda por id
+  externo, no se refresca nunca y puede duplicarse. No cuenta en `errors`
+  —el tramo no ha fallado— ni cuenta las re-escrituras idempotentes del mismo
+  enlace al mismo ítem. Es el número que hay que vigilar **mientras** corre una
+  siembra: si crece tramo a tramo se está perdiendo catálogo en directo.
+  Ambos caminos de escritura (por ítem y por lotes) lo alimentan, y cada salto
+  deja además un `WARNING` en el log nombrando la terna, el ítem pretendiente y
+  el que ya la tiene.
 
 **Auth**: requiere el header `X-API-Key` con el valor de la env var
 `ADMIN_API_KEY`. Header ausente o incorrecto → `401`; `ADMIN_API_KEY` sin

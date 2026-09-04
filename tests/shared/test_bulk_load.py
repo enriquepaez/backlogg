@@ -536,11 +536,20 @@ async def test_invalid_credit_is_dropped_without_costing_the_item(db):
 
 
 def _people_lookup_statements(recorder: _StatementRecorder) -> list[str]:
-    """The person-resolution SELECT — the only one that reads external_ids.item_id."""
+    """The person-resolution SELECT, told apart by its projection.
+
+    It used to be "the only SELECT that reads ``external_ids.item_id``", but
+    issue #22 made the claim pre-check in ``_upsert_external_ids`` read
+    ``item_id`` too (that is how it tells an idempotent re-link from a link
+    stolen by another item). The two are still distinguishable by their select
+    list: the person lookup projects ``source, external_id, item_id`` and the
+    claim pre-check leads with ``item_type``.
+    """
     return [
         statement
         for statement in recorder.statements
-        if "external_ids.item_id" in statement and statement.lstrip().upper().startswith("SELECT")
+        if statement.lstrip().startswith("SELECT external_ids.source")
+        and "external_ids.item_id" in statement
     ]
 
 
