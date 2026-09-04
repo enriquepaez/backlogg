@@ -279,6 +279,13 @@ enlazarse nunca**:
    incluía `item_type` y un id de persona bastaba para bloquear la película o
    serie con el mismo número (issue #20). Eso ya está arreglado.
 
+   Y había una segunda causa masiva, cerrada justo antes de sembrar: los
+   títulos en alfabeto no latino foldaban a `""` y todos los de un mismo año
+   caían en el slug `-2025`, así que con `vote_count >= 25` —que deja entrar
+   mucho contenido en CJK y cirílico— se habrían fundido miles de fichas en un
+   puñado de filas. Desde el issue #18 esos ítems se slugifican con su id
+   externo (`tmdb-1599191`). Ver `docs/conventions.md` § Identificadores y URLs.
+
 Si esos targets se quedan en el conjunto pendiente, `pending` tiene un **suelo
 permanente > 0**. Y las dos garantías del diseño dependen de que `pending`
 llegue a 0: la rotación de refresco solo se dispara cuando no queda nada
@@ -481,7 +488,7 @@ log de `scripts/backfill_sync.py` (y en la respuesta de
 | Contador | Qué significa | Qué hacer si sube |
 |---|---|---|
 | `errors` | Ítems que fallaron y no se escribieron | Si `synced == 0` y `errors > 0` el backfill aborta solo. Si convive con `synced` alto, mirar el log del ítem concreto |
-| `people_errors` | El ítem se guardó pero sus credits no | No aborta el tramo (un credit ausente no puede tumbar la slice). Se recupera después con `backfill_sync.py --only-missing-credits` |
+| `people_errors` | El ítem se guardó pero sus credits no | No aborta el tramo (un credit ausente no puede tumbar la slice). Se recupera después con `backfill_sync.py --only-missing-credits`. Hasta el issue #18 subía sistemáticamente por los nombres en alfabeto no latino (slug vacío → credit descartado); eso ya no lo dispara, así que durante la siembra cualquier subida es una anomalía real que merece mirar el log |
 | `skipped_links` | El ítem se guardó **sin enlace en `external_ids`**: la terna `(item_type, source, external_id)` ya la tenía otro ítem del mismo tipo (issue #22) | **Es el que importa durante la siembra.** Cada unidad es una fila del catálogo que ya no se encontrará por id externo, no se refrescará nunca y puede duplicarse. Si crece tramo a tramo hay un fallo sistemático: parar y mirar los `WARNING` de `backlogg.shared.external_ids`, que nombran la terna, el ítem pretendiente y el que ya la tiene |
 
 `skipped_links` **no** cuenta las re-escrituras idempotentes del mismo enlace al

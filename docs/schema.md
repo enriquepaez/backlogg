@@ -4,6 +4,22 @@ PostgreSQL. Migrations managed with Alembic. All timestamps are `TIMESTAMPTZ`.
 
 ## Item tables
 
+Los cuatro tipos comparten la misma regla de `slug`, que es **UNIQUE** y por
+tanto la clave de conflicto del upsert: el slug es identidad, no decoración.
+Se construye con `titled_slug` (`backlogg/shared/slugs.py`) como
+`<título foldado a ASCII>-<año>` y, cuando el fold queda **totalmente vacío**
+—títulos íntegramente en CJK, cirílico, árabe…—, como `<fuente>-<id externo>`
+**sin año** (`tmdb-1599191`, `open-library-ol3923952w`). Antes del issue #18
+esos títulos producían `-2025`, así que todos los ítems no latinos de un mismo
+año compartían una sola fila. Ver `docs/conventions.md` § Identificadores y
+URLs.
+
+Lo que el slug **no** garantiza: que dos ítems distintos sean dos filas cuando
+sus folds coinciden. Pasa con dos títulos latinos iguales del mismo año y pasa
+también con los mezclados, donde el fallback no llega a entrar
+(`初次尝鲜 Season 2` → `season-2-2025`). Esas fusiones se cuentan en
+`seed_targets.unreachable_at` (ver «Sync cursors»).
+
 ### `movies`
 
 ```sql
@@ -323,6 +339,29 @@ CREATE TABLE people (
 CREATE INDEX idx_people_name ON people USING GIN (to_tsvector('simple', name));
 CREATE INDEX idx_people_last_synced_at ON people (last_synced_at);
 ```
+
+**Qué garantiza `slug` y qué no.** `slug` es la clave de conflicto de
+`upsert_person` (`uq_people_slug`), así que **es la identidad de facto de una
+persona**, no un adorno de URL: dos filas que generen el mismo slug se funden
+en una y la perdedora se queda sin su `external_id`.
+
+- **Garantiza** que un nombre cuyo fold a ASCII queda **totalmente vacío** no
+  colapse: desde el issue #18 el slug se deriva del id externo
+  (`tmdb-1234567`, `open-library-ol123w`), único por `(item_type, source)`.
+  Antes, *todas* las personas íntegramente en CJK/cirílico/árabe compartían la
+  fila `slug = ''`.
+- **No garantiza** nada cuando del fold sobrevive algo, por poco que sea. Dos
+  casos, los dos abiertos:
+  - **Nombres mezclados.** `宮崎駿 Jr` folda a `jr`, no a `""`, así que el
+    fallback no entra y dos personas así se funden igual. Lo mismo en ítems:
+    `初次尝鲜 Season 2` → `season-2`.
+  - **Homónimos en alfabeto latino** (issue #24): `slugify` no puede
+    distinguir dos personas con el mismo nombre y el upsert las funde.
+
+  Dicho de otra forma: el fallback cubre el fold **vacío**, no el fold
+  **ambiguo**. Sigue habiendo personas distintas que comparten fila.
+- El nombre para mostrar es `name`, que conserva el alfabeto original. El slug
+  nunca se usa para presentar a una persona.
 
 ### `credits`
 

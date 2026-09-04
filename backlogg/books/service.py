@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books import repository as repo
-from backlogg.books.adapters.open_library import OpenLibraryClient, _slugify
+from backlogg.books.adapters.open_library import OpenLibraryClient
 from backlogg.books.models import Book
 from backlogg.books.schemas import (
     BookGenreOut,
@@ -25,6 +25,7 @@ from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Person
 from backlogg.shared.schemas import CreditOut
+from backlogg.shared.slugs import slug_with_external_fallback
 
 _ol_client = OpenLibraryClient()
 
@@ -91,7 +92,9 @@ async def collect_book_authors(work_detail: dict) -> list[BulkPerson]:
                     source="OPEN_LIBRARY",
                     external_id=author_id,
                     name=name,
-                    slug=_slugify(name),
+                    # Issue #18: a non-Latin author name folds to "" and
+                    # collapses on uq_people_slug — fall back to the OL id.
+                    slug=slug_with_external_fallback(name, "OPEN_LIBRARY", author_id),
                     profile_url=None,
                     role="AUTHOR",
                 )

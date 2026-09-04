@@ -13,13 +13,12 @@ from backlogg.games.models import Game
 from backlogg.games.schemas import GameSortEnum
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
-from backlogg.movies.adapters.tmdb import _slugify as _movie_slugify
 from backlogg.movies.service import _persist_movie_people
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.adapters.tmdb import _slugify as _series_slugify
 from backlogg.series.service import _persist_series_creators, _persist_series_people
 from backlogg.shared.external_ids import upsert_external_id
+from backlogg.shared.slugs import titled_slug
 from backlogg.trending.schemas import TrendingItemOut, TrendingOut
 
 _movies_tmdb = TMDBClient()
@@ -47,8 +46,10 @@ async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut
         except ValueError:
             pass
 
-    slug_base = _movie_slugify(title)
-    slug = f"{slug_base}-{year}" if year else slug_base
+    # Same rule the adapter applies, so the local lookup below can hit.  With
+    # the plain fold a non-Latin title produced "-{year}" and could match an
+    # unrelated item of that year (issue #18).
+    slug = titled_slug(title, year, "TMDB", tmdb_id)
 
     # Try local DB first to avoid unnecessary TMDB calls
     movie = await movies_repo.get_movie_by_slug(db, slug)
@@ -109,8 +110,7 @@ async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOu
         except ValueError:
             pass
 
-    slug_base = _series_slugify(title)
-    slug = f"{slug_base}-{year}" if year else slug_base
+    slug = titled_slug(title, year, "TMDB", tmdb_id)
 
     series = await series_repo.get_series_by_slug(db, slug)
     if series is None:

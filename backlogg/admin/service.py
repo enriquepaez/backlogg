@@ -1,8 +1,5 @@
 """Admin service — business logic layer for admin domain."""
 
-import re
-import unicodedata
-
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +20,7 @@ from backlogg.books import repository as books_repo
 from backlogg.games import repository as games_repo
 from backlogg.movies import repository as movies_repo
 from backlogg.series import repository as series_repo
+from backlogg.shared.slugs import slugify
 from backlogg.users import repository as users_repo
 from backlogg.users.models import User
 
@@ -59,14 +57,6 @@ _ADMIN_UPDATE = {
 }
 
 
-def _slugify(text: str) -> str:
-    """Same slugify rule as the sync adapters (backlogg/*/adapters/*.py)."""
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[-\s]+", "-", text).strip("-")
-
-
 def _genres_payload(names: list[str]) -> list[dict]:
     """Convert admin-provided genre names into {"name", "slug"} dicts.
 
@@ -77,7 +67,7 @@ def _genres_payload(names: list[str]) -> list[dict]:
     seen: set[str] = set()
     result: list[dict] = []
     for name in names:
-        slug = _slugify(name)
+        slug = slugify(name)
         if not slug or slug in seen:
             continue
         seen.add(slug)

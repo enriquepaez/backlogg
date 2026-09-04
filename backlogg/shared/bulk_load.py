@@ -817,6 +817,19 @@ async def bulk_load_items(
     for item in items:
         slug = item.data.get("slug")
         try:
+            if not slug:
+                # Issue #18 invariant, enforced here because this is the write
+                # frontier: ``slug`` is the ON CONFLICT key, so an empty one
+                # makes every such item upsert onto the *same* row.  It can
+                # only happen when the title folds to nothing **and** the
+                # payload carries no external id — and an item with no
+                # external id can never be linked, refreshed or found by id
+                # either, so dropping it is the honest outcome.  Counted in
+                # ``rejected`` like any other pre-validation drop.
+                raise RowRejected(
+                    "empty slug: the title folds to nothing and the payload "
+                    "carries no external id to fall back to"
+                )
             record = _build_record(table, columns, item.data)
         except RowRejected as exc:
             logger.warning("bulk_load: dropping %s row slug=%r — %s", spec.item_type, slug, exc)

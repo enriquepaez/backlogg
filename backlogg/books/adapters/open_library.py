@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-import unicodedata
 from collections import Counter
 from datetime import UTC, date, datetime
 
@@ -10,6 +9,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from backlogg.books.constants import BOOK_LANGUAGE_EN, BOOK_LANGUAGE_ES
 from backlogg.core.config import settings
+from backlogg.shared.slugs import titled_slug
 
 _OL_BASE = "https://openlibrary.org"
 _OL_COVER_BASE = "https://covers.openlibrary.org/b/id"
@@ -815,13 +815,6 @@ def _derive_genres(search_doc: dict) -> list[dict]:
     return genres
 
 
-def _slugify(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[-\s]+", "-", text).strip("-")
-
-
 def _normalize_edition_as_work(edition: dict) -> dict:
     """Reshape an Open Library edition JSON into work-shaped fields.
 
@@ -1188,9 +1181,12 @@ class OpenLibraryClient:
                     first_publish_date = parsed
                     year_str = str(parsed.year)
 
-        # Build slug from title and year
-        slug_base = _slugify(title)
-        slug = f"{slug_base}-{year_str}" if year_str else slug_base
+        # Build slug from title and year.  ``titled_slug`` falls back to the
+        # Open Library work id when the title folds to nothing (issue #18):
+        # a CJK/Cyrillic title used to yield "-{year}", collapsing every
+        # non-Latin book of that year onto a single slug.
+        work_id = str(search_doc.get("key", "")).removeprefix("/works/")
+        slug = titled_slug(title, year_str, "OPEN_LIBRARY", work_id)
 
         # Cover image from search result (cover_i is an integer cover ID)
         cover_i = search_doc.get("cover_i")

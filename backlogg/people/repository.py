@@ -11,6 +11,7 @@ from backlogg.people.schemas import CreditOut, PersonOut
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Credit, Person
+from backlogg.shared.slugs import external_id_slug
 
 
 async def get_person_by_slug(db: AsyncSession, slug: str) -> PersonOut | None:
@@ -144,7 +145,15 @@ async def get_or_create_person_by_external(
     'PERSON'``, which is also the leading column of that constraint since
     migration 0036 (issue #20): a movie or series holding the same TMDB number
     is a different row and must not be mistaken for this person.
+
+    ``slug`` gets the issue #18 fallback applied as a last line of defence: an
+    empty slug would upsert on ``uq_people_slug`` and make every caller that
+    forgot the fallback collapse its people into a single row, silently
+    reattributing credits.  Callers already build the slug with
+    ``slug_with_external_fallback``; this only catches the ones that do not.
     """
+    slug = slug or external_id_slug(source, external_id)
+
     existing_id = await get_person_id_by_external(db, source, external_id)
     if existing_id is not None:
         person = await get_person_by_id(db, existing_id)
