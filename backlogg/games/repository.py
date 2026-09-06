@@ -17,6 +17,7 @@ from backlogg.games.models import (
 from backlogg.games.schemas import CompanyCreditOut, GameSortEnum
 from backlogg.shared.bulk_load import BulkLoadSpec, EntityCreditSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
+from backlogg.shared.identity import resolve_item_slug
 
 
 async def list_games(
@@ -178,8 +179,16 @@ async def _get_or_create_company(db: AsyncSession, name: str, slug: str) -> Comp
     return company
 
 
-async def upsert_game(db: AsyncSession, data: dict) -> Game:
-    """Insert or update a game by slug.
+async def upsert_game(db: AsyncSession, data: dict, *, external_id: str | None = None) -> Game:
+    """Insert or update a game, identified by ``external_id`` when there is one.
+
+    The statement keys on the slug (``ON CONFLICT ("slug")``), but the slug
+    is derived from the title and the title moves: IGDB renames items.
+    When the caller knows the item's external id it must pass it, and the
+    row already linked to it is realigned to the incoming slug *first*
+    (issue #23, ``backlogg.shared.identity``) so the upsert updates that row
+    instead of inserting a second one that could never be linked.  Without
+    ``external_id`` the behaviour is exactly what it was: resolution by slug.
 
     The ``data`` dict must contain all game fields plus optional lists:
     - ``genres``: list of dicts with ``name`` and ``slug``
@@ -196,6 +205,20 @@ async def upsert_game(db: AsyncSession, data: dict) -> Game:
     (see backlogg/admin/service.py's editable-field table) so they are never
     lockable and always sync normally.
     """
+    if external_id and data.get("slug"):
+        # Issue #23: the external id, not the slug, is what says which row
+        # this is.  ``upsert_game`` keys its ON CONFLICT on the slug, which is
+        # derived from the title and moves when the source renames the item —
+        # so without this the rename would insert a second, unlinkable row.
+        data["slug"] = await resolve_item_slug(
+            db,
+            item_type="GAME",
+            table=Game.__table__,
+            source="IGDB",
+            external_id=external_id,
+            proposed_slug=data["slug"],
+        )
+
     genres_data: list[dict] = data.pop("genres", [])
     platforms_data: list[dict] = data.pop("platforms", [])
     companies_data: list[dict] = data.pop("companies", [])

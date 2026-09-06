@@ -50,6 +50,13 @@ CREDIT_GAP_SOURCES: dict[str, str] = {
     "BOOK": "OPEN_LIBRARY",
 }
 
+# The catalog table behind each polymorphic ``item_type``.  Used by the
+# credits-gap query and by the seed-target convergence check, which both have
+# to go from an ``item_type``/``item_id`` pair to the real row: ``credits`` and
+# ``external_ids`` carry no FK, so "does this id point at anything?" is a
+# question only a join can answer.  GAME is absent because neither query serves
+# it (games have no person credits and no seed targets); asking for it raises
+# instead of silently answering about nothing.
 _ITEM_MODELS: dict[str, Any] = {
     "MOVIE": Movie,
     "SERIES": Series,
@@ -286,7 +293,7 @@ class SeedTargetProgress:
 
 
 def _unlinked_targets_stmt(item_type: str, source: str):
-    """``seed_targets`` rows with no matching row in ``external_ids``.
+    """``seed_targets`` rows whose link does not reach a live catalog item.
 
     This is the resume mechanism of the whole feature: **the difference
     between what the catalog wants and what it has**, computed live.  There is
@@ -298,7 +305,33 @@ def _unlinked_targets_stmt(item_type: str, source: str):
     person — which is exactly what ``uq_external_id`` allows since migration
     0036 (issue #20), so the join key here matches that constraint column for
     column.
+
+    **Issue #25 — the second join.**  Existence of a row with the target's
+    triple used to be the whole test, and a triple only proves that *somebody*
+    has it, not that the item the target wanted exists.  A target whose triple
+    was held by a row pointing nowhere silently counted as converged: out of
+    the work list, never retried, never accumulating ``attempts``, absent from
+    ``pending``, from ``stuck`` and therefore from every number an operator
+    reads to decide whether a seeding run converged.  Chaining a second
+    ``LEFT JOIN`` onto the catalog table and asking for ``<item>.id IS NULL``
+    covers both cases at once — no ``external_ids`` row at all, or one that
+    does not resolve to an item — because a NULL from the first join can only
+    produce a NULL in the second.
+
+    Why this is safe *now* and was not before: it is only correct together
+    with issue #23.  While the upsert resolved items by slug, a rename forked a
+    second row and the triple stayed with the first one, so a target could be
+    permanently unable to link and re-opening it would have meant retrying
+    forever — worse than the silence.  With identity resolved by external id
+    (``backlogg.shared.identity``), the row holding a triple *is* the item that
+    target seeds, so a target that comes back here comes back because nothing
+    is linked, which is exactly what the work list is for.  The residue that
+    still cannot converge is bounded by ``_retired_clause``: it burns its
+    ``attempts`` and shows up as ``unlinkable``, visible instead of invisible.
     """
+    model = _ITEM_MODELS.get(item_type)
+    if model is None:
+        raise ValueError(f"_unlinked_targets_stmt: unsupported item_type {item_type!r}")
     return (
         select(SeedTarget)
         .outerjoin(
@@ -307,10 +340,13 @@ def _unlinked_targets_stmt(item_type: str, source: str):
             & (ExternalId.source == SeedTarget.source)
             & (ExternalId.external_id == SeedTarget.external_id),
         )
+        # ``external_ids`` has no FK (docs/conventions.md): whether the link
+        # reaches an item is a question only this join can answer.
+        .outerjoin(model, model.id == ExternalId.item_id)
         .where(
             SeedTarget.item_type == item_type,
             SeedTarget.source == source,
-            ExternalId.id.is_(None),
+            model.id.is_(None),
         )
     )
 

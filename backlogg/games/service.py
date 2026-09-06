@@ -83,7 +83,7 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
         if game_data["game_type"] not in ALLOWED_GAME_TYPES:
             raise HTTPException(status_code=404, detail="Game not found")
         igdb_id = str(raw.get("id", ""))
-        game = await repo.upsert_game(db, game_data)
+        game = await repo.upsert_game(db, game_data, external_id=igdb_id or None)
 
         # 4. Persist the IGDB external ID
         if igdb_id:
@@ -162,8 +162,8 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
                 # Disallowed category (feature 65) — skip, don't persist or
                 # include it among the recommendations.
                 continue
-            sim_game = await repo.upsert_game(db, game_data)
             sim_igdb_id = str(detail.get("id", ""))
+            sim_game = await repo.upsert_game(db, game_data, external_id=sim_igdb_id or None)
             if sim_igdb_id:
                 await upsert_external_id(db, "GAME", sim_game.id, "IGDB", sim_igdb_id)
             await db.commit()

@@ -173,7 +173,9 @@ async def _ingest_movies(q: str, page: int, limit: int) -> None:
                             is_new = (
                                 await movies_repo.get_movie_by_slug(db, movie_data["slug"]) is None
                             )
-                            movie = await movies_repo.upsert_movie(db, movie_data)
+                            movie = await movies_repo.upsert_movie(
+                                db, movie_data, external_id=str(tmdb_id)
+                            )
                             await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
                             if is_new:
                                 # Persist people (cast + directors) — feature
@@ -242,7 +244,9 @@ async def _ingest_series(q: str, page: int, limit: int) -> None:
                                 await series_repo.get_series_by_slug(db, series_data["slug"])
                                 is None
                             )
-                            series = await series_repo.upsert_series(db, series_data)
+                            series = await series_repo.upsert_series(
+                                db, series_data, external_id=str(tmdb_id)
+                            )
                             await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
                             if is_new:
                                 # Persist people (cast + creators) — feature
@@ -324,7 +328,7 @@ async def _ingest_books(q: str, page: int, limit: int) -> None:
                             is_new = (
                                 await books_repo.get_book_by_slug(db, book_data["slug"]) is None
                             )
-                            book = await books_repo.upsert_book(db, book_data)
+                            book = await books_repo.upsert_book(db, book_data, external_id=work_id)
                             if work_id:
                                 await upsert_external_id(
                                     db, "BOOK", book.id, "OPEN_LIBRARY", work_id
@@ -366,7 +370,9 @@ async def _ingest_games(q: str, page: int, limit: int) -> None:
                             # Disallowed category (feature 65) — never ingested.
                             continue
                         async with db.begin_nested():  # savepoint per game
-                            game = await games_repo.upsert_game(db, game_data)
+                            game = await games_repo.upsert_game(
+                                db, game_data, external_id=str(igdb_id)
+                            )
                             await upsert_external_id(db, "GAME", game.id, "IGDB", str(igdb_id))
                     except Exception:
                         logger.exception(

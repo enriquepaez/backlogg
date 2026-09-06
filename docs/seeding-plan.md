@@ -554,11 +554,23 @@ issues #7, #15 y #20, y en los tres casos los datos se perdieron durante meses
 y el hallazgo fue accidental, en una QA que casualmente comparaba lo enumerado
 contra lo enlazado.
 
-Lo que estos contadores **no** cubren todavía: `seed_targets` da por convergido
-un target si existe *alguna* fila con su terna, sin mirar a qué `item_id`
-apunta, así que un target robado se cuenta como hecho y no aparece en `stuck`.
-Arreglarlo obliga a decidir qué `item_id` es el dueño legítimo — decisión de
-datos, no de instrumentación.
+Qué hace subir hoy `skipped_links` y qué ya no. **No** lo hace un renombrado en
+la fuente: desde el issue #23 la identidad del ítem es su `external_id`, así que
+un título nuevo actualiza la fila que ya tiene el enlace en vez de crear una
+segunda huérfana (ese era el mecanismo que lo disparó en la QA del #22, con la
+serie 284753). Lo que queda y sigue contando: dos ids externos cuyos títulos
+foldan al mismo slug, una persona que colisiona por `uq_people_slug` (issue
+#24, abierto) y una fila de `external_ids` que apunta a un ítem que ya no
+existe. Los tres son pérdidas reales, y el tercero solo se resuelve borrando la
+fila huérfana a mano.
+
+`seed_targets` **sí** comprueba desde el issue #25 a qué `item_id` apunta la
+terna: un target cuya fila no llega a un ítem vivo vuelve a la work list, gasta
+sus `attempts` y acaba visible en `unlinkable`/`stuck` en vez de contarse como
+convergido en silencio. Es seguro precisamente porque va con el #23: con la
+identidad resuelta por id externo, el dueño de la terna es por construcción el
+ítem que el target sembraba, así que reabrirlo no puede convertirse en un
+reintento eterno.
 
 ---
 

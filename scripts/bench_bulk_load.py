@@ -186,7 +186,9 @@ async def _run_per_item(session: AsyncSession, items: list[BulkItem]) -> None:
     """The pre-feature-84 route: one item at a time, two commits per item."""
     now = datetime.now(UTC)
     for item in items:
-        movie = await movies_repo.upsert_movie(session, dict(item.data))
+        movie = await movies_repo.upsert_movie(
+            session, dict(item.data), external_id=item.external_id
+        )
         await upsert_external_id(session, "MOVIE", movie.id, "TMDB", item.external_id)
         await session.commit()
         for person in item.people:

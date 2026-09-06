@@ -90,7 +90,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -102,6 +102,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import sqltypes
 
 from backlogg.shared.external_ids import ExternalId, record_link_skip
+from backlogg.shared.identity import align_slugs_to_external_ids
 from backlogg.shared.models import Credit, Person
 
 logger = logging.getLogger(__name__)
@@ -779,6 +780,42 @@ async def _resolve_people(
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 
+async def _align_batch_slugs(
+    session: AsyncSession, spec: BulkLoadSpec, items: Sequence[BulkItem]
+) -> Sequence[BulkItem]:
+    """Return ``items`` with the slug of every already-linked item realigned.
+
+    Thin adapter over ``backlogg.shared.identity``: the rule itself (and the
+    reasons it sometimes keeps the stored slug) lives there, shared with the
+    on-demand route, so the same external id cannot mean two different rows
+    depending on which door it came through.
+
+    ``BulkItem.data`` is never mutated — a realigned item is rebuilt with
+    ``dataclasses.replace`` — because the caller keeps the payload it handed in
+    to retry it through the per-item route if the batch fails.
+    """
+    proposed = {
+        item.external_id: item.data["slug"]
+        for item in items
+        if item.external_id and item.data.get("slug")
+    }
+    aligned = await align_slugs_to_external_ids(
+        session,
+        item_type=spec.item_type,
+        table=spec.table,
+        source=spec.source,
+        proposed=proposed,
+    )
+    if not aligned:
+        return items
+    return [
+        replace(item, data={**item.data, "slug": aligned[item.external_id]})
+        if item.external_id in aligned and aligned[item.external_id] != item.data.get("slug")
+        else item
+        for item in items
+    ]
+
+
 async def bulk_load_items(
     session: AsyncSession, spec: BulkLoadSpec, items: Sequence[BulkItem]
 ) -> BulkLoadResult:
@@ -795,6 +832,16 @@ async def bulk_load_items(
     table = spec.table
     relation_keys = spec.relation_keys
     now = datetime.now(UTC)
+
+    # ── Identity before naming (issue #23) ──────────────────────────────────
+    # The upsert below keys on ``slug``, which is derived from the title and
+    # therefore changes whenever the source renames something.  Realign the
+    # slug of every item that is *already* linked to this batch's external ids
+    # first, so a rename updates that row instead of forking a second one that
+    # can never be linked.  Constant cost per batch (see
+    # ``align_slugs_to_external_ids``), and zero extra writes when nothing was
+    # renamed — the seeding case.
+    items = await _align_batch_slugs(session, spec, items)
 
     # Column set = the union of the payload keys, minus the relation keys.
     # Every item of a slice comes from the same ``*_to_dict`` mapper so the

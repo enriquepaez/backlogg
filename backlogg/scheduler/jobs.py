@@ -120,6 +120,7 @@ from backlogg.shared.bulk_load import (
     rollback_quietly,
 )
 from backlogg.shared.external_ids import collect_link_skips, upsert_external_id
+from backlogg.shared.identity import resolve_item_slug
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,23 @@ async def _write_items_individually(
                 )
             # The per-item upserts pop the relation keys off the dict they are
             # given, so hand them a copy and keep the batch payload intact.
-            entity = await spec.upsert_item(session, dict(item.data))
+            data = dict(item.data)
+            if item.external_id:
+                # Issue #23, same rule the batch route applies before its COPY:
+                # the external id decides which row this is, so a renamed item
+                # updates its own row instead of forking an unlinkable twin.
+                # Done here rather than inside ``spec.upsert_item`` because the
+                # spec's callable is the pre-existing ``upsert_*(db, data)``
+                # signature the batch loader shares with the on-demand route.
+                data["slug"] = await resolve_item_slug(
+                    session,
+                    item_type=spec.item_type,
+                    table=spec.table,
+                    source=spec.source,
+                    external_id=item.external_id,
+                    proposed_slug=data["slug"],
+                )
+            entity = await spec.upsert_item(session, data)
             if item.external_id:
                 await upsert_external_id(
                     session, spec.item_type, entity.id, spec.source, item.external_id

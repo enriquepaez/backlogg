@@ -8,7 +8,19 @@
 - **Slugs** como identificadores en URLs, nunca IDs numéricos de DB.
   - ✅ `GET /movies/the-matrix-1999`
   - ❌ `GET /movies/42`
-- Los slugs se generan al persistir el ítem y no cambian.
+- **La identidad de un ítem de catálogo es su `external_id`, no su slug**
+  (issue #23). El slug lo nombra; el id externo dice qué fila es. Toda ruta de
+  escritura que conozca el id externo lo pasa —`upsert_movie/series/book/game`
+  tienen el kwarg `external_id`, `bulk_load_items` lo lee de `BulkItem`— y la
+  fila enlazada a `(item_type, source, external_id)` se resuelve **antes** que
+  el slug (`backlogg/shared/identity.py`). Sin eso, un renombrado en la fuente
+  inserta una **segunda** fila que nunca podrá enlazarse.
+- Los slugs de ítems **sí cambian** cuando la fuente renombra el ítem: se
+  realinean sobre la fila existente. Un slug estable que apunta a un duplicado
+  que nadie refresca vale menos que una URL que sigue al ítem. Tres casos
+  conservan el slug guardado (y solo redirigen la escritura, nunca duplican):
+  el slug nuevo ya es de otra fila, dos ítems del mismo lote lo piden a la vez,
+  o `title` está bloqueado por un admin (feature 49).
 - **Un slug se construye siempre con `backlogg/shared/slugs.py`.** No copies el
   fold a ASCII en un módulo nuevo: vivía duplicado en cinco sitios y el issue
   #18 hubo que arreglarlo en los cinco a la vez.

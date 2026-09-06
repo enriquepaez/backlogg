@@ -58,7 +58,7 @@ async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut
         if detail is None:
             return None
         movie_data = _movies_tmdb.movie_to_dict(detail)
-        movie = await movies_repo.upsert_movie(db, movie_data)
+        movie = await movies_repo.upsert_movie(db, movie_data, external_id=str(tmdb_id))
         await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
 
         # Persist people (cast + directors) — the row was just created by the
@@ -118,7 +118,7 @@ async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOu
         if detail is None:
             return None
         series_data = _series_tmdb.series_to_dict(detail)
-        series = await series_repo.upsert_series(db, series_data)
+        series = await series_repo.upsert_series(db, series_data, external_id=str(tmdb_id))
         await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
 
         # Persist people (cast + creators) — the row was just created by the
