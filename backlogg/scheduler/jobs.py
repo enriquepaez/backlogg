@@ -110,7 +110,7 @@ from backlogg.scheduler.repository import (
 )
 from backlogg.series import repository as series_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.service import collect_series_creators, map_series_cast
+from backlogg.series.service import collect_series_creators, map_series_credits
 from backlogg.shared.bulk_load import (
     BulkItem,
     BulkLoadSpec,
@@ -427,9 +427,10 @@ class BatchWriter:
 # catalog is defined by ``TMDB_SEED_MIN_VOTES_*`` and the nightly volume by
 # ``SYNC_SLICE_SIZE_*``.  See ``backlogg/core/config.py``.
 
-# Sub-resources folded into the detail request.  ``external_ids`` is not read
-# yet — feature 74 (SOURCE_AUTHOR) is what consumes it — but it rides along
-# for free and asking for it now means that feature costs zero extra requests.
+# Sub-resources folded into the detail request.  ``credits`` is what feeds the
+# people/credits rows (cast, director and the feature-74 writing crew).
+# ``external_ids`` is not read by any code path yet — feature 74 turned out to
+# need only ``credits`` — but it rides along for free in the same request.
 _TMDB_APPEND_TO_RESPONSE = "credits,external_ids"
 
 
@@ -455,7 +456,7 @@ async def _fetch_series_payload(external_id: str) -> tuple[dict, list[BulkPerson
     )
     if detail is None:
         return None
-    people = map_series_cast(detail.get("credits"))
+    people = map_series_credits(detail.get("credits"))
     people += collect_series_creators(detail.get("created_by", []))
     return _tmdb_series.series_to_dict(detail), people
 
@@ -1033,7 +1034,7 @@ async def _fetch_series_credit_rows(external_id: str) -> list[BulkPerson]:
     detail = await _tmdb_series.get_series_detail(int(external_id), append_to_response="credits")
     if not detail:
         return []
-    rows = map_series_cast(detail.get("credits"))
+    rows = map_series_credits(detail.get("credits"))
     rows += collect_series_creators(detail.get("created_by", []))
     return rows
 

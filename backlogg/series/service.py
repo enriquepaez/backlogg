@@ -20,7 +20,11 @@ from backlogg.series.schemas import (
 )
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
-from backlogg.shared.credits import get_credits_for_item
+from backlogg.shared.credits import (
+    SERIES_CREW_JOB_ROLES,
+    get_credits_for_item,
+    select_crew_credits,
+)
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
 from backlogg.shared.rating_sort import rating_desc_sort_key
@@ -95,13 +99,17 @@ def _tmdb_person_row(
     )
 
 
-def map_series_cast(credits_data: dict | None) -> list[BulkPerson]:
-    """Map an already-fetched TMDB credits payload to ACTOR credit rows.
+def map_series_credits(credits_data: dict | None) -> list[BulkPerson]:
+    """Map an already-fetched TMDB credits payload to bulk credit rows.
 
-    Pure mapping, no network: split out from ``collect_series_credits`` for
-    feature 85, whose targeted backfill gets the same payload embedded in the
-    detail response (``/tv/{id}?append_to_response=credits``) and must not
-    spend a second request to re-fetch it.
+    Pure mapping, no network: the top-10 billed cast plus every crew member
+    whose ``job`` is on ``SERIES_CREW_JOB_ROLES`` — the author of the source
+    work (``SOURCE_AUTHOR``) and the screenwriter (``WRITER``), feature 74.
+    Was ``map_series_cast`` until it started reading ``crew`` too.  Split out
+    from ``collect_series_credits`` for feature 85, whose targeted backfill
+    gets the same payload embedded in the detail response
+    (``/tv/{id}?append_to_response=credits``) and must not spend a second
+    request to re-fetch it.  Mirrors ``backlogg.movies.service.map_movie_credits``.
     """
     if not credits_data:
         return []
@@ -116,19 +124,27 @@ def map_series_cast(credits_data: dict | None) -> list[BulkPerson]:
         )
         if row is not None:
             rows.append(row)
+
+    # Crew — allowlisted jobs only, never ``department == "Writing"``.  Series
+    # creators are not here: they come from the detail payload's ``created_by``
+    # (see ``collect_series_creators``).
+    for member, role in select_crew_credits(credits_data.get("crew", []), SERIES_CREW_JOB_ROLES):
+        row = _tmdb_person_row(member, role)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
 async def collect_series_credits(tmdb_id: int) -> list[BulkPerson]:
     """Fetch a series' credits from TMDB and map them to bulk credit rows.
 
-    Cast only (top 10 by billing order): the credits endpoint carries no
-    meaningful directors for TV, and creators come from the detail payload's
-    ``created_by`` instead — see ``collect_series_creators``.  Split out for
-    feature 84 so the batch write path can gather a whole slice's people
-    before touching the database.
+    Cast (top 10 by billing order) plus the allowlisted writing crew: the
+    credits endpoint carries no meaningful directors for TV, and creators come
+    from the detail payload's ``created_by`` instead — see
+    ``collect_series_creators``.  Split out for feature 84 so the batch write
+    path can gather a whole slice's people before touching the database.
     """
-    return map_series_cast(await _tmdb.get_series_credits(tmdb_id))
+    return map_series_credits(await _tmdb.get_series_credits(tmdb_id))
 
 
 def collect_series_creators(created_by: list) -> list[BulkPerson]:

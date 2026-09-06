@@ -429,11 +429,13 @@ persisted as credits. Ingestion filters by an explicit `job` allowlist:
 
 | Role            | TMDB jobs                                                                                  | Purpose |
 |-----------------|--------------------------------------------------------------------------------------------|---------|
-| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Original Story`, `Characters` | Author of the **source work**. This is the book → film cross-type bridge: same `people` row as the book's `AUTHOR` credit |
+| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Characters` | Author of the **source work**. This is the book → film cross-type bridge: same `people` row as the book's `AUTHOR` credit |
 | `WRITER`        | `Screenplay`, `Writer`, `Teleplay`, `Adaptation`, `Dialogue`                                 | Screenwriter. Detail-page data only (Credits section), not a recommendation signal |
 
-`Story` and `Screenstory` are deliberately excluded from `SOURCE_AUTHOR`: in TMDB
-they mean "screen story" — original material written for the screen, not a prior work.
+`Story`, `Screenstory` and `Original Story` are deliberately excluded from
+`SOURCE_AUTHOR`: in TMDB all three mean "screen story" — original material written
+for the screen, not a prior work. *Inside Out* adapts nothing, yet TMDB credits
+Pete Docter and Ronnie del Carmen with `Original Story`.
 
 Caveat: translators are credited with `job: "Book"` (e.g. *The Witcher* credits
 Danusia Stok and David French alongside Sapkowski) and the `job` does not tell them

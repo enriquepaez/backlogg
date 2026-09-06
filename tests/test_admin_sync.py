@@ -665,7 +665,7 @@ async def test_sync_series_maps_cast_and_creators_from_one_payload():
             return_value=series_raw,
         ) as mock_detail,
         patch(
-            "backlogg.scheduler.jobs.map_series_cast",
+            "backlogg.scheduler.jobs.map_series_credits",
             return_value=[],
         ) as mock_map_cast,
         patch(
