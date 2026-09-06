@@ -21,6 +21,8 @@ from backlogg.library.models import LibraryEntry
 from backlogg.movies.models import Movie, movie_genres_join
 from backlogg.ratings.models import UserRating
 from backlogg.series.models import Series, series_genres_join
+from backlogg.shared.credits import AUTHORSHIP_ROLES
+from backlogg.shared.models import Credit
 
 # Statuses that count as an implicit positive signal for seeding.
 SEED_LIBRARY_STATUSES = ("completed", "want")
@@ -260,5 +262,71 @@ async def get_popular_items(
         )
         .limit(limit)
     )
+    result = await db.execute(stmt)
+    return list(result.all())
+
+
+async def get_authorship_works(
+    db: AsyncSession,
+    person_id: int,
+    *,
+    exclude: tuple[str, int] | None = None,
+    limit: int | None = None,
+) -> list[Any]:
+    """Return every catalog work this person authored, across all item types.
+
+    Layer 0 of ``docs/recommendations-plan.md``: ``AUTHOR`` (books) and
+    ``SOURCE_AUTHOR`` (the film/series adapted from a prior work) are treated
+    as **one** authorship class — ``AUTHORSHIP_ROLES`` — so one call from
+    either shore returns the other. ``WRITER`` is not authorship and never
+    appears here.
+
+    The anti-translator gate: TMDB credits translators with ``job: "Book"``
+    (*The Witcher* credits Danusia Stok and David French alongside Sapkowski)
+    and the job does not tell them apart, so the whole result is conditioned on
+    the person also holding an ``AUTHOR`` credit on a book **that exists in the
+    catalog**. A translator has ``SOURCE_AUTHOR`` credits and no book of their
+    own, so they get an empty list instead of a bogus bridge.
+
+    ``exclude`` drops the ``(item_type, item_id)`` the caller started from.
+    Rows carry item_type/item_id/title/slug/role, ordered by type then id.
+    Every item type is covered; ``GAME`` contributes nothing because games
+    carry no person credits at all (decision of 2026-09-04, docs/schema.md).
+    """
+    # Gate, evaluated once for the whole statement: does this person have an
+    # AUTHOR credit on a book in the catalog?
+    authored_a_book = (
+        select(Credit.id)
+        .join(Book, Book.id == Credit.item_id)
+        .where(
+            Credit.person_id == person_id,
+            Credit.item_type == "BOOK",
+            Credit.role == "AUTHOR",
+        )
+        .exists()
+    )
+
+    queries = []
+    for item_type, (model, _join, _item_col, _release_attr) in _TYPE_CONFIG.items():
+        q = (
+            select(
+                literal(item_type, type_=String).label("item_type"),
+                model.id.label("item_id"),
+                model.title.label("title"),
+                model.slug.label("slug"),
+                Credit.role.label("role"),
+            )
+            .select_from(model)
+            .join(Credit, and_(Credit.item_id == model.id, Credit.item_type == item_type))
+            .where(Credit.person_id == person_id, Credit.role.in_(AUTHORSHIP_ROLES))
+        )
+        if exclude is not None and exclude[0] == item_type:
+            q = q.where(model.id != exclude[1])
+        queries.append(q)
+
+    subq = union_all(*queries).subquery()
+    stmt = select(subq).where(authored_a_book).order_by(subq.c.item_type, subq.c.item_id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await db.execute(stmt)
     return list(result.all())

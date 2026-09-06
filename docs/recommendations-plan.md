@@ -66,12 +66,18 @@ actuales, sin embargo, no permiten el cruce más obvio:
 | Movies | DIRECTOR, ACTOR | **SOURCE_AUTHOR** |
 | Series | CREATOR, ACTOR | **SOURCE_AUTHOR** |
 | Books | AUTHOR | — |
-| Games | (ninguno persistido) | DIRECTOR |
+| Games | (ninguno persistido) | — (podado el 2026-09-04) |
+
+> Games no espera ningún rol: la intención original de darles `DIRECTOR` se
+> **podó el 2026-09-04**, porque IGDB v4 no expone credits de persona en
+> absoluto. El razonamiento completo está en `docs/schema.md`, sección «Games
+> have no person credits — by decision (2026-09-04)».
 
 **El puente libro → película lo da `SOURCE_AUTHOR` — el autor de la obra de
 origen — y solo él.** Stephen King, Gaiman, Tolkien, Sapkowski: el caso de uso
-cross-type más reconocible del producto, resuelto con una migración Alembic y un
-cambio en el adaptador de ingesta, sin peticiones nuevas a TMDB.
+cross-type más reconocible del producto, resuelto con un cambio en el adaptador
+de ingesta y nada más: sin peticiones nuevas a TMDB y **sin migración**, porque
+`credits.role` es un `VARCHAR(50)` libre y un rol nuevo es texto nuevo.
 
 **Corrección de 2026-09-02: `WRITER` NO sirve para esto.** La versión anterior
 de este plan proponía el rol `WRITER` poblado desde el departamento `Writing`
@@ -96,11 +102,15 @@ La ingesta filtra por `job` con allowlist explícita, en dos roles distintos:
 
 | Rol | Jobs de TMDB | Para qué sirve |
 |---|---|---|
-| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Original Story`, `Characters` | **El puente cross-type.** Es la capa 0 |
+| `SOURCE_AUTHOR` | `Novel`, `Book`, `Short Story`, `Comic Book`, `Graphic Novel`, `Theatre Play`, `Characters` | **El puente cross-type.** Es la capa 0 |
 | `WRITER` | `Screenplay`, `Writer`, `Teleplay`, `Adaptation`, `Dialogue` | Dato de ficha (sección Credits de `docs/detail-page-layout.md`). **No es señal de recomendación** |
 
-`Story` y `Screenstory` se quedan fuera de `SOURCE_AUTHOR` deliberadamente: en
-TMDB son «argumento para pantalla», material original, no obra previa.
+`Story`, `Screenstory` y `Original Story` se quedan fuera de `SOURCE_AUTHOR`
+deliberadamente: en TMDB los tres son «argumento para pantalla», material
+original escrito para el cine, no obra previa. `Original Story` salió de la
+lista el 2026-09-06, en la QA manual de la feature 74: estaba admitido y
+acreditaba como autores de la obra de origen a los de *Inside Out*, que no
+adapta nada.
 
 **Por qué `WRITER` no entra en el ranker.** Nadie descubre una película porque
 comparte guionista con otra; el enganche existe (Sorkin, Kaufman) pero el

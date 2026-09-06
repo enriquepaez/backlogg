@@ -39,7 +39,7 @@ from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.service import map_movie_credits
 from backlogg.people import repository as people_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.service import collect_series_creators, map_series_cast
+from backlogg.series.service import collect_series_creators, map_series_credits
 from backlogg.shared.bulk_load import BulkPerson, bulk_load_credits
 from backlogg.shared.models import Credit, Person
 from backlogg.shared.slugs import (
@@ -293,9 +293,9 @@ def test_map_movie_credits_falls_back_for_a_non_latin_director():
     assert [row.slug for row in rows] == ["tmdb-608"]
 
 
-def test_map_series_cast_falls_back_for_a_non_latin_actor():
+def test_map_series_credits_falls_back_for_a_non_latin_actor():
     """The exact payload of the issue: series 305977, actor '韩晓晖'."""
-    rows = map_series_cast({"cast": [{"id": 2296, "name": "韩晓晖", "order": 0}]})
+    rows = map_series_credits({"cast": [{"id": 2296, "name": "韩晓晖", "order": 0}]})
     assert [row.slug for row in rows] == ["tmdb-2296"]
 
 
@@ -341,7 +341,7 @@ async def test_bulk_load_credits_no_longer_rejects_non_latin_people(db):
     ``POST /admin/sync/series``) with the very same names, and asserts both
     people land as distinct rows with their credits attached.
     """
-    people = map_series_cast({"cast": [{"id": 92296, "name": "韩晓晖", "order": 0}]})
+    people = map_series_credits({"cast": [{"id": 92296, "name": "韩晓晖", "order": 0}]})
     people += collect_series_creators([{"id": 93311, "name": "한영롱"}])
     assert len(people) == 2
 

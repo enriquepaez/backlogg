@@ -20,7 +20,11 @@ from backlogg.movies.schemas import (
 from backlogg.people import repository as people_repo
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
-from backlogg.shared.credits import get_credits_for_item
+from backlogg.shared.credits import (
+    MOVIE_CREW_JOB_ROLES,
+    get_credits_for_item,
+    select_crew_credits,
+)
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
 from backlogg.shared.slugs import slug_with_external_fallback, titled_slug
@@ -103,13 +107,14 @@ def _tmdb_person_row(
 def map_movie_credits(credits_data: dict | None) -> list[BulkPerson]:
     """Map an already-fetched TMDB credits payload to bulk credit rows.
 
-    Pure mapping, no network: the top-10 billed cast and every director,
-    exactly the selection ``_persist_movie_people`` has always persisted.
-    Split out from ``collect_movie_credits`` for feature 86, whose seeding
-    path gets this very payload embedded in the detail response
+    Pure mapping, no network: the top-10 billed cast plus every crew member
+    whose ``job`` is on ``MOVIE_CREW_JOB_ROLES`` — the director, the author of
+    the source work (``SOURCE_AUTHOR``) and the screenwriter (``WRITER``),
+    feature 74.  Split out from ``collect_movie_credits`` for feature 86, whose
+    seeding path gets this very payload embedded in the detail response
     (``/movie/{id}?append_to_response=credits,external_ids``) and must not
     spend a second request to re-fetch it.  Mirrors
-    ``backlogg.series.service.map_series_cast``.
+    ``backlogg.series.service.map_series_credits``.
     """
     if not credits_data:
         return []
@@ -126,11 +131,11 @@ def map_movie_credits(credits_data: dict | None) -> list[BulkPerson]:
         if row is not None:
             rows.append(row)
 
-    # Crew — directors only
-    for member in credits_data.get("crew", []):
-        if member.get("job") != "Director":
-            continue
-        row = _tmdb_person_row(member, "DIRECTOR")
+    # Crew — allowlisted jobs only.  Never the whole ``Writing`` department:
+    # it also carries animation storyboard jobs (``Story Artist`` and friends),
+    # which are not credits of the film.
+    for member, role in select_crew_credits(credits_data.get("crew", []), MOVIE_CREW_JOB_ROLES):
+        row = _tmdb_person_row(member, role)
         if row is not None:
             rows.append(row)
 
