@@ -148,6 +148,55 @@ auto-revocación) en [`docs/schema.md`](docs/schema.md).
 | Libros        | Open Library | Sin auth                |
 | Juegos        | IGDB         | Twitch client credentials |
 
+## Siembra del catálogo de producción
+
+Llenar el catálogo desde cero. Corre en GitHub Actions contra Neon, no en
+Render: una pasada completa son horas y Render corta una petición a ~15 min.
+Diseño completo en [`docs/seeding-plan.md`](docs/seeding-plan.md); runbook
+detallado en [`docs/operations.md`](docs/operations.md).
+
+**Un `content_type` por dispatch.** Los `hydrate` de TMDB tardan ~5 h cada uno.
+
+```bash
+# 0. Borrado previo, si se siembra desde cero. IRREVERSIBLE.
+#    La URL de producción NO está en .env — sale de Neon o de Render.
+psql "$PROD_DATABASE_URL" -f scripts/wipe_production.sql
+
+# 1. Enumerar la lista objetivo — minutos, NO escribe catálogo (solo seed_targets).
+#    Obligatorio ANTES del primer hydrate de movies/series.
+gh workflow run backfill-sync.yml -f content_type=movie  -f mode=enumerate
+gh workflow run backfill-sync.yml -f content_type=series -f mode=enumerate
+
+# 2. Hidratar TMDB — lo largo. Secuencial entre ellos: comparten el
+#    presupuesto de peticiones de TMDB.
+gh workflow run backfill-sync.yml -f content_type=movie  -f mode=hydrate
+gh workflow run backfill-sync.yml -f content_type=series -f mode=hydrate
+
+# 3. Books y games — fuentes distintas (Open Library e IGDB), así que pueden
+#    ir en paralelo con la hidratación de TMDB.
+gh workflow run backfill-sync.yml -f content_type=book -f mode=dump
+gh workflow run backfill-sync.yml -f content_type=game -f mode=hydrate -f seed_top_n=10000
+
+# Seguimiento
+gh run list --workflow=backfill-sync.yml --limit 5
+gh run watch
+gh run view <run-id> --log | grep backfill
+```
+
+`seed_top_n` **debe coincidir** con `SEED_TOP_N_GAMES` en Render, o el cursor
+compartido da la vuelta antes de tiempo. Aplica solo a `book` y `game`:
+`SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la feature 86.
+
+**Qué mirar mientras corre.** El contador que importa es `skipped_links`: cada
+unidad es una fila del catálogo que se guardó **sin enlace en `external_ids`**,
+así que no se encontrará por id externo ni se refrescará nunca. Si crece tramo
+a tramo, para y mira los `WARNING` de `backlogg.shared.external_ids`. Los otros
+dos son `errors` (el ítem no se escribió) y `people_errors` (el ítem sí, sus
+credits no; se recupera después con `mode=credits`).
+
+Volumen esperado: movies 57.135 · series 10.880 · books ~19.221 · games 31.958
+(topado en 10.000 por `seed_top_n`).
+
 ## Documentación
 
 - [`docs/architecture.md`](docs/architecture.md) — estructura y principios
