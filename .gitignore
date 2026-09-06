@@ -46,6 +46,10 @@ htmlcov/
 # Alembic
 # (no ignorar alembic/versions — son los archivos de migración)
 
+# Artefactos de la siembra desde los dumps de Open Library (feature 87):
+# el work-dir por defecto de scripts/seed_openlibrary_books.py
+.openlibrary-seed/
+
 # --- JS / frontend (monorepo) ---
 node_modules/
 .next/

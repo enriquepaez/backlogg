@@ -146,7 +146,7 @@ _ITEM_TYPES_BY_CONTENT: dict[str, str] = {
 }
 
 
-async def _refresh_catalog_search(session) -> None:
+async def refresh_catalog_search(session) -> None:
     """Refresh the catalog_search materialized view concurrently."""
     await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search"))
     await session.commit()
@@ -339,11 +339,17 @@ async def _write_batch(
     return outcome.written, outcome.rejected, outcome.people_rejected
 
 
-class _BatchWriter:
+class BatchWriter:
     """Accumulates fetched items and flushes them in ``BULK_LOAD_BATCH_SIZE`` chunks.
 
     Keeping the batch bounded caps both memory and the amount of work a
-    single fallback has to redo.
+    single fallback has to redo.  Each flush commits, which is also what makes
+    a long seeding run resumable: whatever landed stays landed.
+
+    Public (rather than ``_``-prefixed) because the write path is shared: the
+    nightly jobs here and ``scripts/seed_openlibrary_books.py`` (feature 87)
+    must write through the *same* batching-with-per-item-fallback code, not
+    through two copies of it.
     """
 
     def __init__(self, session, spec: BulkLoadSpec, job_name: str) -> None:
@@ -610,7 +616,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
-            writer = _BatchWriter(session, spec.bulk_spec, spec.job_name)
+            writer = BatchWriter(session, spec.bulk_spec, spec.job_name)
             for chunk_start in range(0, len(work), chunk_size):
                 chunk = work[chunk_start : chunk_start + chunk_size]
 
@@ -673,7 +679,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
                 logger.exception("%s: failed to recount seed target progress", spec.job_name)
 
             try:
-                await _refresh_catalog_search(session)
+                await refresh_catalog_search(session)
             except Exception:
                 logger.exception("%s: failed to refresh catalog_search", spec.job_name)
 
@@ -800,7 +806,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
-            writer = _BatchWriter(session, books_repo.BOOK_BULK_SPEC, "sync_books")
+            writer = BatchWriter(session, books_repo.BOOK_BULK_SPEC, "sync_books")
             for raw in raw_list:
                 try:
                     work_key = raw.get("key", "")
@@ -859,7 +865,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
             )
 
             try:
-                await _refresh_catalog_search(session)
+                await refresh_catalog_search(session)
             except Exception:
                 logger.exception("sync_books: failed to refresh catalog_search")
 
@@ -927,7 +933,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
-            writer = _BatchWriter(session, games_repo.GAME_BULK_SPEC, "sync_games")
+            writer = BatchWriter(session, games_repo.GAME_BULK_SPEC, "sync_games")
             for raw in raw_list:
                 try:
                     igdb_id = raw.get("id")
@@ -953,7 +959,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
             )
 
             try:
-                await _refresh_catalog_search(session)
+                await refresh_catalog_search(session)
             except Exception:
                 logger.exception("sync_games: failed to refresh catalog_search")
 

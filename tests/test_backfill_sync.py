@@ -59,7 +59,7 @@ def _job_patches(cursor_offset: int):
             return_value=cursor_offset,
         ),
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
+        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
     )
 

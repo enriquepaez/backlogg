@@ -27,7 +27,8 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 
 | Env var | Valor actual | Notas |
 |---|---|---|
-| `SEED_TOP_N_BOOKS` / `SEED_TOP_N_GAMES` | 10000 | Objetivo de catálogo de los tipos con cursor |
+| `SEED_TOP_N_GAMES` | 10000 | Objetivo de catálogo del único tipo que sigue siendo puramente de cursor |
+| `SEED_TOP_N_BOOKS` | 10000 | **Inerte para la siembra desde la feature 87** (`mode=dump` selecciona por los umbrales `BOOKS_SEED_MIN_*`, sin corte por número de ítems). Sigue viva para el camino por cursor: `sync_books` y `backfill_sync.py book`. ⚠️ Ahí 10.000 **se queda corto**: el filtro de la feature 73 entrega 18.874 obras, así que el cursor da la vuelta antes de recorrerlas todas. Si se usa ese camino, subirla a ≥ 18.874 (con `mode=dump` da igual) |
 | `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES` | 10000 | **Inertes desde la feature 86.** El catálogo de movies/series lo define `TMDB_SEED_MIN_VOTES_*`, no un número de ítems. Se dejan puestas para que la config de Render y la del workflow de backfill sigan siendo idénticas |
 | `TMDB_SEED_MIN_VOTES_MOVIES` / `_SERIES` | 25 | Umbral `vote_count` que **define** el catálogo de TMDB: 57.135 movies y 10.880 series |
 | `TMDB_SEED_START_YEAR` / `_END_YEAR` | 1874 / (vacío) | Rango de años que trocea la enumeración `/discover`. Vacío = año actual + 1 |
@@ -469,26 +470,136 @@ uv run python scripts/seed_tmdb_targets.py movie --start-year 2000 --end-year 20
   incluso tras el troceo mensual. La lista enumerada está **incompleta**: hay
   que subir el umbral o añadir un nivel de troceo más fino antes de fiarse de
   ella. El log dice qué ventanas.
-- Solo `movie` y `series`. Books usa dumps de Open Library y games una única
-  query a IGDB; el workflow rechaza esos tipos en este modo.
+- Solo `movie` y `series`. Books tiene su **propio modo** (`mode=dump`, abajo) y
+  games no necesita enumeración (una sola query a IGDB devuelve 500 juegos con
+  todos los campos); el workflow rechaza esos tipos en este modo.
 
-### Los tres modos: `enumerate`, `hydrate` y `credits`
+### Siembra de libros desde los dumps de Open Library (`mode=dump`)
+
+`scripts/seed_openlibrary_books.py` siembra **todo** el catálogo de libros desde
+los dumps mensuales de Open Library. A diferencia del enumerador de TMDB, este
+script sí escribe las filas del catálogo: el dump trae todos los campos, así que
+no queda ninguna petición de detalle por ítem que planificar — **cero** llamadas
+HTTP por libro y por autor, frente a las dos que hacía la siembra por
+`search.json`.
+
+```bash
+# Todo el pipeline desde Actions
+gh workflow run backfill-sync.yml -f content_type=book -f mode=dump
+
+# Una sola fase (p. ej. repetir solo la escritura, que es idempotente)
+gh workflow run backfill-sync.yml -f content_type=book -f mode=dump -f dump_phase=load
+
+# En local
+uv run python scripts/seed_openlibrary_books.py
+uv run python scripts/seed_openlibrary_books.py --phase editions --force
+```
+
+**Las cinco fases y su coste.** Medido el 2026-09-04 contra los dumps reales
+(`ol_dump_2026-08-31`) desde una línea doméstica hacia archive.org.
+
+⚠️ **El run es limitado por ancho de banda, y el ancho de banda de archive.org
+varía muchísimo**: la misma pasada de editions se midió en **35 min** a las
+15:00 y en **~100 min** a las 19:00 del mismo día, con el mismo código y la
+misma línea (6,3 MB/s de pico medido con una descarga de 200 MB). Planifica con
+el número alto, no con el bajo. Los tamaños de dump son además un **suelo**:
+crecen todos los meses.
+
+| Fase | Dump que descarga | Líneas leídas | Tiempo | Pico de RSS | Artefacto que deja |
+|---|---|---|---|---|---|
+| 1 `reading-log` | 0,12 GB | 12.838.026 | **61 s** | **444 MB** | `readinglog_counts.tsv.gz` — 399.259 obras, **1,4 MB** |
+| 2 `editions` | **12,59 GB** | 56.728.501 | 35-125 min | **574 MB** | `selected_works.jsonl.gz` — **19.221 obras elegidas**, **1,7 MB** |
+| 3 `works` | 4,06 GB | 41.591.088 | ~14 min | < fase 2 | `work_records.jsonl.gz` |
+| 4 `authors` | 0,78 GB | 15.412.139 | ~3 min | < fase 2 | `author_names.tsv.gz` |
+| 5 `load` | — | — | minutos | acotado por `BULK_LOAD_BATCH_SIZE` | ninguno: es un upsert idempotente |
+| **Total** | **~17,5 GB transferidos** | | **~1-2,5 h** | **574 MB** | **~3 MB tras las dos primeras fases** |
+
+Las fases 1 y 2 están medidas con el código de esta rama contra el dump
+`2026-08-31` (`resource.getrusage`, pasada completa). Las fases 3 y 4 llevan el
+tiempo medido de una pasada equivalente sobre los mismos ficheros; su memoria es
+trivialmente menor porque trabajan sobre las 19.221 obras elegidas, no sobre las
+399.259 de la whitelist.
+
+**Contraste que importa**: la fase 2 selecciona **19.221** obras aplicando el
+filtro de la feature 73 sobre el dump; `search.json` daba **18.874** con el mismo
+filtro sobre un índice un mes más nuevo. **+1,8 %**: el catálogo que sale de los
+dumps es el mismo que salía de Solr.
+
+**Disco: el pico es el `--work-dir`, no el dump.** Un runner de GitHub Actions
+tiene ~14 GB libres y el dump de editions solo ya son 12,59 GB, así que el
+pipeline **no escribe ni un byte de dump a disco**: cada fase es `httpx.stream`
++ `gzip` sobre el socket. Lo único que toca el disco son los artefactos:
+**3,1 MB medidos** tras las dos primeras fases, y del orden de 10 MB al acabar
+las cuatro. Los 17,5 GB son tráfico de red, no almacenamiento.
+
+**Memoria: 574 MB de pico, medidos.** Está en la fase 2 y lo acota la whitelist
+de la fase 1: se agregan solo las 399.259 obras con `readinglog_count >= 5`, no
+los 41.591.088 registros de obra del corpus ni los 56.728.501 de edición. De
+esas 399.259, **392.466 tienen al menos una edición** y solo 19.221 pasan el
+filtro, así que las fases 3-5 trabajan sobre dos órdenes de magnitud menos y su
+memoria es irrelevante. Sobra sitio de largo en los 16 GB de un runner.
+
+**Reanudable por fases.** Cada fase se salta si su artefacto ya está en el
+`--work-dir` (`--force` lo rehace), y los artefactos se escriben a `.tmp` +
+`rename`, así que un run muerto a medias nunca deja un artefacto truncado del
+que fiarse. La fase 5 no necesita artefacto porque es un upsert: repetirla es
+seguro por construcción.
+
+En Actions el `--work-dir` se guarda **siempre** en la caché del repo al
+terminar el job (falle o no), pero **solo se restaura si pides `-f
+resume=true`**:
+
+```bash
+# Run normal: siempre empieza del dump del mes en curso
+gh workflow run backfill-sync.yml -f content_type=book -f mode=dump
+
+# Continuar el run anterior que murió en la fase 3 (no vuelve a bajar los 12,59 GB)
+gh workflow run backfill-sync.yml -f content_type=book -f mode=dump -f resume=true
+```
+
+⚠️ Restaurar es opt-in **a propósito**. Si la caché se restaurase siempre, un
+`mode=dump` normal lanzado con la caché del mes pasado todavía viva se saltaría
+las cuatro fases y **resembraría el catálogo de un dump viejo sin decir nada**.
+Con `resume=true` la decisión es del operador y está escrita en el dispatch.
+Ojo también: si un run resumido termina y el mes ha cambiado, mezclarías dos
+dumps — para eso está `-f force_phase=true`, que rehace la fase pedida.
+
+- **Exit code 2** = el run terminó **degradado**: 0 libros escritos, filas
+  rechazadas por el cargador, credits rechazados o `external_ids` que no se
+  pudieron enlazar. Un catálogo parcial no se reporta como run verde.
+- **Cuándo relanzarlo**: cuando Open Library publica un dump nuevo (mensual). El
+  incremental fino entre dumps es la feature 88.
+- **archive.org corta conexiones.** En el run medido, la fase 3 murió a los 4 s
+  con `ConnectError: Connection reset by peer` justo después de dos horas
+  descargando editions. El pipeline reintenta hasta 3 veces **mientras no haya
+  entregado ninguna línea** (abrir el stream es gratis de repetir); un corte a
+  media descarga **no** se reintenta, porque gzip no tiene punto de rebobinado y
+  releer duplicaría el dump. Ese caso se arregla relanzando con `-f resume=true`:
+  vuelve a hacer solo la fase que se cayó.
+- Esto **no** sustituye al sync nocturno de libros: `sync_books` sigue sobre
+  `search.json` con su cursor, igual que antes. Esta feature cambia la
+  **siembra**, no el camino de la petición.
+
+### Los cuatro modos: `enumerate`, `dump`, `hydrate` y `credits`
 
 El workflow tiene un input `mode`. Resuelven problemas distintos y **no** se
 sustituyen entre sí:
 
-| | `enumerate` (movie/series) | `hydrate` (por defecto) | `credits` (`--only-missing-credits`) |
-|---|---|---|---|
-| Lista de trabajo | `/discover` por año bajo `vote_count.gte` | movie/series: targets de `seed_targets` sin fila en `external_ids`; book/game: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits`**, unida a `external_ids` |
-| Estado entre runs | la propia tabla `seed_targets` | movie/series: ninguno (diferencia en vivo); book/game: cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
-| Llamadas HTTP por ítem | 0 (20 ítems por petición de lista) | **una**: `/{tipo}/{id}?append_to_response=credits,external_ids` | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
-| Escribe la fila del ítem | **no**: solo la lista objetivo | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |
-| Condición de parada | ventanas agotadas | `pending == 0` (movie/series; los targets retirados no cuentan), wraparound del cursor (book/game) o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
-| Para qué sirve | decidir **qué** quiere el catálogo | bajar lo que falta | cerrar agujeros de credits (issue #15) |
-| `book`/`game` | **rechazados** | soportados | `game` **rechazado** |
+| | `enumerate` (movie/series) | `dump` (book) | `hydrate` (por defecto) | `credits` (`--only-missing-credits`) |
+|---|---|---|---|---|
+| Lista de trabajo | `/discover` por año bajo `vote_count.gte` | los dumps mensuales enteros, filtrados por los umbrales `BOOKS_SEED_MIN_*` | movie/series: targets de `seed_targets` sin fila en `external_ids`; book/game: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits`**, unida a `external_ids` |
+| Estado entre runs | la propia tabla `seed_targets` | un artefacto por fase en `--work-dir` (en Actions, la caché del repo) | movie/series: ninguno (diferencia en vivo); book/game: cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
+| Llamadas HTTP por ítem | 0 (20 ítems por petición de lista) | **0**: cuatro descargas para todo el catálogo | **una**: `/{tipo}/{id}?append_to_response=credits,external_ids` | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
+| Escribe la fila del ítem | **no**: solo la lista objetivo | sí (upsert completo, con géneros y credits de autoría) | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |
+| Condición de parada | ventanas agotadas | las cuatro pasadas terminan | `pending == 0` (movie/series; los targets retirados no cuentan), wraparound del cursor (book/game) o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
+| Para qué sirve | decidir **qué** quiere el catálogo | sembrar el catálogo de libros entero | bajar lo que falta | cerrar agujeros de credits (issue #15) |
+| Tipos que acepta | `movie`, `series` | **solo `book`** | los cuatro | todos menos `game` |
 
 **Cuándo usar cada uno.** Si el catálogo de movies/series está vacío o el
-umbral ha cambiado, `enumerate` primero y `hydrate` después. Si faltan
+umbral ha cambiado, `enumerate` primero y `hydrate` después. Si el que está
+vacío es el de **libros**, `dump`: siembra el catálogo entero de una vez y sin
+tocar `search.json` (`hydrate` sobre `book` sigue existiendo, pero es el camino
+lento por cursor y su tope es `SEED_TOP_N_BOOKS`). Si faltan
 *ítems*, `hydrate`. Si los ítems están pero les faltan *credits*, `credits`:
 `hydrate` no cierra ese hueco (issue #15) — con la lista objetivo ya
 hidratada, `pending` es 0 y el run termina de inmediato sin tocar los ítems

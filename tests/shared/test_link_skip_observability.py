@@ -564,7 +564,7 @@ async def test_sync_games_reports_the_links_it_could_not_write(db):
         patch.object(
             sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_session_factory(db)),
     ):
         result = await sync_jobs.sync_games(slice_size=1)
@@ -602,7 +602,7 @@ async def test_a_clean_sync_reports_zero_skipped_links(db):
         patch.object(
             sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_session_factory(db)),
     ):
         result = await sync_jobs.sync_games(slice_size=1)

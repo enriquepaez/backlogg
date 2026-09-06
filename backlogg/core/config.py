@@ -22,8 +22,14 @@ class Settings(BaseSettings):
     # configure and no cursor left to wrap. They are kept (rather than
     # deleted) because they are still set as environment variables on Render
     # and in .github/workflows/backfill-sync.yml, and removing a name that
-    # deployments export would break nothing but read as an accident. The two
-    # that are still live are BOOKS and GAMES, whose enumeration is unchanged.
+    # deployments export would break nothing but read as an accident.
+    #
+    # ⚠️ Since feature 87 SEED_TOP_N_BOOKS is inert for the *seeding* path too:
+    # scripts/seed_openlibrary_books.py selects the book catalog from the
+    # monthly Open Library dumps by the BOOKS_SEED_MIN_* thresholds below, with
+    # no item-count cutoff. It stays live for the *cursor* path — sync_books
+    # and scripts/backfill_sync.py book still page search.json and wrap on it.
+    # SEED_TOP_N_GAMES is fully live: games are unchanged.
     # See docs/seeding-plan.md §3 and docs/operations.md.
     SEED_TOP_N_MOVIES: int = 100
     SEED_TOP_N_SERIES: int = 100
@@ -79,11 +85,28 @@ class Settings(BaseSettings):
     # costs three slice slots once instead of a target forever.
     TMDB_SEED_MAX_ATTEMPTS: int = 3
 
-    # Quality thresholds for the Open Library seed query (feature 73). The
+    # Quality thresholds for the Open Library book catalog (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the
     # tunable numbers are env vars. Defaults are the calibrated values
-    # documented in docs/external-apis.md: they yield a pool of 16.959
-    # English + 1.858 Spanish works, comfortably above SEED_TOP_N_BOOKS.
+    # documented in docs/external-apis.md: they select 17.015 English +
+    # 1.859 Spanish works = 18.874, which IS the size of the book catalog.
+    #
+    # ⚠️ That is 189x the default SEED_TOP_N_BOOKS of 100 but *below* any
+    # realistic target, so the old wording here ("comfortably above
+    # SEED_TOP_N_BOOKS") was only ever true against the default and is gone.
+    # Since feature 87 SEED_TOP_N_BOOKS is INERT for the seeding path: books
+    # are seeded from the monthly dumps by scripts/seed_openlibrary_books.py,
+    # which selects by these thresholds and has no item-count cutoff and no
+    # cursor to wrap — exactly what happened to SEED_TOP_N_MOVIES/_SERIES in
+    # feature 86. It is still LIVE for the cursor path: sync_books (the
+    # nightly job) and scripts/backfill_sync.py book still walk search.json
+    # by offset and use it as their wraparound target.
+    #
+    # These same thresholds drive both paths, so the two agree on which works
+    # belong in the catalog; only the transport differs. One caveat for the
+    # cursor path: production sets SEED_TOP_N_BOOKS to 10.000, which is *below*
+    # the 18.874 the filter actually yields, so the cursor wraps before covering
+    # the catalog. Irrelevant to the dump path, flagged in docs/operations.md.
     #
     # BOOKS_SEED_MIN_READINGLOG applies to the English stream and
     # BOOKS_SEED_MIN_READINGLOG_ES to the Spanish one: the shelving signal is

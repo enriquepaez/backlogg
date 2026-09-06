@@ -114,11 +114,27 @@ por ítem), no de red.
 
 - **Auth**: none required
 - **Base URL**: `https://openlibrary.org`
-- **Rate limits**: none enforced — suitable for batch sync
+- **Rate limits (corregido 2026-09-04)**: la página oficial vigente
+  (`openlibrary.org/developers/api`, editada 2026-05-05) pide **1 req/s sin
+  identificar** y **3 req/s con un `User-Agent` identificativo**, y prohíbe
+  explícitamente *"harvest data in bulk"* y *"make hundreds of single-book
+  requests"*, con aviso de bloqueo por IP.
+  > ⚠️ Este documento afirmaba «Rate limits: none enforced — suitable for
+  > batch sync». **Era falso.** La siembra por `search.json` hacía justo lo que
+  > la política prohíbe (una petición de work y otra de autor por libro), y es
+  > uno de los argumentos de la feature 87: la siembra ahora sale de los dumps
+  > mensuales, con **cero** peticiones por ítem. Poner el `User-Agent`
+  > identificativo y limitar el ritmo del adaptador on-demand es otro camino y
+  > va como **issue #26**, deliberadamente fuera de la feature 87.
 - **Key endpoints used**:
-  - `GET /search.json?q=<filtered>&sort=readinglog&offset=&limit=` — seed/nightly sync popular books (dos streams filtrados, EN y ES; ver *Popular-books strategy*)
+  - `GET /search.json?q=<filtered>&sort=readinglog&offset=&limit=` — nightly sync de libros populares (dos streams filtrados, EN y ES; ver *Popular-books strategy*)
   - `GET /search.json?title=&limit=` — on-demand fallback search
   - `GET /works/{olid}.json` — work detail (modeled at work level, not edition)
+- **Dumps mensuales** (`https://openlibrary.org/data/ol_dump_<name>_latest.txt.gz`,
+  redirige a archive.org): la **siembra** del catálogo de libros sale de aquí
+  desde la feature 87 — ver *Siembra desde los dumps mensuales* más abajo. No
+  sustituye a `search.json`, que sigue sirviendo el fallback on-demand, la
+  búsqueda y el job nocturno.
 
 - **Popular-books strategy**: the sync uses `search.json` sorted by `readinglog` —
   the count of users who shelved the work as want-to-read/reading/read — with native
@@ -517,6 +533,101 @@ por ítem), no de red.
   order already used by `GET /books` (feature 66), over items already
   persisted — no Open Library call happens for this endpoint. `period` is
   accepted but has no effect (no time-windowed signal exists to apply it to).
+
+### Siembra desde los dumps mensuales (feature 87)
+
+Open Library publica su base entera cada mes. Desde la feature 87 el catálogo
+de libros **se siembra desde ahí**, no desde `search.json`:
+`scripts/seed_openlibrary_books.py` + `backlogg/books/adapters/openlibrary_dump.py`.
+El fallback on-demand, la búsqueda y el job nocturno **siguen** en `search.json`.
+
+**Tamaños reales medidos el 2026-09-04** (`HEAD` sobre `openlibrary.org/data/`,
+que redirige a `archive.org/download/ol_dump_2026-08-31/`). Los dumps crecen
+todos los meses: estos números son un **suelo**, no un techo.
+
+| Dump | Tamaño real | Lo que `docs/seeding-plan.md` decía | Para qué se usa |
+|---|---|---|---|
+| `ol_dump_reading-log_latest.txt.gz` | **0,12 GB** | no listado | `readinglog_count` por obra |
+| `ol_dump_editions_latest.txt.gz` | **12,59 GB** | ~9,2 GB (+37 %) | `edition_count`, `language`, `number_of_pages_median`, `first_publish_year`, `ddc`, `lcc`, `isbn` |
+| `ol_dump_works_latest.txt.gz` | **4,06 GB** | ~2,9 GB (+40 %) | título, `subjects`, portada, descripción, claves de autor |
+| `ol_dump_authors_latest.txt.gz` | **0,78 GB** | ~0,5 GB (+56 %) | nombre del autor (rol `AUTHOR`) |
+| `ol_dump_ratings_latest.txt.gz` | 9,2 MB | ~5 MB | **no se usa**: la señal de notoriedad es `readinglog_count` |
+
+**Formato, verificado sobre los bytes reales.** `works`/`editions`/`authors`
+son TSV de 5 columnas **sin cabecera**: `type \t key \t revision \t
+last_modified \t JSON`. El JSON va escapado (`\uXXXX`), así que **nunca**
+contiene un tab ni un salto de línea crudos y `line.split("\t", 4)` es seguro.
+`reading-log` **no** comparte ese formato: son 4 columnas
+`work_key \t edition_key \t shelf \t date`, con `\N` cuando no hay edición
+y cuatro baldas — medidas sobre el dump entero: `Want to Read` 10.558.404,
+`Already Read` 1.672.281, `Currently Reading` 605.949, `Stopped Reading` 1.392.
+
+**Qué campo vive dónde — y por qué el dump de editions es obligatorio.** El plan
+original ofrecía como alternativa «clasificar desde works y pedir `ddc`/`lcc` a
+`search.json` solo para los seleccionados». **Esa vía no existe**: rastreando el
+backend real de Open Library (`openlibrary/solr/updater/work.py`), casi todos
+los campos de selección los calcula Solr **desde las ediciones**, no desde la
+obra.
+
+| Campo de `search.json` | De dónde sale de verdad |
+|---|---|
+| `edition_count` | editions — cuenta de ediciones de la obra |
+| `number_of_pages_median` | editions — `ceil` de la mediana de `number_of_pages` sobre las ediciones que lo declaran (un `0` explícito cuenta; solo se salta el ausente). Es literalmente lo que hace `openlibrary/solr/updater/work.py` |
+| `language` (el filtro `eng`/`spa`) | editions — unión de `languages`; **la obra no tiene idioma** |
+| `first_publish_year` | editions — `min(publish_year)`; el `first_publish_date` de la obra existe en el 2,6 % de los registros y Solr **ni lo mira** |
+| `ddc` / `lcc` | editions — `dewey_decimal_class` y `lc_classifications` |
+| `isbn` | editions — `isbn_13` / `isbn_10` |
+| `readinglog_count` | reading-log — `COUNT(*)` sobre las cuatro baldas |
+| `title`, `subjects`, `covers`, `description`, claves de autor | works |
+
+Sin editions no se puede ni **seleccionar** (no hay idioma, ni `edition_count`,
+ni páginas), no ya clasificar.
+
+**Formato crudo de `ddc`/`lcc`.** Las ediciones traen la notación sin
+normalizar (`"303.48/33"`, `"813/.54"`, `"T14.5 .L58 1997"`, `"PZ7 .R79835"`),
+no la forma ordenable de Solr (`"PZ-0007.00000000.R26447"`). Los parsers de la
+feature 72 ya la aceptan tal cual, y eso está **demostrado con datos reales de
+dump** en `tests/books/test_openlibrary_dump_fixture.py`, que compara los
+géneros derivados del dump contra los derivados de `search.json` para las
+mismas obras. No hace falta reimplementar `normalize_ddc()` /
+`short_lcc_to_sortable_lcc()` (que además son AGPL).
+
+**`readinglog_count` del dump vs. el de Solr** (contrastado el 2026-09-04):
+
+| Obra | Dump | Solr | Δ |
+|---|---|---|---|
+| Atomic Habits (`OL17930368W`) | 62.594 | 62.545 | +0,08 % |
+| The 48 Laws of Power (`OL1968368W`) | 51.165 | 51.072 | +0,18 % |
+| It Ends With Us (`OL18020194W`) | 44.376 | 44.360 | +0,04 % |
+| A Bigger House for June (`OL27714493W`) | 20 | **20** | exacto |
+| Exposure (`OL17643507W`) | 25 | **25** | exacto |
+
+La deriva de las grandes es el desfase entre un dump del 31-08 y un Solr vivo,
+y es irrelevante frente a umbrales de 20 y 5: en las obras que **rozan** el
+umbral —las únicas donde la decisión cambia— el recuento es exacto. El criterio
+de la feature 73 se preserva.
+
+**Distribución de `readinglog_count`** (dump entero: 12.838.026 filas,
+3.314.590 obras distintas, 65 s de pasada):
+
+| `readinglog_count ≥` | Obras |
+|---|---|
+| 1 | 3.314.590 |
+| 2 | 1.315.094 |
+| 3 | 771.874 |
+| **5 (whitelist)** | **399.259** |
+| 10 | 166.388 |
+| **20 (umbral EN)** | **70.491** |
+| 50 | 22.164 |
+| 100 | 8.835 |
+
+Las 399.259 obras con ≥ 5 estanterías son la **whitelist** contra la que se
+agrega el dump de editions, y es lo que hace que una pasada de 12,59 GB quepa
+en memoria acotada: sin ella habría que mantener un mapa de las 41.591.088
+claves de obra del corpus.
+
+Coste en tiempo y disco del run: `docs/operations.md`, sección *Siembra de
+libros desde los dumps de Open Library*.
 
 ## IGDB (Games)
 

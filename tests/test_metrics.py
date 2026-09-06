@@ -219,7 +219,7 @@ async def test_sync_job_increments_syncs_counter(monkeypatch):
     # list, not the popularity listing; an empty list is enough to prove the
     # counter is incremented at the start of the job.
     with (
-        patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
+        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
         patch(
             "backlogg.scheduler.jobs._read_seed_work_list",

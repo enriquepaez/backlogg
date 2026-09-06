@@ -19,7 +19,7 @@ and the setting is inert for them.  What sizes their slice now is
 ``tests/test_tmdb_discover_seeding.py``.
 
 All external API clients are mocked so no real network calls are made, and
-``async_session_factory`` / ``_refresh_catalog_search`` / the sync-cursor
+``async_session_factory`` / ``refresh_catalog_search`` / the sync-cursor
 repository are mocked so no real DB access happens.
 """
 
@@ -73,7 +73,7 @@ async def test_sync_movies_slice_size_comes_from_the_per_type_setting(monkeypatc
     with (
         _seed_work_list_patch() as mock_work_list,
         patch(
-            "backlogg.scheduler.jobs._refresh_catalog_search",
+            "backlogg.scheduler.jobs.refresh_catalog_search",
             new_callable=AsyncMock,
         ),
         patch(
@@ -96,7 +96,7 @@ async def test_sync_series_slice_size_comes_from_the_per_type_setting(monkeypatc
     with (
         _seed_work_list_patch() as mock_work_list,
         patch(
-            "backlogg.scheduler.jobs._refresh_catalog_search",
+            "backlogg.scheduler.jobs.refresh_catalog_search",
             new_callable=AsyncMock,
         ),
         patch(
@@ -124,7 +124,7 @@ async def test_sync_movies_ignores_seed_top_n(monkeypatch):
         with (
             patch("backlogg.scheduler.jobs._read_seed_work_list", new=capture),
             patch(
-                "backlogg.scheduler.jobs._refresh_catalog_search",
+                "backlogg.scheduler.jobs.refresh_catalog_search",
                 new_callable=AsyncMock,
             ),
             patch(
@@ -150,7 +150,7 @@ async def test_sync_books_limit_comes_from_settings(monkeypatch):
             return_value=[],
         ) as mock_fetch,
         patch(
-            "backlogg.scheduler.jobs._refresh_catalog_search",
+            "backlogg.scheduler.jobs.refresh_catalog_search",
             new_callable=AsyncMock,
         ),
         patch(
@@ -179,7 +179,7 @@ async def test_sync_games_limit_comes_from_settings(monkeypatch):
             return_value=[],
         ) as mock_fetch,
         patch(
-            "backlogg.scheduler.jobs._refresh_catalog_search",
+            "backlogg.scheduler.jobs.refresh_catalog_search",
             new_callable=AsyncMock,
         ),
         patch(

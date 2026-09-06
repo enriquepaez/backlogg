@@ -221,7 +221,7 @@ async def test_sync_movies_bad_item_does_not_block_slice(db, monkeypatch):
     with (
         patch.object(sync_jobs._tmdb_movies, "get_movie_detail", new=fake_detail),
         patch.object(sync_jobs.movies_repo, "upsert_movie", new=poisoned_upsert),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.bulk_load_items",
             new_callable=AsyncMock,
@@ -302,7 +302,7 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()
@@ -374,7 +374,7 @@ async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()
@@ -456,7 +456,7 @@ async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, m
             return_value=None,
         ),
         patch.object(sync_jobs._ol_client, "book_to_dict", side_effect=_spy),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

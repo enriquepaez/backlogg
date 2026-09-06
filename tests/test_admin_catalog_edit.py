@@ -338,7 +338,7 @@ async def test_locked_field_survives_next_sync(db):
             "movie_to_dict",
             return_value=dict(synced_movie_data),
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

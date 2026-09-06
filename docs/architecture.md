@@ -65,6 +65,8 @@ backlogg/
 scripts/
 ├── backfill_sync.py       # Backfill directo contra la DB (ver docs/operations.md)
 ├── seed_tmdb_targets.py   # Enumeración de la lista objetivo de TMDB (/discover)
+├── seed_openlibrary_books.py  # Siembra del catálogo de libros desde los dumps
+│                          # mensuales de Open Library (feature 87)
 └── bench_bulk_load.py     # Benchmark ruta por ítem vs. ruta por lotes
 ```
 

@@ -491,3 +491,182 @@ las aserciones duras.
   sobre el papel: el borrado y la siembra **no se han ejecutado**. Cerrarlo ahora
   repetiría el error que lo originó (el #7 se cerró dando por hecho un backfill
   que nunca se corrió).
+
+## 2026-09-04 — Issue #22 `skipped_links` (observabilidad de enlaces saltados)
+
+Punto **3.2** de `progress/priority_order.md`, rama
+`fix/external_ids_skipped_link_observability`, mergeada en el PR #194. Los dos
+caminos de escritura de `external_ids` saltaban en silencio cuando la terna
+`(item_type, source, external_id)` ya pertenecía a otro ítem: sin contador y sin
+log. Es el mecanismo ciego que encadenó los issues **#7 → #15 → #20**, y el único
+panel de instrumentos disponible durante una siembra de varias horas. La
+instrumentación es el entregable: `skipped_links` viaja del job al endpoint
+`POST /v1/admin/sync/{type}`, a `scripts/backfill_sync.py` y al `::warning::` del
+workflow nocturno, con `WARNING` de `backlogg.shared.external_ids` nombrando la
+terna, el ítem pretendiente y el que ya la tiene. No cuenta las re-escrituras
+idempotentes del mismo enlace al mismo ítem (una persona en cast y crew, un tramo
+re-ejecutado): contarlas convertiría el número en ruido. Reviewer **APPROVED** y
+QA manual del leader contra un salto real. Issue **cerrado** (`resolved`), a
+diferencia del #20: aquí lo entregado es la propia medición. Derivados nacidos de
+su arreglo: issues **#23** (duplicado huérfano por renombrado en la fuente),
+**#24** (colisión de slug en `_resolve_people` pierde un id de persona) y **#25**
+(`_unlinked_targets_stmt` no comprueba `item_id`), los tres sin punto asignado en
+la cola.
+
+## 2026-09-04 — Issue #18 slug vacío en alfabetos no latinos
+
+Punto **3.3** de `progress/priority_order.md` — el último antes de la siembra—,
+rama `fix/non_latin_slug_fallback`, mergeada en el PR #195. Los nombres y los
+títulos en alfabetos no latinos folded a ASCII daban slug vacío: los credits se
+descartaban contando `people_errors`, y los ítems colisionaban entre sí.
+
+**Decisión de producto del usuario: opción B**, derivar el slug del id externo
+(`tmdb-1234567`, `open-library-ol123w`, `igdb-4567`) en vez de transliterar.
+Transliterar (`unidecode`/`anyascii`/`pypinyin`) **empeoraba el issue #24**:
+colapsa identidades distintas (`张伟` y `章伟` → `zhang-wei`) y `upsert_person`
+resuelve la colisión con `ON CONFLICT DO UPDATE`, así que dos personas se funden
+en una fila — cambia «perder el credit» por «atribuirlo a otra persona», que es
+peor porque no se ve. El id externo es único por construcción por
+`(item_type, source)`, determinista y estable ante renombrados, sin dependencia
+nueva ni el asunto de licencia (`Unidecode` es GPL). El coste —slug opaco— es hoy
+casi nulo: `apps/web` no tiene ninguna ruta de persona, y el nombre para mostrar
+sigue en `people.name`/`title`, en su alfabeto original.
+
+**Alcance ampliado a ítems además de personas**, por ser la misma causa y el
+mismo helper: el sondeo del leader encontró `slug = f"{slug_base}-{year}"` con
+`slug_base` vacío produciendo `-2025`, un **imán de colisiones** (todos los
+títulos no latinos del mismo año al mismo slug, fundidos por el upsert), y ahí es
+peor porque el slug de ítem **sí** es la URL pública. Las cinco copias de
+`_slugify` se unificaron en `backlogg/shared/slugs.py`.
+
+Reviewer **CHANGES_REQUESTED** en la ronda 1 con 3 hallazgos, los tres cerrados
+en la ronda 2; el bloqueante era que los cuatro sitios de predicción de slug no
+tenían test (revertidos a la fórmula pre-fix, la suite seguía verde), cerrado con
+tests que comparan la predicción contra lo que **genera el adaptador**, no contra
+un literal. La segunda pasada la hizo el **leader** —el agente reviewer se cayó
+por límite de sesión— reproduciendo sus mutaciones sitio a sitio con mapeo 1:1
+confirmado y md5 de restauración. `init.sh` verde, 1322 tests.
+
+**QA manual del leader** contra TMDB y la DB de dev reales: serie CJK 305977 →
+`tmdb-305977` (antes `-<año>`), dos títulos CJK del mismo año ya no colapsan, y
+`fight-club-1999` idéntico a hoy (sin regresión sobre el catálogo sembrado). Dos
+lecciones registradas: (1) **qué ítems caen en el fallback depende del idioma que
+sirva la fuente ese día** —la película 137 se demostró mal porque TMDB sirve hoy
+su título en inglés—, así que el volumen real solo se sabrá midiéndolo durante la
+carga; (2) las 5 filas degeneradas de dev **no se reparan re-sincronizando**
+(`slug` está en `_NEVER_UPDATED` y el upsert conflicta por `slug`: un re-sync
+inserta una segunda fila sin enlace en `external_ids`), así que se **borraron**
+con autorización del usuario, previa auditoría de que solo colgaba catálogo y
+nada de usuario. Extra no previsto: `catalog_search` es una **vista
+materializada**, así que las filas borradas seguían apareciendo en búsqueda hasta
+el `REFRESH MATERIALIZED VIEW CONCURRENTLY`. Producción no necesita nada de esto:
+se borra y se siembra.
+
+## 2026-09-06 — Feature 87 `openlibrary_dump_seeding`
+
+Punto **4** del Bloque A de `progress/priority_order.md`, rama
+`feat/openlibrary_dump_seeding`. La siembra de libros deja de salir de
+`search.json`: cuatro pasadas en streaming sobre los dumps mensuales de Open
+Library producen el catálogo entero con **cero** peticiones HTTP por libro y por
+autor. El camino de la petición —`search_book`, el fallback on-demand, `get_book`,
+`_persist_book_authors`— y el nocturno `sync_books` **no se tocan**: el
+incremental desde dumps es la feature 88.
+
+### La decisión de diseño la resolvieron los hechos, no una preferencia
+
+`docs/seeding-plan.md` ofrecía una vía B más barata —clasificar desde works y
+pedir `ddc`/`lcc` a `search.json` solo para los seleccionados—. **Esa vía no
+existe.** Rastreando el backend real de Open Library
+(`openlibrary/solr/updater/work.py`), casi todos los criterios de selección se
+calculan **desde las ediciones**: `edition_count`, `number_of_pages_median`,
+`first_publish_year`, `isbn`, `ddc`, `lcc` y —el que lo cierra— **`language`, que
+la obra no tiene en absoluto**. Sin el dump de editions no se puede ni
+*seleccionar*, no ya clasificar. Se documentó la corrección en el plan.
+
+Los tamaños del plan también estaban obsoletos, medidos con `HEAD` contra las
+fuentes reales: editions **12,59 GB** (no 9,2), works 4,06, authors 0,78,
+reading-log 0,12. **Crecen cada mes**: lo documentado es un suelo.
+
+### Lo que hace viable la pasada de 12,59 GB en un runner de 14 GB
+
+El orden de las pasadas **es** el diseño: reading-log (0,12 GB) → whitelist de
+**399.259 obras** con `readinglog_count >= 5` → editions, que agrega **solo**
+contra esa whitelist en vez de contra los 41,6 M de claves del corpus → works →
+authors. Y ni un byte de dump toca el disco (`httpx.stream` + `gzip` sobre el
+socket): los 17,5 GB son tráfico, no almacenamiento.
+
+Resultado del run real: **19.221 obras**, +1,8 % frente a las 18.874 que estimaba
+el `numFound` de `search.json`. Pico de memoria 574 MB, pico de disco 3,1 MB.
+
+### Tres rondas de review, y las tres encontraron algo real
+
+**Ronda 1 — CHANGES_REQUESTED**, 3 bloqueantes. El reviewer mató **27 de 29
+mutaciones**, o sea que el grueso estaba sujeto; lo que fallaba era **la fase de
+escritura**, justo donde dos límites de sesión cortaron al implementer. El
+bloqueante de fondo: los tres contadores del panel (`errors`, `people_errors`,
+`skipped_links`) se podían poner a `0` constante y los 1398 tests seguían verdes
+—el camino feliz afirmaba `== 0`, que un cero constante satisface igual—. Es el
+único canal de información de un run desatendido de 1-2 h, y el proyecto ya se
+quemó ahí (issue #22). Cerrado con tres runs degradados de verdad contra la DB.
+
+**Ronda 2 — CHANGES_REQUESTED**, 1 bloqueante nuevo en código que el reviewer no
+había visto: los reintentos que el implementer añadió tras perder su run real a
+`Connection reset by peer` de archive.org. La lógica era correcta y **no la
+sujetaba nada**: el test que decía cubrirla truncaba el gzip, y un gzip truncado
+lanza `EOFError`, que **no** capturaba el `except (TransportError,
+HTTPStatusError)` — la aserción era cierta *por el tipo de excepción*, no por la
+guarda, y pasaba igual con la guarda borrada. Medido lo que previene: sin ella,
+3 aperturas y **453.614 líneas duplicadas**, que sobre 56,7 M de ediciones es
+`edition_count` multiplicado y un catálogo mal seleccionado **en silencio**, sin
+que se mueva ningún contador.
+
+**Ronda 3 — APPROVED.** Test con un `ReadError` real a media descarga (una sola
+apertura, cero duplicados, con un `assert received` como seguro anti-vacuidad), y
+`EOFError`/`gzip.BadGzipFile` entran en la tupla de reintentables: un cuerpo que
+acaba antes de tiempo es el mismo corte visto una capa más arriba, y antes
+escapaba **por accidente, no por diseño**. Ahora es la guarda, y no el tipo de
+excepción, la que gobierna el caso.
+
+### Dos veces el implementer se corrigió a sí mismo con datos
+
+- `int(median(...))` → **`math.ceil`**, que es lo que hace Open Library, y un
+  `number_of_pages` de **0 vota** (upstream solo salta los `None`). Su propio
+  fixture no podía cazarlo: ninguna de las 5 obras tiene un número par de
+  ediciones. Fue a la fuente.
+- El regex de año anclaba con `\b`, que **rechaza `"c1985"`** (circa): `c` y `1`
+  son ambos caracteres de palabra. Los libros se sembraban sin fecha.
+
+Y una tercera contra el reviewer, midiendo: `sys.intern` sobre `lcc` no dedupe
+nada (ratio 1,3×, porque la signatura lleva autor y año dentro) y desde CPython
+3.12 las cadenas internadas son inmortales, así que **sube** el suelo de memoria.
+Quitado de `lcc`, conservado en `ddc` e idiomas.
+
+### QA manual del leader — contra los dumps reales
+
+El contraste vale porque los números de la fase 1 los midió el leader **a mano el
+2026-09-04, antes de que existiera una línea de código**: el pipeline produce
+**12.838.026 filas y una whitelist de 399.259**, idénticas. Artefacto verificado
+obra a obra contra Solr y `min = 5` en las 399.259 filas. Reanudabilidad
+comprobada (segunda ejecución: skip instantáneo, cero HTTP). Y sobre la fase
+pesada, muestreo cada 20 s: **RSS plano en 51 MB y work-dir plano en 1440 KB** —
+disco cero, que es lo que exige el criterio 1. Un `kill` a mitad dejó **0
+artefactos truncados y 0 `.tmp`**: la escritura atómica se sostiene bajo una
+muerte real, no solo bajo el test que la simula.
+
+**No verificado por el leader**, y queda dicho: las fases 2-5 completas (~1-2 h y
+17,5 GB). Los 574 MB, los 19.221 ítems y los 3,1 MB son medición del implementer,
+declarada y no comprobable desde el repo — el reviewer los marcó igual.
+
+### Derivados
+
+- **Issue #26** (medium): el adaptador de Open Library no se identifica ni limita
+  su ritmo, contra la política vigente de la API (1 req/s sin identificar, 3 con
+  `User-Agent`, prohibido el bulk harvesting). `docs/external-apis.md` afirmaba
+  «Rate limits: none enforced», que es **falso**; la línea se corrigió aquí y el
+  arreglo del adaptador va aparte por ser el camino on-demand.
+- **Issue #27** (low): `SEED_TOP_N_BOOKS` (100 por defecto, 10.000 en Render)
+  está por debajo de las 19.221 obras reales. Inerte para la siembra, **vivo**
+  para el nocturno. Registrado a decisión del usuario para que no se quedara solo
+  en documentación; probablemente lo disuelve la feature 88.
+
+`bash init.sh` verde: **1414 tests** (+92 sobre los 1.322 de partida).
