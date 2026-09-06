@@ -393,6 +393,32 @@
       "impact": "El target desaparece del panel de control sin haber sembrado nada. Es el agravante que documenta el issue #22 en su síntoma: por eso la pérdida no aparecía tampoco en pending/stuck/unlinkable, los tres números en los que se confía para saber si un tramo de siembra ha convergido.",
       "solution": "Propuesta, no implementada: comprobar item_id además de la terna. El motivo de no haberlo hecho en la rama del #22 es que hacerlo obliga a decidir QUÉ item_id es el dueño legítimo de la terna — si el target vuelve a la work list sin cambiar la regla de 'gana el primero', reintentará eternamente sin poder enlazar nunca, que es peor que el estado actual. Va acoplado a la decisión del issue #23.",
       "notes": "Registrado por el leader el 2026-09-04 al cerrar la rama del issue #22, donde quedó explícitamente fuera de scope (§6.5 de progress/impl_issue-22.md y confirmado por el reviewer). La limitación está documentada como conocida en docs/seeding-plan.md §5.1."
+    },
+    {
+      "id": 26,
+      "title": "El adaptador de Open Library no se identifica ni limita su ritmo, contra la política vigente de la API",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-09-04",
+      "symptom": "backlogg/books/adapters/open_library.py hace peticiones a openlibrary.org sin User-Agent identificativo y sin ninguna limitación de ritmo. La siembra actual encadena, por cada libro, un GET /works/{olid}.json y ademas un GET /authors/{olid}.json por autor, en rafaga.",
+      "cause": "docs/external-apis.md afirmaba de Open Library 'Rate limits: none enforced — suitable for batch sync'. Es falso contra la pagina oficial vigente (openlibrary.org/developers/api, editada 2026-05-05), que fija 1 req/s sin identificar y 3 req/s con un User-Agent que lleve nombre de la app y email de contacto, y prohibe explicitamente 'harvest data in bulk' y 'make hundreds of single-book requests (use search.json for batch results)', avisando de que las violaciones pueden acabar en rate limiting agresivo o bloqueo.",
+      "impact": "Riesgo de rate limiting o bloqueo de la aplicacion por parte de Open Library. Es tambien la explicacion mas plausible del issue #9 (500 intermitentes de search.json) que costo montar un presupuesto de 8 reintentos en el adaptador: no un backend flojo, sino una fuente defendiendose.",
+      "solution": "Propuesta, no implementada: User-Agent identificativo (nombre de la app + email de contacto) en el cliente httpx del adaptador, y un limitador de ritmo a 3 req/s en el camino on-demand. La feature 87 ya elimina el motivo principal del trafico masivo — la siembra deja de usar la API y pasa a los dumps mensuales, que es justo lo que Open Library pide que se haga para acceso masivo — asi que lo que queda por acotar es el camino de la peticion, no el de la siembra.",
+      "notes": "Registrado por el leader el 2026-09-04 durante la investigacion de la feature 87, y deliberadamente fuera de scope de su rama: la 87 cambia la SIEMBRA y este issue es el camino on-demand, otra causa y otro codigo. La linea falsa de docs/external-apis.md si se corrige en la 87, porque actualizar ese documento es uno de sus criterios de aceptacion."
+    },
+    {
+      "id": 27,
+      "title": "SEED_TOP_N_BOOKS (100 por defecto, 10.000 en Render) esta por debajo del catalogo real de libros, y el nocturno sigue usandolo",
+      "area": "backend",
+      "severity": "low",
+      "status": "open",
+      "discovered": "2026-09-06",
+      "symptom": "SEED_TOP_N_BOOKS vale 100 por defecto (backlogg/core/config.py) y 10.000 en Render, pero el filtro de la feature 73 entrega 19.221 obras medidas sobre el dump de 2026-08-31 (18.874 segun el numFound de search.json). sync_books y scripts/backfill_sync.py book usan ese numero como objetivo de wraparound del cursor de sync_cursors, asi que por el camino nocturno el cursor da la vuelta antes de haber recorrido el catalogo entero: las obras que caen mas alla del tope no se visitan nunca.",
+      "cause": "El valor se calibro cuando la siembra de libros era un recorrido por offset de search.json con un objetivo de catalogo mucho menor. La feature 87 lo dejo INERTE para la siembra —el camino de dumps selecciona por los umbrales BOOKS_SEED_MIN_*, sin corte por numero de items— pero NO para el nocturno, que sigue vivo y sin tocar por decision de alcance.",
+      "impact": "Bajo mientras la siembra la haga el camino de dumps, que es el que llena el catalogo y no mira esta variable. El efecto real es que el refresco nocturno por cursor no cubre la cola del catalogo. No se pierden datos: las filas existen y las escribe la siembra; lo que no llega es el refresco periodico de las que quedan por encima del tope.",
+      "solution": "Tres vias, sin decidir: (a) subir el valor a >= 19.221 en el default de config.py y en la env var de Render; (b) hacerlo inerte tambien para el nocturno, que es lo natural si la feature 88 (catalog_incremental_updates) reescribe el camino de books sobre el diff del dump mensual, como plantea docs/seeding-plan.md §6; (c) dejarlo y aceptar que el nocturno solo refresca la cabeza del catalogo. La (b) es la que probablemente lo disuelve sin tocar nada.",
+      "notes": "Registrado por el usuario el 2026-09-06 al cerrar la feature 87, a propuesta del leader. Lo levanto el reviewer como no bloqueante en la ronda 1 (progress/review_87.md), coincidiendo con el implementer en que cambiar una env var de Render no era decision suya. Ya esta documentado en backlogg/core/config.py, docs/operations.md y docs/seeding-plan.md; el issue existe para que la decision no se quede solo en documentacion. Revisar junto con la feature 88."
     }
   ]
 }

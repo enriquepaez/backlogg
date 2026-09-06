@@ -1743,7 +1743,7 @@
         "Tests sobre un fragmento de dump fijado en el repo (no dependientes de la red)",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 88,

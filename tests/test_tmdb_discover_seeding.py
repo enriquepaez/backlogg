@@ -412,7 +412,7 @@ async def test_sync_movies_slice_never_calls_the_credits_endpoint(db):
 
     with (
         patch("httpx.AsyncClient.get", new=fake_get),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -573,7 +573,7 @@ async def test_sync_movies_fills_the_slice_with_pending_then_rotation(db):
 
     with (
         patch("httpx.AsyncClient.get", new=fake_get),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -593,7 +593,7 @@ async def test_sync_movies_reads_no_sync_cursor(db):
     with (
         patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock) as get_cursor,
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock) as set_cursor,
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -625,7 +625,7 @@ async def test_sync_movies_counts_a_fetch_failure_without_losing_the_slice(db):
 
     with (
         patch.object(sync_jobs._tmdb_movies, "get_movie_detail", new=flaky_detail),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -658,7 +658,7 @@ async def test_sync_movies_retires_an_id_tmdb_no_longer_serves(db):
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -715,7 +715,7 @@ async def test_sync_series_is_target_driven_too(db):
             new_callable=AsyncMock,
             return_value=detail,
         ) as mock_detail,
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -983,7 +983,7 @@ async def test_unlinkable_target_is_retired_so_pending_reaches_zero(db, monkeypa
         patch.object(
             sync_jobs._tmdb_series, "get_series_detail", new=_series_detail_by_id(details)
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -1019,7 +1019,7 @@ async def test_a_failed_fetch_does_not_burn_a_targets_budget(db, monkeypatch):
             new_callable=AsyncMock,
             side_effect=RuntimeError("TMDB is down"),
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -1073,7 +1073,7 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
         patch.object(
             sync_jobs._tmdb_series, "get_series_detail", new=_series_detail_by_id(series_details)
         ),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -1095,7 +1095,7 @@ async def test_refresh_rotation_fires_once_the_stuck_target_is_retired(db, monke
 
     with (
         patch.object(sync_jobs._tmdb_movies, "get_movie_detail", new=fake_detail),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),
@@ -1150,7 +1150,7 @@ async def test_hydration_never_exceeds_the_configured_concurrency(db, monkeypatc
 
     with (
         patch.object(sync_jobs._tmdb_movies, "get_movie_detail", new=fake_detail),
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(db),

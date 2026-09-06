@@ -119,9 +119,11 @@ es el que esos filtros entregan:
 - **Books** (feature 73): `readinglog_count ≥ 20` y `edition_count ≥ 10` en
   inglés, `≥ 5` y `≥ 2` en castellano, más `number_of_pages_median ≥ 100`.
   `numFound` real: **17.015 en inglés + 1.859 en castellano = 18.874**.
-  El comentario de `backlogg/core/config.py:23` («comfortably above
-  `SEED_TOP_N_BOOKS`») se escribió con el default de 100 y hay que corregirlo al
-  subir el objetivo.
+  Ese **es** el tamaño del catálogo de libros: desde la feature 87 la siembra
+  aplica esos mismos umbrales sobre los dumps mensuales, sin corte por número
+  de ítems. El comentario de `backlogg/core/config.py` («comfortably above
+  `SEED_TOP_N_BOOKS`») era falso salvo contra el default de 100 y ya está
+  corregido.
 - **Games** (feature 65): allowlist de `game_type` **y `rating > 0`**.
   `/games/count` real: 374.223 juegos en total, 336.653 pasan la allowlist, pero
   solo **31.958** tienen valoración. Quitar `rating > 0` los multiplicaría por
@@ -331,8 +333,14 @@ Dejan de ser el criterio de corte y quedan **inertes**. El catálogo lo define
 `TMDB_SEED_MIN_VOTES_*`; el tamaño de la rebanada nocturna,
 `SYNC_SLICE_SIZE_*`. Se conservan (en vez de borrarse) porque Render y
 `.github/workflows/backfill-sync.yml` siguen exportándolas, y quitar un nombre
-que los despliegues declaran se leería como un descuido. `SEED_TOP_N_BOOKS` y
-`SEED_TOP_N_GAMES` siguen vivas: sus enumeraciones no cambian.
+que los despliegues declaran se leería como un descuido.
+
+`SEED_TOP_N_BOOKS` está en una situación intermedia desde la feature 87:
+**inerte para la siembra** (`scripts/seed_openlibrary_books.py` selecciona por
+los umbrales `BOOKS_SEED_MIN_*`, sin corte por número de ítems) y **viva para
+el camino por cursor** (`sync_books` y `scripts/backfill_sync.py book` siguen
+paginando `search.json` y haciendo wraparound sobre ella).
+`SEED_TOP_N_GAMES` sigue viva del todo: la enumeración de games no cambia.
 
 ### TMDB — los ficheros diarios de IDs son para el incremental
 
@@ -354,28 +362,73 @@ altas** (§6).
 
 ### Open Library — dumps mensuales
 
-| Fichero | Tamaño | Para qué |
-|---|---|---|
-| `ol_dump_works_latest.txt.gz` | ~2,9 GB | La obra: título, autores, descripción |
-| `ol_dump_authors_latest.txt.gz` | ~0,5 GB | Autoría (rol `AUTHOR`) |
-| `ol_dump_ratings_latest.txt.gz` | ~5 MB | Señal de notoriedad |
-| `ol_dump_editions_latest.txt.gz` | ~9,2 GB | **Ver aviso** |
+> ✅ **Implementado en la feature 87** (`scripts/seed_openlibrary_books.py`).
 
-Formato TSV con columnas `type, key, revision, last_modified, JSON`. Descarga
-desde `openlibrary.org/data/`, o por torrent desde `archive.org/details/ol_exports`.
-Sacar `search.json` del camino crítico elimina de golpe los 500 intermitentes que
-costaron el issue #9 y el presupuesto de retries que hubo que montar.
+Tamaños **medidos el 2026-09-04** contra `openlibrary.org/data/` (redirige a
+`archive.org/download/ol_dump_2026-08-31/`). Los números que este documento
+daba en 2026-09-02 estaban entre un 37 % y un 56 % por debajo, y los dumps
+crecen cada mes: trátalos como suelo.
 
-> ⚠️ **`ddc` y `lcc` viven en los registros de *edition*, no en los de *work*.**
-> La feature 72 los obtiene de `search.json`, donde Solr los agrega desde las
-> ediciones. Para mantener ese criterio con dumps hace falta también
-> `ol_dump_editions_latest` (~9,2 GB) — del que, como beneficio secundario, sale
-> `edition_count` contando directamente, que es el discriminante de notoriedad de
-> la feature 73. Es el único punto pesado de todo el plan.
->
-> Alternativa si 9,2 GB resulta inmanejable: enumerar y clasificar desde works, y
-> pedir `ddc`/`lcc` a `search.json` solo para los seleccionados. Sigue siendo una
-> llamada por ítem, pero sobre 18.874 y no sobre el catálogo entero.
+| Fichero | Tamaño real | Este doc decía | Para qué |
+|---|---|---|---|
+| `ol_dump_reading-log_latest.txt.gz` | **0,12 GB** | no listado | `readinglog_count` por obra (la señal de notoriedad) |
+| `ol_dump_editions_latest.txt.gz` | **12,59 GB** | ~9,2 GB | `edition_count`, `language`, `number_of_pages_median`, `first_publish_year`, `ddc`, `lcc`, `isbn` |
+| `ol_dump_works_latest.txt.gz` | **4,06 GB** | ~2,9 GB | título, `subjects`, portada, descripción, claves de autor |
+| `ol_dump_authors_latest.txt.gz` | **0,78 GB** | ~0,5 GB | nombre del autor (rol `AUTHOR`) |
+| `ol_dump_ratings_latest.txt.gz` | 9,2 MB | ~5 MB | **descartado**: la notoriedad la da el reading-log |
+| **Total de los cuatro que se usan** | **~17,5 GB** | | |
+
+Formato TSV de 5 columnas `type, key, revision, last_modified, JSON` **sin
+cabecera** — salvo `reading-log`, que son 4 columnas
+`work_key, edition_key, shelf, date` sin JSON. Detalle y verificación en
+`docs/external-apis.md`.
+
+#### La «vía B» no existe
+
+Este documento planteaba como alternativa «enumerar y clasificar desde works, y
+pedir `ddc`/`lcc` a `search.json` solo para los seleccionados». **Se descarta
+por los hechos, no por preferencia**: estaba escrita sobre la premisa —falsa— de
+que solo `ddc`/`lcc` viven en las ediciones. Rastreando el backend real de Open
+Library (`openlibrary/solr/updater/work.py`), **casi todos los criterios de
+selección** salen de las ediciones: `edition_count`, `number_of_pages_median`,
+`first_publish_year`, `isbn` y —lo decisivo— `language`, porque **una obra no
+tiene idioma**: el `language` de `search.json` es la unión del de sus ediciones.
+Sin el dump de editions no se puede ni *seleccionar* el catálogo, no ya
+clasificarlo. Tabla campo a campo en `docs/external-apis.md`.
+
+#### Vía elegida: cuatro pasadas en streaming, sin escribir dumps a disco
+
+El orden es lo que hace viable los 17,5 GB en un runner de GitHub Actions con
+~14 GB libres, porque **ningún byte de dump toca el disco**: cada pasada es
+`httpx.stream` + `gzip` sobre el socket.
+
+```
+1. reading-log (0,12 GB)  -> COUNT(*) por obra -> whitelist: 399.259 obras con
+                             readinglog_count >= 5 (el umbral ES, el más bajo)
+2. editions   (12,59 GB)  -> agrega SOLO las obras de la whitelist y aplica el
+                             filtro de la feature 73 -> ~19 k obras elegidas
+3. works      (4,06 GB)   -> título, subjects, portada, descripción y autores
+                             SOLO de las elegidas
+4. authors    (0,78 GB)   -> nombres SOLO de las claves de autor recogidas
+```
+
+La whitelist del paso 1 es lo que acota la memoria: sin ella, agregar las
+**56.728.501** ediciones exigiría un mapa de **41.591.088** claves de obra (las
+dos cifras contadas al recorrer los dumps del 2026-08-31, no estimadas).
+
+**Reanudable por fases, no por fichero**: cada pasada deja un artefacto
+comprimido en `--work-dir` (decenas de MB, no 17,5 GB) y una fase cuyo artefacto
+ya existe se salta. El pico de disco del run **es el work-dir**, no el dump. La
+fase de escritura es un upsert, así que re-ejecutarla es idempotente. Coste real
+de tiempo y disco en `docs/operations.md`.
+
+**Autoría** (rol `AUTHOR`) sale del dump de authors: **cero** llamadas a
+`/authors/{id}`. Antes eran una petición por obra (`/works/{id}.json`) más una
+por autor, que es justo lo que la política de Open Library prohíbe.
+
+**Lo que esta feature no cambia**: `sync_books` (nocturno), `search_book`, el
+fallback on-demand y `get_book` siguen sobre `search.json`. El incremental
+desde dumps es la feature 88 (§6).
 
 ### IGDB — nada que cambiar
 
@@ -544,7 +597,7 @@ Volumen diario real: unos pocos cientos de ítems.
 | 1 | **84 `bulk_load_pipeline`** (`COPY` + upserts agrupados) ✅ | Prerrequisito de todo. Sin esto ningún método de enumeración sirve, es condición necesaria para la ventana de 6 meses de movies (§2.3), y además arregla el backfill dirigido a huecos (issue #15) |
 | 2 | **85 `backfill_credits_targeted`** ✅ | Cierra el issue #15, que hoy bloquea la feature 74 |
 | 3 | **86 `tmdb_discover_quality_seeding`** ✅ | Rompe el techo de 10.000 y aplica el criterio de `vote_count` |
-| 4 | **87 `openlibrary_dump_seeding`** | Elimina `search.json` del camino crítico |
+| 4 | **87 `openlibrary_dump_seeding`** ✅ | Elimina `search.json` del camino crítico de la siembra |
 | 5 | **88 `catalog_incremental_updates`** | Mantiene el catálogo sin barridos completos, incluida la promoción por umbral |
 
 Games no necesita feature de siembra propia: su enumeración actual ya es óptima y

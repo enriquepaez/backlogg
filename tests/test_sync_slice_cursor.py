@@ -185,7 +185,7 @@ def _job_patches(cursor_offset: int):
             return_value=cursor_offset,
         ),
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs._refresh_catalog_search", new_callable=AsyncMock),
+        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
     )
 
@@ -389,7 +389,7 @@ async def test_rerunning_the_same_movie_slice_is_idempotent(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=movie_raw,
         ) as mock_detail,
-        patch.object(sync_jobs, "_refresh_catalog_search", new_callable=AsyncMock),
+        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

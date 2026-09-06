@@ -41,14 +41,18 @@ esto» del final**.
 > Contado contra los tres archivos fuente, no de memoria. Si vuelves a tocar
 > esta sección, vuelve a contarlos.
 
-- **12 features backend pendientes**: 74-83, 87 y 88. Ninguna en `in_progress`.
-  Las 84, 85 y 86 están `done`.
+- **11 features backend pendientes**: 74-83 y 88. Ninguna en `in_progress`.
+  Las 84, 85, 86 y **87** están `done` (la 87, el 2026-09-06).
 - **5 features frontend en `blocked`** (FE-65 a FE-69, ids 64-68): ninguna
   ejecutable hoy, cada una espera a su feature backend pareja. Las 63 anteriores
   están `done`. Índice en el apartado «Frontend».
-- **7 issues abiertos**: #15, #18, #19, #20, #23, #24 y #25. El **#22 pasó a
-  `resolved` el 2026-09-04**; los #23, #24 y #25 nacieron de su arreglo. Detalle y
-  ubicación en la cola justo debajo.
+- **8 issues abiertos**: #15, #18, #19, #20, #23, #24, #25 y **#26**. El **#22
+  pasó a `resolved` el 2026-09-04**; los #23, #24 y #25 nacieron de su arreglo, y
+  el **#26** —Open Library sin `User-Agent` ni límite de ritmo, contra su
+  política vigente— de la investigación de la feature 87. ⚠️ El **#18 sigue
+  `open` aunque su arreglo se mergeó** en el PR #195 el 2026-09-04: nadie lo
+  cerró. Mismo caso que el #20. Decidir si se cierran los dos ahora o se esperan
+  a medirlos contra la siembra real. Detalle y ubicación en la cola justo debajo.
 
 ### Issues abiertos y dónde caen en la cola
 
@@ -136,7 +140,7 @@ Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
 | 3.1 | **issue #20** `uq_external_id` gana `item_type` | ✅ implementado, revisado y con QA manual el 2026-09-04. Prerrequisito duro: sin él la siembra pierde catálogo en silencio y a tasa creciente |
 | 3.2 | ~~**issue #22** hacer ruidosos los saltos silenciosos de `external_ids`~~ ✅ **resolved 2026-09-04** | Era el panel de instrumentos de la siembra. `skipped_links` viaja ya del job al endpoint, al `backfill_sync.py` y al `::warning::` del workflow nocturno |
 | 3.3 | **issue #18** slug de nombres en alfabeto no latino | Antes de sembrar: si no, el catálogo nuevo nace con un agujero permanente en credits. Decisión de producto pendiente (transliterar vs. `tmdb-<id>`) |
-| 4 | **87** `openlibrary_dump_seeding` | El catálogo real de books (18.874). Saca `search.json` del camino crítico |
+| 4 | ~~**87** `openlibrary_dump_seeding`~~ ✅ **done 2026-09-06** | El catálogo real de books. Medido sobre el dump: **19.221 obras**, +1,8 % frente a las 18.874 que estimaba `numFound`. `search.json` fuera del camino crítico de la siembra (sigue sirviendo búsqueda y on-demand) |
 | 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |
 | 6 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |
 

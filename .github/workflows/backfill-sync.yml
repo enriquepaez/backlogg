@@ -13,12 +13,13 @@ on:
           - book
           - game
       mode:
-        description: 'enumerate = fill seed_targets from /discover (movie/series only, feature 86); hydrate = run the sync job in a loop (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
+        description: 'enumerate = fill seed_targets from /discover (movie/series only, feature 86); dump = seed the whole book catalog from the Open Library monthly dumps (book only, feature 87); hydrate = run the sync job in a loop (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
         required: true
         type: choice
         default: hydrate
         options:
           - enumerate
+          - dump
           - hydrate
           - credits
       min_votes:
@@ -28,6 +29,21 @@ on:
         default: ''
       recheck:
         description: 'credits mode only — re-visit items already stamped with credits_synced_at'
+        required: false
+        type: boolean
+        default: false
+      dump_phase:
+        description: 'dump mode only — run a single phase instead of all five: reading-log | editions | works | authors | load (blank = all). Phases already done are skipped unless force_phase is set'
+        required: false
+        type: string
+        default: ''
+      force_phase:
+        description: 'dump mode only — redo a phase even if its artifact is already in the work dir'
+        required: false
+        type: boolean
+        default: false
+      resume:
+        description: 'dump mode only — restore the work dir of a PREVIOUS run and continue where it died. Off by default: a plain dump run always starts from the current monthly dump'
         required: false
         type: boolean
         default: false
@@ -89,12 +105,58 @@ jobs:
           case "${{ github.event.inputs.content_type }}" in
             movie|series) ;;
             *)
-              echo "::error::enumerate mode only supports 'movie' and 'series' — books use Open Library dumps and games a single IGDB query"
+              echo "::error::enumerate mode only supports 'movie' and 'series' — books have their own mode=dump (Open Library monthly dumps, feature 87) and games need no enumeration at all (a single IGDB query returns 500 games with every field)"
               exit 1
               ;;
           esac
           uv run python scripts/seed_tmdb_targets.py "${{ github.event.inputs.content_type }}" \
             ${{ github.event.inputs.min_votes != '' && format('--min-votes {0}', github.event.inputs.min_votes) || '' }}
+
+      # Resumability across dispatches: every dispatch gets a fresh runner, so
+      # without a restored work dir a run that died in phase 3 would have to
+      # re-download the 12,59 GB of editions. The artifacts are a few MB, far
+      # below the 10 GB repo cache budget. restore/save rather than plain
+      # `cache` so that the artifacts of a run that failed halfway are saved
+      # too — that is precisely the run worth resuming.
+      #
+      # ⚠️ Restoring is OPT-IN (`resume: true`) and that is deliberate. A
+      # prefix `restore-keys` would silently hand a *plain* `mode=dump` — the
+      # invocation docs/operations.md documents as the normal one — the work
+      # dir of an earlier month, and the run would skip all four phases and
+      # re-seed the catalog of a stale dump without a word. Fresh by default,
+      # resume only when the operator says so.
+      - name: Restore Open Library seed work dir
+        if: ${{ github.event.inputs.mode == 'dump' && github.event.inputs.resume == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/openlibrary-seed
+          key: openlibrary-seed-workdir-${{ github.run_id }}
+          restore-keys: openlibrary-seed-workdir-
+
+      # Dump seeding (feature 87): streams the four Open Library monthly dumps
+      # (17,5 GB) through memory — not one dump byte is written to disk, which
+      # is what makes it fit on a runner with ~14 GB free — and writes the
+      # whole book catalog. Phases whose artifact is already in the work dir
+      # are skipped. Exit code 2 = the run finished degraded (nothing
+      # selected, rejected rows, or external ids that could not be linked).
+      - name: Seed books from the Open Library dumps (dump mode)
+        if: ${{ github.event.inputs.mode == 'dump' }}
+        run: |
+          if [ "${{ github.event.inputs.content_type }}" != "book" ]; then
+            echo "::error::dump mode is only for 'book' — Open Library is the only source we seed from a full monthly dump"
+            exit 1
+          fi
+          uv run python scripts/seed_openlibrary_books.py \
+            --work-dir "${{ runner.temp }}/openlibrary-seed" \
+            ${{ github.event.inputs.dump_phase != '' && format('--phase {0}', github.event.inputs.dump_phase) || '' }} \
+            ${{ github.event.inputs.force_phase == 'true' && '--force' || '' }}
+
+      - name: Save Open Library seed work dir
+        if: ${{ always() && github.event.inputs.mode == 'dump' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/openlibrary-seed
+          key: openlibrary-seed-workdir-${{ github.run_id }}
 
       - name: Run backfill (hydrate mode)
         if: ${{ github.event.inputs.mode == 'hydrate' }}
