@@ -310,11 +310,19 @@ async def test_a_person_claiming_a_tmdb_id_does_not_block_a_movie(db):
     assert person_link.scalar_one() == person.id
 
 
-async def test_batch_still_leaves_an_id_claimed_within_the_same_type_alone(db):
-    """First claim still wins *within* a type — the half of the rule that stays.
+async def test_a_tmdb_id_offered_under_a_new_slug_updates_its_own_row(db):
+    """One TMDB id, one row — even when the slug changes (issue #23).
 
-    Two different movies cannot hold the same TMDB id, so the batch writer must
-    keep skipping that pair instead of raising on ``uq_external_id``.
+    This test used to assert the opposite: the second batch wrote a *second*
+    movie and the pre-check then refused to move the link, "first claim wins".
+    That rule protected ``uq_external_id`` from raising, but it was protecting
+    the wrong thing — the duplicate had already been written by then, and it
+    could never be linked, refreshed or found by id again.
+
+    The identity of an item that comes from a source is its external id, so
+    the batch writer now realigns the slug of the row that holds it and
+    updates that row.  ``uq_external_id`` is still never violated: there is
+    only ever one row wanting the id.
     """
     from backlogg.shared.external_ids import upsert_external_id
 
@@ -342,7 +350,19 @@ async def test_batch_still_leaves_an_id_claimed_within_the_same_type_alone(db):
         ],
     )
     assert second.written == 1
-    intruder = await _movie(db, "bulk-claim-second")
+
+    # The batch route writes with raw SQL, so the identity map still holds the
+    # pre-rename instance: expire it or the assertions below read the old row.
+    db.expire_all()
+    renamed = await _movie(db, "bulk-claim-second")
+    assert renamed.id == claimer.id
+    assert renamed.title == "Bulk Claim Second"
+    # The old slug is gone: it named this same row, not another one.
+    assert (
+        await db.execute(
+            select(func.count()).select_from(Movie).where(Movie.slug == "bulk-claim-first")
+        )
+    ).scalar_one() == 0
 
     holder = await db.execute(
         select(ExternalId.item_id).where(
@@ -352,15 +372,15 @@ async def test_batch_still_leaves_an_id_claimed_within_the_same_type_alone(db):
         )
     )
     assert holder.scalar_one() == claimer.id
-    unlinked = await db.execute(
+    links = await db.execute(
         select(func.count())
         .select_from(ExternalId)
-        .where(ExternalId.item_type == "MOVIE", ExternalId.item_id == intruder.id)
+        .where(ExternalId.item_type == "MOVIE", ExternalId.item_id == claimer.id)
     )
-    assert unlinked.scalar_one() == 0
+    assert links.scalar_one() == 1
 
     # The per-item route agrees, which is what the fallback relies on.
-    same = await upsert_external_id(db, "MOVIE", intruder.id, "TMDB", "8400141")
+    same = await upsert_external_id(db, "MOVIE", claimer.id, "TMDB", "8400141")
     assert same.item_id == claimer.id
 
 

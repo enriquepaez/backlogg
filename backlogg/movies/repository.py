@@ -6,6 +6,7 @@ from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
 from backlogg.movies.schemas import MovieSortEnum
 from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
+from backlogg.shared.identity import resolve_item_slug
 
 
 async def list_movies(
@@ -89,8 +90,16 @@ async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> MovieG
     return genre
 
 
-async def upsert_movie(db: AsyncSession, data: dict) -> Movie:
-    """Insert or update a movie by slug.
+async def upsert_movie(db: AsyncSession, data: dict, *, external_id: str | None = None) -> Movie:
+    """Insert or update a movie, identified by ``external_id`` when there is one.
+
+    The statement keys on the slug (``ON CONFLICT ("slug")``), but the slug
+    is derived from the title and the title moves: TMDB renames items.
+    When the caller knows the item's external id it must pass it, and the
+    row already linked to it is realigned to the incoming slug *first*
+    (issue #23, ``backlogg.shared.identity``) so the upsert updates that row
+    instead of inserting a second one that could never be linked.  Without
+    ``external_id`` the behaviour is exactly what it was: resolution by slug.
 
     The ``data`` dict must contain all movie fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
@@ -104,6 +113,20 @@ async def upsert_movie(db: AsyncSession, data: dict) -> Movie:
     block when locked.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if external_id and data.get("slug"):
+        # Issue #23: the external id, not the slug, is what says which row
+        # this is.  ``upsert_movie`` keys its ON CONFLICT on the slug, which is
+        # derived from the title and moves when the source renames the item —
+        # so without this the rename would insert a second, unlinkable row.
+        data["slug"] = await resolve_item_slug(
+            db,
+            item_type="MOVIE",
+            table=Movie.__table__,
+            source="TMDB",
+            external_id=external_id,
+            proposed_slug=data["slug"],
+        )
 
     genres_data: list[dict] = data.pop("genres", [])
 

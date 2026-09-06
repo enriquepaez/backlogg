@@ -7,6 +7,7 @@ from backlogg.books.models import Book, BookGenre, book_genres_join
 from backlogg.books.schemas import BookSortEnum
 from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
+from backlogg.shared.identity import resolve_item_slug
 from backlogg.shared.models import Credit
 
 
@@ -113,8 +114,16 @@ async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> BookGe
     return genre_result.scalar_one()
 
 
-async def upsert_book(db: AsyncSession, data: dict) -> Book:
-    """Insert or update a book by slug.
+async def upsert_book(db: AsyncSession, data: dict, *, external_id: str | None = None) -> Book:
+    """Insert or update a book, identified by ``external_id`` when there is one.
+
+    The statement keys on the slug (``ON CONFLICT ("slug")``), but the slug
+    is derived from the title and the title moves: OPEN_LIBRARY renames items.
+    When the caller knows the item's external id it must pass it, and the
+    row already linked to it is realigned to the incoming slug *first*
+    (issue #23, ``backlogg.shared.identity``) so the upsert updates that row
+    instead of inserting a second one that could never be linked.  Without
+    ``external_id`` the behaviour is exactly what it was: resolution by slug.
 
     The ``data`` dict must contain all book fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
@@ -127,6 +136,20 @@ async def upsert_book(db: AsyncSession, data: dict) -> Book:
     checked separately after the reload below, skipping the genre re-sync
     block when locked.
     """
+    if external_id and data.get("slug"):
+        # Issue #23: the external id, not the slug, is what says which row
+        # this is.  ``upsert_book`` keys its ON CONFLICT on the slug, which is
+        # derived from the title and moves when the source renames the item —
+        # so without this the rename would insert a second, unlinkable row.
+        data["slug"] = await resolve_item_slug(
+            db,
+            item_type="BOOK",
+            table=Book.__table__,
+            source="OPEN_LIBRARY",
+            external_id=external_id,
+            proposed_slug=data["slug"],
+        )
+
     genres_data: list[dict] = data.pop("genres", [])
 
     # Build INSERT ... ON CONFLICT (slug) DO UPDATE

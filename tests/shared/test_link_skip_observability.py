@@ -284,22 +284,30 @@ def test_the_detail_list_is_capped_but_the_count_is_not():
 # ── Batch path (``_upsert_external_ids``) ────────────────────────────────────
 
 
-async def test_batch_link_claimed_by_an_existing_row_is_counted(db):
-    """The batch pre-check drops the pair — now it says so."""
-    first = await bulk_load_items(
-        db,
-        _SPEC,
-        [
-            BulkItem(
-                data=_movie_payload("link-skip-batch-first", "Batch First"), external_id="9200001"
-            )
-        ],
+async def test_batch_link_claimed_by_an_orphan_row_is_counted(db):
+    """The batch pre-check drops the pair — now it says so.
+
+    The scenario had to change with issue #23, and the change is the point:
+    this used to be a *renamed* item, which wrote a second row that could not
+    take the id.  Identity is resolved by external id now, so a rename updates
+    the row it always was and loses nothing.
+
+    What is left is the link that points at nothing: an ``external_ids`` row
+    whose ``item_id`` has no item behind it (a catalog row deleted by hand, a
+    partially wiped database — ``scripts/bench_bulk_load.py`` does exactly that
+    with its own rows).  There is no live row to resolve the identity to, the
+    fresh item is written by slug, and the triple is still taken.  That is a
+    real, permanent loss and it must still be counted and logged, because the
+    only way out of it is an operator deleting the orphan.
+    """
+    orphan_item_id = 2_000_000_001
+    db.add(
+        ExternalId(item_type="MOVIE", item_id=orphan_item_id, source="TMDB", external_id="9200001")
     )
-    assert first.written == 1
-    incumbent = await _movie_by_slug(db, "link-skip-batch-first")
+    await db.flush()
 
     with collect_link_skips() as skips:
-        second = await bulk_load_items(
+        written = await bulk_load_items(
             db,
             _SPEC,
             [
@@ -309,14 +317,14 @@ async def test_batch_link_claimed_by_an_existing_row_is_counted(db):
                 )
             ],
         )
-    assert second.written == 1
+    assert written.written == 1
     pretender = await _movie_by_slug(db, "link-skip-batch-second")
 
     assert skips.count == 1
     skip = skips.skips[0]
     assert (skip.item_type, skip.source, skip.external_id) == ("MOVIE", "TMDB", "9200001")
     assert skip.attempted_item_id == pretender.id
-    assert skip.claimed_by_item_id == incumbent.id
+    assert skip.claimed_by_item_id == orphan_item_id
 
     holder = await db.execute(
         select(ExternalId.item_id).where(
@@ -325,7 +333,7 @@ async def test_batch_link_claimed_by_an_existing_row_is_counted(db):
             ExternalId.external_id == "9200001",
         )
     )
-    assert holder.scalar_one() == incumbent.id
+    assert holder.scalar_one() == orphan_item_id
 
 
 async def test_rerunning_the_same_batch_counts_no_skip(db):
@@ -495,24 +503,49 @@ async def test_the_claim_pre_check_still_costs_a_single_query(db):
     down to a handful per batch).  Reading ``item_id`` in the pre-check that
     was already being issued keeps that budget intact; a second ``SELECT``
     would have paid for the instrumentation with the thing being instrumented.
-    """
-    items = [
-        BulkItem(
-            data=_movie_payload(f"link-skip-roundtrip-{i}", f"Round Trip {i}"),
-            external_id=f"920010{i}",
-        )
-        for i in range(3)
-    ]
-    with _StatementRecorder() as recorder:
-        await bulk_load_items(db, _SPEC, items)
 
-    selects = [
-        statement
-        for statement in recorder.statements
-        if "external_ids" in statement and statement.lstrip().upper().startswith("SELECT")
+    Issue #23 added the *other* ``external_ids`` read of the batch — the one
+    that resolves which row each external id already is — so the budget is now
+    two reads, and this test pins both halves: the pre-check is still exactly
+    one query, the identity resolution is exactly one more, and neither grows
+    with the size of the batch (asserted by running 3 items and 9).
+    """
+
+    def batch(prefix: str, size: int) -> list[BulkItem]:
+        return [
+            BulkItem(
+                data=_movie_payload(f"link-skip-roundtrip-{prefix}-{i}", f"Round Trip {i}"),
+                external_id=f"9201{prefix}{i:02d}",
+            )
+            for i in range(size)
+        ]
+
+    def selects(recorder: _StatementRecorder) -> list[str]:
+        return [
+            statement
+            for statement in recorder.statements
+            if "external_ids" in statement and statement.lstrip().upper().startswith("SELECT")
+        ]
+
+    with _StatementRecorder() as small:
+        await bulk_load_items(db, _SPEC, batch("3", 3))
+    with _StatementRecorder() as large:
+        await bulk_load_items(db, _SPEC, batch("9", 9))
+
+    assert len(selects(small)) == len(selects(large)) == 2, (selects(small), selects(large))
+
+    # The claim pre-check: leads with ``item_type`` and reads ``item_id``.
+    pre_check = [
+        s for s in selects(small) if s.lstrip().startswith("SELECT external_ids.item_type")
     ]
-    assert len(selects) == 1, selects
-    assert "item_id" in selects[0]
+    assert len(pre_check) == 1, selects(small)
+    assert "external_ids.item_id" in pre_check[0]
+
+    # The identity resolution (issue #23): joins the catalog table, because a
+    # link that points at no row must not decide any identity.
+    identity = [s for s in selects(small) if s not in pre_check]
+    assert len(identity) == 1
+    assert "JOIN movies" in identity[0]
 
 
 # ── The number reaches the sync response ─────────────────────────────────────
@@ -533,22 +566,18 @@ def _session_factory(db):
 async def test_sync_games_reports_the_links_it_could_not_write(db):
     """End to end on a real job: the loss shows up in the returned dict.
 
-    The scenario is the realistic one, not a contrived collision: IGDB game
-    9300001 was ingested when its name slugified to ``link-skip-game-old``;
-    the game has since been renamed, so this slice writes a **second** row
-    under the new slug and that row can never take the external id — the old
-    one holds it.  Before issue #22 the job returned ``errors: 0`` and the
-    operator had no way to tell.
+    Since issue #23 a rename is *not* this case any more — it updates the row
+    that holds the id (see ``test_sync_games_renaming_a_game_updates_its_row``
+    in ``tests/shared/test_external_id_identity.py``).  What still produces a
+    genuine, permanent loss is a link that points at nothing: IGDB id 9300001
+    is claimed by an ``external_ids`` row whose ``item_id`` has no game behind
+    it, so the fresh row is written and can never take the id.  Before issue
+    #22 the job returned ``errors: 0`` and the operator had no way to tell.
     """
-    stale = Game(
-        title="Link Skip Game Old",
-        slug="link-skip-game-old",
-        game_type="MAIN_GAME",
-        last_synced_at=_now(),
+    orphan_item_id = 2_000_000_002
+    db.add(
+        ExternalId(item_type="GAME", item_id=orphan_item_id, source="IGDB", external_id="9300001")
     )
-    db.add(stale)
-    await db.flush()
-    await upsert_external_id(db, "GAME", stale.id, "IGDB", "9300001")
     await db.flush()
 
     raw = [
@@ -574,11 +603,11 @@ async def test_sync_games_reports_the_links_it_could_not_write(db):
     assert result["skipped_links"] == 1
 
     # The new row is really there and really unlinked.
-    renamed = await _movie_or_game_id(db, "link-skip-game-new")
+    fresh = await _movie_or_game_id(db, "link-skip-game-new")
     orphan = await db.execute(
         select(func.count())
         .select_from(ExternalId)
-        .where(ExternalId.item_type == "GAME", ExternalId.item_id == renamed)
+        .where(ExternalId.item_type == "GAME", ExternalId.item_id == fresh)
     )
     assert orphan.scalar_one() == 0
 

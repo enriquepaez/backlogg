@@ -243,7 +243,7 @@ async def get_series(db: AsyncSession, slug: str, viewer_id: int | None = None) 
 
         # 4. Persist to local DB via repository
         series_data = _tmdb.series_to_dict(detail)
-        series = await repo.upsert_series(db, series_data)
+        series = await repo.upsert_series(db, series_data, external_id=str(tmdb_id))
 
         # 5. Persist the TMDB external ID
         await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
@@ -336,7 +336,7 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
             if detail is None:
                 continue
             series_data = _tmdb.series_to_dict(detail)
-            rec_series = await repo.upsert_series(db, series_data)
+            rec_series = await repo.upsert_series(db, series_data, external_id=str(rec_tmdb_id))
             await upsert_external_id(db, "SERIES", rec_series.id, "TMDB", str(rec_tmdb_id))
 
             # Persist people (cast + creators) — the row was just created by

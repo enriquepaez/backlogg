@@ -15,7 +15,6 @@ import importlib.util
 import logging
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -24,7 +23,7 @@ from sqlalchemy import func, select
 
 from backlogg.books.adapters import openlibrary_dump as dump
 from backlogg.books.models import Book, BookGenre, book_genres_join
-from backlogg.shared.external_ids import ExternalId, upsert_external_id
+from backlogg.shared.external_ids import ExternalId
 from backlogg.shared.models import Credit, Person
 from tests.books import dump_fixtures as fx
 
@@ -370,19 +369,23 @@ async def test_a_rejected_credit_is_counted_and_never_costs_the_book(db, monkeyp
 async def test_an_external_id_that_cannot_be_linked_is_reported(db, monkeypatch, work_dir):
     """``skipped_links`` is the issue-#22 channel: a lost link must be visible.
 
-    The realistic shape, not a contrived one: an older row already holds
-    ``(BOOK, OPEN_LIBRARY, OL24178205W)`` under a different slug — a title
-    that changed between two seedings. The new row is written and simply
-    cannot take the id.
+    This used to be a *renamed* work: a row held ``OL24178205W`` under an older
+    slug, so the seeding wrote a second row that could not take the id.  Issue
+    #23 turned that into an in-place update (the external id is the identity),
+    which is why the scenario here is the one that is still permanent: the id
+    is held by a link pointing at a book that does not exist — a row deleted by
+    hand, a half-wiped database.  Nothing can resolve it, so the fresh row is
+    written and stays unlinked, and the operator has to be told.
     """
-    stale = Book(
-        title="Dump Seed Stale Title",
-        slug="dump-seed-stale-title-2021",
-        last_synced_at=datetime.now(UTC),
+    orphan_item_id = 2_000_000_003
+    db.add(
+        ExternalId(
+            item_type="BOOK",
+            item_id=orphan_item_id,
+            source="OPEN_LIBRARY",
+            external_id=fx.WORK_LOVE_HYPOTHESIS,
+        )
     )
-    db.add(stale)
-    await db.flush()
-    await upsert_external_id(db, "BOOK", stale.id, "OPEN_LIBRARY", fx.WORK_LOVE_HYPOTHESIS)
     await db.flush()
 
     _patched(db, monkeypatch)
@@ -392,7 +395,7 @@ async def test_an_external_id_that_cannot_be_linked_is_reported(db, monkeypatch,
     assert summary["load"]["synced"] == 4
     assert seed._exit_code(summary) == 2
 
-    # The stale row keeps the id, the fresh row exists and is unlinked.
+    # The orphan keeps the id, the fresh row exists and is unlinked.
     holder = (
         await db.execute(
             select(ExternalId.item_id).where(
@@ -401,7 +404,7 @@ async def test_an_external_id_that_cannot_be_linked_is_reported(db, monkeypatch,
             )
         )
     ).scalar_one()
-    assert holder == stale.id
+    assert holder == orphan_item_id
 
 
 class _LogCapture(logging.Handler):

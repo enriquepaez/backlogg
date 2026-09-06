@@ -455,6 +455,11 @@ async def test_sync_books_calls_get_work_detail_for_authors():
         # expunge_all is a sync method on AsyncSession — the write path calls
         # it after a rollback and after a successful batch.
         mock_session.expunge_all = MagicMock()
+        # execute() must hand back a *sync* result object, like
+        # ``_mocked_session_factory`` does: the per-item write path resolves the
+        # item's identity by external id first (issue #23), and an AsyncMock
+        # child would make ``.all()`` a coroutine instead of an empty result.
+        mock_session.execute = AsyncMock(return_value=MagicMock(**{"all.return_value": []}))
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -815,6 +820,9 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
         mock_session.expunge_all = MagicMock()
+        # See the note in ``_mocked_session_factory``: the per-item write path
+        # issues an identity SELECT (issue #23) and needs a sync result object.
+        mock_session.execute = AsyncMock(return_value=MagicMock(**{"all.return_value": []}))
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)

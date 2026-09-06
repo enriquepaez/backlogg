@@ -231,7 +231,7 @@ async def get_movie(db: AsyncSession, slug: str, viewer_id: int | None = None) -
 
         # 4. Persist to local DB via repository
         movie_data = _tmdb.movie_to_dict(detail)
-        movie = await repo.upsert_movie(db, movie_data)
+        movie = await repo.upsert_movie(db, movie_data, external_id=str(tmdb_id))
 
         # 5. Persist the TMDB external ID
         await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
@@ -315,7 +315,7 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
             if detail is None:
                 continue
             movie_data = _tmdb.movie_to_dict(detail)
-            rec_movie = await repo.upsert_movie(db, movie_data)
+            rec_movie = await repo.upsert_movie(db, movie_data, external_id=str(rec_tmdb_id))
             await upsert_external_id(db, "MOVIE", rec_movie.id, "TMDB", str(rec_tmdb_id))
 
             # Persist people (cast + directors) — the row was just created by

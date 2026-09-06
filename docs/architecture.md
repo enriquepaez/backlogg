@@ -56,6 +56,9 @@ backlogg/
 │   │                      # ingesta masiva; el descriptor por tipo vive en
 │   │                      # cada <domain>/repository.py
 │   ├── external_ids.py    # Utilidades polimórficas de external_ids
+│   ├── identity.py        # Resolución del ítem por external_id antes que por
+│   │                      # slug, y realineado del slug al renombrar (#23);
+│   │                      # la usan bulk_load y los cuatro upsert_* on-demand
 │   └── slugs.py           # Generación de slugs: el fold a ASCII y el fallback
 │                          # por id externo cuando queda vacío (issue #18)
 └── core/

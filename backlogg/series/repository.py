@@ -6,6 +6,7 @@ from backlogg.series.models import Series, SeriesGenre, series_genres_join
 from backlogg.series.schemas import SeriesSortEnum
 from backlogg.shared.bulk_load import BulkLoadSpec, LookupJoinSpec
 from backlogg.shared.catalog_filters import CatalogSearchFilters, build_catalog_filter_clauses
+from backlogg.shared.identity import resolve_item_slug
 
 
 async def list_series(
@@ -90,8 +91,16 @@ async def _get_or_create_genre(db: AsyncSession, name: str, slug: str) -> Series
     return genre
 
 
-async def upsert_series(db: AsyncSession, data: dict) -> Series:
-    """Insert or update a series by slug.
+async def upsert_series(db: AsyncSession, data: dict, *, external_id: str | None = None) -> Series:
+    """Insert or update a series, identified by ``external_id`` when there is one.
+
+    The statement keys on the slug (``ON CONFLICT ("slug")``), but the slug
+    is derived from the title and the title moves: TMDB renames items.
+    When the caller knows the item's external id it must pass it, and the
+    row already linked to it is realigned to the incoming slug *first*
+    (issue #23, ``backlogg.shared.identity``) so the upsert updates that row
+    instead of inserting a second one that could never be linked.  Without
+    ``external_id`` the behaviour is exactly what it was: resolution by slug.
 
     The ``data`` dict must contain all series fields plus an optional
     ``genres`` list of dicts with ``name`` and ``slug`` keys.
@@ -105,6 +114,20 @@ async def upsert_series(db: AsyncSession, data: dict) -> Series:
     block when locked.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if external_id and data.get("slug"):
+        # Issue #23: the external id, not the slug, is what says which row
+        # this is.  ``upsert_series`` keys its ON CONFLICT on the slug, which is
+        # derived from the title and moves when the source renames the item —
+        # so without this the rename would insert a second, unlinkable row.
+        data["slug"] = await resolve_item_slug(
+            db,
+            item_type="SERIES",
+            table=Series.__table__,
+            source="TMDB",
+            external_id=external_id,
+            proposed_slug=data["slug"],
+        )
 
     genres_data: list[dict] = data.pop("genres", [])
 

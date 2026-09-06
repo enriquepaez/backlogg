@@ -204,7 +204,7 @@ async def get_book(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
 
         # 4. Convert to DB-ready dict and persist
         book_data = _ol_client.book_to_dict(search_result, work_detail)
-        book = await repo.upsert_book(db, book_data)
+        book = await repo.upsert_book(db, book_data, external_id=work_id)
 
         # 5. Persist the Open Library external ID
         if work_id:

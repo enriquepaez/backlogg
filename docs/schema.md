@@ -5,7 +5,7 @@ PostgreSQL. Migrations managed with Alembic. All timestamps are `TIMESTAMPTZ`.
 ## Item tables
 
 Los cuatro tipos comparten la misma regla de `slug`, que es **UNIQUE** y por
-tanto la clave de conflicto del upsert: el slug es identidad, no decoración.
+tanto la clave de conflicto del upsert.
 Se construye con `titled_slug` (`backlogg/shared/slugs.py`) como
 `<título foldado a ASCII>-<año>` y, cuando el fold queda **totalmente vacío**
 —títulos íntegramente en CJK, cirílico, árabe…—, como `<fuente>-<id externo>`
@@ -13,6 +13,17 @@ Se construye con `titled_slug` (`backlogg/shared/slugs.py`) como
 esos títulos producían `-2025`, así que todos los ítems no latinos de un mismo
 año compartían una sola fila. Ver `docs/conventions.md` § Identificadores y
 URLs.
+
+**El slug nombra el ítem; la identidad es el id externo** (issue #23). El slug
+sigue siendo la clave del `ON CONFLICT`, pero cuando la escritura conoce el id
+externo se busca **primero** la fila enlazada a
+`(item_type, source, external_id)` y se **realinea su slug** al que propone el
+payload; solo entonces corre el upsert, que así cae sobre esa misma fila. Un
+renombrado en la fuente actualiza el ítem —incluido su slug— en vez de insertar
+un duplicado que jamás podría enlazarse, porque la terna ya la tendría la fila
+vieja. La regla, y los tres casos en que el slug guardado se conserva (el nuevo
+ya es de otra fila, dos ítems del lote lo piden a la vez, `title` bloqueado por
+un admin), están en `backlogg/shared/identity.py`.
 
 Lo que el slug **no** garantiza: que dos ítems distintos sean dos filas cuando
 sus folds coinciden. Pasa con dos títulos latinos iguales del mismo año y pasa
@@ -611,12 +622,21 @@ LEFT JOIN external_ids ei
   ON ei.item_type = st.item_type
  AND ei.source     = st.source
  AND ei.external_id = st.external_id
-WHERE st.item_type = 'MOVIE' AND st.source = 'TMDB' AND ei.id IS NULL
+LEFT JOIN movies m ON m.id = ei.item_id      -- issue #25
+WHERE st.item_type = 'MOVIE' AND st.source = 'TMDB' AND m.id IS NULL
   AND st.unreachable_at IS NULL
   AND st.attempts < :max_attempts
 ORDER BY st.attempts ASC, st.vote_count DESC NULLS LAST, st.id ASC
 LIMIT :slice_size;
 ```
+
+El segundo `LEFT JOIN` es el issue #25: `external_ids` no tiene FK, así que la
+terna solo prueba que *alguien* la tiene. Preguntando por `m.id IS NULL` se
+cubren los dos casos a la vez —no hay fila de enlace, o la hay y no llega a
+ningún ítem— y un target cuyo enlace apunta al vacío vuelve a la lista de
+trabajo en vez de contarse como convergido en silencio. Es seguro solo junto
+con el issue #23: con la identidad resuelta por id externo, el dueño de una
+terna es por construcción el ítem que el target sembraba.
 
 Un run que muera a mitad no deja nada que arreglar: la consulta describe
 exactamente el trabajo restante, muera como muera.
@@ -635,10 +655,9 @@ enlazarse, por dos motivos sin relación entre sí:
   Antes de la migración `0036` había una tercera causa, y era la masiva: la
   restricción no incluía `item_type`, así que una fila `PERSON` con el id de
   TMDB de una serie la dejaba sin enlazar para siempre (issue #20). Esa ya no
-  existe. Ojo con el matiz: cuando la colisión es *dentro* del mismo tipo, el
-  target **sí** encuentra fila en el join y se cuenta como hecho aunque apunte
-  a otro `item_id`; lo que llega a `unlinkable` es solo lo que no consigue
-  ninguna fila.
+  existe. Y desde el issue #25 tampoco existe el matiz que la acompañaba: un
+  enlace que no llega a ningún ítem ya no cuenta como target hecho, así que el
+  residuo real acaba en `unlinkable` en vez de desaparecer del panel.
 
 Dejarlos en el conjunto pendiente le pondría a `pending` un **suelo permanente
 > 0**, y de que `pending` llegue a 0 dependen las dos garantías del diseño: la
