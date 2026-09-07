@@ -1833,7 +1833,7 @@
         "docs/schema.md, docs/api.md y docs/operations.md actualizados; issue #28 cerrado",
         "bash init.sh en verde"
       ],
-      "status": "in_progress"
+      "status": "done"
     }
   ]
 }

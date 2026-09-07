@@ -84,3 +84,46 @@ que conservar.
 - **Adelgazar la vista** (quitar `overview`/`title`/`poster_url` y hacer join):
   la deja en ~85 MB. Cabría hoy, pero a catálogo completo serían ~118 MB con un
   refresh de otros 118: choca otra vez. Aplaza el problema.
+
+---
+
+## 5. Medición DESPUÉS, contra producción (criterio 9) — 2026-09-07
+
+Migración `0038` aplicada. `catalog_search` no existe; las cuatro tablas tienen
+su columna `search_vector` y su índice GIN, con **cobertura del 100 %**
+(56.371 movies, 19.159 books, 10.000 games, 0 series — todas con vector).
+
+| | Antes | Después |
+|---|---|---|
+| `movies` | 40 MB | 89 MB |
+| `books` | 15 MB | 45 MB |
+| `games` | 8,6 MB | 24 MB |
+| `catalog_search` | **137 MB** | **0** |
+| **Cluster** | **386 MB** | **343 MB** |
+| **Holgura** | 126 MB | **169 MB** |
+
+Ahorro neto **43 MB** (se preveían ~55: el coste distribuido salió en ~94 MB
+frente a los ~82 estimados). Lo que no se mide en MB y era el objetivo: **el
+refresh ya no existe**, así que desaparece el pico transitorio de 137 MB que
+bloqueaba la siembra, y con él el issue #28.
+
+Verificado en producción: el planificador usa `idx_movies_search_vector`
+(`Bitmap Index Scan`) y el `UNION ALL` devuelve los mismos resultados y el mismo
+orden que daba la vista.
+
+### El despliegue falló tres veces antes de entrar, y conviene saber por qué
+
+**El paso 2 del runbook —dropear `catalog_search` antes de mergear— se saltó.**
+Desde una base de 386 MB los `ALTER` van sumando (movies +49, books +30) y al
+llegar a `games`, el último, ya no queda sitio: `DiskFullError` exactamente ahí.
+
+**La migración se comportó como debía**: cada fallo dejó la base intacta —
+alembic en `0037`, ninguna columna a medias y **cero bloat acumulado** (600
+tuplas muertas residuales en `movies`). Es el argumento a favor de la
+transacción única: si se hubiera partido en cuatro para bajar el pico, el
+resultado habrían sido dos tablas migradas y dos sin migrar.
+
+Tras dropear la vista (386 → 248 MB, 264 de holgura) el redespliegue entró a la
+primera. **La lección operativa**: el gate de disco no es una recomendación, y
+el orden importa — Render aplica la migración al desplegar, así que el `DROP`
+tiene que estar commiteado *antes* del merge.
