@@ -1790,7 +1790,7 @@
         "docs/schema.md actualizado con el modelo nuevo y el razonamiento",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 90,

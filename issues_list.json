@@ -421,6 +421,19 @@
       "impact": "Bajo mientras la siembra la haga el camino de dumps, que es el que llena el catalogo y no mira esta variable. El efecto real es que el refresco nocturno por cursor no cubre la cola del catalogo. No se pierden datos: las filas existen y las escribe la siembra; lo que no llega es el refresco periodico de las que quedan por encima del tope.",
       "solution": "Tres vias, sin decidir: (a) subir el valor a >= 19.221 en el default de config.py y en la env var de Render; (b) hacerlo inerte tambien para el nocturno, que es lo natural si la feature 88 (catalog_incremental_updates) reescribe el camino de books sobre el diff del dump mensual, como plantea docs/seeding-plan.md §6; (c) dejarlo y aceptar que el nocturno solo refresca la cabeza del catalogo. La (b) es la que probablemente lo disuelve sin tocar nada.",
       "notes": "Registrado por el usuario el 2026-09-06 al cerrar la feature 87, a propuesta del leader. Lo levanto el reviewer como no bloqueante en la ronda 1 (progress/review_87.md), coincidiendo con el implementer en que cambiar una env var de Render no era decision suya. Ya esta documentado en backlogg/core/config.py, docs/operations.md y docs/seeding-plan.md; el issue existe para que la decision no se quede solo en documentacion. Revisar junto con la feature 88."
+    },
+    {
+      "id": 28,
+      "title": "REFRESH MATERIALIZED VIEW CONCURRENTLY de catalog_search no cabe: duplica 137 MB sobre 127 MB libres",
+      "area": "backend",
+      "severity": "high",
+      "status": "open",
+      "discovered": "2026-09-07",
+      "symptom": "backlogg/scheduler/jobs.py:153 y backlogg/search/repository.py:20 ejecutan REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search. CONCURRENTLY construye una copia completa de la vista antes de intercambiarla, asi que necesita tanto espacio libre como ocupa la vista. Medido en produccion el 2026-09-07 tras la feature 89: catalog_search pesa 137 MB (109 de heap + 28 de indices) y el cluster tiene 127 MB libres de los 512. El refresh nocturno no cabe HOY, y a catalogo completo la vista rondaria los 191 MB con un refresh del mismo tamano.",
+      "cause": "La vista se midio en 105 MB durante la planificacion de la feature 89, pero esa cifra estaba tomada sobre una vista OBSOLETA: sus estadisticas reportaban 66.363 filas cuando el catalogo tiene 85.530, porque no se refresco nunca tras morir la siembra del 2026-09-07. Recreada completa pesa 137 MB, 1,6 KB por item. La proyeccion a catalogo completo pasa de ~444 MB a ~488 MB de 512, y el coste TRANSITORIO del refresh no estaba contabilizado en ninguna proyeccion.",
+      "impact": "Bloquea retomar la siembra: anadir los 33.695 items que faltan (795 movies, 10.880 series, 21.958 games) engorda la vista y su refresh en paralelo. La busqueda se queda obsoleta o el nocturno falla. No es regresion de la feature 89 — la 89 libero 152 MB y dejo el cluster en 385 MB — sino la siguiente pared, que la 89 ya anticipaba en progress/measure_89.md seccion 10.",
+      "options": "1) REFRESH no concurrente: bloquea lecturas mientras corre pero no duplica. 2) Sustituir la vista materializada por una tabla real mantenida por triggers o por el propio pipeline de ingesta. 3) Retirar la vista y poner el indice GIN en la tabla de cada tipo, resolviendo la busqueda cross-type con UNION ALL en la query. Decision de producto/arquitectura, no trivial: la 2 y la 3 tocan el camino de busqueda entero.",
+      "notes": "Descubierto durante la QA de despliegue de la feature 89. Debe resolverse ANTES de retomar la siembra (punto 7 de progress/priority_order.md)."
     }
   ]
 }
