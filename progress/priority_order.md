@@ -119,6 +119,40 @@ esto» del final**.
 > El borrado y la siembra de producción se ejecutan **como paso propio**, con
 > confirmación explícita del usuario, no dentro de otra tarea.
 
+> **Actualización 2026-09-07 — la siembra se intentó, y chocó. El orden cambia.**
+>
+> El borrado de producción se ejecutó y la siembra arrancó. Las dos
+> enumeraciones salieron perfectas (movies 57.166 targets, series 10.880, `0
+> retired` en ambas), pero las dos hidrataciones largas murieron con el mismo
+> error:
+>
+> ```
+> asyncpg.exceptions.DiskFullError:
+> could not extend file because project size limit (512 MB) has been exceeded
+> ```
+>
+> **Estado en el que quedó producción**: movies 56.371 de 57.166 · books 19.159
+> · games 10.000 (topado) · **series 0**. Falta un tipo de contenido entero, así
+> que **el catálogo de hoy no es publicable** y la siembra no puede retomarse.
+>
+> **Por qué pasó, y no es mala suerte.** El free tier de Neon da 512 MB. A los
+> 6,27 KB/ítem medidos, eso son ~85.000 ítems y el catálogo planificado son
+> 118.850: faltaba un 40 % desde el principio. `docs/seeding-plan.md` §2.2
+> estimó bien el tamaño (~1 GB) pero razonó sobre el **precio** (0,35 $/GB-mes →
+> «no condiciona nada») en vez de sobre el **tope del plan**.
+>
+> **El usuario descartó subir de plan en Neon**, y también el parcheo incremental
+> (borrar índices redundantes + `DELETE` del reparto + `VACUUM FULL`), que
+> recuperaba ~95 MB pero dejaba intacto el modelo que causa el problema.
+>
+> **Consecuencia sobre esta cola**: la nueva **feature 89
+> `credits_people_storage_redesign`** pasa a ser el **punto 6, delante de la
+> 88**, y bloquea la siembra. `credits` + `people` + su parte de `external_ids`
+> son ~266 MB de los 472 de la base — más de la mitad, para 85.530 ítems.
+>
+> Se dio de alta también la **feature 90 `igdb_targets_seeding`**, que converge
+> games a `seed_targets` y retira el tope de 10.000 sobre 31.958 juegos.
+
 ## Orden acordado con el usuario (2026-09-02)
 
 El razonamiento de fondo: **primero el catálogo, después lo que se construye
@@ -142,7 +176,10 @@ Diseño completo del bloque de catálogo en **`docs/seeding-plan.md`**.
 | 3.3 | **issue #18** slug de nombres en alfabeto no latino | Antes de sembrar: si no, el catálogo nuevo nace con un agujero permanente en credits. Decisión de producto pendiente (transliterar vs. `tmdb-<id>`) |
 | 4 | ~~**87** `openlibrary_dump_seeding`~~ ✅ **done 2026-09-06** | El catálogo real de books. Medido sobre el dump: **19.221 obras**, +1,8 % frente a las 18.874 que estimaba `numFound`. `search.json` fuera del camino crítico de la siembra (sigue sirviendo búsqueda y on-demand) |
 | 5 | **74** `credits_source_author_role` | **Aquí y no antes**: necesita el issue #15 resuelto (paso 2) y las *dos orillas* del puente sembradas — movies/series del paso 3 y books del paso 4. Y aquí y no después: la 86 reescribe la hidratación con `append_to_response=credits`, que es exactamente el payload del que sale `SOURCE_AUTHOR`; hacerla con ese código fresco evita tocar dos veces el mismo bucle de `crew` |
-| 6 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |
+| 6 | **89** `credits_people_storage_redesign` | ⛔ **Bloquea la siembra.** Más de la mitad de la base es el grafo de personas, y el catálogo completo no cabe en 512 MB con el modelo actual. Empieza midiendo la distribución real de `people` por número de credits — la decisión entre estrechar tipos (A) y separar ficha de grafo (B) sale de ese número, no de la intuición |
+| 7 | **Siembra de producción** | Retomar donde quedó: los 795 movies pendientes siguen en `seed_targets`, la fase `load` de books es idempotente, y series entera. Nada de las 2h44m ya invertidas se repite |
+| 8 | **88** `catalog_incremental_updates` | Cierra el ciclo. Sin esto el catálogo se congela el día de la siembra: ni entran estrenos ni promocionan los ítems que cruzan el umbral de `vote_count` a posteriori |
+| 9 | **90** `igdb_targets_seeding` | Converge games a `seed_targets` y retira el tope de 10.000 sobre 31.958 juegos. Pegada a la 88 a propósito: comparten la misma query de IGDB (`where created_at > …`), así que hacerlas seguidas evita escribir dos veces el mismo adaptador |
 
 ### Bloque B — Capa semántica y de conocimiento
 
@@ -151,20 +188,20 @@ quedan satisfechas en secuencia.
 
 | # | Feature | Nota |
 |---|---|---|
-| 7 | **75** `pgvector_item_embeddings` | Ya **no está bloqueada**: el riesgo de la cláusula de IA de TMDB se aceptó explícitamente el 2026-09-02 (`docs/external-apis.md`). Va después del bloque A para embeber el catálogo definitivo una sola vez |
-| 8 | **76** `themes_taxonomy` | Hub cross-type |
-| 9 | **77** `themes_manual_mapping` | `depends_on: [76, 72✓]` |
-| 10 | **78** `themes_longtail_autoassign` | `depends_on: [77, 75]` |
-| 11 | **79** `wikidata_adaptations` | Independiente. Doble propósito: también es el ancla de QID frente a un cambio futuro de proveedor |
-| 12 | **80** `similar_semantic_rewrite` | `depends_on: [75]` |
+| 10 | **75** `pgvector_item_embeddings` | Ya **no está bloqueada**: el riesgo de la cláusula de IA de TMDB se aceptó explícitamente el 2026-09-02 (`docs/external-apis.md`). Va después del bloque A para embeber el catálogo definitivo una sola vez |
+| 11 | **76** `themes_taxonomy` | Hub cross-type |
+| 12 | **77** `themes_manual_mapping` | `depends_on: [76, 72✓]` |
+| 13 | **78** `themes_longtail_autoassign` | `depends_on: [77, 75]` |
+| 14 | **79** `wikidata_adaptations` | Independiente. Doble propósito: también es el ancla de QID frente a un cambio futuro de proveedor |
+| 15 | **80** `similar_semantic_rewrite` | `depends_on: [75]` |
 
 ### Bloque C — Endpoints propios
 
 | # | Feature | Nota |
 |---|---|---|
-| 13 | **81** `trending_local` | Independiente |
-| 14 | **82** `recommendations_ranker` | `depends_on: [74, 76, 79, 80]` — todas satisfechas al llegar aquí |
-| 15 | **83** `cooccurrence_layer` | `depends_on: [82]`, **y además masa crítica de usuarios**. Es legítimo que se quede en `pending` indefinidamente: sin usuarios no hay co-ocurrencia que medir |
+| 16 | **81** `trending_local` | Independiente |
+| 17 | **82** `recommendations_ranker` | `depends_on: [74, 76, 79, 80]` — todas satisfechas al llegar aquí |
+| 18 | **83** `cooccurrence_layer` | `depends_on: [82]`, **y además masa crítica de usuarios**. Es legítimo que se quede en `pending` indefinidamente: sin usuarios no hay co-ocurrencia que medir |
 
 ---
 

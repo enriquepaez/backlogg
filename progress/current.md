@@ -1,77 +1,50 @@
 # Sesión actual
 
-- **Feature**: 74 — `credits_source_author_role`
-- **Rama**: `feat/credits_source_author_role`
-- **Inicio**: 2026-09-06
-- **Estado**: in_progress
-- **Punto de la cola**: `progress/priority_order.md` → Bloque A, punto 5
-  (el 4, feature 87, se cerró el 2026-09-06)
+**Estado: sin tarea en curso.** La última sesión cerró el 2026-09-07 dejando
+todo mergeado. Lo que sigue es el contexto que una sesión nueva necesita y que
+no se deduce del código ni del historial de git.
 
-## Objetivo
+## Por dónde seguir
 
-Poblar dos roles nuevos en `credits` para `MOVIE` y `SERIES` desde el `crew`
-de los payloads de TMDB que ya se piden hoy, filtrando por **allowlist de
-`job`**, nunca por `department == "Writing"`:
+`progress/priority_order.md` → **punto 6: feature 89
+`credits_people_storage_redesign`**. Lee antes el bloque «Actualización
+2026-09-07» de ese archivo: explica por qué la 89 se coló delante de la 88.
 
-- `SOURCE_AUTHOR` — autor de la obra de origen. Es el puente cross-type
-  libro → película (capa 0 de `docs/recommendations-plan.md`).
-- `WRITER` — guionista. **Solo dato de ficha**, peso cero en el ranker.
+Su **criterio de aceptación 1 no es implementar, es medir**: la distribución
+real de `people` por número de credits contra producción. La decisión entre
+estrechar tipos (A) y separar ficha de grafo (B) sale de ese número. No arranques
+un implementer sin él.
 
-La especificación completa ya está escrita y no hay que decidir nada:
-`docs/schema.md` §`SOURCE_AUTHOR` vs `WRITER` (líneas ~422-440) y
-`docs/recommendations-plan.md` §capa 0.
+## Dos cosas que parecen incoherentes y no lo son
 
-## Estado del código hoy (verificado)
+**1. La feature 74 está en `in_progress` a propósito.** Su código está
+implementado, revisado (`APPROVED`), con QA manual y **mergeado** en el PR #197.
+No está `done` porque su criterio de aceptación 9 —«issue #15 verificado como
+resuelto para movies, series **y** books»— depende de la siembra de producción,
+que está bloqueada por la 89. La 74 y el issue #15 se cierran **juntos** cuando
+la siembra esté hecha y medida. Cerrarla antes repetiría el error del issue #7,
+que se dio por cerrado dando por hecho un backfill que nunca se corrió.
 
-- `credits.role` es un `String(50)` libre, sin enum: no hace falta migración
-  para admitir roles nuevos.
-- Los roles viven hoy como literales sueltos: `"ACTOR"`/`"DIRECTOR"` en
-  `backlogg/movies/service.py:122,133`, `"ACTOR"`/`"CREATOR"` en
-  `backlogg/series/service.py:113,138`, `"AUTHOR"` en `backlogg/books/`.
-- **Movies**: `map_movie_credits()` ya recorre `crew`, pero solo se queda con
-  `job == "Director"`. Es el único embudo — lo usan la ruta on-demand
-  (`collect_movie_credits`), la siembra (`scheduler/jobs.py:443`) y el
-  backfill (`jobs.py:1021`).
-- **Series**: `map_series_cast()` **no mira `crew` en absoluto**; los
-  `CREATOR` salen de `created_by` del detalle. Hay que añadir el tratamiento
-  de `crew` en ese mismo embudo (`jobs.py:458`, `jobs.py:1036`, `service.py:176`).
-- `backlogg/books/repository.py:223,240` ya tiene las consultas de autoría,
-  pero solo de `BOOK` y solo `role == "AUTHOR"`.
+**2. Producción tiene un catálogo a medias, y no se toca.** movies 56.371 de
+57.166 · books 19.159 · games 10.000 (topado) · **series 0**. La siembra murió
+por el techo de 512 MB del free tier de Neon. **No se reintenta hasta que la 89
+esté hecha**: volver a llenar con el modelo actual choca con la misma pared.
+Cuando se retome, no se repite nada — los 795 movies pendientes siguen en
+`seed_targets` y la fase `load` de books es idempotente.
 
-## Plan
+## Credenciales: dónde NO están
 
-1. **Allowlists por dominio** — constantes nombradas (no strings sueltos
-   repartidos), en un módulo compartido de credits, con los jobs exactos de
-   `docs/schema.md`. `Story` y `Screenstory` **fuera** de `SOURCE_AUTHOR`.
-   Los jobs de storyboard (`Story Artist`, `Head of Story`,
-   `Story Supervisor`) no caen en ninguna lista y por tanto no se persisten.
-2. **Movies** — extender el bucle de `crew` de `map_movie_credits` para
-   emitir además `SOURCE_AUTHOR` y `WRITER` por allowlist.
-3. **Series** — añadir el mismo bucle de `crew` al embudo de
-   `map_series_cast` (renombrar a `map_series_credits` y actualizar los tres
-   call sites, para que el nombre no mienta). Sin llamadas nuevas a TMDB: el
-   payload de `/tv/{id}/credits` ya trae `crew`.
-4. **Consulta cross-type** — dado un `person_id`, devolver sus obras en
-   **todos** los `item_type`, tratando `{AUTHOR, SOURCE_AUTHOR}` como una
-   sola clase de autoría, y **exigiendo** que la persona tenga además un
-   credit `AUTHOR` sobre un libro del catálogo (filtro anti-traductor del
-   job `Book`).
-5. **Tests** — regresión de storyboard, exclusión de `Story`/`Screenstory`,
-   adaptación real (guionista ≠ autor → `WRITER` y `SOURCE_AUTHOR` en
-   personas distintas), y persona con obra en dos tipos enlazada en ambos
-   sentidos.
-6. **Bruno** — revisar si cambia algún contrato de `credits[]` en los detail
-   endpoints; sincronizar `bruno/` si es el caso.
+La `DATABASE_URL` de **producción no está en `.env`**. La de `.env` apunta al
+contenedor Docker local (`backlogg-db`). La de producción vive solo en el
+dashboard de Neon y en las variables de Render, y en el secret `DATABASE_URL` de
+GitHub Actions —que es de solo escritura: `gh` da el nombre, nunca el valor—.
+Para cualquier consulta contra producción hay que pedírsela al usuario.
 
-## Fuera de alcance
+Detalle que cuesta un intento: esa URL está guardada con el prefijo
+`postgresql+asyncpg://`, que es el dialecto de SQLAlchemy. **`psql` no lo
+entiende**; hay que quitarle el `+asyncpg`.
 
-- Games: sin credits de persona, por decisión del 2026-09-04.
-- Peso de estos roles en el ranker: es la feature 82.
-- Migración de Alembic: no hace falta, `role` es texto libre.
-
-## Riesgo abierto (a resolver antes de cerrar, no antes de implementar)
-
-El criterio de aceptación «issue #15 verificado como resuelto para movies,
-series **y** books» depende del borrado + siembra de producción, que sigue sin
-ejecutarse. Se verifica contra la DB de dev en la QA manual; el cierre real del
-#15 sigue atado a la siembra.
+⚠️ La contraseña de producción quedó escrita en el historial de la conversación
+del 2026-09-07. **Pendiente de rotar** en Neon, actualizando después el secret de
+GitHub Actions y la variable de Render. Si se rota antes de la siembra, el
+workflow deja de autenticar a mitad.
