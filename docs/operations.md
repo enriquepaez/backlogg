@@ -391,6 +391,31 @@ GROUP BY st.item_type ORDER BY st.item_type;
 
 (El `3` es `TMDB_SEED_MAX_ATTEMPTS`; ajústalo si lo cambias en Render.)
 
+## ⚠️ La `DATABASE_URL` de producción no está en `.env`
+
+Cuesta un rato descubrirlo y lleva a apuntar sin querer a la base equivocada.
+
+- **`.env` (local)** → el contenedor Docker `backlogg-db`. Es la DB de
+  desarrollo. Un `psql "$DATABASE_URL"` desde el repo va **ahí**, no a Neon.
+- **Producción** → solo en el dashboard de **Neon** y en las variables de
+  **Render** (`render.yaml` la declara con `sync: false`, así que no vive en el
+  repo). También está en el secret `DATABASE_URL` de GitHub Actions, pero los
+  secrets de GitHub son de **solo escritura**: `gh secret list` da el nombre y la
+  fecha, nunca el valor.
+
+Dos trampas al usarla a mano:
+
+1. Está guardada con el prefijo **`postgresql+asyncpg://`**, que es el dialecto
+   de SQLAlchemy. `psql` responde `invalid connection option`. Hay que quitarle
+   el `+asyncpg`.
+2. Antes de ejecutar nada destructivo, comprueba contra qué base estás:
+
+   ```bash
+   psql "postgresql://…" -c "SELECT current_database(), count(*) FROM movies;"
+   ```
+
+   Si el número se parece al de tu catálogo de dev, es dev.
+
 ## Backfill del catálogo
 
 `.github/workflows/backfill-sync.yml` ejecuta `scripts/backfill_sync.py`
