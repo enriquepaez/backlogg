@@ -20,8 +20,9 @@ from backlogg.people import repository as people_repo
 from backlogg.series import repository as series_repo
 from backlogg.series import service as series_service
 from backlogg.series.service import _persist_series_creators, _persist_series_people
+from backlogg.shared.credits import cast_payload_to_credits
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
-from backlogg.shared.models import Credit
+from backlogg.shared.models import Credit, ItemCast
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,6 +31,14 @@ from backlogg.shared.models import Credit
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+async def _cast_names(db, item_type: str, item_id: int) -> list[str]:
+    """The names stored in ``item_cast`` for an item, in payload order."""
+    payload = await db.execute(
+        select(ItemCast.payload).where(ItemCast.item_type == item_type, ItemCast.item_id == item_id)
+    )
+    return [entry.person_name for entry in cast_payload_to_credits(payload.scalar_one_or_none())]
 
 
 def _movie_data(slug: str, title: str = "Dedup Test Movie") -> dict:
@@ -177,14 +186,15 @@ async def test_get_person_by_id_returns_none_for_unknown(db):
 
 
 async def test_persist_movie_people_dedup_same_actor_two_movies(db):
-    """Same TMDB actor in two movies reuses the existing Person without IntegrityError.
+    """The same actor in two movies creates no ``people`` row at all.
 
-    Scenario:
-      - Movie A is persisted with actor TMDB ID 77001 named "Actor Variant A".
-      - Movie B is persisted with the SAME TMDB ID 77001 but name "Actor Variant B".
-    Expected:
-      - Only one Person row exists.
-      - Credits for both movies point to the same person.id.
+    Feature 89 turned the whole dedup question moot for the cast: it never
+    reaches ``people``, ``external_ids`` or ``credits``, so there is nothing
+    to deduplicate.  Each movie keeps its own ``item_cast`` array, and the
+    name variant the source used for that item travels with it — which is the
+    honest behaviour: an item's cast is a snapshot of that item's payload.
+    Crew dedup, which still matters, is covered by
+    ``test_persist_movie_people_dedup_director_same_tmdb_id``.
     """
     TMDB_PERSON_ID = 77001
 
@@ -211,25 +221,33 @@ async def test_persist_movie_people_dedup_same_actor_two_movies(db):
         # Must NOT raise IntegrityError
         await _persist_movie_people(db, movie_b, 1002)
 
-    # Only one Person linked to TMDB ID 77001
-    person_id = await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID))
-    assert person_id is not None
+    assert await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID)) is None
 
-    # Both movies have a credit pointing to the same person
-    result = await db.execute(
-        select(Credit).where(
-            Credit.person_id == person_id,
-            Credit.item_type == "MOVIE",
+    credits_list = (
+        (
+            await db.execute(
+                select(Credit).where(
+                    Credit.item_type == "MOVIE",
+                    Credit.item_id.in_([movie_a.id, movie_b.id]),
+                )
+            )
         )
+        .scalars()
+        .all()
     )
-    credits_list = result.scalars().all()
-    item_ids = {c.item_id for c in credits_list}
-    assert movie_a.id in item_ids
-    assert movie_b.id in item_ids
+    assert credits_list == []
+
+    assert await _cast_names(db, "MOVIE", movie_a.id) == ["Actor Variant A"]
+    assert await _cast_names(db, "MOVIE", movie_b.id) == ["Actor Variant B"]
 
 
-async def test_persist_movie_people_creates_external_id_on_first_insert(db):
-    """First time a TMDB actor is persisted, an external_id row is created."""
+async def test_persist_movie_people_creates_no_external_id_for_the_cast(db):
+    """The cast buys no ``external_ids`` row — that was 175.306 of them.
+
+    The inverse test for the crew (``external_ids`` row created on first
+    insert) is ``test_persist_movie_people_dedup_director_same_tmdb_id``,
+    which needs the link to dedupe at all.
+    """
     TMDB_PERSON_ID = 77002
 
     movie = await movies_repo.upsert_movie(db, _movie_data("dedup-movie-c-2024"))
@@ -243,16 +261,8 @@ async def test_persist_movie_people_creates_external_id_on_first_insert(db):
     ):
         await _persist_movie_people(db, movie, 1003)
 
-    person_id = await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID))
-    assert person_id is not None
-
-    person = await people_repo.get_person_by_id(db, person_id)
-    assert person is not None
-    assert person.name == "New Actor C"
-
-    ext = await get_external_id(db, "PERSON", person_id, "TMDB")
-    assert ext is not None
-    assert ext.external_id == str(TMDB_PERSON_ID)
+    assert await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID)) is None
+    assert await _cast_names(db, "MOVIE", movie.id) == ["New Actor C"]
 
 
 async def test_persist_movie_people_dedup_director_same_tmdb_id(db):
@@ -315,7 +325,7 @@ async def test_persist_movie_people_dedup_director_same_tmdb_id(db):
 
 
 async def test_persist_series_people_dedup_same_actor_two_series(db):
-    """Same TMDB actor in two series reuses the existing Person without IntegrityError."""
+    """Series mirror of the movie case: the cast creates no ``people`` row."""
     TMDB_PERSON_ID = 88001
 
     series_a = await series_repo.upsert_series(db, _series_data("dedup-series-a-2024"))
@@ -342,19 +352,10 @@ async def test_persist_series_people_dedup_same_actor_two_series(db):
     ):
         await _persist_series_people(db, series_b, 2002)
 
-    person_id = await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID))
-    assert person_id is not None
+    assert await people_repo.get_person_id_by_external(db, "TMDB", str(TMDB_PERSON_ID)) is None
 
-    result = await db.execute(
-        select(Credit).where(
-            Credit.person_id == person_id,
-            Credit.item_type == "SERIES",
-        )
-    )
-    credits_list = result.scalars().all()
-    item_ids = {c.item_id for c in credits_list}
-    assert series_a.id in item_ids
-    assert series_b.id in item_ids
+    assert await _cast_names(db, "SERIES", series_a.id) == ["Series Actor Variant A"]
+    assert await _cast_names(db, "SERIES", series_b.id) == ["Series Actor Variant B"]
 
 
 async def test_persist_series_creators_dedup_same_creator_two_series(db):

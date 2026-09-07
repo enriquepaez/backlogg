@@ -53,8 +53,6 @@ async def _credit_author(db, book_id: int, person_id: int) -> None:
             "item_id": book_id,
             "person_id": person_id,
             "role": "AUTHOR",
-            "character_name": None,
-            "billing_order": None,
         },
     )
 

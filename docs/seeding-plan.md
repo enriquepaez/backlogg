@@ -138,14 +138,22 @@ Medido sobre la DB de dev (1.495 ítems de catálogo):
 |---|---|---|---|
 | Fila del ítem | ~1.100 | 1 | 1.100 |
 | `catalog_search` (vista materializada + índices) | 1.959 | 1 | 1.959 |
-| `credits` | 330 | ~7 | 2.310 |
+| `credits` (grafo) + `item_cast` (reparto) | 330 / ~640 por ítem | ~2 grafo + 1 fila de reparto | ~1.300 |
 | Joins de géneros/plataformas | ~150 | ~3 | 450 |
 | **Total por ítem** | | | **~6 KB** |
 
-Para ~119.000 ítems: **~715 MB** de catálogo más ~220 MB de `people` y sus
-`external_ids` = **~1 GB**. A 0,35 $/GB-mes de Neon son **~0,35 $/mes**. Con los
+Para ~119.000 ítems: **~715 MB** de catálogo más `people` y sus `external_ids`.
+Esa última cifra era ~220 MB con el modelo anterior; la feature 89 (separar el
+reparto del grafo de navegación, ver `docs/schema.md`) la baja a ~60-70 MB, que
+es lo que hace que el catálogo completo entre en el techo de 512 MB del plan
+gratuito de Neon. La medición y las proyecciones están en
+`progress/measure_89.md`.
+
+A 0,35 $/GB-mes de Neon el coste sigue siendo **~0,3 $/mes**. Con los
 embeddings de la feature 75 encima (119k × 512 dims × 4 B más índice HNSW ≈
-600 MB) se queda en **~0,56 $/mes**. No condiciona nada.
+600 MB) se queda en **~0,5 $/mes**. El precio nunca fue la restricción; **el
+techo de 512 MB del plan gratuito sí**, y es lo que mató la siembra del
+2026-09-07.
 
 ### 2.3 Ventana de caché de TMDB — obliga a subir el slice de movies
 

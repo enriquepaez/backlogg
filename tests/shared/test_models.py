@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, StatementError
 
+from backlogg.shared.codes import CREDIT_ROLE_CODES, ITEM_TYPE_CODES
 from backlogg.shared.external_ids import (
     ExternalId,
     get_external_id,
@@ -36,7 +38,13 @@ async def test_create_person(db):
 
 
 async def test_create_credit(db):
-    """Create a Credit associated with a Person and verify fields."""
+    """Create a Credit associated with a Person and verify fields.
+
+    Feature 89: a credit is now exactly ``(item_id, person_id, item_type,
+    role)`` plus ``created_at`` — no surrogate ``id``, no ``character_name``,
+    no ``billing_order`` — and the two vocabulary columns are ``smallint`` on
+    disk while staying strings in Python (``backlogg/shared/codes.py``).
+    """
     person = Person(
         name="Cillian Murphy",
         slug="test-model-cillian-murphy",
@@ -49,25 +57,28 @@ async def test_create_credit(db):
         item_type="MOVIE",
         item_id=12345,
         person_id=person.id,
-        role="ACTOR",
-        character_name="J. Robert Oppenheimer",
-        billing_order=0,
+        role="DIRECTOR",
     )
     db.add(credit)
     await db.flush()
 
-    assert credit.id is not None
     assert credit.item_type == "MOVIE"
     assert credit.item_id == 12345
     assert credit.person_id == person.id
-    assert credit.role == "ACTOR"
-    assert credit.character_name == "J. Robert Oppenheimer"
-    assert credit.billing_order == 0
+    assert credit.role == "DIRECTOR"
     assert credit.created_at is not None
 
+    # Narrow on disk, wide in Python: the row is two smallints.
+    stored = (
+        await db.execute(
+            text("SELECT item_type, role FROM credits WHERE item_id = 12345"),
+        )
+    ).one()
+    assert stored == (ITEM_TYPE_CODES["MOVIE"], CREDIT_ROLE_CODES["DIRECTOR"])
 
-async def test_credit_unique_constraint(db):
-    """Violating uq_credit (item_type, item_id, person_id, role) raises IntegrityError."""
+
+async def test_credit_primary_key_constraint(db):
+    """The natural key is the primary key now: a duplicate raises."""
     person = Person(
         name="Tom Hardy",
         slug="tom-hardy",
@@ -80,7 +91,7 @@ async def test_credit_unique_constraint(db):
         item_type="MOVIE",
         item_id=99001,
         person_id=person.id,
-        role="ACTOR",
+        role="DIRECTOR",
     )
     db.add(credit1)
     await db.flush()
@@ -89,10 +100,32 @@ async def test_credit_unique_constraint(db):
         item_type="MOVIE",
         item_id=99001,
         person_id=person.id,
-        role="ACTOR",
+        role="DIRECTOR",
     )
     db.add(credit2)
     with pytest.raises(IntegrityError):
+        await db.flush()
+
+
+async def test_credit_rejects_an_unknown_role(db):
+    """An out-of-vocabulary role raises instead of being silently coerced."""
+    person = Person(
+        name="Unknown Role Person",
+        slug="test-model-unknown-role",
+        last_synced_at=_now(),
+    )
+    db.add(person)
+    await db.flush()
+
+    db.add(
+        Credit(
+            item_type="MOVIE",
+            item_id=99002,
+            person_id=person.id,
+            role="GAFFER",
+        )
+    )
+    with pytest.raises(StatementError, match="unknown credit role"):
         await db.flush()
 
 

@@ -119,6 +119,7 @@ from backlogg.shared.bulk_load import (
     bulk_load_items,
     rollback_quietly,
 )
+from backlogg.shared.credits import CAST_ROLE, build_cast_payload, upsert_item_cast
 from backlogg.shared.external_ids import collect_link_skips, upsert_external_id
 from backlogg.shared.identity import resolve_item_slug
 
@@ -217,9 +218,24 @@ async def _persist_people_individually(
     Same two steps the on-demand path takes for a single item (resolve the
     person by external id, then upsert the credit), just driven by the rows
     the fetch phase already collected instead of re-hitting the external API.
+
+    Takes the same fork as every other write path since feature 89: the cast
+    (``CAST_ROLE``) becomes one ``item_cast`` array and creates no ``people``,
+    ``external_ids`` or ``credits`` row; the crew builds the graph as before.
     """
     now = datetime.now(UTC)
+
+    payload = build_cast_payload(
+        (person.name, person.character_name, person.billing_order)
+        for person in people
+        if person.role == CAST_ROLE
+    )
+    if payload:
+        await upsert_item_cast(session, item_type, [(item_id, payload)])
+
     for person in people:
+        if person.role == CAST_ROLE:
+            continue
         row = await people_repo.get_or_create_person_by_external(
             session,
             person.source,
@@ -238,8 +254,6 @@ async def _persist_people_individually(
                 "item_id": item_id,
                 "person_id": row.id,
                 "role": person.role,
-                "character_name": person.character_name,
-                "billing_order": person.billing_order,
             },
         )
 

@@ -183,8 +183,16 @@ async def test_get_similar_games_returns_404(client, db):
     assert response.status_code == 404
 
 
-async def test_get_game_credits_present_and_ordered(client, db):
-    """GET /games/{slug} returns credits ordered by billing_order ascending."""
+async def test_get_game_credits_present(client, db):
+    """GET /games/{slug} still merges the two credit tables for games.
+
+    Games carry **no person credits** in production (docs/schema.md, decision
+    of 2026-09-04) and no cast at all, so this only exercises the graph half
+    of the merged read: crew rows come back with the ``people`` row behind
+    them and a null ``character_name``/``billing_order``, which feature 89
+    dropped from ``credits``.  Order between crew rows is
+    ``(created_at, person_id)``.
+    """
     game = await repo.upsert_game(db, _make_game_dict("credits-ordered-game-1993"))
     now = datetime.now(UTC)
 
@@ -206,28 +214,16 @@ async def test_get_game_credits_present_and_ordered(client, db):
             "last_synced_at": now,
         },
     )
-    await people_repo.upsert_credit(
-        db,
-        {
-            "item_type": "GAME",
-            "item_id": game.id,
-            "person_id": person_b.id,
-            "role": "DEVELOPER",
-            "character_name": None,
-            "billing_order": 2,
-        },
-    )
-    await people_repo.upsert_credit(
-        db,
-        {
-            "item_type": "GAME",
-            "item_id": game.id,
-            "person_id": person_a.id,
-            "role": "DEVELOPER",
-            "character_name": None,
-            "billing_order": 1,
-        },
-    )
+    for person in (person_b, person_a):
+        await people_repo.upsert_credit(
+            db,
+            {
+                "item_type": "GAME",
+                "item_id": game.id,
+                "person_id": person.id,
+                "role": "DIRECTOR",
+            },
+        )
 
     response = await client.get("/v1/games/credits-ordered-game-1993")
     assert response.status_code == 200
@@ -238,8 +234,7 @@ async def test_get_game_credits_present_and_ordered(client, db):
     assert credits[0]["person_name"] == "Game Dev A"
     assert credits[0]["person_slug"] == "game-dev-a-credits-test"
     assert credits[0]["profile_url"] == "https://example.com/ga.jpg"
-    assert credits[0]["role"] == "DEVELOPER"
+    assert credits[0]["role"] == "DIRECTOR"
     assert credits[0]["character_name"] is None
-    assert credits[0]["billing_order"] == 1
+    assert credits[0]["billing_order"] is None
     assert credits[1]["person_name"] == "Game Dev B"
-    assert credits[1]["billing_order"] == 2

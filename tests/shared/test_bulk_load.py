@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Engine, event, func, select, text
+from sqlalchemy import Engine, delete, event, func, select, text
 
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
@@ -38,8 +38,9 @@ from backlogg.shared.bulk_load import (
     bulk_load_items,
     copy_round_trips,
 )
+from backlogg.shared.credits import cast_payload_to_credits
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, Person
+from backlogg.shared.models import Credit, ItemCast, Person
 
 _SPEC = movies_repo.MOVIE_BULK_SPEC
 
@@ -167,13 +168,29 @@ async def _genre_slugs(db, movie_id: int) -> list[str]:
 
 
 async def _credits_of(db, movie_id: int) -> list[tuple]:
+    """Every person of a movie as ``(slug, role, character, billing order)``.
+
+    Since feature 89 that spans two tables and this helper spans both, so the
+    assertions in this file keep meaning "these are the item's people": the
+    crew from ``credits`` (which no longer carries a character or a billing
+    order) and the cast from ``item_cast`` (which has no ``people`` row, so
+    its slug is derived from the name exactly as ``CreditOut`` does).
+    """
     result = await db.execute(
-        select(Person.slug, Credit.role, Credit.character_name, Credit.billing_order)
+        select(Person.slug, Credit.role)
         .join(Person, Person.id == Credit.person_id)
         .where(Credit.item_type == "MOVIE", Credit.item_id == movie_id)
-        .order_by(Person.slug, Credit.role)
     )
-    return [tuple(row) for row in result.all()]
+    rows = [(slug, role, None, None) for slug, role in result.all()]
+
+    payload = await db.execute(
+        select(ItemCast.payload).where(ItemCast.item_type == "MOVIE", ItemCast.item_id == movie_id)
+    )
+    rows += [
+        (entry.person_slug, entry.role, entry.character_name, entry.billing_order)
+        for entry in cast_payload_to_credits(payload.scalar_one_or_none())
+    ]
+    return sorted(rows, key=lambda row: (row[0], row[1]))
 
 
 async def _movie(db, slug: str) -> Movie:
@@ -190,7 +207,17 @@ async def test_batch_of_new_rows_writes_everything(db):
         BulkItem(
             data=_movie_payload("bulk-new-alpha", "Bulk New Alpha"),
             external_id="8400101",
-            people=[_person("8400111", "Bulk Alpha Actor", "bulk-alpha-actor")],
+            people=[
+                _person("8400111", "Bulk Alpha Actor", "bulk-alpha-actor"),
+                _person(
+                    "8400112",
+                    "Bulk Beta Director",
+                    "bulk-beta-director",
+                    role="DIRECTOR",
+                    character_name=None,
+                    billing_order=None,
+                ),
+            ],
         ),
         BulkItem(
             data=_movie_payload("bulk-new-beta", "Bulk New Beta"),
@@ -231,26 +258,44 @@ async def test_batch_of_new_rows_writes_everything(db):
     )
     assert external.scalar_one() == "8400101"
 
-    assert await _credits_of(db, alpha.id) == [("bulk-alpha-actor", "ACTOR", "Someone", 0)]
-    assert await _credits_of(db, beta.id) == [
+    expected = [
         ("bulk-alpha-actor", "ACTOR", "Someone", 0),
         ("bulk-beta-director", "DIRECTOR", None, None),
     ]
+    assert await _credits_of(db, alpha.id) == expected
+    assert await _credits_of(db, beta.id) == expected
 
-    # The person shared by both items exists exactly once and is linked to the
-    # external id that identifies them at TMDB.
+    # The crew person shared by both items exists exactly once and is linked to
+    # the external id that identifies them at TMDB.
     people_count = await db.execute(
-        select(func.count()).select_from(Person).where(Person.slug == "bulk-alpha-actor")
+        select(func.count()).select_from(Person).where(Person.slug == "bulk-beta-director")
     )
     assert people_count.scalar_one() == 1
     person_link = await db.execute(
         select(ExternalId.item_id).where(
             ExternalId.item_type == "PERSON",
             ExternalId.source == "TMDB",
-            ExternalId.external_id == "8400111",
+            ExternalId.external_id == "8400112",
         )
     )
     assert person_link.scalar_one() is not None
+
+    # Feature 89: the cast buys none of that.  No ``people`` row, no
+    # ``external_ids`` link, no ``credits`` row — it lives in ``item_cast``.
+    actor_rows = await db.execute(
+        select(func.count()).select_from(Person).where(Person.slug == "bulk-alpha-actor")
+    )
+    assert actor_rows.scalar_one() == 0
+    actor_link = await db.execute(
+        select(func.count())
+        .select_from(ExternalId)
+        .where(
+            ExternalId.item_type == "PERSON",
+            ExternalId.source == "TMDB",
+            ExternalId.external_id == "8400111",
+        )
+    )
+    assert actor_link.scalar_one() == 0
 
 
 # ── Issue #20: uq_external_id is unique per item type ────────────────────────
@@ -395,7 +440,17 @@ async def test_batch_of_existing_rows_is_idempotent(db):
             BulkItem(
                 data=_movie_payload("bulk-idem-alpha", "Bulk Idem Alpha"),
                 external_id="8400201",
-                people=[_person("8400211", "Bulk Idem Actor", "bulk-idem-actor")],
+                people=[
+                    _person("8400211", "Bulk Idem Actor", "bulk-idem-actor"),
+                    _person(
+                        "8400212",
+                        "Bulk Idem Director",
+                        "bulk-idem-director",
+                        role="DIRECTOR",
+                        character_name=None,
+                        billing_order=None,
+                    ),
+                ],
             )
         ]
 
@@ -412,7 +467,10 @@ async def test_batch_of_existing_rows_is_idempotent(db):
 
     movie = await _movie(db, "bulk-idem-alpha")
     assert await _genre_slugs(db, movie.id) == ["bulk-drama"]
-    assert await _credits_of(db, movie.id) == [("bulk-idem-actor", "ACTOR", "Someone", 0)]
+    assert await _credits_of(db, movie.id) == [
+        ("bulk-idem-actor", "ACTOR", "Someone", 0),
+        ("bulk-idem-director", "DIRECTOR", None, None),
+    ]
 
     external = await db.execute(
         select(func.count())
@@ -422,9 +480,14 @@ async def test_batch_of_existing_rows_is_idempotent(db):
     assert external.scalar_one() == 1
 
     people = await db.execute(
-        select(func.count()).select_from(Person).where(Person.slug == "bulk-idem-actor")
+        select(func.count()).select_from(Person).where(Person.slug == "bulk-idem-director")
     )
     assert people.scalar_one() == 1
+    # Re-running the batch rewrites the cast array in place, never appends.
+    cast = await db.execute(
+        select(ItemCast.payload).where(ItemCast.item_type == "MOVIE", ItemCast.item_id == movie.id)
+    )
+    assert len(cast.scalar_one()) == 1
 
 
 # ── Mixed batch ──────────────────────────────────────────────────────────────
@@ -575,8 +638,18 @@ def _people_lookup_statements(recorder: _StatementRecorder) -> list[str]:
 
 async def test_people_of_a_batch_are_resolved_with_a_single_query(db):
     """Acceptance #2: one SELECT resolves every person of the batch."""
+    # Crew, not cast: since feature 89 the cast is not resolved against
+    # ``people`` at all, so an all-``ACTOR`` batch would issue zero lookups
+    # and the assertion below would test nothing.
     people = [
-        _person(f"84006{index:02d}", f"Bulk Crowd {index}", f"bulk-crowd-{index}")
+        _person(
+            f"84006{index:02d}",
+            f"Bulk Crowd {index}",
+            f"bulk-crowd-{index}",
+            role="DIRECTOR",
+            character_name=None,
+            billing_order=None,
+        )
         for index in range(6)
     ]
     items = [
@@ -723,8 +796,11 @@ async def _snapshot(db, slug: str) -> dict:
 async def _wipe(db, slug: str) -> None:
     """Remove a movie and everything the routes attached to it."""
     movie = await _movie(db, slug)
+    # ``item_type`` is a smallint since feature 89, so raw SQL has to spell the
+    # code out; going through the ORM keeps the mapping in one place instead.
+    await db.execute(delete(Credit).where(Credit.item_type == "MOVIE", Credit.item_id == movie.id))
     await db.execute(
-        text("DELETE FROM credits WHERE item_type = 'MOVIE' AND item_id = :id"), {"id": movie.id}
+        delete(ItemCast).where(ItemCast.item_type == "MOVIE", ItemCast.item_id == movie.id)
     )
     await db.execute(
         text("DELETE FROM external_ids WHERE item_type = 'MOVIE' AND item_id = :id"),
@@ -1074,14 +1150,27 @@ def _fallback_case(item_type: str) -> dict:
             "spec": movies_repo.MOVIE_BULK_SPEC,
             "external_id": "8401501",
             "payload": _movie_payload("bulk-fallback-movie", "Bulk Fallback Movie"),
-            "people": [_person("8401511", "Bulk Fallback Actor", "bulk-fallback-actor")],
+            "people": [
+                _person("8401511", "Bulk Fallback Actor", "bulk-fallback-actor"),
+                _person(
+                    "8401513",
+                    "Bulk Fallback Director",
+                    "bulk-fallback-director",
+                    role="DIRECTOR",
+                    character_name=None,
+                    billing_order=None,
+                ),
+            ],
             "table": "movies",
             "genre_sql": (
                 "SELECT g.slug FROM movie_genres g JOIN movie_genres_join j "
                 "ON j.genre_id = g.id WHERE j.movie_id = :id"
             ),
             "genres": ["bulk-drama"],
-            "roles": ["ACTOR"],
+            # Feature 89: the actor goes to ``item_cast``, only the crew row
+            # reaches ``credits``.
+            "roles": ["DIRECTOR"],
+            "cast": ["Bulk Fallback Actor"],
         }
     if item_type == "SERIES":
         return {
@@ -1251,6 +1340,16 @@ async def test_per_item_fallback_writes_every_content_type(db, item_type):
         .order_by(Credit.role)
     )
     assert [r[0] for r in credits.all()] == case["roles"]
+
+    stored_cast = await db.execute(
+        select(ItemCast.payload).where(
+            ItemCast.item_type == case["spec"].item_type, ItemCast.item_id == item_id
+        )
+    )
+    cast_names = [
+        entry.person_name for entry in cast_payload_to_credits(stored_cast.scalar_one_or_none())
+    ]
+    assert cast_names == case.get("cast", [])
 
     if item_type == "GAME":
         from backlogg.games.models import Company, CompanyCredit

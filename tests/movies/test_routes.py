@@ -8,6 +8,7 @@ from backlogg.main import app
 from backlogg.movies import repository as repo
 from backlogg.movies import service
 from backlogg.people import repository as people_repo
+from backlogg.shared.credits import build_cast_payload, upsert_item_cast
 
 
 def _make_movie_dict(slug: str = "the-matrix-1999") -> dict:
@@ -88,50 +89,40 @@ async def test_get_movie_credits_empty(client, db):
     assert body["credits"] == []
 
 
-async def test_get_movie_credits_present_and_ordered(client, db):
-    """GET /movies/{slug} returns credits ordered by billing_order ascending."""
+async def test_get_movie_credits_merge_cast_and_crew_in_order(client, db):
+    """GET /movies/{slug} merges ``item_cast`` and ``credits`` (feature 89).
+
+    The endpoint contract did not change when the storage did: the cast comes
+    first, in billing order, then the crew — exactly what the single
+    ``ORDER BY billing_order ASC NULLS LAST`` used to produce.  ``apps/web``
+    renders this array verbatim, so the shape is a contract too.
+    """
     movie = await repo.upsert_movie(db, _make_movie_dict("credits-ordered-movie-1999"))
     now = datetime.now(UTC)
 
-    person_a = await people_repo.upsert_person(
+    director = await people_repo.upsert_person(
         db,
         {
-            "name": "Actor A",
-            "slug": "actor-a-credits-movie-test",
+            "name": "Director A",
+            "slug": "director-a-credits-movie-test",
             "profile_url": "https://example.com/a.jpg",
             "last_synced_at": now,
         },
     )
-    person_b = await people_repo.upsert_person(
-        db,
-        {
-            "name": "Actor B",
-            "slug": "actor-b-credits-movie-test",
-            "profile_url": None,
-            "last_synced_at": now,
-        },
-    )
     await people_repo.upsert_credit(
         db,
         {
             "item_type": "MOVIE",
             "item_id": movie.id,
-            "person_id": person_b.id,
-            "role": "ACTOR",
-            "character_name": "Bob",
-            "billing_order": 2,
+            "person_id": director.id,
+            "role": "DIRECTOR",
         },
     )
-    await people_repo.upsert_credit(
+    # Deliberately out of billing order: ``build_cast_payload`` sorts.
+    await upsert_item_cast(
         db,
-        {
-            "item_type": "MOVIE",
-            "item_id": movie.id,
-            "person_id": person_a.id,
-            "role": "ACTOR",
-            "character_name": "Alice",
-            "billing_order": 1,
-        },
+        "MOVIE",
+        [(movie.id, build_cast_payload([("Actor B", "Bob", 2), ("Actor A", "Alice", 1)]))],
     )
 
     response = await client.get("/v1/movies/credits-ordered-movie-1999")
@@ -139,12 +130,19 @@ async def test_get_movie_credits_present_and_ordered(client, db):
 
     body = response.json()
     credits = body["credits"]
-    assert len(credits) == 2
+    assert len(credits) == 3
     assert credits[0]["person_name"] == "Actor A"
-    assert credits[0]["person_slug"] == "actor-a-credits-movie-test"
-    assert credits[0]["profile_url"] == "https://example.com/a.jpg"
     assert credits[0]["role"] == "ACTOR"
     assert credits[0]["character_name"] == "Alice"
     assert credits[0]["billing_order"] == 1
+    assert credits[0]["person_slug"] == "actor-a"
+    # The cast has no ``people`` row any more, so no photo travels with it.
+    assert credits[0]["profile_url"] is None
     assert credits[1]["person_name"] == "Actor B"
     assert credits[1]["billing_order"] == 2
+    # Crew last, with the ``people`` row behind it intact.
+    assert credits[2]["person_name"] == "Director A"
+    assert credits[2]["role"] == "DIRECTOR"
+    assert credits[2]["profile_url"] == "https://example.com/a.jpg"
+    assert credits[2]["character_name"] is None
+    assert credits[2]["billing_order"] is None

@@ -63,6 +63,12 @@ from backlogg.shared.bulk_load import (  # noqa: E402
     bulk_load_items,
     copy_round_trips,
 )
+from backlogg.shared.codes import ITEM_TYPE_CODES  # noqa: E402
+from backlogg.shared.credits import (  # noqa: E402
+    CAST_ROLE,
+    build_cast_payload,
+    upsert_item_cast,
+)
 from backlogg.shared.external_ids import upsert_external_id  # noqa: E402
 
 _SPEC = movies_repo.MOVIE_BULK_SPEC
@@ -192,6 +198,8 @@ async def _run_per_item(session: AsyncSession, items: list[BulkItem]) -> None:
         await upsert_external_id(session, "MOVIE", movie.id, "TMDB", item.external_id)
         await session.commit()
         for person in item.people:
+            if person.role == CAST_ROLE:
+                continue
             row = await people_repo.get_or_create_person_by_external(
                 session,
                 person.source,
@@ -208,10 +216,17 @@ async def _run_per_item(session: AsyncSession, items: list[BulkItem]) -> None:
                     "item_id": movie.id,
                     "person_id": row.id,
                     "role": person.role,
-                    "character_name": person.character_name,
-                    "billing_order": person.billing_order,
                 },
             )
+        # Feature 89: the cast is one array per item, not a row per actor —
+        # the per-item route splits exactly like ``_persist_movie_people``.
+        cast = build_cast_payload(
+            (person.name, person.character_name, person.billing_order)
+            for person in item.people
+            if person.role == CAST_ROLE
+        )
+        if cast:
+            await upsert_item_cast(session, "MOVIE", [(movie.id, cast)])
         await session.commit()
 
 
@@ -249,9 +264,18 @@ async def _measure(
 async def _cleanup(engine) -> None:
     """Delete every row the benchmark wrote (items, credits, people, genres)."""
     async with engine.begin() as conn:
+        # ``item_type`` is a smallint since feature 89, so raw SQL has to spell
+        # the code out rather than the name (``backlogg/shared/codes.py``).
+        movie_code = ITEM_TYPE_CODES["MOVIE"]
         await conn.execute(
             text(
-                "DELETE FROM credits WHERE item_type = 'MOVIE' AND item_id IN "
+                f"DELETE FROM credits WHERE item_type = {movie_code} AND item_id IN "
+                "(SELECT id FROM movies WHERE slug LIKE 'bench-%')"
+            )
+        )
+        await conn.execute(
+            text(
+                f"DELETE FROM item_cast WHERE item_type = {movie_code} AND item_id IN "
                 "(SELECT id FROM movies WHERE slug LIKE 'bench-%')"
             )
         )
