@@ -1811,6 +1811,29 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 91,
+      "name": "search_expression_index",
+      "title": "Retirar la vista materializada catalog_search y buscar con indice GIN de expresion sobre las tablas base",
+      "description": "Cierra el issue #28, que bloquea retomar la siembra. REFRESH MATERIALIZED VIEW CONCURRENTLY construye una copia completa de catalog_search antes de intercambiarla: la vista pesa 137 MB y el cluster tiene 127 MB libres, asi que hoy no cabe; a catalogo completo serian ~191 MB por duplicado. || LA MEDICION QUE DECIDE EL DISENO (2026-09-07, contra produccion): de los 137 MB, 57 MB son el search_vector ALMACENADO, 29 MB son overview copiado de las tablas base, 25 MB el indice GIN y ~9 MB entre poster_url, slug y title. Es decir: mas del 60 % es duplicacion pura. || LA CLAVE: un indice GIN sobre una EXPRESION no necesita la columna materializada — el tsvector vive solo dentro del indice. Hoy se guarda dos veces (57 MB en el heap de la vista + 25 MB en el indice). La expresion es indexable porque usa to_tsvector(regconfig, text) de dos argumentos, que es IMMUTABLE, igual que regexp_replace y COALESCE. || DIRECCION PROPUESTA (A1): retirar la vista, crear un indice GIN de expresion en movies, series, books y games, y resolver la busqueda cross-type con UNION ALL. Coste de busqueda 137 MB -> ~25 MB; cluster 385 -> ~273 MB; proyeccion a catalogo completo ~348 MB de 512 (~164 de margen, frente a los 24 de hoy). El refresh DESAPARECE, no se hace mas pequeno: un indice de expresion se actualiza en la propia escritura. Ademas se cierra la ventana de obsolescencia — hoy un item no aparece en la busqueda hasta el siguiente refresh. || EL RIESGO, Y POR QUE EL PRIMER PASO ES MEDIR: ts_rank necesita el tsvector de cada fila candidata y sin columna almacenada hay que recalcularlo, ademas ANTES del LIMIT porque esta en el ORDER BY. PERO en backlogg/search/repository.py ts_rank es solo DESEMPATE: el orden primario es rating_external DESC NULLS LAST, y el propio docstring explica (issue #14) que ordenar por rank primero hacia que rating_external no decidiera nunca. Asi que la primera pregunta no es como optimizar ts_rank sino SI APORTA ALGO como desempate. Si no aporta, el riesgo desaparece. Si aporta, la salida es A2: columna generada STORED + GIN en cada tabla, que mantiene el rank barato y tambien mata el refresh, aunque solo ahorre ~50 MB en vez de ~112. || DESCARTADAS CON NUMEROS: (1) REFRESH no concurrente sigue construyendo un heap nuevo de ~109 MB antes de intercambiar, cabe hoy por los pelos, bloquea lecturas y a catalogo completo vuelve a fallar. (2) Adelgazar la vista quitando overview/title/poster_url la deja en ~85 MB, cabria hoy pero a catalogo completo serian ~118 MB con un refresh de otros 118: choca otra vez. Ambas aplazan el problema, no lo resuelven.",
+      "depends_on": [],
+      "acceptance": [
+        "PRIMERO: medido si ts_rank aporta algo como desempate detras de rating_external, con datos reales, y decidida A1 (indice de expresion) o A2 (columna generada STORED) CON ESE NUMERO",
+        "La vista materializada catalog_search deja de existir, y con ella toda llamada a REFRESH MATERIALIZED VIEW",
+        "Busqueda cross-type resuelta con UNION ALL sobre las cuatro tablas base, conservando filtros por item_type, rango de fechas y rango de rating",
+        "El contrato de GET /v1/search no cambia: mismos campos, mismo orden (rating_external DESC NULLS LAST, luego el desempate que decida la medicion, luego id) y misma paginacion con total",
+        "Estabilidad de paginacion preservada (issue #14): el desempate final por id se mantiene",
+        "Un item recien ingerido aparece en la busqueda SIN ningun paso de refresh, con test que lo fija",
+        "backlogg/search/models.py y el resto del codigo dejan de referenciar catalog_search",
+        "Migracion Alembic con upgrade y downgrade probados; el downgrade recrea la vista y sus tres indices",
+        "Tamano de la busqueda medido ANTES y DESPUES contra produccion, y proyeccion a catalogo completo actualizada",
+        "El nocturno (backlogg/scheduler/jobs.py) deja de refrescar y no se rompe por ello",
+        "bruno/ sincronizado si cambia algun contrato",
+        "docs/schema.md, docs/api.md y docs/operations.md actualizados; issue #28 cerrado",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
