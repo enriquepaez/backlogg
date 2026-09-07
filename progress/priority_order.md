@@ -199,7 +199,7 @@ quedan satisfechas en secuencia.
 
 | # | Feature | Nota |
 |---|---|---|
-| 16 | **81** `trending_local` | Independiente |
+| 16 | ~~**81** `trending_local`~~ ✅ **done 2026-09-07** | Se adelantó al bloque C por ser la única del backlog que no depende del catálogo: se hizo en paralelo a la siembra. Retiró el fan-out a TMDB Trending y desbloqueó **FE-68**. Derivó los issues **#29**, **#30** y **#31** |
 | 17 | **82** `recommendations_ranker` | `depends_on: [74, 76, 79, 80]` — todas satisfechas al llegar aquí |
 | 18 | **83** `cooccurrence_layer` | `depends_on: [82]`, **y además masa crítica de usuarios**. Es legítimo que se quede en `pending` indefinidamente: sin usuarios no hay co-ocurrencia que medir |
 

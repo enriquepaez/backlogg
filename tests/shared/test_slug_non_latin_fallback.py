@@ -454,23 +454,24 @@ def test_fallback_slug_does_not_disturb_the_rest_of_the_payload():
     assert result["slug"] == "tmdb-1599191"
 
 
-# ── The four slug *prediction* sites ─────────────────────────────────────────
+# ── The slug *prediction* sites ──────────────────────────────────────────────
 #
-# Four call sites do not build a slug to persist it: they build the slug they
+# Some call sites do not build a slug to persist it: they build the slug they
 # expect the adapter to produce, so they can look the item up locally and skip
-# a network round trip (``trending/service.py`` x2, the similar/recommended
-# paths of ``movies`` and ``series``).  Prediction and generation are two
-# separate expressions over two separate inputs (the *list*-format payload vs.
-# the *detail* payload), and nothing in the type system ties them together —
-# that divergence is the mechanism that produced this issue in the first place.
+# a network round trip (the similar/recommended paths of ``movies`` and
+# ``series``).  Prediction and generation are two separate expressions over two
+# separate inputs (the *list*-format payload vs. the *detail* payload), and
+# nothing in the type system ties them together — that divergence is the
+# mechanism that produced this issue in the first place.
 #
 # So these tests never compare against a literal.  They run the real function,
 # capture the slug it hands to the local lookup, and compare it against what
-# the adapter really returns for the same item.  Reverting any of the four to
-# the pre-fix ``f"{slugify(title)}-{year}"`` must fail here.
+# the adapter really returns for the same item.  Reverting any of them to the
+# pre-fix ``f"{slugify(title)}-{year}"`` must fail here.
+#
+# ``trending/service.py`` used to hold two more of these sites; feature 81
+# retired its TMDB fan-out, so the prediction there no longer exists.
 
-_CJK_MOVIE_ID = 771001
-_CJK_SERIES_ID = 771002
 _CJK_REC_MOVIE_ID = 771003
 _CJK_REC_SERIES_ID = 771004
 _SOURCE_MOVIE_ID = 771005
@@ -564,57 +565,6 @@ def _slug_spy(module, attr: str):
         return await real(db, slug)
 
     return patch.object(module, attr, new=spy), seen
-
-
-@pytest.mark.asyncio
-async def test_trending_movie_predicts_the_slug_the_adapter_generates(db):
-    """``trending/service.py`` — prediction must match ``movie_to_dict``."""
-    from backlogg.movies import repository as movies_repo
-    from backlogg.trending.service import _ingest_trending_movie
-
-    detail = _cjk_movie_detail(_CJK_MOVIE_ID)
-    expected = TMDBClient().movie_to_dict(dict(detail))["slug"]
-    detail_mock = AsyncMock(return_value=detail)
-    spy, seen = _slug_spy(movies_repo, "get_movie_by_slug")
-
-    with (
-        spy,
-        patch("backlogg.trending.service._movies_tmdb.get_movie_detail", new=detail_mock),
-        patch("backlogg.movies.service._tmdb.get_movie_credits", new=AsyncMock(return_value=None)),
-    ):
-        first = await _ingest_trending_movie(db, _cjk_movie_list_item(_CJK_MOVIE_ID))
-        # Second pass: the prediction must now hit the row the first pass wrote.
-        second = await _ingest_trending_movie(db, _cjk_movie_list_item(_CJK_MOVIE_ID))
-
-    assert seen == [expected, expected]
-    assert first is not None and first.slug == expected
-    assert second is not None and second.slug == expected
-    detail_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_trending_series_predicts_the_slug_the_adapter_generates(db):
-    """``trending/service.py`` — prediction must match ``series_to_dict``."""
-    from backlogg.series import repository as series_repo
-    from backlogg.trending.service import _ingest_trending_series
-
-    detail = _cjk_series_detail(_CJK_SERIES_ID)
-    expected = TMDBSeriesClient().series_to_dict(dict(detail))["slug"]
-    detail_mock = AsyncMock(return_value=detail)
-    spy, seen = _slug_spy(series_repo, "get_series_by_slug")
-
-    with (
-        spy,
-        patch("backlogg.trending.service._series_tmdb.get_series_detail", new=detail_mock),
-        patch("backlogg.series.service._tmdb.get_series_credits", new=AsyncMock(return_value=None)),
-    ):
-        first = await _ingest_trending_series(db, _cjk_series_list_item(_CJK_SERIES_ID))
-        second = await _ingest_trending_series(db, _cjk_series_list_item(_CJK_SERIES_ID))
-
-    assert seen == [expected, expected]
-    assert first is not None and first.slug == expected
-    assert second is not None and second.slug == expected
-    detail_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -13,11 +13,13 @@ router = APIRouter(prefix="/trending", tags=["trending"])
     response_model=TrendingOut,
     summary="Get trending items",
     description=(
-        "Up to 20 trending items. Movies/series come from TMDB's Trending API "
-        "(new items are persisted locally). Books/games have no external "
-        "trending endpoint, so they use a local popularity heuristic "
+        "Up to 20 trending items, ranked from the platform's own recent "
+        "activity (ratings, reviews and backlog changes) with exponential time "
+        "decay. No external API is involved. A content type with too little "
+        "activity in the window falls back to the catalog's canonical order "
         "(rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST as "
-        "tie-break) — period is accepted but has no effect for those two types."
+        "tie-break) restricted to recent releases. period sets both windows and "
+        "has a real effect for all four types."
     ),
 )
 async def get_trending(

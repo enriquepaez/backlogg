@@ -214,5 +214,14 @@ class Settings(BaseSettings):
     CACHE_TTL_TRENDING: int = 900
     CACHE_TTL_GENRES: int = 300
 
+    # Trending (feature 81). /trending ranks by the platform's own recent
+    # activity, so each content type needs a minimum amount of it before the
+    # ranking means anything. The threshold is applied **per item type**, not
+    # globally: a type with fewer than this many activity gestures inside the
+    # period's window falls back to the catalog's canonical order restricted to
+    # recent releases. Low on purpose — the point is to stop ranking off a
+    # single click, not to wait for a crowd.
+    TRENDING_MIN_ACTIVITY: int = 5
+
 
 settings = Settings()

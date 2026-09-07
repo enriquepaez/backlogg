@@ -111,21 +111,6 @@ class TMDBSeriesClient:
             return data.get("results", [])
 
     @_tmdb_retry
-    async def get_trending_series(self, period: str = "week") -> list[dict]:
-        """Fetch trending TV series from TMDB for the given time window (day or week).
-
-        Returns the first page of results (up to 20 items).
-        """
-        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
-            response = await client.get(
-                f"{_TMDB_BASE}/trending/tv/{period}",
-                headers=self._headers,
-            )
-            response.raise_for_status()
-            data = response.json()
-        return data.get("results", [])
-
-    @_tmdb_retry
     async def _get_popular_page(self, page: int) -> dict:
         """Fetch a single page of /tv/popular. Retried as a unit per page."""
         async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:

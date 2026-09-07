@@ -527,12 +527,12 @@ por ítem), no de red.
 - **"Trending" investigation (2026-08-26, feature 68)**: Open Library has no
   "trending this week/day" endpoint (`/trending/weekly.json` exists but is
   capped at a few hundred entries and unrelated to what the catalog needs —
-  see the popular-books note above, same reasoning applies). `GET
-  /trending?type=book` is therefore computed entirely from local data: the
-  same `rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST`
-  order already used by `GET /books` (feature 66), over items already
-  persisted — no Open Library call happens for this endpoint. `period` is
-  accepted but has no effect (no time-windowed signal exists to apply it to).
+  see the popular-books note above, same reasoning applies). No Open Library
+  call happens for `GET /trending?type=book`. Since **feature 81** that is no
+  longer a books-only exception: `/trending` is computed from local platform
+  activity for all four types, and `period` **does** have an effect (it drives
+  both the activity window and the fallback's release window). See
+  `docs/api.md` §Trending.
 
 ### Siembra desde los dumps mensuales (feature 87)
 
@@ -674,12 +674,11 @@ libros desde los dumps de Open Library*.
   person credits".
 - **external_ids source value**: `IGDB`
 - **"Trending" investigation (2026-08-26, feature 68)**: IGDB has no
-  "trending this week/day" endpoint. `GET /trending?type=game` is therefore
-  computed entirely from local data — same heuristic as `type=book` (see
-  Open Library's "Trending" note above): `rating_internal DESC NULLS LAST,
-  rating_external DESC NULLS LAST` order already used by `GET /games`
-  (feature 66), over items already persisted. No IGDB call happens for this
-  endpoint, and `period` is accepted but has no effect.
+  "trending this week/day" endpoint, so no IGDB call happens for
+  `GET /trending?type=game`. Since **feature 81** the endpoint is computed from
+  local platform activity for all four types — including movies and series,
+  which until then did call TMDB — and `period` has a real effect on all of
+  them. See `docs/api.md` §Trending.
 
 ## TheTVDB v4 — EVALUADA Y APARCADA (2026-08-29)
 
@@ -720,6 +719,7 @@ libros desde los dumps de Open Library*.
 
 - **⚠️ No existe endpoint de "similar" ni de "trending".** Ambos se sustituyen
   por cálculo local — features 80 y 81, ver `docs/recommendations-plan.md`.
+  Feature 81 is done: `/trending` calls no external API at all, not even TMDB.
 
 - **⚠️ No existe feed de popularidad paginado.** Es el problema caro: obligaría
   a rehacer `scheduler/jobs.py` y `scripts/backfill_sync.py`, no solo a cambiar
