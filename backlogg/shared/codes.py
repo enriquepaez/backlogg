@@ -17,9 +17,10 @@ in order of weight:
    migration, so a new role (or a fifth content type) would need one *and* a
    deploy window; here it is a line in the dict below.
 3. **``item_type`` is not local to this table.**  It also lives in
-   ``external_ids``, ``catalog_search``, ``seed_targets``, ``sync_cursors``,
-   ``activity_events``, ``library_entries``, ``notifications`` and
-   ``company_credits`` — all of them as text.  A native enum on ``credits``
+   ``external_ids``, ``seed_targets``, ``sync_cursors``, ``activity_events``,
+   ``library_entries``, ``notifications`` and ``company_credits`` — all of
+   them as text (and, since feature 91, as a per-branch literal in the
+   cross-type search ``UNION ALL``).  A native enum on ``credits``
    only would make every comparison against those tables a cross-type one
    needing an explicit cast, and converting *all* of them is a much larger
    change than feature 89 is allowed to be.

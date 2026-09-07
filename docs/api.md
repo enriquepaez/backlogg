@@ -51,9 +51,20 @@ GET /v1/search?q=&type=&page=&limit=
 `date_from`/`date_to` and `rating_external_min`/`rating_external_max` are
 independently optional and combinable with `q` and with each other.
 `date_from > date_to` or `rating_external_min > rating_external_max` returns
-`422`. There is no `rating_internal_*` filter here — the `catalog_search`
-materialized view exposes `rating_internal` on each result (feature 69) but
-it is not a filterable range on this endpoint.
+`422`. There is no `rating_internal_*` filter here — every result carries a
+`rating_internal` field (feature 69) but it is not a filterable range on this
+endpoint.
+
+`date_from`/`date_to` apply to each type's own date column, surfaced as the
+single `release_date` response field: `movies.release_date`,
+`series.first_air_date`, `books.first_publish_date`, `games.release_date`.
+
+**Results are never stale.** Since feature 91 the search reads the four
+content tables directly (a `UNION ALL` over their `search_vector` generated
+columns) instead of a materialized view, so an item ingested by the nightly
+sync, the backfill or the external fan-out is searchable the moment its
+transaction commits — there is no refresh step and therefore no window in
+which a just-ingested item is missing. See `docs/schema.md` § Search.
 
 **Without `q`, there is no external fallback**: the four external APIs
 (TMDB, Open Library, IGDB) all require a text term to search against, so the

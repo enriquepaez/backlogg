@@ -185,7 +185,6 @@ def _job_patches(cursor_offset: int):
             return_value=cursor_offset,
         ),
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
     )
 
@@ -194,7 +193,7 @@ async def test_intermediate_slice_advances_cursor(monkeypatch):
     """A full intermediate slice advances the cursor by the fetched count."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=3)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=3)
 
     # Items without an external id are skipped by the upsert loop but still
     # count as fetched for cursor advancement.
@@ -207,7 +206,6 @@ async def test_intermediate_slice_advances_cursor(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_games()
@@ -222,7 +220,7 @@ async def test_final_slice_wraps_to_zero(monkeypatch):
     """Reaching SEED_TOP_N_GAMES wraps the cursor back to 0."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=8)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=8)
 
     with (
         patch.object(
@@ -233,7 +231,6 @@ async def test_final_slice_wraps_to_zero(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_games()
@@ -248,7 +245,7 @@ async def test_short_fetch_wraps_to_zero(monkeypatch):
     """The API returning fewer items than requested wraps the cursor to 0."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=3)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=3)
 
     with (
         patch.object(
@@ -259,7 +256,6 @@ async def test_short_fetch_wraps_to_zero(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_games()
@@ -273,7 +269,7 @@ async def test_stale_cursor_normalises_to_zero(monkeypatch):
     """A cursor at or beyond the target (e.g. after lowering SEED_TOP_N) restarts at 0."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=25)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=25)
 
     with (
         patch.object(
@@ -284,7 +280,6 @@ async def test_stale_cursor_normalises_to_zero(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_games()
@@ -298,7 +293,7 @@ async def test_sync_books_slice_uses_cursor(monkeypatch):
     """sync_books fetches from its cursor and wraps on a short response."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 20)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 5)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=10)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=10)
 
     with (
         patch.object(
@@ -310,7 +305,6 @@ async def test_sync_books_slice_uses_cursor(monkeypatch):
         patch.object(sync_jobs._ol_client, "book_to_dict", return_value={"title": ""}),
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_books()
@@ -324,7 +318,7 @@ async def test_sync_games_slice_uses_cursor(monkeypatch):
     """sync_games fetches from its cursor and advances it."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 20)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 5)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=5)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=5)
 
     with (
         patch.object(
@@ -335,7 +329,6 @@ async def test_sync_games_slice_uses_cursor(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_games()
@@ -389,7 +382,6 @@ async def test_rerunning_the_same_movie_slice_is_idempotent(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=movie_raw,
         ) as mock_detail,
-        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
         mock_cm = MagicMock()

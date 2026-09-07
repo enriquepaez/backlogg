@@ -137,7 +137,7 @@ Medido sobre la DB de dev (1.495 ítems de catálogo):
 | Concepto | Bytes/fila | Filas por ítem | Bytes/ítem |
 |---|---|---|---|
 | Fila del ítem | ~1.100 | 1 | 1.100 |
-| `catalog_search` (vista materializada + índices) | 1.959 | 1 | 1.959 |
+| `search_vector` generado + índice GIN (feature 91) | ~960 | 1 | ~960 |
 | `credits` (grafo) + `item_cast` (reparto) | 330 / ~640 por ítem | ~2 grafo + 1 fila de reparto | ~1.300 |
 | Joins de géneros/plataformas | ~150 | ~3 | 450 |
 | **Total por ítem** | | | **~6 KB** |
@@ -148,6 +148,17 @@ reparto del grafo de navegación, ver `docs/schema.md`) la baja a ~60-70 MB, que
 es lo que hace que el catálogo completo entre en el techo de 512 MB del plan
 gratuito de Neon. La medición y las proyecciones están en
 `progress/measure_89.md`.
+
+> **Actualizado por la feature 91.** La fila de arriba era
+> `catalog_search` (vista materializada + índices), 1.959 bytes por ítem. La
+> vista se retiró: el `tsvector` vive ahora como columna generada en las cuatro
+> tablas de contenido más su índice GIN, y lo que desaparece es la duplicación
+> de `title`, `overview`, `poster_url` y `slug`. Medido en producción sobre
+> 85.530 ítems: 137 MB → ~82 MB (57 del vector + 25 del GIN), unos **55 MB
+> menos**. Y, sobre todo, desaparece el `REFRESH MATERIALIZED VIEW
+> CONCURRENTLY` que construía otra copia completa antes de intercambiarla y que
+> es lo que bloqueaba retomar la siembra (issue #28). Detalle en
+> `progress/measure_91.md`.
 
 A 0,35 $/GB-mes de Neon el coste sigue siendo **~0,3 $/mes**. Con los
 embeddings de la feature 75 encima (119k × 512 dims × 4 B más índice HNSW ≈

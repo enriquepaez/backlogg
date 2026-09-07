@@ -11,12 +11,12 @@ class SearchParams(BaseModel):
     subclass) because that shared model carries ``search``/``rating_internal_*``
     fields that do not apply here: ``q`` already covers free-text search, and
     this endpoint has no ``rating_internal_min``/``rating_internal_max``
-    filter (out of scope for feature 69 — the ``catalog_search`` materialized
-    view does expose a ``rating_internal`` column on each result since that
-    feature, but only as a response field, not as a filterable range). Cross-
-    field range validation is replicated (not imported) for just the two
-    ranges that do apply here — same ``model_validator`` mechanism so
-    FastAPI turns a violation into a ``422`` automatically.
+    filter (out of scope for feature 69 — every result does carry a
+    ``rating_internal`` field since that feature, but only as a response
+    field, not as a filterable range). Cross-field range validation is
+    replicated (not imported) for just the two ranges that do apply here —
+    same ``model_validator`` mechanism so FastAPI turns a violation into a
+    ``422`` automatically.
 
     ``q`` is optional: when absent, ``/v1/search`` behaves as a pure filter
     endpoint over ``date_from``/``date_to``/``rating_external_min/max``

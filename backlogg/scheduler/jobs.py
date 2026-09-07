@@ -41,8 +41,11 @@ Rows the batch route rejects up front (a NOT NULL missing, a string longer
 than its column) are dropped individually and counted in ``errors`` — one
 bad row never takes the slice down with it.
 
-After a successful slice every job refreshes the catalog_search materialized
-view so search results stay current.
+Nothing is refreshed after a slice: since feature 91 ``search_vector`` is a
+generated column on the four content tables, so every item a slice writes is
+searchable the moment the slice's transaction commits.  The
+``catalog_search`` materialized view — and the ``REFRESH MATERIALIZED VIEW
+CONCURRENTLY`` that used to close each job — are gone (issue #28).
 
 Besides the four sync jobs this module exposes ``sync_missing_credits``
 (feature 85): a *targeted* pass whose work list comes from the local catalog
@@ -78,8 +81,6 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-
-from sqlalchemy import text
 
 from backlogg.books import repository as books_repo
 from backlogg.books.adapters.open_library import OpenLibraryClient
@@ -146,12 +147,6 @@ _ITEM_TYPES_BY_CONTENT: dict[str, str] = {
     "book": "BOOK",
     "game": "GAME",
 }
-
-
-async def refresh_catalog_search(session) -> None:
-    """Refresh the catalog_search materialized view concurrently."""
-    await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search"))
-    await session.commit()
 
 
 def _resolve_slice_size(item_type: str, slice_size: int | None) -> int:
@@ -710,11 +705,6 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
             except Exception:
                 logger.exception("%s: failed to recount seed target progress", spec.job_name)
 
-            try:
-                await refresh_catalog_search(session)
-            except Exception:
-                logger.exception("%s: failed to refresh catalog_search", spec.job_name)
-
     synced = writer.synced
     errors += writer.errors
     people_errors = writer.people_errors
@@ -896,11 +886,6 @@ async def sync_books(slice_size: int | None = None) -> dict:
                 "sync_books",
             )
 
-            try:
-                await refresh_catalog_search(session)
-            except Exception:
-                logger.exception("sync_books: failed to refresh catalog_search")
-
     synced = writer.synced
     errors += writer.errors
     people_errors += writer.people_errors
@@ -989,11 +974,6 @@ async def sync_games(slice_size: int | None = None) -> dict:
                 _next_offset(offset, len(raw_list), slice_size, target),
                 "sync_games",
             )
-
-            try:
-                await refresh_catalog_search(session)
-            except Exception:
-                logger.exception("sync_games: failed to refresh catalog_search")
 
     synced = writer.synced
     errors += writer.errors

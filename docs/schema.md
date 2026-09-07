@@ -453,9 +453,8 @@ Tres decisiones de esa DDL, todas con su número detrás:
   `Credit.role == "AUTHOR"` sin ver un número nunca. Se descartó el ENUM nativo
   por tres razones: un valor de ENUM es un `oid` de **4 bytes** contra los 2 del
   `smallint` (y esta feature existe por el disco), añadir un valor es DDL, y
-  `item_type` vive además como texto en `external_ids`, `catalog_search`,
-  `seed_targets`, `activity_events`, `library_entries`, `notifications` y
-  `company_credits` — un ENUM solo en `credits` obligaría a castear en cada
+  `item_type` vive además como texto en `external_ids`, `seed_targets`,
+  `activity_events`, `library_entries`, `notifications` y `company_credits` — un ENUM solo en `credits` obligaría a castear en cada
   comparación cruzada.
 
 **`character_name` y `billing_order` ya no están aquí.** Medido en producción:
@@ -612,54 +611,69 @@ rows are still reserved for v2 and have no reader yet.
 
 ## Search
 
-Materialized view used for cross-type full-text search.
+Cross-type full-text search reads the four content tables directly. There is
+**no materialized view**: `movies`, `series`, `books` and `games` each carry
+their own `search_vector` as a `GENERATED ALWAYS AS (...) STORED` column with
+a GIN index over it, and `backlogg/search/repository.py` combines them with a
+`UNION ALL`.
+
+Why (feature 91, issue #28): `catalog_search` was a fifth copy of the catalog
+(137 MB in production) and, worse, every ingestion had to run `REFRESH
+MATERIALIZED VIEW CONCURRENTLY`, which builds a *complete second copy* before
+swapping it in. With 127 MB free of Neon's 512 MB that refresh no longer fit,
+and it is what blocked the seeding. A generated column is recomputed by
+Postgres inside the statement that writes the row, transactionally: **the
+refresh does not get smaller, it stops existing**, and the window in which a
+freshly ingested item was not yet searchable closes with it.
 
 `search_vector` indexes the title twice: once as-is, once with all
 punctuation stripped (spaces preserved as word separators) so a query typed
 without punctuation (`Spiderman`) still matches a punctuated title
 (`Spider-Man`) — the `simple` dictionary never generates that concatenated
-lexeme on its own. `overview` is left unnormalized.
+lexeme on its own (issue #13). `overview` is left unnormalized.
 
-`rating_internal` (feature 69, `rating_internal_list_exposure`) is included in
-every sub-query alongside `rating_external` — it is a plain passthrough of the
-base table's own `rating_internal` column, not a new computation.
+The expression lives in **one** place, `backlogg/shared/search_vector.py`
+(`SEARCH_VECTOR_SQL`), read by the four ORM models and by migration `0038`.
+It has to be byte-identical on the four tables: if they drift, search starts
+behaving differently per content type with no error anywhere.
+
+It is legal in a generated column because every function in it is
+`IMMUTABLE` — `to_tsvector(regconfig, text)` (the **two-argument** form; the
+one-argument form is only `STABLE`, since it reads
+`default_text_search_config`), `regexp_replace` and `COALESCE`.
 
 ```sql
-CREATE MATERIALIZED VIEW catalog_search AS
-SELECT
-    id,
-    'MOVIE'         AS item_type,
-    slug,
-    title,
-    overview,
-    poster_url,
-    release_date,
-    rating_external,
-    rating_internal,
-    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, '')) AS search_vector
-FROM movies
-UNION ALL
-SELECT id, 'SERIES', slug, title, overview, poster_url, first_air_date, rating_external, rating_internal,
-    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
-FROM series
-UNION ALL
-SELECT id, 'BOOK', slug, title, overview, poster_url, first_publish_date, rating_external, rating_internal,
-    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
-FROM books
-UNION ALL
-SELECT id, 'GAME', slug, title, overview, poster_url, release_date, rating_external, rating_internal,
-    to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
-FROM games;
+-- identical on movies, series, books and games
+ALTER TABLE movies ADD COLUMN search_vector tsvector
+GENERATED ALWAYS AS (
+    to_tsvector('simple',
+        title || ' ' ||
+        regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' ||
+        COALESCE(overview, ''))
+) STORED;
 
-CREATE INDEX idx_catalog_search_vector ON catalog_search USING GIN (search_vector);
-CREATE INDEX idx_catalog_search_type ON catalog_search (item_type);
-CREATE UNIQUE INDEX uq_catalog_search_type_id ON catalog_search (item_type, id);
+CREATE INDEX idx_movies_search_vector ON movies USING GIN (search_vector);
+CREATE INDEX idx_series_search_vector ON series USING GIN (search_vector);
+CREATE INDEX idx_books_search_vector  ON books  USING GIN (search_vector);
+CREATE INDEX idx_games_search_vector  ON games  USING GIN (search_vector);
 ```
 
-Refreshed after each sync job completes:
-```sql
-REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search;
-```
+The `UNION ALL` maps each type's own date column onto a single `release_date`
+output, exactly as the view did — get this wrong and `date_from`/`date_to`
+silently stop filtering the affected type:
+
+| `item_type` | Table    | Date column          |
+|-------------|----------|----------------------|
+| `MOVIE`     | `movies` | `release_date`       |
+| `SERIES`    | `series` | `first_air_date`     |
+| `BOOK`      | `books`  | `first_publish_date` |
+| `GAME`      | `games`  | `release_date`       |
+
+`rating_internal` (feature 69) is a plain passthrough of each base table's own
+column, exposed as a response field only.
+
+Nothing refreshes anything: there is no `REFRESH MATERIALIZED VIEW` anywhere
+in the codebase.
 
 ## Shared trigger
 

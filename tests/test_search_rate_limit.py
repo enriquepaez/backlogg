@@ -5,13 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from backlogg.core import config
 from backlogg.main import app
 from backlogg.movies import repository as movies_repo
 
-_REFRESH_PATCH = "backlogg.search.repository.SearchRepository.refresh_catalog_search"
 _NO_LOCAL = "zzzzzzzzzz_no_local_match_rl"
 
 
@@ -57,14 +55,13 @@ def _fallback_patches():
         patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     )
 
 
 async def test_search_fallback_rate_limited_returns_429(client, monkeypatch):
     monkeypatch.setattr(config.settings, "RATE_LIMIT_SEARCH_FALLBACK", "2/60")
-    p1, p2, p3, p4, p5 = _fallback_patches()
-    with p1, p2, p3, p4, p5:
+    p1, p2, p3, p4 = _fallback_patches()
+    with p1, p2, p3, p4:
         # Two misses trigger the fan-out and consume quota.
         for _ in range(2):
             resp = await client.get(f"/v1/search?q={_NO_LOCAL}")
@@ -86,10 +83,9 @@ async def test_search_with_local_results_does_not_consume_quota(client, db, monk
     monkeypatch.setattr(config.settings, "RATE_LIMIT_SEARCH_FALLBACK", "2/60")
     await movies_repo.upsert_movie(db, _movie_dict("inception-2010-rl-test"))
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
 
-    p1, p2, p3, p4, p5 = _fallback_patches()
-    with p1, p2, p3, p4, p5:
+    p1, p2, p3, p4 = _fallback_patches()
+    with p1, p2, p3, p4:
         # Many local-hit queries — well beyond the fallback limit of 2.
         for _ in range(5):
             resp = await client.get("/v1/search?q=inception&limit=1")
@@ -109,10 +105,9 @@ async def test_search_with_partial_local_page_does_consume_quota(client, db, mon
     monkeypatch.setattr(config.settings, "RATE_LIMIT_SEARCH_FALLBACK", "2/60")
     await movies_repo.upsert_movie(db, _movie_dict("inception-2010-rl-partial-test"))
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
 
-    p1, p2, p3, p4, p5 = _fallback_patches()
-    with p1, p2, p3, p4, p5:
+    p1, p2, p3, p4 = _fallback_patches()
+    with p1, p2, p3, p4:
         # Two partial-page queries trigger the fan-out and consume quota.
         for _ in range(2):
             resp = await client.get("/v1/search?q=inception")

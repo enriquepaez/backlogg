@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Column,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -16,10 +17,11 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backlogg.core.database import Base
+from backlogg.shared.search_vector import SEARCH_VECTOR_SQL
 
 # Association table for the many-to-many between books and genres
 book_genres_join = Table(
@@ -98,6 +100,26 @@ class Book(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    # Feature 91 (search_expression_index): full-text vector of this row,
+    # maintained by Postgres itself as a STORED generated column and indexed
+    # by ``idx_books_search_vector``.  It replaces the ``catalog_search``
+    # materialized view, whose ``REFRESH MATERIALIZED VIEW CONCURRENTLY`` no
+    # longer fit in Neon's 512 MB (issue #28) — a generated column is
+    # recomputed inside the writing statement, so there is nothing left to
+    # refresh.  The expression is shared by all four content tables, see
+    # ``backlogg/shared/search_vector.py``.
+    #
+    # ``deferred`` because it is large (~0,7 KB/row) and no Python code ever
+    # reads it: it exists to be filtered with ``@@`` and ranked with
+    # ``ts_rank`` inside ``backlogg/search/repository.py``.  Without this every
+    # ``select(Book)`` in the codebase would drag the vector along.
+    search_vector: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed(SEARCH_VECTOR_SQL, persisted=True),
+        nullable=False,
+        deferred=True,
+    )
+
     genres: Mapped[list[BookGenre]] = relationship(
         "BookGenre", secondary=book_genres_join, back_populates="books"
     )
@@ -106,4 +128,5 @@ class Book(Base):
         UniqueConstraint("slug", name="uq_books_slug"),
         Index("idx_books_first_publish_date", "first_publish_date"),
         Index("idx_books_last_synced_at", "last_synced_at"),
+        Index("idx_books_search_vector", "search_vector", postgresql_using="gin"),
     )

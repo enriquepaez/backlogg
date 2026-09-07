@@ -93,10 +93,29 @@ VACUUM FULL external_ids;
 
 ### Paso 6 — recrear `catalog_search`
 
-DDL completo en `alembic/versions/0028_catalog_search_punctuation_normalization.py`
-(`_create_view` + los tres índices). `CREATE MATERIALIZED VIEW` ya la puebla; el
+⚠️ **CORRECCIÓN (2026-09-07, mismo día).** La versión original de este paso
+mandaba usar el DDL de la migración **`0028`**. **Es incorrecto y rompió
+producción durante ~1 h.** La definición vigente de la vista es la de la
+**`0031` (`catalog_search_rating_internal`)**, que añade la columna
+`rating_internal`; la `0028` es anterior y no la tiene.
+
+Al ejecutarse el paso con el DDL de la `0028`, la vista quedó sin esa columna y
+`GET /v1/search` devolvió error hasta que se recreó bien: el código hace
+`select(CatalogSearchEntry)` y ese modelo mapea `rating_internal`.
+
+**La lección**: `catalog_search` se ha redefinido en varias migraciones
+(`0006` → `0028` → `0031`), así que *grep* devuelve varias definiciones y **la
+buena es la última**, no la primera que aparece. El DDL correcto y verificado
+está en `docs/operations.md`, sección «Si el despliegue aborta después del
+`DROP` manual».
+
+Esto es, además, un argumento a favor de la **feature 91**: mientras la vista
+exista, su definición vive duplicada en N migraciones sin fuente única de
+verdad. La 91 la retira.
+
+`CREATE MATERIALIZED VIEW` ya la puebla, así que no hace falta `REFRESH`. El
 índice único `uq_catalog_search_type_id` es obligatorio para poder refrescar
-`CONCURRENTLY` en el futuro.
+`CONCURRENTLY`.
 
 ### Paso 7 — medir (criterios de aceptación 10 y 11)
 

@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 
 from backlogg.books.adapters import openlibrary_dump as dump
 from backlogg.books.models import Book, BookGenre, book_genres_join
+from backlogg.search.repository import SearchRepository
 from backlogg.shared.external_ids import ExternalId
 from backlogg.shared.models import Credit, Person
 from tests.books import dump_fixtures as fx
@@ -63,9 +64,6 @@ def _session_factory(db):
 def _patched(db, monkeypatch, *, stream=_fixture_stream):
     monkeypatch.setattr(seed, "stream_dump_lines", stream)
     monkeypatch.setattr(seed, "async_session_factory", _session_factory(db))
-    # REFRESH MATERIALIZED VIEW CONCURRENTLY cannot run inside the test's
-    # transaction, and the view is not what these tests are about.
-    monkeypatch.setattr(seed, "refresh_catalog_search", AsyncMock())
     # The script disposes the app engine when it finishes; the test session
     # comes from the suite's own engine, so leave the app one alone (the
     # attribute on AsyncEngine is read-only, hence patching the module name).
@@ -527,15 +525,25 @@ async def test_seeded_books_carry_the_synopsis_from_the_works_dump(db, monkeypat
     assert book.overview and len(book.overview) > 50
 
 
-async def test_the_load_phase_refreshes_the_search_view(db, monkeypatch, work_dir):
-    """19 k new rows are invisible to /search until catalog_search is refreshed."""
-    _patched(db, monkeypatch)
-    refresh = AsyncMock()
-    monkeypatch.setattr(seed, "refresh_catalog_search", refresh)
+async def test_seeded_books_are_searchable_with_no_refresh_step(db, monkeypatch, work_dir):
+    """Feature 91: the load phase has no refresh, and does not need one.
 
+    This test used to assert the opposite — that the 19 k rows a run writes
+    stayed invisible to ``/search`` until ``REFRESH MATERIALIZED VIEW`` ran.
+    That refresh is what stopped fitting in Neon's 512 MB (issue #28), so
+    ``books.search_vector`` is now a generated column: Postgres fills it in the
+    same statement that writes the row. Nothing is called between the write and
+    the query below, which is exactly the point.
+    """
+    _patched(db, monkeypatch)
     await seed.run(work_dir, None, False)
 
-    refresh.assert_awaited_once()
+    book = (await db.execute(select(Book).where(Book.overview.is_not(None)).limit(1))).scalar_one()
+
+    results, total = await SearchRepository(db).search(q=book.title, item_type="book")
+
+    assert total >= 1
+    assert book.slug in [r["slug"] for r in results]
 
 
 async def test_phase_selects_only_the_requested_phase(db, monkeypatch, work_dir):
