@@ -1768,6 +1768,49 @@
         "bash init.sh en verde"
       ],
       "status": "pending"
+    },
+    {
+      "id": 89,
+      "name": "credits_people_storage_redesign",
+      "title": "Rediseno del almacenamiento de credits y people: separar los datos de ficha del grafo de navegacion",
+      "description": "DESCUBIERTA EL 2026-09-07, durante la siembra real de produccion. La siembra fallo con asyncpg.exceptions.DiskFullError: could not extend file because project size limit (512 MB) has been exceeded. Estado en el momento del fallo: movies 56.371 de 57.166, books 19.159, games 10.000 (topado), y SERIES 0 — falta un tipo de contenido entero, asi que el catalogo no es publicable. || LA MEDICION, que es lo que motiva la feature: credits pesa 136 MB (61 de tabla + 75 de indices), people 56 MB y external_ids 74 MB. Entre los tres, ~266 MB de los 472 MB de la base: MAS DE LA MITAD DE LA BASE ES EL GRAFO DE PERSONAS, para servir 85.530 items. Son 710.772 credits (8,3 por item) y 240.615 personas (2,8 por item), y cada persona arrastra ademas su fila en external_ids. || EL DIAGNOSTICO: credits mezcla dos cosas que no tienen la misma naturaleza ni el mismo coste. (1) DATOS DE FICHA — el reparto que pinta la pagina de detalle: una lista ordenada, que se lee siempre entera y siempre por el mismo item; nadie navega desde el septimo actor. (2) EL GRAFO de navegacion y recomendacion — director, creador, author, source_author: es lo que permite 'otras obras de esta persona' y el puente cross-type de la feature 74. El (2) justifica una tabla relacional con su people, sus indices y sus ids externos. El (1) no, y el (1) es la mayor parte del volumen: la mayoria de esas 240.615 personas son actores que aparecen UNA SOLA VEZ en todo el catalogo, con cero valor de navegacion y cero valor de recomendacion, pagando fila en people, fila en external_ids, fila en credits y su parte en cuatro indices. || PROBLEMA DE TIPOS QUE AMPLIFICA TODO: cada una de las 710.772 filas guarda item_type VARCHAR(20) ('MOVIE') y role VARCHAR(50) ('ACTOR') como TEXTO. Dos de las cuatro columnas de uq_credit son cadenas anchas, y por eso ese indice solo pesa 35 MB. Ademas credits declara un id autoincremental que NO REFERENCIA NADIE (verificado: cero FKs contra credits.id) teniendo ya uq_credit como identidad — son 15 MB de indice mas ~6 de columna. || DOS DIRECCIONES, COMPATIBLES ENTRE SI: (A) ESTRECHAR SIN CAMBIAR EL MODELO — item_type y role a smallint/enum, quitar el id y que uq_credit sea la PK. Mecanico, no toca semantica ni frontend. Estimacion sin medir: credits de 136 MB a ~60-70. (B) SEPARAR FICHA DE GRAFO — el reparto se guarda desnormalizado en la propia fila del item (JSONB con nombre, personaje y orden) y credits/people se quedan SOLO con quien construye grafo. Estimacion sin medir: credits de ~710k filas a ~150k y people de 240k a ~60k, con external_ids cayendo detras. A es casi gratis dentro de B. || EL PRIMER PASO NO ES IMPLEMENTAR, ES MEDIR: la distribucion real de personas por numero de credits la tiene la base y es la que decide si B libera 150 MB o 200, y si A sola ya basta. No se elige entre A y B sin ese numero. || ALTERNATIVA DESCARTADA POR EL USUARIO EL 2026-09-07: subir de plan en Neon (~19 $/mes, 10 GB). Tambien se descarto el parcheo incremental (borrar indices redundantes + DELETE del reparto por debajo de billing_order 5 + VACUUM FULL): recupera ~95 MB y desbloquearia la siembra, pero deja intacto el modelo que causa el problema. || OJO AL MEDIR usos de indices con pg_stat_user_indexes: produccion no ha tenido trafico de usuarios desde el borrado, solo la siembra, asi que un idx_scan = 0 significa 'la siembra no lo uso', NO 'la app no lo usa'. idx_catalog_search_vector (22 MB), uq_catalog_search_type_id (necesario para REFRESH CONCURRENTLY) e idx_people_name salen a 0 y ninguno se puede borrar.",
+      "depends_on": [],
+      "acceptance": [
+        "PRIMERO: medida y documentada la distribucion real de people por numero de credits (cuantas personas tienen 1, 2, 3+ credits, y que porcentaje del volumen representa cada tramo), contra la base de produccion",
+        "Decision entre A, B o ambas tomada CON ESOS NUMEROS y registrada por escrito, no por intuicion",
+        "item_type y role dejan de almacenarse como texto en cada fila de credits",
+        "El id autoincremental de credits desaparece y uq_credit pasa a ser la identidad, salvo que la medicion demuestre que hace falta",
+        "Si se implementa B: el reparto de ficha deja de generar filas en people y en external_ids",
+        "Migracion Alembic con backfill de los datos existentes, upgrade y downgrade probados",
+        "El puente cross-type de la feature 74 sigue funcionando: get_authorship_works devuelve lo mismo antes y despues, con test que lo fija",
+        "Los endpoints de detalle mantienen su contrato, o se regenera packages/api-client y pasa pnpm typecheck en apps/web (gate real de CI, no solo local)",
+        "bruno/ sincronizado si cambia algun contrato",
+        "Tamano de credits, people y external_ids medido ANTES y DESPUES, con las cifras en el informe",
+        "Verificado que el catalogo completo (118.850 items del seeding-plan, incluidos los 31.958 games y las 10.880 series) cabe en 512 MB con el modelo nuevo — o cuantificado cuanto falta",
+        "docs/schema.md actualizado con el modelo nuevo y el razonamiento",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": 90,
+      "name": "igdb_targets_seeding",
+      "title": "Enumerar games a seed_targets como movies y series, retirando el cursor y SEED_TOP_N_GAMES",
+      "description": "Games es el unico tipo que sigue sembrandose por CURSOR. La feature 86 convirtio movies y series a una lista objetivo en seed_targets enumerada con /discover, y la 87 paso books a los dumps de Open Library; a games simplemente no le toco turno. NO ES UNA LIMITACION DE IGDB: su query language admite 'where' perfectamente (where category = ..., where rating_count > ..., where first_release_date > ...), asi que se puede enumerar a seed_targets exactamente igual que movies y series. || LO QUE CUESTA HOY ESA DIVERGENCIA: (1) el catalogo de games esta TOPADO EN 10.000 sobre 31.958 juegos reales, porque SEED_TOP_N_GAMES es el objetivo de wraparound del cursor — medido en la siembra del 2026-09-07, que dejo exactamente 10.000 filas en games; (2) el comando de siembra necesita un '-f seed_top_n=10000' que ademas DEBE COINCIDIR con la variable de Render, o el cursor compartido da la vuelta antes de tiempo — una trampa operativa que no existe para ningun otro tipo; (3) mantiene cuatro formas de sembrar donde bastan dos. || RESULTADO: movies, series y games por seed_targets; books por dumps. Dos formas en vez de cuatro, y desaparecen seed_top_n del comando y el tope de 10.000. || CORRECCION A LA NOTA ORIGINAL (2026-09-07): al proponer esta feature se dijo que cerraria tambien el issue #27. ES FALSO y conviene no arrastrarlo: el #27 es SEED_TOP_N_BOOKS (10.000 frente a 19.221 obras) por el camino NOCTURNO de books, que sigue recorriendo search.json con cursor. Convertir games no lo toca. El #27 se cierra moviendo el nocturno de books fuera del cursor, que es territorio de la feature 88. || RELACION CON LA 88: se parecen y conviene mirarlas juntas. La 88 le da a cada fuente su mecanismo nativo de novedades y actualizaciones, e IGDB es justo el caso trivial ahi (where created_at > <ultima ejecucion>). La enumeracion de esta feature y el incremental de la 88 comparten la misma query de IGDB, asi que hacerlas seguidas evita escribir dos veces el mismo adaptador. Orden a decidir por el usuario.",
+      "depends_on": [],
+      "acceptance": [
+        "Games se enumera a seed_targets con una query de IGDB, con el mismo criterio de calidad que aplica hoy (allowlist de game_type y el umbral que corresponda), documentado",
+        "La hidratacion de games consume seed_targets por diferencia contra external_ids, como movies y series",
+        "SEED_TOP_N_GAMES y el cursor de games en sync_cursors dejan de usarse; retirados del codigo, de render.yaml y de docs/operations.md",
+        "El parametro seed_top_n del workflow deja de aplicar a game (solo queda para book, mientras books siga con cursor en el nocturno)",
+        "El catalogo de games deja de estar topado en 10.000: la siembra alcanza los ~31.958 que pasan el filtro de calidad",
+        "Contadores de la siembra (pending / stuck / skipped_links) funcionan para games igual que para movies y series",
+        "Tests: la enumeracion produce targets, un target ya enlazado no se reenumera, y un juego que no pasa el filtro no entra",
+        "README, docs/operations.md y docs/seeding-plan.md actualizados: la tabla de formas de sembrar pasa de cuatro a dos",
+        "El issue #27 NO se da por cerrado con esta feature: es de books y del camino nocturno",
+        "bash init.sh en verde"
+      ],
+      "status": "pending"
     }
   ]
 }
