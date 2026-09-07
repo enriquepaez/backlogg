@@ -670,3 +670,115 @@ declarada y no comprobable desde el repo — el reviewer los marcó igual.
   en documentación; probablemente lo disuelve la feature 88.
 
 `bash init.sh` verde: **1414 tests** (+92 sobre los 1.322 de partida).
+
+---
+
+## 2026-09-07 — Feature 81 `trending_local` (rama `feat/trending_local`)
+
+`/v1/trending` deja de preguntarle a TMDB y se calcula desde la actividad de la
+propia plataforma: `activity_events`, `library_entries` y `user_ratings` de los
+últimos N días con decaimiento exponencial. Cerrada en **dos rondas de review**;
+la primera fue `CHANGES_REQUESTED`.
+
+Se cogió en paralelo a la siembra de producción por ser la única del backlog que
+no depende del catálogo.
+
+### Tres decisiones tomadas con el usuario antes de implementar
+
+1. **Fuera el fan-out a TMDB Trending.** Consecuencia buscada y aceptada
+   explícitamente: `/trending` **deja de descubrir e ingestar ítems nuevos** —
+   `_ingest_trending_movie` / `_ingest_trending_series` eran el único camino que
+   lo hacía desde trending. Lo cubren la siembra ahora y la feature 88 después.
+   `get_trending_movies` / `get_trending_series` retirados de los dos adapters,
+   sin llamantes huérfanos.
+2. **Fallback**: ventana derivada de `period` como filtro `WHERE`
+   (`day → 90 d`, `week → 365 d`) y encima el **orden canónico del catálogo**
+   (feature 66). El tiempo va en el `WHERE`, nunca en el `ORDER BY`: eso es lo
+   que hace que `period` tenga efecto real también en el fallback, que es el
+   estado por defecto mientras no haya usuarios. Con resultado *totalmente*
+   vacío la ventana se relaja; un resultado parcial respeta `period`.
+3. **Umbral por tipo, no global** (`TRENDING_MIN_ACTIVITY=5`). Cada tipo decide
+   su fuente por separado; en el mix, cada bloque el suyo.
+
+### El bloqueante de la primera ronda
+
+Contar la misma acción dos veces. `activity_events` es un espejo parcial de las
+otras dos tablas, y el implementer argumentó que las contribuciones eran
+disjuntas porque «la contribución 3 filtra `updated_at > created_at`, que por
+construcción excluye la fila recién creada».
+
+**El argumento asumía que el evento nace con la fila. No es así.**
+`backlogg/ratings/service.py:82` condiciona la escritura del evento a que la
+valoración *tenga contenido*, y `RatingIn` admite ambos campos a `None`. Así que
+`PUT {}` → `PUT {"score": 4}` es **una sola acción** que crea el evento (peso
+3,0) y además deja `updated_at > created_at` (peso 1,0): 2 gestos y 4,0 donde
+debe haber 1 y 3,0. Contaminaba el ranking **y** el umbral.
+
+Los dos tests que rozaban el caso lo esquivaban por construcción — uno ponía el
+evento fuera de la ventana, el otro usaba `updated_at == created_at`.
+
+**Arreglo**: `LEFT JOIN` al evento propio de la fila con
+`event.id IS NULL OR updated_at > event.created_at`. El discriminante pasa de
+«editado después de la **fila**» a «editado después de su **evento**».
+`uq_activity_events_rating_id` acota el join a ≤1 fila, y `rating_id` es NULL en
+todos los `status_completed`, así que esos nunca entran.
+
+El `>` estricto es exacto por los dos lados, no por margen: `rate_item` hace el
+UPDATE y el INSERT en la misma transacción con un solo commit, y `now()` en
+Postgres es timestamp de **transacción**, así que los dos timestamps salen
+idénticos y el `>` excluye el caso por construcción.
+
+Lección que vale más que el parche: **una afirmación de disjunción entre dos
+tablas es tan fuerte como el invariante del escritor**, y aquí el invariante
+supuesto («el evento nace con la fila») no existía. El argumento falso estaba
+propagado a tres sitios —docstring de módulo, `docs/api.md` y el informe—; se
+corrigió en los tres dejando el error visible en vez de reescribirlo.
+
+### QA manual del leader
+
+Contra la DB de dev (578 movies · 1136 series · 391 books · 465 games):
+
+- **`period` muerde de verdad**: `game/day` → 5 ítems y `game/week` → 16,
+  que son exactamente los conteos de las ventanas de 90 y 365 días. Movies y
+  series divergen en 10 y 7 slugs entre `day` y `week`.
+- **El caso de `book` idéntico entre `day` y `week` NO era un fallo**: ningún
+  libro de dev tiene fecha dentro de ninguna de las dos ventanas (la más
+  reciente es 2025-01-01), así que ambas relajan. Fabricando tres libros dentro
+  de las ventanas, `day` → 1 y `week` → 3. Es la relajación documentada.
+- **Fallback exacto**: los 8 primeros de `movie/week` coinciden slug a slug con
+  el `ORDER BY rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST`
+  ejecutado a mano en psql (el único desorden es un empate a 8,7).
+- **Camino local**: moviendo 5 eventos de `fight-club-1999` a la ventana, pasa a
+  ser el único resultado de `movie/day` — y es de 1999, así que por el fallback
+  era inalcanzable. Prueba que la señal local manda cuando existe.
+- **Umbral por tipo, en la misma respuesta**: en el mix, MOVIE servía local
+  (fight-club) mientras SERIES, BOOK y GAME caían al fallback.
+- **Configurable**: con `TRENDING_MIN_ACTIVITY=6`, los 5 gestos de movie quedan
+  por debajo y el tipo cae al fallback.
+- **Cero llamadas externas** en los cuatro logs de servidor de la QA.
+- `422` en `period=month` y `type=music`; `cache-control: public, max-age=900`;
+  10 ms de latencia.
+
+DB de dev restaurada a su estado original al terminar.
+
+### Derivados
+
+- **FE-68** `trending_period_books_games` desbloqueada (`blocked` → `pending`).
+- **Issue #29** (medium): la actividad de usuarios baneados sigue empujando
+  trending. `visible_review_filters()` ya existe y dice reutilizarse en toda
+  superficie que agregue reviews; trending reimplementa la mitad (`is_hidden`
+  sí, `is_banned` no). Deferral correcto — el leader fijó dos exclusiones y esta
+  no era una— pero la inconsistencia nace documentada.
+- **Issue #30** (medium): el toggle `completed → dropped → completed` genera
+  `activity_events` ilimitados —`uq_activity_events_rating_id` no lo frena
+  porque esos eventos llevan `rating_id` NULL—, así que un solo usuario puede
+  cruzar `TRENDING_MIN_ACTIVITY` él solo. Comportamiento preexistente de la
+  feature 54; lo nuevo es que ahora tenga consecuencia.
+- **Issue #31** (low): el fallback ejecuta cuatro `COUNT(*)` cuyo resultado se
+  descarta. Irrelevante con TTL de 900 s, deja de serlo si el TTL baja.
+- **`CACHE_TTL_TRENDING=900` sin issue propio, a propósito**: bajarlo es cambiar
+  contrato de cabecera (`tests/test_response_caching.py:174` fija
+  `cache-control: public, max-age=900`), no una constante suelta. Es una feature
+  con decisión de producto detrás, no un bug.
+
+`bash init.sh` verde: **1499 tests** (+17 sobre los 1482 de partida).

@@ -1,17 +1,25 @@
 # Sesión actual
 
-**Estado: sin tarea en curso.** El 2026-09-07 se cerraron **dos features
-seguidas**, ambas desplegadas en producción y medidas: la **89
-`credits_people_storage_redesign`** y la **91 `search_expression_index`**.
+**Estado: sin tarea en curso.** El 2026-09-07 se cerraron **tres features**:
+la **89** `credits_people_storage_redesign`, la **91** `search_expression_index`
+—ambas desplegadas en producción y medidas— y la **81** `trending_local`.
 
-## Dos cosas en marcha en paralelo (2026-09-07)
+## Lo único en marcha: la siembra de producción
 
-**1. La siembra de producción** — la ejecuta el usuario a mano. Todo lo que hace
-falta está en «Runbook de la siembra» aquí abajo.
+La ejecuta el usuario a mano. Todo lo que hace falta está en «Runbook de la
+siembra» aquí abajo.
 
-**2. La feature 81 `trending_local`** — el usuario la está haciendo **en otra
-conversación**. ⚠️ **No la cojas.** Si empiezas sesión nueva y necesitas tarea,
-salta a la 79 o pregunta.
+> **La feature 81 ya está hecha** (PR #207). Este archivo decía que se estaba
+> haciendo «en otra conversación» y que no se cogiera: quedó obsoleto. Resumen
+> completo en `progress/history.md`; desbloqueó **FE-68** y derivó los issues
+> **#29**, **#30** y **#31**.
+
+## ⚠️ Este archivo se trunca al cerrar sesión
+
+`AGENTS.md` §6.4 manda vaciar `progress/current.md` al terminar una sesión, y el
+runbook de abajo vive aquí. **Antes de truncarlo, comprueba si la siembra sigue
+pendiente**: si lo está, mueve el runbook a `docs/` o a
+`progress/priority_order.md` —que no se trunca— en vez de perderlo.
 
 ---
 

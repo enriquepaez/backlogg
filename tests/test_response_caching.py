@@ -165,17 +165,9 @@ async def test_genres_listing_is_public(client, db):
 
 
 async def test_trending_listing_is_public(client, db):
-    with (
-        patch(
-            "backlogg.trending.service._movies_tmdb.get_trending_movies",
-            new=AsyncMock(return_value=[]),
-        ),
-        patch(
-            "backlogg.trending.service._series_tmdb.get_trending_series",
-            new=AsyncMock(return_value=[]),
-        ),
-    ):
-        response = await client.get("/v1/trending")
+    # Feature 81: /trending is computed entirely from local data, so there is
+    # nothing external left to mock here.
+    response = await client.get("/v1/trending")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=900"
 

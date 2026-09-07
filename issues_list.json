@@ -438,6 +438,45 @@
       "resolution_ref": "feature 91 (search_expression_index), migracion alembic 0038",
       "solution": "Se cierra porque el refresh DESAPARECE, no porque quepa. La vista materializada catalog_search se retira y search_vector pasa a ser una columna GENERATED ALWAYS AS (...) STORED en movies, series, books y games, con su indice GIN por tabla; la busqueda cross-type se resuelve con UNION ALL sobre las cuatro (backlogg/search/repository.py). Postgres recalcula una columna generada dentro de la misma sentencia que escribe la fila, transaccionalmente: no queda ningun REFRESH MATERIALIZED VIEW en el codigo, asi que no hay copia transitoria que quepa o no quepa. Ni un refresh mas pequeno ni un refresh no concurrente: ninguno. De paso se cierra la ventana de obsolescencia — un item recien ingerido era invisible en /v1/search hasta el siguiente refresco y ahora lo es en cuanto commitea. Se descarto la opcion 3 en su version pura (indice GIN de EXPRESION, sin columna almacenada, que habria ahorrado ~112 MB en vez de ~55): la medicion contra produccion de progress/measure_91.md mostro que ts_rank reordena entre el 35 % y el 75 % del top-20 —entre el 8 % y el 44 % de las coincidencias no tienen rating_external y todos los NULL empatan entre si—, y sin columna almacenada habria que recalcular to_tsvector de cada fila candidata ANTES del LIMIT, porque ts_rank vive en el ORDER BY. Coste de la busqueda 137 MB -> ~82 MB (57 del vector + 25 del GIN).",
       "verification": "grep -r 'REFRESH MATERIALIZED VIEW' backlogg/ scripts/ no devuelve nada (solo migraciones antiguas, que son historia). tests/test_search_expression_index.py fija que un item recien escrito aparece en la busqueda sin ningun paso intermedio, que no queda ninguna vista materializada en la DB, que las cuatro expresiones son identicas y que la migracion 0038 sube y baja con datos dentro. En produccion, tras desplegar: SELECT pg_size_pretty(sum(pg_database_size(datname))) FROM pg_database; debe bajar ~55 MB, y SELECT COUNT(*) FROM pg_matviews debe dar 0."
+    },
+    {
+      "id": 29,
+      "title": "La actividad de usuarios baneados empuja trending; visible_review_filters() queda reimplementado a medias",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-09-07",
+      "symptom": "backlogg/trending/repository.py excluye user_ratings.is_hidden pero no comprueba si el autor esta baneado. Un usuario baneado sigue empujando items hacia /v1/trending con sus valoraciones, sus entradas de biblioteca y sus activity_events, y ademas cuenta para el umbral TRENDING_MIN_ACTIVITY, que decide si un tipo sirve senal local o cae al fallback del catalogo.",
+      "cause": "backlogg/ratings/repository.py:32 visible_review_filters() ya existe y su docstring dice explicitamente que se reutiliza en toda superficie que lista o agrega reviews 'so hidden reviews and banned users disappear from all of them consistently'. Trending es una superficie nueva que agrega ratings y reimplementa la mitad del helper: is_hidden si, is_banned no. El leader fijo dos exclusiones obligatorias al implementer y esta no era una, asi que el deferral fue correcto; la inconsistencia nace documentada, no oculta.",
+      "impact": "Moderacion incompleta: banear a un usuario retira sus reviews de las listas y de los agregados pero no su influencia sobre que ve la portada. Con pocos usuarios el efecto es proporcionalmente mayor, porque el umbral es bajo (TRENDING_MIN_ACTIVITY=5) y basta poca actividad para mover un bloque entero de local a fallback o al reves.",
+      "options": "1) Reutilizar visible_review_filters() en las contribuciones de trending que tocan user_ratings. 2) Extender el filtro tambien a library_entries y activity_events, que no tienen equivalente hoy — es donde esta el trabajo real, porque el helper actual solo cubre ratings. Decidir si la exclusion debe ser por autor baneado en las tres tablas o solo en la de ratings.",
+      "notes": "Detectado por el reviewer en la review de la feature 81 (progress/review_81.md, punto 2 de deuda legitima). No es un bug introducido por la 81: es una superficie nueva que hereda una inconsistencia preexistente del modelo de moderacion."
+    },
+    {
+      "id": 30,
+      "title": "El toggle completed -> dropped -> completed genera activity_events ilimitados y un solo usuario cruza TRENDING_MIN_ACTIVITY",
+      "area": "backend",
+      "severity": "medium",
+      "status": "open",
+      "discovered": "2026-09-07",
+      "symptom": "backlogg/library/service.py:64 inserta un activity_event de tipo status_completed en cada transicion HACIA completed. Un usuario que alterne el estado de una entrada (completed -> dropped -> completed -> ...) genera un evento nuevo en cada vuelta, sin tope. uq_activity_events_rating_id no lo frena porque esos eventos llevan rating_id NULL y Postgres admite multiples NULL en una constraint unique.",
+      "cause": "El escritor de eventos es idempotente frente a un PUT repetido del mismo estado (solo inserta si previous_status != 'completed'), pero no frente a un ciclo de ida y vuelta. Es comportamiento preexistente de la feature 54, no de la 81.",
+      "impact": "Antes de la feature 81 el unico consumidor era el feed, donde el efecto es cosmetico. Con la 81 el contador de gestos alimenta TRENDING_MIN_ACTIVITY y el score decaido de /v1/trending, asi que un solo usuario puede cruzar el umbral el solo y colocar un item en trending sin que exista comunidad detras. Deja de ser cosmetico: es el vector de manipulacion mas barato del endpoint.",
+      "options": "1) Deduplicar por (user_id, item_type, item_id, event_type) dentro de una ventana en el propio escritor. 2) Deduplicar en la agregacion de trending, contando como mucho un gesto por (usuario, item, tipo de gesto) en la ventana — no arregla el feed pero si el endpoint afectado. 3) Constraint parcial en activity_events. La 2 es la mas barata y la unica que no cambia el comportamiento del feed.",
+      "notes": "Detectado por el reviewer en la review de la feature 81 (progress/review_81.md, punto 5 de deuda legitima). El comportamiento es preexistente; lo que es nuevo es que ahora tenga consecuencia."
+    },
+    {
+      "id": 31,
+      "title": "El fallback de trending ejecuta cuatro COUNT(*) cuyo resultado se descarta",
+      "area": "backend",
+      "severity": "low",
+      "status": "open",
+      "discovered": "2026-09-07",
+      "symptom": "backlogg/trending/service.py _list_recent_catalog delega en list_movies/list_series/list_books/list_games, que devuelven (items, total). El total se descarta, pero la query de conteo se ejecuta igualmente (backlogg/movies/repository.py:45-47 y equivalentes). En el mix sin type son 4 conteos inutiles por computo, 8 si algun tipo relaja la ventana por quedarse vacio.",
+      "cause": "Los list_* estan disenados para paginacion, donde el total es parte del contrato. Trending los reutiliza por el criterio de orden (feature 66) y no necesita paginar.",
+      "impact": "Hoy irrelevante: el resultado se sirve de la cache in-process con CACHE_TTL_TRENDING=900, asi que son 4 conteos cada 15 minutos por combinacion de (type, period). Deja de serlo si se baja el TTL, y el coste crece con el catalogo — el objetivo son ~100k items por tipo.",
+      "options": "1) Parametro para omitir el conteo en los list_*. 2) Query propia en el repositorio de trending, a costa de duplicar el criterio de orden en un quinto sitio. La 1 es preferible: mantiene el orden canonico en un solo lugar.",
+      "notes": "Detectado por el reviewer en la review de la feature 81 (progress/review_81.md, punto 6 de deuda legitima). Acoplado a la decision sobre CACHE_TTL_TRENDING: si el TTL baja, este issue sube de severidad."
     }
   ]
 }

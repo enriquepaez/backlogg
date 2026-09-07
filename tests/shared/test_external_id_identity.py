@@ -267,8 +267,8 @@ async def test_the_batch_route_follows_the_external_id_when_the_title_changes(db
 async def test_the_on_demand_route_follows_the_external_id_when_the_title_changes(db):
     """Same rule through the per-item upsert the on-demand paths call.
 
-    ``GET /movies/{slug}``, the search fan-out, ``/similar`` and ``trending``
-    all reach the catalog through ``upsert_movie`` + ``upsert_external_id``.
+    ``GET /movies/{slug}``, the search fan-out and ``/similar`` all reach the
+    catalog through ``upsert_movie`` + ``upsert_external_id``.
     Passing the external id is what makes them resolve identity, and the two
     routes must agree — otherwise the same TMDB id would mean two different
     rows depending on which door it came through.

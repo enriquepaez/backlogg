@@ -1007,20 +1007,81 @@ Sin `type` devuelve mix de los 4 tipos (movies, series, books, games — hasta
 `slug`, `poster_url`, `release_date`, `rating_external`, `rating_internal`
 (feature 69).
 
-**Fuente por tipo** (feature 68 — Open Library e IGDB no exponen un
-"trending" nativo, ver `docs/external-apis.md`):
+**Fuente (feature 81 — igual para los cuatro tipos):** la actividad reciente
+de la propia plataforma. **No hay ninguna llamada externa**; en particular
+`/trending` ya **no** consulta la TMDB Trending API y por tanto ya no descubre
+ni ingesta items nuevos en el catálogo (de eso se encargan la siembra y el sync
+nocturno, ver `docs/seeding-plan.md`).
 
-- `movie`/`series`: TMDB Trending API. `period=day|week` selecciona la
-  ventana temporal de TMDB. Los items nuevos descubiertos se persisten en la
-  DB local (comportamiento sin cambios respecto a la feature 20).
-- `book`/`game`: heurística de popularidad local sobre items ya persistidos
-  (no hay fan-out a Open Library/IGDB — no existe un endpoint de trending
-  que consultar). Mismo criterio de orden que el resto del catálogo
-  (feature 66): `rating_internal DESC NULLS LAST` como criterio visible,
-  `rating_external DESC NULLS LAST` solo como desempate interno.
-  **Limitación conocida:** `period` se acepta sin error pero no tiene efecto
-  para `book`/`game` — la heurística no tiene ventana temporal, el resultado
-  es el mismo para `period=day` y `period=week`.
+Cada tipo resuelve su fuente **por separado** — books pueden ordenarse por
+actividad real mientras games siguen en fallback, dentro de la misma respuesta.
+
+**1. Señal local (cuando hay actividad suficiente).** Se agregan tres tablas
+dentro de la ventana del `period`, con **decaimiento exponencial** por
+antigüedad (`0.5 ^ (edad / vida_media)`), de modo que un gesto de hace seis
+días pesa mucho menos que uno de hace seis horas:
+
+| Contribución | Tabla | Recorte | Peso |
+|---|---|---|---|
+| Rating/review creado | `activity_events` (`rating_created`) | — | 3,0 |
+| Item completado | `activity_events` (`status_completed`) | — | 2,0 |
+| Intención de backlog | `library_entries` | solo `want` / `in_progress` / `dropped` | 1,0 / 1,5 / 0,5 |
+| Edición de rating | `user_ratings` | solo ediciones **posteriores al propio evento** de la fila | 1,0 |
+
+Los recortes no son cosméticos: `activity_events` **es un espejo** de las otras
+dos tablas (un `rating_created` por fila de `user_ratings`, un
+`status_completed` por transición a `completed`), así que sumarlas enteras
+contaría un mismo gesto hasta tres veces. Los estados `want`/`in_progress`/
+`dropped` nunca generan evento y una edición de rating tampoco
+(`uq_activity_events_rating_id`): esas dos son exactamente las porciones que
+aportan señal sin duplicar.
+
+El recorte de la última fila es más fino de lo que parece. El evento se escribe
+la primera vez que el rating **tiene contenido**, que no es necesariamente
+cuando nació la fila: `RatingIn` admite los dos campos a `None`, así que
+`PUT {}` crea fila sin evento y un `PUT {"score": 4}` posterior crea el evento
+**y** deja `updated_at > created_at`. Comparar solo esas dos columnas contaría
+esa única acción dos veces (3,0 + 1,0). Por eso la condición es contra el
+timestamp del **evento**, no contra el de la fila: `updated_at >
+evento.created_at` (o fila sin evento). Justificación completa en
+`backlogg/trending/repository.py`.
+
+Una review **oculta por moderación** (`user_ratings.is_hidden`) no cuenta, ni
+por su evento ni por su fila.
+
+**2. Fallback (cuando no hay actividad suficiente).** Es el estado por defecto
+mientras la comunidad no exista. El orden es el **canónico del catálogo**
+(feature 66) — `rating_internal DESC NULLS LAST` como criterio visible,
+`rating_external DESC NULLS LAST` solo como desempate — sobre los estrenos
+recientes del tipo. La recencia va en el `WHERE` (ventana sobre
+`movies.release_date`, `series.first_air_date`, `books.first_publish_date`,
+`games.release_date`), **nunca** en el `ORDER BY`: es lo que hace que `period`
+tenga efecto real también sin actividad.
+
+Si la ventana deja **cero** resultados para un tipo (catálogo sin estrenos
+recientes de ese tipo — el caso normal en libros, cuya fecha es la de
+publicación original), la ventana se **relaja** y se sirve el orden canónico
+sobre todo el catálogo, en vez de devolver un hueco. Solo se relaja con
+resultado **totalmente** vacío: un resultado parcial sigue respetando `period`.
+
+**Umbral.** Un tipo usa la señal local cuando tiene al menos
+`TRENDING_MIN_ACTIVITY` gestos dentro de la ventana; por debajo, cae al
+fallback. Se evalúa **por tipo**, no globalmente, y es configurable por env
+(default 5, ver `.env.example`).
+
+**Efecto de `period`** (valores admitidos: `day` y `week`, sin cambios):
+
+| | `period=day` | `period=week` |
+|---|---|---|
+| Ventana de actividad | 1 día | 7 días |
+| Vida media del decaimiento | 6 h | 42 h |
+| Ventana de estreno del fallback | 90 días | 365 días |
+
+`period` tiene efecto real para **los cuatro tipos**. La «limitación conocida»
+de la feature 68 (`period` inerte para `book`/`game`) ya no aplica.
+
+La respuesta se cachea en proceso por `(type, period)` durante
+`CACHE_TTL_TRENDING` segundos.
 
 ### Admin (sync trigger)
 

@@ -1614,7 +1614,7 @@
         "Tests: con actividad, sin actividad, y distintos valores de period",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 82,

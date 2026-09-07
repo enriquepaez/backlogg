@@ -255,10 +255,18 @@ los últimos N días, con decaimiento temporal. En cuanto haya usuarios, tu
 trending propio es mejor y más honesto que el de TMDB, porque refleja a tu
 comunidad y no al tráfico global de otra web.
 
-Mientras no haya usuarios, se cae a `rating_external × recencia` —
-exactamente lo que ya hacen `type=book` y `type=game` hoy (ver
-`docs/external-apis.md`). El parámetro `period`, que hoy se acepta y se
-ignora para libros y juegos, pasa a tener efecto real para los cuatro tipos.
+Mientras no haya usuarios, se cae al **orden canónico del catálogo** sobre los
+estrenos recientes. El parámetro `period`, que se aceptaba y se ignoraba para
+libros y juegos, pasa a tener efecto real para los cuatro tipos.
+
+> **Hecho (feature 81).** Implementado. Dos matices frente a lo previsto aquí:
+> el fallback ordena por `rating_internal DESC NULLS LAST, rating_external DESC
+> NULLS LAST` (el orden canónico de la feature 66) y no por
+> `rating_external × recencia` —trending no se inventa un orden propio—, y la
+> recencia va como filtro `WHERE` sobre la fecha de estreno, no dentro del
+> `ORDER BY`, que es lo que hace que `period` se note también sin actividad. El
+> umbral de actividad mínima se evalúa **por tipo**. Contrato y tablas de pesos
+> en `docs/api.md` §Trending.
 
 ---
 

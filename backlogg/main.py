@@ -104,7 +104,10 @@ OPENAPI_TAGS = [
     },
     {
         "name": "trending",
-        "description": "Trending movies and series from the TMDB Trending API.",
+        "description": (
+            "Trending items ranked from the platform's own recent activity, "
+            "with a catalog fallback when activity is too thin."
+        ),
     },
     {
         "name": "auth",

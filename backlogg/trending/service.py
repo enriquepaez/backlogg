@@ -1,5 +1,31 @@
-import asyncio
-from datetime import date
+"""Trending service — ranking built from the platform's own recent activity.
+
+Feature 81. ``GET /v1/trending`` no longer asks TMDB what the rest of the
+internet is watching: it ranks by what *this* community did in the last
+``period``, with an explicit exponential time decay. There is no external
+fan-out left in this module, which also means trending no longer discovers or
+ingests new catalog items — the catalog is filled by the seeding scripts and
+by the nightly sync (see ``docs/seeding-plan.md``).
+
+Two sources, chosen **per item type**:
+
+1. **Local activity** — ``activity_events`` + ``library_entries`` +
+   ``user_ratings`` inside the period's window, decayed by age. Served when the
+   type has at least ``settings.TRENDING_MIN_ACTIVITY`` gestures in that
+   window. The de-duplicated decomposition of those three tables (they overlap
+   by construction) is documented in ``backlogg/trending/repository.py``.
+2. **Fallback** — the catalog's canonical order (feature 66:
+   ``rating_internal DESC NULLS LAST``, ``rating_external DESC NULLS LAST`` as
+   tie-break) restricted to recent releases. The period lives in the ``WHERE``
+   (a release-date window), never in the ``ORDER BY``, which is what makes
+   ``period`` observable even with an empty platform — the default state until
+   the community exists.
+
+The threshold is evaluated per type, not globally: books can rank from real
+activity while games still fall back, inside the same response.
+"""
+
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,145 +38,84 @@ from backlogg.games import repository as games_repo
 from backlogg.games.models import Game
 from backlogg.games.schemas import GameSortEnum
 from backlogg.movies import repository as movies_repo
-from backlogg.movies.adapters.tmdb import TMDBClient
-from backlogg.movies.service import _persist_movie_people
+from backlogg.movies.models import Movie
+from backlogg.movies.schemas import MovieSortEnum
 from backlogg.series import repository as series_repo
-from backlogg.series.adapters.tmdb import TMDBSeriesClient
-from backlogg.series.service import _persist_series_creators, _persist_series_people
-from backlogg.shared.external_ids import upsert_external_id
-from backlogg.shared.slugs import titled_slug
+from backlogg.series.models import Series
+from backlogg.series.schemas import SeriesSortEnum
+from backlogg.shared.catalog_filters import CatalogSearchFilters
+from backlogg.trending import repository as repo
 from backlogg.trending.schemas import TrendingItemOut, TrendingOut
 
-_movies_tmdb = TMDBClient()
-_series_tmdb = TMDBSeriesClient()
+TRENDING_LIMIT = 20
+MIX_PER_TYPE = 5
+
+# ── What ``period`` means ────────────────────────────────────────────────────
+#
+# ACTIVITY_WINDOWS is how far back the activity signal looks. DECAY_HALF_LIVES
+# is the half-life of that signal inside the window: a gesture exactly one
+# half-life old counts half as much as one made right now, two half-lives a
+# quarter, and so on (``0.5 ** (age / half_life)``). Both are a quarter of the
+# window, so the newest quarter of the window always dominates — that is what
+# makes "trending" mean *accelerating*, not merely *popular*.
+ACTIVITY_WINDOWS: dict[str, timedelta] = {
+    "day": timedelta(days=1),
+    "week": timedelta(days=7),
+}
+DECAY_HALF_LIVES: dict[str, timedelta] = {
+    "day": timedelta(hours=6),
+    "week": timedelta(hours=42),
+}
+
+# Release-date window used by the fallback. Much wider than the activity
+# window, because it filters *catalog* recency rather than user gestures: what
+# counts as "a recent release" is measured in months, not hours. Still driven
+# by ``period``, so the parameter has a real effect for all four types even
+# with zero activity on the platform.
+FALLBACK_WINDOWS: dict[str, timedelta] = {
+    "day": timedelta(days=90),
+    "week": timedelta(days=365),
+}
+
+# ?type= value -> stored item_type (the three activity tables and the four
+# catalog tables both use the uppercase form).
+TYPE_TO_ITEM_TYPE: dict[str, str] = {
+    "movie": "MOVIE",
+    "series": "SERIES",
+    "book": "BOOK",
+    "game": "GAME",
+}
 
 
-async def _ingest_trending_movie(db: AsyncSession, raw: dict) -> TrendingItemOut | None:
-    """Persist a trending movie (list-format TMDB item) and return a TrendingItemOut.
+# ── Mapping catalog rows to the response shape ───────────────────────────────
 
-    The trending endpoint returns list-format items (no genres), so we fetch
-    full detail to get genres and persist correctly.
-    """
-    tmdb_id = raw.get("id")
-    if not tmdb_id:
-        return None
 
-    title = raw.get("title", "")
-    release_date_str = raw.get("release_date", "")
-    release_date: date | None = None
-    year = ""
-    if release_date_str:
-        try:
-            release_date = date.fromisoformat(release_date_str)
-            year = str(release_date.year)
-        except ValueError:
-            pass
-
-    # Same rule the adapter applies, so the local lookup below can hit.  With
-    # the plain fold a non-Latin title produced "-{year}" and could match an
-    # unrelated item of that year (issue #18).
-    slug = titled_slug(title, year, "TMDB", tmdb_id)
-
-    # Try local DB first to avoid unnecessary TMDB calls
-    movie = await movies_repo.get_movie_by_slug(db, slug)
-    if movie is None:
-        detail = await _movies_tmdb.get_movie_detail(tmdb_id)
-        if detail is None:
-            return None
-        movie_data = _movies_tmdb.movie_to_dict(detail)
-        movie = await movies_repo.upsert_movie(db, movie_data, external_id=str(tmdb_id))
-        await upsert_external_id(db, "MOVIE", movie.id, "TMDB", str(tmdb_id))
-
-        # Persist people (cast + directors) — the row was just created by the
-        # upsert above (feature 70: trending ingestion previously left movies
-        # without credits forever, since upsert_movie is idempotent by slug
-        # and this branch only runs once per movie).
-        await _persist_movie_people(db, movie, tmdb_id)
-
-        await db.commit()
-
-    poster_path = raw.get("poster_path")
-    poster_url = (
-        f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else movie.poster_url
-    )
-
-    vote_average = raw.get("vote_average")
-    rating_external = (
-        round(float(vote_average), 1)
-        if vote_average
-        else (float(movie.rating_external) if movie.rating_external is not None else None)
-    )
-
+def _movie_to_trending_item(movie: Movie) -> TrendingItemOut:
     return TrendingItemOut(
         item_type="MOVIE",
         title=movie.title,
         slug=movie.slug,
-        poster_url=poster_url,
+        poster_url=movie.poster_url,
         release_date=movie.release_date,
-        rating_external=rating_external,
+        rating_external=(
+            float(movie.rating_external) if movie.rating_external is not None else None
+        ),
         rating_internal=(
             float(movie.rating_internal) if movie.rating_internal is not None else None
         ),
     )
 
 
-async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOut | None:
-    """Persist a trending series (list-format TMDB item) and return a TrendingItemOut."""
-    tmdb_id = raw.get("id")
-    if not tmdb_id:
-        return None
-
-    title = raw.get("name", "")
-    first_air_date_str = raw.get("first_air_date", "")
-    year = ""
-    if first_air_date_str:
-        try:
-            first_air_date = date.fromisoformat(first_air_date_str)
-            year = str(first_air_date.year)
-        except ValueError:
-            pass
-
-    slug = titled_slug(title, year, "TMDB", tmdb_id)
-
-    series = await series_repo.get_series_by_slug(db, slug)
-    if series is None:
-        detail = await _series_tmdb.get_series_detail(tmdb_id)
-        if detail is None:
-            return None
-        series_data = _series_tmdb.series_to_dict(detail)
-        series = await series_repo.upsert_series(db, series_data, external_id=str(tmdb_id))
-        await upsert_external_id(db, "SERIES", series.id, "TMDB", str(tmdb_id))
-
-        # Persist people (cast + creators) — the row was just created by the
-        # upsert above (feature 70: trending ingestion previously left series
-        # without credits forever, since upsert_series is idempotent by slug
-        # and this branch only runs once per series).
-        await _persist_series_people(db, series, tmdb_id)
-        created_by = detail.get("created_by", [])
-        if created_by:
-            await _persist_series_creators(db, series, created_by)
-
-        await db.commit()
-
-    poster_path = raw.get("poster_path")
-    poster_url = (
-        f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else series.poster_url
-    )
-
-    vote_average = raw.get("vote_average")
-    rating_external = (
-        round(float(vote_average), 1)
-        if vote_average
-        else (float(series.rating_external) if series.rating_external is not None else None)
-    )
-
+def _series_to_trending_item(series: Series) -> TrendingItemOut:
     return TrendingItemOut(
         item_type="SERIES",
         title=series.title,
         slug=series.slug,
-        poster_url=poster_url,
+        poster_url=series.poster_url,
         release_date=series.first_air_date,
-        rating_external=rating_external,
+        rating_external=(
+            float(series.rating_external) if series.rating_external is not None else None
+        ),
         rating_internal=(
             float(series.rating_internal) if series.rating_internal is not None else None
         ),
@@ -158,13 +123,6 @@ async def _ingest_trending_series(db: AsyncSession, raw: dict) -> TrendingItemOu
 
 
 def _book_to_trending_item(book: Book) -> TrendingItemOut:
-    """Map a persisted ``Book`` to a trending item.
-
-    Books have no external "trending this week" endpoint (Open Library
-    exposes no such thing), so unlike movies/series there is nothing to
-    ingest here — the item is already in the catalog. Popularity is a local
-    heuristic instead of a fetched signal (see ``_collect_books``).
-    """
     return TrendingItemOut(
         item_type="BOOK",
         title=book.title,
@@ -177,11 +135,6 @@ def _book_to_trending_item(book: Book) -> TrendingItemOut:
 
 
 def _game_to_trending_item(game: Game) -> TrendingItemOut:
-    """Map a persisted ``Game`` to a trending item (see ``_book_to_trending_item``).
-
-    IGDB has no "trending this week" endpoint either, so games use the same
-    local popularity heuristic as books.
-    """
     return TrendingItemOut(
         item_type="GAME",
         title=game.title,
@@ -193,29 +146,115 @@ def _game_to_trending_item(game: Game) -> TrendingItemOut:
     )
 
 
-async def _collect_books(db: AsyncSession, limit: int) -> list[TrendingItemOut]:
-    """Return up to ``limit`` books ranked by the catalog's popularity heuristic.
+_TO_TRENDING_ITEM = {
+    "MOVIE": _movie_to_trending_item,
+    "SERIES": _series_to_trending_item,
+    "BOOK": _book_to_trending_item,
+    "GAME": _game_to_trending_item,
+}
 
-    Open Library has no native "trending" concept, so this reuses the same
-    ``order_by`` already established for book listings (feature 66):
-    ``rating_internal DESC NULLS LAST`` as the primary/visible criterion,
-    ``rating_external DESC NULLS LAST`` only as an internal tie-break. This
-    is a local ranking over already-persisted items, not an external fetch —
-    there is nothing to ingest, unlike movies/series.
+
+# ── Fallback: canonical catalog order, restricted to recent releases ─────────
+
+
+async def _list_recent_catalog(
+    db: AsyncSession, item_type: str, date_from, limit: int
+) -> list[TrendingItemOut]:
+    """One page of the type's catalog listing, newest-release window applied.
+
+    Delegates to the domain's own ``list_*`` repository rather than re-writing
+    its ``ORDER BY`` here: trending must rank like the rest of the catalog, and
+    both the sort (``rating_desc``) and the date window (``filters.date_from``,
+    already bound to each type's own date column) are part of those functions'
+    existing contract. ``date_from=None`` means "no window".
     """
-    books, _total = await books_repo.list_books(
-        db, genre=None, sort=BookSortEnum.rating_desc, page=1, limit=limit
-    )
-    return [_book_to_trending_item(book) for book in books]
+    filters = CatalogSearchFilters(date_from=date_from)
+    if item_type == "MOVIE":
+        items, _ = await movies_repo.list_movies(
+            db, genre=None, sort=MovieSortEnum.rating_desc, page=1, limit=limit, filters=filters
+        )
+    elif item_type == "SERIES":
+        items, _ = await series_repo.list_series(
+            db, genre=None, sort=SeriesSortEnum.rating_desc, page=1, limit=limit, filters=filters
+        )
+    elif item_type == "BOOK":
+        items, _ = await books_repo.list_books(
+            db, genre=None, sort=BookSortEnum.rating_desc, page=1, limit=limit, filters=filters
+        )
+    else:
+        items, _ = await games_repo.list_games(
+            db, genre=None, sort=GameSortEnum.rating_desc, page=1, limit=limit, filters=filters
+        )
+    to_item = _TO_TRENDING_ITEM[item_type]
+    return [to_item(item) for item in items]
 
 
-async def _collect_games(db: AsyncSession, limit: int) -> list[TrendingItemOut]:
-    """Return up to ``limit`` games ranked by the same popularity heuristic
-    as ``_collect_books`` (IGDB also has no native "trending" concept)."""
-    games, _total = await games_repo.list_games(
-        db, genre=None, sort=GameSortEnum.rating_desc, page=1, limit=limit
+async def _fallback(
+    db: AsyncSession, item_type: str, period: str, limit: int
+) -> list[TrendingItemOut]:
+    """Catalog fallback for one type: recent releases in canonical order.
+
+    Empty-window edge case: a catalog with no release of this type inside the
+    window would otherwise leave a silent hole in the response — worse for the
+    caller than a slightly older item, and the likeliest outcome for books,
+    whose ``first_publish_date`` is the original publication year. So when the
+    window yields **nothing at all**, it is relaxed away entirely and the plain
+    canonical order is served. The window is only relaxed on a *fully* empty
+    result: a partial one still honours ``period``, which is the point of the
+    parameter.
+    """
+    cutoff = (datetime.now(UTC) - FALLBACK_WINDOWS[period]).date()
+    items = await _list_recent_catalog(db, item_type, cutoff, limit)
+    if items:
+        return items
+    return await _list_recent_catalog(db, item_type, None, limit)
+
+
+# ── Local activity ranking ───────────────────────────────────────────────────
+
+
+async def _local_activity(
+    db: AsyncSession, item_type: str, period: str, limit: int
+) -> list[TrendingItemOut] | None:
+    """Top ``limit`` items of this type by decayed local activity.
+
+    Returns ``None`` when the type has fewer than ``TRENDING_MIN_ACTIVITY``
+    gestures inside the window — the signal is too thin to rank on, so the
+    caller falls back. That decision is taken per type.
+
+    Two queries total, never one per item: one aggregate over the activity
+    tables, one batch resolution of the winning ids against the catalog table.
+    An id whose catalog row no longer exists is dropped silently (the activity
+    tables are polymorphic and carry no FK).
+    """
+    now = datetime.now(UTC)
+    since = now - ACTIVITY_WINDOWS[period]
+    half_life_seconds = DECAY_HALF_LIVES[period].total_seconds()
+
+    total_gestures, scored = await repo.activity_scores(
+        db,
+        item_type=item_type,
+        since=since,
+        now=now,
+        half_life_seconds=half_life_seconds,
+        limit=limit,
     )
-    return [_game_to_trending_item(game) for game in games]
+    if total_gestures < settings.TRENDING_MIN_ACTIVITY:
+        return None
+
+    rows = await repo.get_items_by_ids(db, item_type, [item_id for item_id, _ in scored])
+    to_item = _TO_TRENDING_ITEM[item_type]
+    return [to_item(rows[item_id]) for item_id, _ in scored if item_id in rows]
+
+
+async def _collect(
+    db: AsyncSession, item_type: str, period: str, limit: int
+) -> list[TrendingItemOut]:
+    """Local activity for this type if there is enough of it, catalog otherwise."""
+    items = await _local_activity(db, item_type, period, limit)
+    if items:
+        return items
+    return await _fallback(db, item_type, period, limit)
 
 
 def _interleave(*lists: list[TrendingItemOut]) -> list[TrendingItemOut]:
@@ -234,30 +273,7 @@ def _interleave(*lists: list[TrendingItemOut]) -> list[TrendingItemOut]:
     return interleaved
 
 
-async def _collect_movies(db: AsyncSession, raw_list: list[dict]) -> list[TrendingItemOut]:
-    """Process trending movies sequentially (same DB session — no concurrency)."""
-    results: list[TrendingItemOut] = []
-    for raw in raw_list:
-        try:
-            item = await _ingest_trending_movie(db, raw)
-            if item is not None:
-                results.append(item)
-        except Exception:
-            pass  # skip items that fail to ingest
-    return results
-
-
-async def _collect_series(db: AsyncSession, raw_list: list[dict]) -> list[TrendingItemOut]:
-    """Process trending series sequentially (same DB session — no concurrency)."""
-    results: list[TrendingItemOut] = []
-    for raw in raw_list:
-        try:
-            item = await _ingest_trending_series(db, raw)
-            if item is not None:
-                results.append(item)
-        except Exception:
-            pass  # skip items that fail to ingest
-    return results
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 
 async def get_trending(
@@ -267,10 +283,11 @@ async def get_trending(
 ) -> TrendingOut:
     """Return up to 20 trending items, served from the in-process TTL cache.
 
-    Trending is expensive — it fans out to TMDB and may ingest new items — so the
-    computed result is cached per ``(item_type, period)`` for a configurable TTL.
-    The cache lives behind ``get_cache()`` so it can move to Redis without
-    touching this call site. A cache miss recomputes via :func:`_compute_trending`.
+    Trending aggregates over three activity tables plus the catalog, so the
+    computed result is cached per ``(item_type, period)`` for a configurable
+    TTL. The cache lives behind ``get_cache()`` so it can move to Redis without
+    touching this call site. A cache miss recomputes via
+    :func:`_compute_trending`.
     """
     cache = get_cache()
     key = f"trending:{item_type}:{period}"
@@ -290,47 +307,23 @@ async def _compute_trending(
 ) -> TrendingOut:
     """Compute the trending list (uncached).
 
-    - item_type=None   → mix of the 4 types (movies, series, books, games),
-      up to 5 each, interleaved
-    - item_type=movie  → movies only (TMDB trending, ``period`` applies)
-    - item_type=series → series only (TMDB trending, ``period`` applies)
-    - item_type=book   → books only, ranked by the local popularity heuristic
-      (feature 68 — Open Library has no "trending" endpoint). ``period`` is
-      accepted but ignored: the heuristic has no time window.
-    - item_type=game   → games only, same local heuristic as books (IGDB has
-      no "trending" endpoint either). ``period`` is accepted but ignored.
+    - ``item_type=None`` → mix of the four types, up to 5 each, interleaved.
+      Each block resolves its own source independently, so one type falling
+      back does not drag the others with it.
+    - ``item_type=movie|series|book|game`` → that type only, up to 20.
+
+    ``period`` applies to all four types, in both branches: it sets the
+    activity window and its decay half-life, and the release-date window of
+    the fallback.
     """
-    if item_type == "movie":
-        raw_movies = await _movies_tmdb.get_trending_movies(period)
-        results = await _collect_movies(db, raw_movies[:20])
-        return TrendingOut(results=results[:20])
+    period = str(period)
+    if item_type is not None:
+        stored_type = TYPE_TO_ITEM_TYPE[str(item_type)]
+        results = await _collect(db, stored_type, period, TRENDING_LIMIT)
+        return TrendingOut(results=results[:TRENDING_LIMIT])
 
-    if item_type == "series":
-        raw_series = await _series_tmdb.get_trending_series(period)
-        results = await _collect_series(db, raw_series[:20])
-        return TrendingOut(results=results[:20])
-
-    if item_type == "book":
-        results = await _collect_books(db, limit=20)
-        return TrendingOut(results=results[:20])
-
-    if item_type == "game":
-        results = await _collect_games(db, limit=20)
-        return TrendingOut(results=results[:20])
-
-    # No type filter — mix of the 4 types. Movies/series come from TMDB
-    # (fetched concurrently, no DB involved), books/games from the local
-    # heuristic. Each processed sequentially against the same DB session to
-    # avoid concurrent writes on it.
-    raw_movies, raw_series = await asyncio.gather(
-        _movies_tmdb.get_trending_movies(period),
-        _series_tmdb.get_trending_series(period),
-    )
-
-    movies_out = await _collect_movies(db, raw_movies[:5])
-    series_out = await _collect_series(db, raw_series[:5])
-    books_out = await _collect_books(db, limit=5)
-    games_out = await _collect_games(db, limit=5)
-
-    interleaved = _interleave(movies_out, series_out, books_out, games_out)
-    return TrendingOut(results=interleaved[:20])
+    blocks = [
+        await _collect(db, stored_type, period, MIX_PER_TYPE)
+        for stored_type in TYPE_TO_ITEM_TYPE.values()
+    ]
+    return TrendingOut(results=_interleave(*blocks)[:TRENDING_LIMIT])
