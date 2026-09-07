@@ -296,7 +296,9 @@ async def get_authorship_works(
     # Gate, evaluated once for the whole statement: does this person have an
     # AUTHOR credit on a book in the catalog?
     authored_a_book = (
-        select(Credit.id)
+        # ``Credit.person_id`` and not ``Credit.id``: feature 89 dropped the
+        # surrogate key.  Inside an EXISTS the projection is irrelevant.
+        select(Credit.person_id)
         .join(Book, Book.id == Credit.item_id)
         .where(
             Credit.person_id == person_id,

@@ -51,7 +51,12 @@ async def test_get_person_returns_200(client, db):
 
 
 async def test_get_person_returns_200_with_credits(client, db):
-    """GET /people/{slug} returns credits list."""
+    """GET /people/{slug} returns credits list — graph roles only.
+
+    ``DIRECTOR``, not ``ACTOR``: feature 89 keeps only graph roles in
+    ``people``/``credits``.  The two behaviours that follow from that are
+    covered by ``tests/test_credits_cast_graph_split.py``.
+    """
     from datetime import UTC, datetime
 
     from backlogg.movies.repository import upsert_movie
@@ -99,9 +104,7 @@ async def test_get_person_returns_200_with_credits(client, db):
             "item_type": "MOVIE",
             "item_id": movie.id,
             "person_id": person.id,
-            "role": "ACTOR",
-            "character_name": "Narrator",
-            "billing_order": 2,
+            "role": "DIRECTOR",
         },
     )
 
@@ -115,9 +118,11 @@ async def test_get_person_returns_200_with_credits(client, db):
     assert credit["item_type"] == "MOVIE"
     assert credit["item_slug"] == "router-test-movie-2024"
     assert credit["item_title"] == "Router Test Movie"
-    assert credit["role"] == "ACTOR"
-    assert credit["character_name"] == "Narrator"
-    assert credit["billing_order"] == 2
+    assert credit["role"] == "DIRECTOR"
+    # Both fields survive in the schema and are always null since feature 89:
+    # they only ever described cast rows, which now live in ``item_cast``.
+    assert credit["character_name"] is None
+    assert credit["billing_order"] is None
 
 
 async def test_get_person_returns_404(client, db):

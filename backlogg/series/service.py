@@ -21,9 +21,12 @@ from backlogg.series.schemas import (
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import (
+    CAST_ROLE,
     SERIES_CREW_JOB_ROLES,
+    build_cast_payload,
     get_credits_for_item,
     select_crew_credits,
+    upsert_item_cast,
 )
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
@@ -118,7 +121,7 @@ def map_series_credits(credits_data: dict | None) -> list[BulkPerson]:
     for member in credits_data.get("cast", [])[:10]:
         row = _tmdb_person_row(
             member,
-            "ACTOR",
+            CAST_ROLE,
             character_name=member.get("character") or None,
             billing_order=member.get("order"),
         )
@@ -160,10 +163,26 @@ def collect_series_creators(created_by: list) -> list[BulkPerson]:
 async def _persist_series_credit_rows(
     db: AsyncSession, series: Series, rows: list[BulkPerson]
 ) -> None:
-    """Persist already-mapped credit rows one person at a time."""
+    """Persist already-mapped credit rows, cast and crew to their own tables.
+
+    Feature 89 split the destination on ``CAST_ROLE``: the crew (creator,
+    writer, source author) keeps its ``people``/``external_ids``/``credits``
+    rows because it builds the navigation graph, and the cast is written to
+    ``item_cast`` as one JSONB array with none of the three.  Mirrors
+    ``backlogg.movies.service._persist_movie_people``; the rule itself lives
+    in ``shared/credits.py`` so neither write frontier can drift.
+    """
     now = datetime.now(UTC)
 
+    payload = build_cast_payload(
+        (row.name, row.character_name, row.billing_order) for row in rows if row.role == CAST_ROLE
+    )
+    if payload:
+        await upsert_item_cast(db, "SERIES", [(series.id, payload)])
+
     for row in rows:
+        if row.role == CAST_ROLE:
+            continue
         person = await _get_or_create_person_tmdb(
             db, int(row.external_id), row.name, row.slug, row.profile_url, now
         )
@@ -177,8 +196,6 @@ async def _persist_series_credit_rows(
                 "item_id": series.id,
                 "person_id": person.id,
                 "role": row.role,
-                "character_name": row.character_name,
-                "billing_order": row.billing_order,
             },
         )
 

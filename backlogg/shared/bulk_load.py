@@ -100,7 +100,9 @@ from sqlalchemy import Table, select, text, tuple_
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import sqltypes
+from sqlalchemy.types import TypeDecorator
 
+from backlogg.shared.credits import CAST_ROLE, build_cast_payload, upsert_item_cast
 from backlogg.shared.external_ids import ExternalId, record_link_skip
 from backlogg.shared.identity import align_slugs_to_external_ids
 from backlogg.shared.models import Credit, Person
@@ -268,6 +270,21 @@ def _coerce(col: Any, value: Any) -> Any:
         if not col.nullable:
             raise RowRejected(f"{col.name}: NULL in a NOT NULL column")
         return None
+
+    if isinstance(type_, TypeDecorator):
+        # COPY bypasses SQLAlchemy's execution, so the bind processor of a
+        # ``TypeDecorator`` never runs on this path — it has to be applied by
+        # hand or the string ``'MOVIE'`` would be handed to a ``smallint``
+        # column (feature 89, ``shared/codes.py``).  A rejected value raises
+        # ``ValueError``/``TypeError`` there; turn it into the same per-row
+        # drop as any other invalid value instead of aborting the batch.
+        try:
+            value = type_.process_bind_param(value, _PG_DIALECT)
+        except (ValueError, TypeError) as exc:
+            raise RowRejected(f"{col.name}: {exc}") from exc
+        if value is None:
+            return None
+        type_ = type_.impl_instance
 
     if isinstance(type_, sqltypes.DateTime):
         if not isinstance(value, datetime):
@@ -1013,7 +1030,7 @@ async def _load_people_credits(
     outcome: BulkLoadResult,
     now: datetime,
 ) -> None:
-    """Write the people + credits of a whole batch, item ids already known.
+    """Write the cast + crew of a whole batch, item ids already known.
 
     Split out of ``bulk_load_items`` for feature 85: the targeted credits
     backfill has the item rows already persisted and only needs this half of
@@ -1021,10 +1038,25 @@ async def _load_people_credits(
     person payloads and credits whose person could not be resolved are
     dropped and counted in ``outcome.people_rejected`` — same contract the
     per-item route has always had.  Does not commit.
+
+    Feature 89 gave the batch the same fork the per-item route has: rows whose
+    role is ``CAST_ROLE`` become one ``item_cast`` array per item and never
+    reach ``people``, ``external_ids`` or ``credits``; everything else is the
+    navigation graph and is written exactly as before.  Splitting *here*,
+    rather than in each ``map_*_credits``, is what keeps the two write
+    frontiers on one rule — and keeps the mapping layer able to hand the cast
+    over untouched, which is what a future re-hydration would need.
+
+    Both halves count into ``people_written``: callers (``scheduler.jobs``,
+    the targeted backfill) use it as "credit rows written for this batch" to
+    decide whether a fetch produced anything, and an item whose only people
+    are its cast must not read as empty.
     """
     people: list[BulkPerson] = []
     credit_rows: list[tuple[int, BulkPerson]] = []
+    cast_rows: list[tuple[int, list[dict]]] = []
     for item_id, persons in entries:
+        cast: list[tuple[str, str | None, int | None]] = []
         for person in persons:
             if not person.external_id or not person.name or not person.slug or not person.role:
                 logger.warning(
@@ -1034,22 +1066,25 @@ async def _load_people_credits(
                 )
                 outcome.people_rejected += 1
                 continue
+            if person.role == CAST_ROLE:
+                cast.append((person.name, person.character_name, person.billing_order))
+                continue
             people.append(person)
             credit_rows.append((item_id, person))
+        payload = build_cast_payload(cast)
+        if payload:
+            cast_rows.append((item_id, payload))
+
+    if cast_rows:
+        outcome.people_written += sum(len(payload) for _, payload in cast_rows)
+        await upsert_item_cast(session, item_type, cast_rows)
 
     if not credit_rows:
         return
 
     resolved = await _resolve_people(session, staging, people, now)
     credit_table = Credit.__table__
-    credit_columns = (
-        "item_type",
-        "item_id",
-        "person_id",
-        "role",
-        "character_name",
-        "billing_order",
-    )
+    credit_columns = ("item_type", "item_id", "person_id", "role")
     deduped: dict[tuple[str, int, int, str], tuple] = {}
     for item_id, person in credit_rows:
         person_id = resolved.get((person.source, person.external_id))
@@ -1061,8 +1096,6 @@ async def _load_people_credits(
             "item_id": item_id,
             "person_id": person_id,
             "role": person.role,
-            "character_name": person.character_name,
-            "billing_order": person.billing_order,
         }
         try:
             record = _build_record(credit_table, credit_columns, data)
@@ -1077,16 +1110,14 @@ async def _load_people_credits(
     credit_records = list(deduped.values())
     temp_name = staging.add(credit_table, credit_columns, credit_records)
     await staging.flush()
+    # Nothing left to update on conflict: since feature 89 those four columns
+    # *are* the row, and they are its primary key.
     await _insert_from_temp(
         session,
         credit_table,
         credit_columns,
         temp_name,
-        conflict=(
-            "ON CONFLICT ON CONSTRAINT uq_credit DO UPDATE SET "
-            '"character_name" = excluded."character_name", '
-            '"billing_order" = excluded."billing_order"'
-        ),
+        conflict="ON CONFLICT DO NOTHING",
     )
     outcome.people_written += len(credit_records)
 

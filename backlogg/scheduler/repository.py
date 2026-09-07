@@ -18,7 +18,7 @@ from backlogg.books.models import Book
 from backlogg.movies.models import Movie
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, SeedTarget, SyncCursor
+from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncCursor
 
 __all__ = [
     "CREDIT_GAP_SOURCES",
@@ -124,8 +124,12 @@ async def get_credit_gaps(db: AsyncSession, item_type: str, *, recheck: bool = F
 
     Shape of the query:
 
-    - ``LEFT JOIN credits ON (item_type, item_id) ... WHERE credits.id IS
-      NULL`` — items with not a single credit row;
+    - ``LEFT JOIN credits`` **and** ``LEFT JOIN item_cast`` on ``(item_type,
+      item_id)``, keeping the rows where both sides are NULL — items with
+      neither a crew credit nor a stored cast.  Since feature 89 the two
+      halves of "this item has people" live in different tables, and joining
+      only ``credits`` would report every cast-only item (a film with actors
+      but no allowlisted crew) as a hole forever;
     - ``AND credits_synced_at IS NULL`` unless ``recheck`` — items already
       visited by a successful fetch are not retried (see ``docs/schema.md``);
     - ``LEFT JOIN external_ids`` on the source of the type, so the external
@@ -154,7 +158,11 @@ async def get_credit_gaps(db: AsyncSession, item_type: str, *, recheck: bool = F
             & (ExternalId.item_id == model.id)
             & (ExternalId.source == source),
         )
-        .where(Credit.id.is_(None))
+        .outerjoin(
+            ItemCast,
+            (ItemCast.item_type == item_type) & (ItemCast.item_id == model.id),
+        )
+        .where(Credit.person_id.is_(None), ItemCast.item_id.is_(None))
         .order_by(model.id)
     )
     if not recheck:

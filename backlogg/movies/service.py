@@ -21,9 +21,12 @@ from backlogg.people import repository as people_repo
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import (
+    CAST_ROLE,
     MOVIE_CREW_JOB_ROLES,
+    build_cast_payload,
     get_credits_for_item,
     select_crew_credits,
+    upsert_item_cast,
 )
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
 from backlogg.shared.models import Person
@@ -124,7 +127,7 @@ def map_movie_credits(credits_data: dict | None) -> list[BulkPerson]:
     for member in credits_data.get("cast", [])[:10]:
         row = _tmdb_person_row(
             member,
-            "ACTOR",
+            CAST_ROLE,
             character_name=member.get("character") or None,
             billing_order=member.get("order"),
         )
@@ -156,15 +159,31 @@ async def collect_movie_credits(tmdb_id: int) -> list[BulkPerson]:
 
 
 async def _persist_movie_people(db: AsyncSession, movie: Movie, tmdb_id: int) -> None:
-    """Fetch credits from TMDB and persist people + credits for a movie.
+    """Fetch credits from TMDB and persist the movie's cast and crew.
+
+    Two destinations since feature 89, split on ``CAST_ROLE``: the **crew**
+    (director, writer, source author) keeps earning a ``people`` row, an
+    ``external_ids`` link and a ``credits`` row, because it is what builds the
+    navigation graph; the **cast** goes to ``item_cast`` as one JSONB array
+    and creates none of the three.  The rule lives in ``shared/credits.py`` so
+    this path and ``shared/bulk_load.py`` cannot drift apart.
 
     The on-demand route (``GET /movies/{slug}``, ``/similar``) keeps writing
     one person at a time: it only ever handles a single item, so batching
     would buy nothing (feature 84 leaves this path untouched on purpose).
     """
     now = datetime.now(UTC)
+    rows = await collect_movie_credits(tmdb_id)
 
-    for row in await collect_movie_credits(tmdb_id):
+    payload = build_cast_payload(
+        (row.name, row.character_name, row.billing_order) for row in rows if row.role == CAST_ROLE
+    )
+    if payload:
+        await upsert_item_cast(db, "MOVIE", [(movie.id, payload)])
+
+    for row in rows:
+        if row.role == CAST_ROLE:
+            continue
         person = await _get_or_create_person_tmdb(
             db, int(row.external_id), row.name, row.slug, row.profile_url, now
         )
@@ -178,8 +197,6 @@ async def _persist_movie_people(db: AsyncSession, movie: Movie, tmdb_id: int) ->
                 "item_id": movie.id,
                 "person_id": person.id,
                 "role": row.role,
-                "character_name": row.character_name,
-                "billing_order": row.billing_order,
             },
         )
 

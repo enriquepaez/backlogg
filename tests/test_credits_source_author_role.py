@@ -33,8 +33,9 @@ from backlogg.recommendations import repository as recs_repo
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.series import service as series_service
 from backlogg.series.models import Series
+from backlogg.shared.credits import cast_payload_to_credits
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, Person
+from backlogg.shared.models import Credit, ItemCast, Person
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,12 +63,29 @@ def _roles_by_name(rows) -> set[tuple[str, str]]:
 
 
 async def _persisted_roles(db, item_type: str, item_id: int) -> set[tuple[str, str]]:
+    """Every ``(person name, role)`` an item ended up with, across both tables.
+
+    Feature 89 split the storage — the crew in ``credits``, the cast in
+    ``item_cast`` — but not the question these tests ask, which is "did
+    ingestion classify this crew member correctly".  Reading both keeps that
+    question answerable and keeps the assertions comparable to
+    ``result.credits``, which the endpoints merge the same way.
+    """
     result = await db.execute(
         select(Person.name, Credit.role)
         .join(Person, Person.id == Credit.person_id)
         .where(Credit.item_type == item_type, Credit.item_id == item_id)
     )
-    return {(name, role) for name, role in result.all()}
+    roles = {(name, role) for name, role in result.all()}
+
+    payload = await db.execute(
+        select(ItemCast.payload).where(ItemCast.item_type == item_type, ItemCast.item_id == item_id)
+    )
+    roles |= {
+        (entry.person_name, entry.role)
+        for entry in cast_payload_to_credits(payload.scalar_one_or_none())
+    }
+    return roles
 
 
 def _session_factory(db):
@@ -205,8 +223,9 @@ def test_real_adaptation_splits_writer_and_source_author_across_people():
 def test_two_writing_jobs_for_one_person_yield_a_single_credit():
     """``Screenplay`` + ``Writer`` fold into one WRITER row, not a duplicate.
 
-    ``uq_credit`` is (item_type, item_id, person_id, role): emitting the row
-    twice would hand both write paths a duplicate of the same unique tuple.
+    The primary key of ``credits`` is (item_id, person_id, item_type, role),
+    so emitting the row twice would hand both write paths a duplicate of the
+    same tuple.
     """
     rows = movies_service.map_movie_credits(
         {

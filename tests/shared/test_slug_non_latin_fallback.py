@@ -41,7 +41,8 @@ from backlogg.people import repository as people_repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
 from backlogg.series.service import collect_series_creators, map_series_credits
 from backlogg.shared.bulk_load import BulkPerson, bulk_load_credits
-from backlogg.shared.models import Credit, Person
+from backlogg.shared.credits import cast_payload_to_credits
+from backlogg.shared.models import Credit, ItemCast, Person
 from backlogg.shared.slugs import (
     external_id_slug,
     slug_with_external_fallback,
@@ -338,8 +339,11 @@ async def test_bulk_load_credits_no_longer_rejects_non_latin_people(db):
     """The validation that counts ``people_errors`` stays — it just stops firing.
 
     Reproduces the symptom reported in the issue (``people_errors=2`` on
-    ``POST /admin/sync/series``) with the very same names, and asserts both
-    people land as distinct rows with their credits attached.
+    ``POST /admin/sync/series``) with the very same names.  Since feature 89
+    the two halves land in different places: the creator keeps its ``people``
+    row (with the issue #18 slug fallback, which is what this test exists to
+    pin) and the cast member goes to ``item_cast`` — with its name intact,
+    which is the part of the issue that still matters there.
     """
     people = map_series_credits({"cast": [{"id": 92296, "name": "韩晓晖", "order": 0}]})
     people += collect_series_creators([{"id": 93311, "name": "한영롱"}])
@@ -349,10 +353,12 @@ async def test_bulk_load_credits_no_longer_rejects_non_latin_people(db):
 
     assert outcome.people_rejected == 0
 
-    slugs = ["tmdb-92296", "tmdb-93311"]
-    rows = (await db.execute(select(Person).where(Person.slug.in_(slugs)))).scalars().all()
-    assert sorted(p.slug for p in rows) == slugs
-    assert {p.name for p in rows} == {"韩晓晖", "한영롱"}
+    rows = (
+        (await db.execute(select(Person).where(Person.slug.in_(["tmdb-92296", "tmdb-93311"]))))
+        .scalars()
+        .all()
+    )
+    assert [(p.slug, p.name) for p in rows] == [("tmdb-93311", "한영롱")]
 
     credits = (
         (
@@ -363,8 +369,16 @@ async def test_bulk_load_credits_no_longer_rejects_non_latin_people(db):
         .scalars()
         .all()
     )
-    assert len(credits) == 2
-    assert {c.person_id for c in credits} == {p.id for p in rows}
+    assert len(credits) == 1
+    assert credits[0].person_id == rows[0].id
+    assert credits[0].role == "CREATOR"
+
+    cast = (
+        await db.execute(
+            select(ItemCast.payload).where(ItemCast.item_type == "SERIES", ItemCast.item_id == 4590)
+        )
+    ).scalar_one()
+    assert [entry.person_name for entry in cast_payload_to_credits(cast)] == ["韩晓晖"]
 
 
 @pytest.mark.asyncio

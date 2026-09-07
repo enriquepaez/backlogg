@@ -126,8 +126,6 @@ async def _persist_book_authors(db: AsyncSession, book: Book, work_detail: dict)
                     "item_id": book.id,
                     "person_id": person.id,
                     "role": row.role,
-                    "character_name": None,
-                    "billing_order": None,
                 },
             )
         except Exception:

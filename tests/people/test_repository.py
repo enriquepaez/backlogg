@@ -58,7 +58,14 @@ async def test_get_person_by_slug_found(db):
 
 
 async def test_get_person_by_slug_with_credits(db):
-    """get_person_by_slug returns PersonOut with resolved credits."""
+    """get_person_by_slug returns PersonOut with resolved credits.
+
+    ``DIRECTOR`` and not ``ACTOR``: since feature 89 the cast lives in
+    ``item_cast`` and never reaches ``people``/``credits`` at all, so an
+    ``ACTOR`` credit here would test a row ingestion can no longer write.
+    ``character_name``/``billing_order`` stay in the response schema (that
+    shape is a contract) and are always null now.
+    """
     from datetime import UTC, datetime
 
     # Create a movie to reference
@@ -96,9 +103,7 @@ async def test_get_person_by_slug_with_credits(db):
             "item_type": "MOVIE",
             "item_id": movie.id,
             "person_id": person.id,
-            "role": "ACTOR",
-            "character_name": "Hero",
-            "billing_order": 1,
+            "role": "DIRECTOR",
         },
     )
 
@@ -110,9 +115,9 @@ async def test_get_person_by_slug_with_credits(db):
     assert credit.item_id == movie.id
     assert credit.item_slug == "credit-test-movie-2001"
     assert credit.item_title == "Credit Test Movie"
-    assert credit.role == "ACTOR"
-    assert credit.character_name == "Hero"
-    assert credit.billing_order == 1
+    assert credit.role == "DIRECTOR"
+    assert credit.character_name is None
+    assert credit.billing_order is None
 
 
 async def test_upsert_credit_idempotent(db):
@@ -151,12 +156,17 @@ async def test_upsert_credit_idempotent(db):
         "item_id": movie.id,
         "person_id": person.id,
         "role": "DIRECTOR",
-        "character_name": None,
-        "billing_order": None,
     }
     c1 = await upsert_credit(db, credit_data)
     c2 = await upsert_credit(db, credit_data)
-    assert c1.id == c2.id
+    # Feature 89 dropped the surrogate ``id``: the natural key *is* the row,
+    # so identity is the tuple itself.
+    assert (c1.item_type, c1.item_id, c1.person_id, c1.role) == (
+        c2.item_type,
+        c2.item_id,
+        c2.person_id,
+        c2.role,
+    )
 
 
 async def test_get_person_by_slug_with_book_credits(db):
@@ -190,8 +200,6 @@ async def test_get_person_by_slug_with_book_credits(db):
             "item_id": book.id,
             "person_id": person.id,
             "role": "AUTHOR",
-            "character_name": None,
-            "billing_order": None,
         },
     )
 

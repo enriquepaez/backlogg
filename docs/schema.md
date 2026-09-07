@@ -334,6 +334,12 @@ CREATE TABLE game_platforms_join (
 
 ## People & Credits
 
+> **Feature 89 (2026-09-07)**: `credits` ya no guarda el reparto. Se quedó solo
+> con el **grafo de navegación** (DIRECTOR, CREATOR, WRITER, AUTHOR,
+> SOURCE_AUTHOR) y el reparto vive en `item_cast`, una tabla lateral con un
+> array JSONB por ítem. El razonamiento completo está más abajo, en «Por qué
+> `credits` se partió en dos».
+
 ### `people`
 
 ```sql
@@ -374,23 +380,53 @@ en una y la perdedora se queda sin su `external_id`.
 - El nombre para mostrar es `name`, que conserva el alfabeto original. El slug
   nunca se usa para presentar a una persona.
 
+### Por qué `credits` se partió en dos (feature 89, 2026-09-07)
+
+La siembra de producción murió con `DiskFullError` a 484 MB de los 512 de Neon,
+con **series a cero**. La medición (`progress/measure_89.md`) dijo dónde estaba
+el peso: `credits` 136 MB + `people` 56 MB + `external_ids` 74 MB = **266 MB,
+el 55 % de la base**, para servir 85.530 ítems.
+
+El diagnóstico no es "hay demasiadas filas", es que la tabla **mezclaba dos
+cosas con costes y usos distintos**:
+
+| | Datos de ficha (el reparto) | Grafo de navegación |
+|---|---|---|
+| Qué es | La lista de actores que pinta la página de detalle | DIRECTOR, CREATOR, WRITER, AUTHOR, SOURCE_AUTHOR |
+| Cómo se lee | Siempre entera, siempre por el ítem que ya conoces | Por persona: «otras obras de X», el puente cross-type de la feature 74 |
+| Cuánto pesaba | **72,8 % de los credits**, 175.306 de las 240.615 personas | 27,2 % de los credits |
+| Qué compraba | Nada: el 46,9 % de `people` eran actores con **una sola aparición** en todo el catálogo | Toda la navegación y toda la señal de recomendación |
+
+Un actor de reparto pagaba fila en `people` (125 B), fila en `external_ids`
+(73 B), fila en `credits` (86 B) y su parte en siete índices, a cambio de cero
+valor de navegación. El grafo sí justifica ese coste; la ficha no.
+
+De ahí las dos mitades: **`credits` se queda solo con el grafo** y el reparto se
+desnormaliza en **`item_cast`** (una fila por ítem, un array JSONB). Medido:
+`credits` 710.772 → 193.172 filas, `people` 240.615 → 65.309, `external_ids`
+pierde 175.306 filas, y el payload entero del reparto cabe en 34 MB. La
+proyección a catálogo completo pasa de ~626 MB (no cabe) a ~444 MB.
+
+**Lo que cuesta, dicho claro:** se pierde «otras obras de este actor» para las
+personas que *solo* eran reparto. No se pierde: el reparto completo en la ficha
+(el JSONB no se recorta), la navegación por director/creador/autor, ni el puente
+cross-type de la feature 74. La vuelta atrás existe pero cuesta disco, no
+código: ver §9 de `progress/measure_89.md`.
+
 ### `credits`
 
-Polymorphic join between people and items. One person can have multiple credits
-on the same item with different roles.
+Polymorphic join between people and items — **solo roles de grafo**. Una persona
+puede tener varios credits sobre el mismo ítem con roles distintos.
 
 ```sql
 CREATE TABLE credits (
-    id              BIGSERIAL PRIMARY KEY,
-    item_type       VARCHAR(20) NOT NULL,           -- MOVIE, SERIES, BOOK, GAME
-    item_id         BIGINT NOT NULL,
-    person_id       BIGINT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-    role            VARCHAR(50) NOT NULL,           -- DIRECTOR, ACTOR, CREATOR, AUTHOR, SOURCE_AUTHOR, WRITER
-    character_name  VARCHAR(255),                   -- ACTOR only
-    billing_order   INTEGER,                        -- 0 = top-billed
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    item_id     BIGINT   NOT NULL,
+    person_id   BIGINT   NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    item_type   SMALLINT NOT NULL,          -- código, ver backlogg/shared/codes.py
+    role        SMALLINT NOT NULL,          -- código, ver backlogg/shared/codes.py
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_credit UNIQUE (item_type, item_id, person_id, role)
+    PRIMARY KEY (item_id, person_id, item_type, role)
 );
 
 CREATE INDEX idx_credits_person ON credits (person_id);
@@ -398,18 +434,102 @@ CREATE INDEX idx_credits_item ON credits (item_type, item_id);
 CREATE INDEX idx_credits_role ON credits (role);
 ```
 
+Tres decisiones de esa DDL, todas con su número detrás:
+
+- **No hay `id` autoincremental.** No lo referenciaba nadie (verificado: cero
+  FKs contra `credits.id` en producción) y `uq_credit` ya era la identidad de la
+  fila. La columna + su índice de PK eran ~20 MB de clave duplicada. La clave
+  natural es ahora la primaria, y `uq_credit` desapareció como constraint
+  separada.
+- **El orden de las columnas es funcional, no estético.** Los dos `bigint` van
+  **antes** de los dos `smallint`. Al revés, Postgres mete 6 bytes de relleno de
+  alineación en cada fila: ~7 MB en la tabla y otros tantos dentro de la PK, a
+  cambio de nada. La clave está ordenada igual y por lo mismo.
+- **`item_type` y `role` son `smallint`, no texto ni ENUM nativo.** Cada fila
+  guardaba `'MOVIE'` y `'ACTOR'` literales, y también los guardaban las cuatro
+  columnas de `uq_credit` — por eso ese índice solo pesaba 35 MB. El mapeo
+  texto↔número vive en `backlogg/shared/codes.py` y lo aplican dos
+  `TypeDecorator`, así que el código de aplicación sigue escribiendo
+  `Credit.role == "AUTHOR"` sin ver un número nunca. Se descartó el ENUM nativo
+  por tres razones: un valor de ENUM es un `oid` de **4 bytes** contra los 2 del
+  `smallint` (y esta feature existe por el disco), añadir un valor es DDL, y
+  `item_type` vive además como texto en `external_ids`, `catalog_search`,
+  `seed_targets`, `activity_events`, `library_entries`, `notifications` y
+  `company_credits` — un ENUM solo en `credits` obligaría a castear en cada
+  comparación cruzada.
+
+**`character_name` y `billing_order` ya no están aquí.** Medido en producción:
+**cero** filas no-ACTOR tenían valor en ninguna de las dos. Eran columnas del
+reparto y el reparto vive en `item_cast`. Siguen existiendo en la respuesta de
+la API (`CreditOut` no cambia de forma) y llegan siempre a `null` para el crew.
+
 Supported roles by domain:
 
-| Domain  | Roles                                        | Notes                                      |
-|---------|----------------------------------------------|--------------------------------------------|
-| Movies  | DIRECTOR, ACTOR, SOURCE_AUTHOR, WRITER       | Actors limited to top 10 by billing_order  |
-| Series  | CREATOR, ACTOR, SOURCE_AUTHOR, WRITER        | Actors limited to top 10                   |
-| Books   | AUTHOR                                       | Supports co-authorship                     |
-| Games   | *(none)*                                     | See note below — no person credits at all  |
+| Domain  | Roles                             | Notes                                       |
+|---------|-----------------------------------|---------------------------------------------|
+| Movies  | DIRECTOR, SOURCE_AUTHOR, WRITER   | El reparto está en `item_cast`              |
+| Series  | CREATOR, SOURCE_AUTHOR, WRITER    | El reparto está en `item_cast`              |
+| Books   | AUTHOR                            | Admite coautoría                            |
+| Games   | *(ninguno)*                       | Ver la nota de abajo — no hay person credits |
+
+`ACTOR` sigue existiendo en el vocabulario de `backlogg/shared/codes.py` porque
+lo usan el `downgrade` de la migración `0037` y la lectura fusionada de la ficha
+(cada entrada del reparto se etiqueta con él), pero **ninguna ruta de ingesta
+escribe ya una fila `ACTOR` en `credits`**.
+
+### `item_cast`
+
+El reparto de un ítem, desnormalizado en un único array JSONB.
+
+```sql
+CREATE TABLE item_cast (
+    item_type SMALLINT NOT NULL,           -- mismo código que credits
+    item_id   BIGINT   NOT NULL,
+    payload   JSONB    NOT NULL,
+
+    PRIMARY KEY (item_type, item_id)
+);
+```
+
+`payload` es un array **ordenado por billing order** y **nunca recortado** — la
+ficha sigue mostrando el reparto completo (9,31 actores de media, 30 como
+máximo). Las claves son de un carácter porque se repiten una vez por actor en
+todo el catálogo (~518.000 veces) y el tamaño del payload es el motivo de la
+feature:
+
+```json
+[{"n": "Timothée Chalamet", "c": "Paul Atreides", "o": 0}]
+```
+
+`n` (nombre) siempre está; `c` (personaje) y `o` (billing order) se omiten
+cuando no se conocen. La única pareja de funciones que construye y lee esta
+forma es `build_cast_payload` / `cast_payload_to_credits`, en
+`backlogg/shared/credits.py`.
+
+**Por qué una tabla lateral y no una columna de `movies`/`series`** (decisión de
+2026-09-07): la ficha lee el reparto, pero búsqueda y trending recorren las
+tablas de ítems enteras sin tocarlo. Ensanchar cada fila de ítem 642 B (+40 %
+sobre `movies`) encarecería esos barridos para ahorrar un lookup por PK que la
+ficha se puede permitir. Con 642 B de media el payload queda muy por debajo del
+umbral de TOAST (~2 kB), así que se guarda inline y sin comprimir.
+
+**Qué no guarda el payload, y por qué.** No guarda el `profile_url` del actor
+(duplicaría el tamaño del payload, que es justo la cifra que la feature intenta
+bajar, y ningún consumidor lo lee) ni su slug (se deriva del nombre al leer).
+Consecuencia visible en la API: las entradas de reparto de `credits[]` llegan
+con `profile_url: null` y con un `person_slug` que **no resuelve** — ver
+`docs/api.md`.
+
+**Cómo se escribe.** Las dos fronteras de escritura —la ruta por ítem
+(`_persist_movie_people` / `_persist_series_credit_rows`) y la ruta por lotes
+(`shared/bulk_load.py`)— se bifurcan sobre la misma constante, `CAST_ROLE`, para
+que no puedan divergir. El array se reescribe entero en cada ingesta, nunca se
+mezcla: el reparto de un ítem es un hecho indivisible que viene de un payload.
 
 ### Games have no person credits — by decision (2026-09-04)
 
-`credits` carries **no `GAME` rows at all**, and no ingestion path writes any.
+`credits` (and `item_cast`) carry **no `GAME` rows at all**, and no ingestion
+path writes any.
 Measured against the dev database on 2026-09-04: 500 `BOOK`, 5.618 `MOVIE`,
 8.675 `SERIES`, **0 `GAME`** — with 465 games in the catalog.
 
@@ -1195,9 +1315,18 @@ name and the target being acted on.
 
 ## Notes on polymorphic references
 
-`external_ids`, `credits`, `company_credits`, `user_ratings`, `library_entries`,
-`activity_events`, `notifications` (target_type/target_id),
+`external_ids`, `credits`, `item_cast`, `company_credits`, `user_ratings`,
+`library_entries`, `activity_events`, `notifications` (target_type/target_id),
 `admin_actions` (target_type/target_id) use polymorphic references
 (`item_type`/`target_type` + `item_id`/`target_id`) with no real FK.
 Referential integrity is enforced at the application layer, typically in the
 use case that persists the item.
+
+**Dos representaciones del mismo vocabulario.** Desde la feature 89, `credits` e
+`item_cast` guardan `item_type` como `SMALLINT` (códigos en
+`backlogg/shared/codes.py`); todas las demás lo guardan como texto. No es un
+descuido: estrechar `credits` era el objetivo de la feature y convertir las ocho
+tablas restantes es un cambio mucho mayor. Lo que sí es obligatorio es que el
+vocabulario no se bifurque, y por eso los códigos y los nombres viven en un solo
+módulo. En SQL crudo hay que escribir el número (ver `scripts/bench_bulk_load.py`);
+desde SQLAlchemy no, porque el `TypeDecorator` traduce en la frontera.

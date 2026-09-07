@@ -9,3 +9,17 @@ get {
   body: none
   auth: none
 }
+
+tests {
+  test("a graph person answers 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}
+
+docs {
+  Feature 89: `credits[]` here carries **graph roles only** — the cast moved to
+  `item_cast` and is not reachable from a person.  A director who also acts
+  therefore answers 200 with their directing filmography complete and none of
+  their ACTOR credits.  `character_name` and `billing_order` stay in the schema
+  and are always null.
+}

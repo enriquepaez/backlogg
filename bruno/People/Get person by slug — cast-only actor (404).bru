@@ -1,0 +1,28 @@
+meta {
+  name: Get person by slug — cast-only actor (404)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/people/timothee-chalamet
+  body: none
+  auth: none
+}
+
+tests {
+  test("cast-only people have no person page", function() {
+    expect(res.getStatus()).to.equal(404);
+  });
+}
+
+docs {
+  Feature 89: `people` only holds the people who build the navigation graph
+  (DIRECTOR, CREATOR, WRITER, AUTHOR, SOURCE_AUTHOR).  Someone who only ever
+  appears as cast has no row at all — their name lives inside the item's
+  `item_cast` payload — so this is a 404 by design, not a seeding gap.
+
+  The other half of that behaviour has no separate request because it is the
+  same URL: a person who directs *and* acts answers 200, with their directing
+  filmography complete and none of their ACTOR credits.  See docs/api.md.
+}

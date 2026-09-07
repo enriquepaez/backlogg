@@ -319,10 +319,23 @@ no por el orden curado de relaciones que devuelve IGDB.
 
 **`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,
-`billing_order`, ordenados por `billing_order` ascendente. Array vacío si no hay.
+`billing_order`. Array vacío si no hay.
 No confundir con `companies[]` (solo en games, ver arriba): `credits[]` son
-personas (`people`/`credits`), `companies[]` son estudios/publishers
-(`companies`/`company_credits`).
+personas, `companies[]` son estudios/publishers (`companies`/`company_credits`).
+
+**Orden y procedencia (feature 89).** El array es la fusión de las dos tablas en
+que se partió `credits`, y el orden es el mismo de siempre: primero el
+**reparto** (desde `item_cast`, ordenado por `billing_order` ascendente y
+**completo, sin recortar**), después el **crew** (desde `credits`: DIRECTOR,
+CREATOR, WRITER, AUTHOR, SOURCE_AUTHOR), que nunca tuvo `billing_order` y por
+tanto siempre iba al final. La forma de cada entrada no cambia; sí cambian dos
+valores, y conviene saberlo antes de construir sobre ellos:
+
+| Campo | En una entrada de reparto (`role: "ACTOR"`) | En una entrada de crew |
+|---|---|---|
+| `character_name` / `billing_order` | Con valor, como siempre | Siempre `null` (las columnas ya no existen en `credits`) |
+| `profile_url` | Siempre `null` — la foto no se guarda en el payload del reparto | El de la persona |
+| `person_slug` | Derivado del nombre con `slugify`. **No resuelve**: `GET /people/{slug}` devuelve 404. Y puede llegar **vacío** (`""`) si el nombre está íntegramente en CJK, cirílico, árabe, griego o hebreo, porque el fold a ASCII no deja nada (issue #18) | Resuelve normalmente |
 
 ### Auth & Users
 
@@ -939,6 +952,23 @@ GET /v1/people/{slug}
 Response fields: `id`, `name`, `slug`, `profile_url`, `credits[]`
 (each credit: `item_type`, `item_id`, `item_slug`, `item_title`, `role`,
 `character_name`, `billing_order`)
+
+**Qué personas existen aquí y cuáles no (feature 89).** `people` guarda solo a
+quien construye grafo de navegación. La forma de la respuesta **no cambia**;
+cambia qué llega:
+
+| Caso | Personas en producción | Respuesta |
+|---|---|---|
+| Persona de grafo (director, creador, guionista, autor) | 65.309 | **200**, filmografía completa |
+| Persona de grafo que **además actúa** | 9.251 | **200**, pero **sin sus credits `ACTOR`** — el caso Clint Eastwood: su obra como director está entera, sus papeles como actor no aparecen |
+| Actor de solo-reparto | 175.306 | **404** — no tiene fila en `people` |
+
+El segundo es el que sorprende y no debería descubrirse en una QA: el reparto
+vive en `item_cast`, que está indexado por ítem y no guarda identidad de
+persona, así que no hay forma de llegar a él desde un slug.
+
+`character_name` y `billing_order` siguen en el esquema y llegan **siempre a
+`null`**: solo describían filas de reparto, y esas ya no están en `credits`.
 
 ### Genres
 

@@ -612,7 +612,7 @@ sustituyen entre sí:
 
 | | `enumerate` (movie/series) | `dump` (book) | `hydrate` (por defecto) | `credits` (`--only-missing-credits`) |
 |---|---|---|---|---|
-| Lista de trabajo | `/discover` por año bajo `vote_count.gte` | los dumps mensuales enteros, filtrados por los umbrales `BOOKS_SEED_MIN_*` | movie/series: targets de `seed_targets` sin fila en `external_ids`; book/game: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits`**, unida a `external_ids` |
+| Lista de trabajo | `/discover` por año bajo `vote_count.gte` | los dumps mensuales enteros, filtrados por los umbrales `BOOKS_SEED_MIN_*` | movie/series: targets de `seed_targets` sin fila en `external_ids`; book/game: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits` ni en `item_cast`** (feature 89: «tiene personas» vive en dos tablas), unida a `external_ids` |
 | Estado entre runs | la propia tabla `seed_targets` | un artefacto por fase en `--work-dir` (en Actions, la caché del repo) | movie/series: ninguno (diferencia en vivo); book/game: cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
 | Llamadas HTTP por ítem | 0 (20 ítems por petición de lista) | **0**: cuatro descargas para todo el catálogo | **una**: `/{tipo}/{id}?append_to_response=credits,external_ids` | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
 | Escribe la fila del ítem | **no**: solo la lista objetivo | sí (upsert completo, con géneros y credits de autoría) | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |

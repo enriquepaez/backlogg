@@ -8,6 +8,7 @@ from backlogg.main import app
 from backlogg.people import repository as people_repo
 from backlogg.series import repository as repo
 from backlogg.series import service
+from backlogg.shared.credits import build_cast_payload, upsert_item_cast
 
 
 def _make_series_dict(slug: str = "the-wire-2002") -> dict:
@@ -90,50 +91,43 @@ async def test_get_series_credits_empty(client, db):
     assert body["credits"] == []
 
 
-async def test_get_series_credits_present_and_ordered(client, db):
-    """GET /series/{slug} returns credits ordered by billing_order ascending."""
+async def test_get_series_credits_merge_cast_and_crew_in_order(client, db):
+    """GET /series/{slug} merges ``item_cast`` and ``credits`` (feature 89).
+
+    Same contract as movies: cast first in billing order, crew after it.  The
+    series crew role that matters here is ``CREATOR``, which comes from the
+    detail payload's ``created_by`` and stays in the graph.
+    """
     series = await repo.upsert_series(db, _make_series_dict("credits-ordered-series-2002"))
     now = datetime.now(UTC)
 
-    person_a = await people_repo.upsert_person(
+    creator = await people_repo.upsert_person(
         db,
         {
-            "name": "Series Actor A",
-            "slug": "series-actor-a-credits-test",
+            "name": "Series Creator A",
+            "slug": "series-creator-a-credits-test",
             "profile_url": "https://example.com/sa.jpg",
             "last_synced_at": now,
         },
     )
-    person_b = await people_repo.upsert_person(
-        db,
-        {
-            "name": "Series Actor B",
-            "slug": "series-actor-b-credits-test",
-            "profile_url": None,
-            "last_synced_at": now,
-        },
-    )
     await people_repo.upsert_credit(
         db,
         {
             "item_type": "SERIES",
             "item_id": series.id,
-            "person_id": person_b.id,
-            "role": "ACTOR",
-            "character_name": "Bob",
-            "billing_order": 2,
+            "person_id": creator.id,
+            "role": "CREATOR",
         },
     )
-    await people_repo.upsert_credit(
+    await upsert_item_cast(
         db,
-        {
-            "item_type": "SERIES",
-            "item_id": series.id,
-            "person_id": person_a.id,
-            "role": "ACTOR",
-            "character_name": "Alice",
-            "billing_order": 1,
-        },
+        "SERIES",
+        [
+            (
+                series.id,
+                build_cast_payload([("Series Actor B", "Bob", 2), ("Series Actor A", "Alice", 1)]),
+            )
+        ],
     )
 
     response = await client.get("/v1/series/credits-ordered-series-2002")
@@ -141,12 +135,14 @@ async def test_get_series_credits_present_and_ordered(client, db):
 
     body = response.json()
     credits = body["credits"]
-    assert len(credits) == 2
+    assert len(credits) == 3
     assert credits[0]["person_name"] == "Series Actor A"
-    assert credits[0]["person_slug"] == "series-actor-a-credits-test"
-    assert credits[0]["profile_url"] == "https://example.com/sa.jpg"
     assert credits[0]["role"] == "ACTOR"
     assert credits[0]["character_name"] == "Alice"
     assert credits[0]["billing_order"] == 1
+    assert credits[0]["profile_url"] is None
     assert credits[1]["person_name"] == "Series Actor B"
     assert credits[1]["billing_order"] == 2
+    assert credits[2]["person_name"] == "Series Creator A"
+    assert credits[2]["role"] == "CREATOR"
+    assert credits[2]["profile_url"] == "https://example.com/sa.jpg"

@@ -105,8 +105,6 @@ async def test_similar_by_same_author_prioritizes_internal_over_external(db):
                 "item_id": book.id,
                 "person_id": author.id,
                 "role": "AUTHOR",
-                "character_name": None,
-                "billing_order": None,
             },
         )
 

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -12,11 +13,13 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backlogg.core.database import Base
+from backlogg.shared.codes import CreditRoleCode, ItemTypeCode
 
-__all__ = ["Base", "Person", "Credit", "SyncCursor", "SeedTarget"]
+__all__ = ["Base", "Person", "Credit", "ItemCast", "SyncCursor", "SeedTarget"]
 
 
 class Person(Base):
@@ -40,17 +43,41 @@ class Person(Base):
 
 
 class Credit(Base):
+    """The **navigation graph** between people and items — no longer the cast.
+
+    Feature 89 split this table in two.  What stays here is what earns a
+    relational row: ``DIRECTOR``, ``CREATOR``, ``WRITER``, ``AUTHOR`` and
+    ``SOURCE_AUTHOR`` — the roles that answer "other works by this person" and
+    carry the cross-type authorship bridge of feature 74.  The cast moved to
+    ``ItemCast``: it was 72,8 % of the rows and 175.306 of the 240.615 people,
+    almost all of them appearing exactly once, for a datum that is only ever
+    read as a block on the detail page of one item.  See ``docs/schema.md``.
+
+    Three consequences of that split are visible right here:
+
+    * **No surrogate ``id``.**  Nothing ever referenced it (verified: zero FKs
+      against ``credits.id`` in production), and ``uq_credit`` was already the
+      identity of a row, so the column plus its primary-key index were 20 MB
+      spent on a duplicate key.  The natural key is now the primary key.
+    * **Column order is load-bearing.**  ``item_id`` and ``person_id``
+      (``bigint``, 8-byte aligned) come *before* the two ``smallint``s on
+      purpose.  Declaring the ``smallint`` first would make Postgres insert 6
+      bytes of alignment padding after it in every row — ~7 MB across the
+      table and the same again inside the primary key, for nothing.  The key
+      is ordered the same way for the same reason.
+    * **No ``character_name`` / ``billing_order``.**  Measured in production:
+      zero non-``ACTOR`` rows carried a value in either column.  They were
+      cast columns, and the cast lives in ``ItemCast`` now.
+    """
+
     __tablename__ = "credits"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    item_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    item_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     person_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("people.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("people.id", ondelete="CASCADE"), primary_key=True
     )
-    role: Mapped[str] = mapped_column(String(50), nullable=False)
-    character_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    billing_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_type: Mapped[str] = mapped_column(ItemTypeCode, primary_key=True)
+    role: Mapped[str] = mapped_column(CreditRoleCode, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -58,11 +85,46 @@ class Credit(Base):
     person: Mapped[Person] = relationship("Person", back_populates="credits")
 
     __table_args__ = (
-        UniqueConstraint("item_type", "item_id", "person_id", "role", name="uq_credit"),
         Index("idx_credits_person", "person_id"),
         Index("idx_credits_item", "item_type", "item_id"),
         Index("idx_credits_role", "role"),
     )
+
+
+class ItemCast(Base):
+    """The cast of one catalog item, denormalised into a single JSONB array.
+
+    Feature 89.  The cast is *detail-page data*: it is read whole, always for
+    one known item, and nobody navigates out of the seventh billed actor.  It
+    was paying a row in ``people``, a row in ``external_ids``, a row in
+    ``credits`` and a slice of seven indexes per actor to buy navigation that
+    does not exist.  Here it costs one row per item — 642 B on average,
+    comfortably under the ~2 kB TOAST threshold, so it stays inline and
+    uncompressed and the detail page reads it in the same page fetch.
+
+    **A side table, not a column of ``movies``/``series``** (decision of
+    2026-09-07): the detail page reads the cast, but search and trending scan
+    the item tables end to end without ever touching it.  Widening every item
+    row by ~642 B (+40 % on ``movies``) would make those scans pay for a
+    lookup by primary key the detail page can afford.
+
+    ``payload`` is an array ordered by billing order, **never truncated** — the
+    detail page keeps showing the full cast (9,31 actors on average, 30 at the
+    most).  Keys are one character because their bytes are repeated ~518.000
+    times and payload size is the entire point of the feature:
+
+    ``[{"n": "Timothée Chalamet", "c": "Paul Atreides", "o": 0}, ...]``
+
+    ``c`` (character) and ``o`` (billing order) are omitted when unknown; ``n``
+    (name) is always there.  See ``backlogg.shared.credits`` for the single
+    pair of functions that build and read this shape.
+    """
+
+    __tablename__ = "item_cast"
+
+    item_type: Mapped[str] = mapped_column(ItemTypeCode, primary_key=True)
+    item_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payload: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
 
 class SyncCursor(Base):

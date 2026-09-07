@@ -37,8 +37,13 @@ from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.scheduler.repository import get_credit_gaps
 from backlogg.series.models import Series
+from backlogg.shared.credits import (
+    build_cast_payload,
+    cast_payload_to_credits,
+    upsert_item_cast,
+)
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, Person
+from backlogg.shared.models import Credit, ItemCast, Person
 
 # ── Load the script as a module (scripts/ is not an installed package) ───────
 
@@ -91,8 +96,20 @@ async def _add_credit(db, item_type: str, item_id: int, person_slug: str) -> Non
     person = Person(name=person_slug, slug=person_slug, last_synced_at=_now())
     db.add(person)
     await db.flush()
-    db.add(Credit(item_type=item_type, item_id=item_id, person_id=person.id, role="ACTOR"))
+    db.add(Credit(item_type=item_type, item_id=item_id, person_id=person.id, role="DIRECTOR"))
     await db.flush()
+
+
+async def _cast_names(db, item_type: str, item_id: int) -> list[str]:
+    """The names stored in ``item_cast`` for an item, in payload order.
+
+    Feature 89: the cast no longer lands in ``credits``, so the assertions
+    that used to look for an ``ACTOR`` role look here instead.
+    """
+    payload = await db.execute(
+        select(ItemCast.payload).where(ItemCast.item_type == item_type, ItemCast.item_id == item_id)
+    )
+    return [entry.person_name for entry in cast_payload_to_credits(payload.scalar_one_or_none())]
 
 
 def _session_factory(db):
@@ -136,6 +153,26 @@ async def test_gap_query_returns_exactly_the_items_without_credits(db):
     assert result.gaps[0].external_id == "gap-tmdb-1"
     assert result.skipped_no_external_id == 0
     assert result.considered == 1
+
+
+async def test_gap_query_treats_a_stored_cast_as_covered(db):
+    """Feature 89: "has people" now spans two tables, and so does the gap query.
+
+    A film with actors but no allowlisted crew has zero ``credits`` rows and
+    is fully ingested all the same.  Joining only ``credits`` would put it
+    back on the work list on every single run, forever.
+    """
+    missing = await _add_movie(db, "gap-cast-missing")
+    cast_only = await _add_movie(db, "gap-cast-only")
+    await _link(db, "MOVIE", missing.id, "TMDB", "gap-cast-tmdb-1")
+    await _link(db, "MOVIE", cast_only.id, "TMDB", "gap-cast-tmdb-2")
+    await upsert_item_cast(
+        db, "MOVIE", [(cast_only.id, build_cast_payload([("Cast Only Actor", None, 0)]))]
+    )
+
+    result = await get_credit_gaps(db, "MOVIE")
+
+    assert [gap.item_id for gap in result.gaps] == [missing.id]
 
 
 async def test_gap_query_recheck_includes_already_stamped_items(db):
@@ -227,7 +264,9 @@ async def test_targeted_mode_fetches_only_credits_and_writes_them(db):
         .scalars()
         .all()
     )
-    assert sorted(roles) == ["ACTOR", "DIRECTOR"]
+    # Feature 89: only the crew reaches ``credits``; the cast is in ``item_cast``.
+    assert sorted(roles) == ["DIRECTOR"]
+    assert await _cast_names(db, "MOVIE", movie.id) == ["Targeted Actor"]
 
     refreshed = await db.get(Movie, movie.id, populate_existing=True)
     assert refreshed.credits_synced_at is not None
@@ -351,7 +390,8 @@ async def test_series_creators_are_persisted_in_targeted_mode(db):
         .scalars()
         .all()
     )
-    assert sorted(roles) == ["ACTOR", "CREATOR"]
+    assert sorted(roles) == ["CREATOR"]
+    assert await _cast_names(db, "SERIES", series.id) == ["Series Actor"]
     assert summary["credits_written"] == 2
 
 

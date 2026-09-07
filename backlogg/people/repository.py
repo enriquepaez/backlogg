@@ -15,7 +15,18 @@ from backlogg.shared.slugs import external_id_slug
 
 
 async def get_person_by_slug(db: AsyncSession, slug: str) -> PersonOut | None:
-    """Return a PersonOut with resolved credit item_slug/item_title, or None."""
+    """Return a PersonOut with resolved credit item_slug/item_title, or None.
+
+    Since feature 89 ``people`` holds only the people who build the navigation
+    graph, which gives this endpoint two documented behaviours
+    (``docs/api.md``):
+
+    * a **cast-only** person has no row at all — 404;
+    * a person who directs or writes **and also acts** keeps their row and
+      their whole graph filmography, but none of their ``ACTOR`` credits: the
+      cast lives in ``item_cast``, which is keyed by item and holds no person
+      identity to look them up by.  Same ``CreditOut`` shape, fewer entries.
+    """
     result = await db.execute(
         select(Person).where(Person.slug == slug).options(selectinload(Person.credits))
     )
@@ -97,8 +108,11 @@ async def _resolve_credits(db: AsyncSession, credits: list[Credit]) -> list[Cred
                 item_slug=item_slug,
                 item_title=item_title,
                 role=credit.role,
-                character_name=credit.character_name,
-                billing_order=credit.billing_order,
+                # Both were ``ACTOR``-only columns and feature 89 dropped them
+                # from ``credits``; the fields stay in the schema (the response
+                # shape is a contract) and are always null here now.
+                character_name=None,
+                billing_order=None,
             )
         )
 
@@ -208,26 +222,27 @@ async def upsert_person(db: AsyncSession, data: dict) -> Person:
 
 
 async def upsert_credit(db: AsyncSession, data: dict) -> Credit:
-    """Upsert a credit by (item_type, item_id, person_id, role) (idempotent).
+    """Insert a credit if it is not already there (idempotent).
 
-    ``data`` must contain: item_type, item_id, person_id, role,
-    and optionally character_name, billing_order.
+    ``data`` must contain: item_type, item_id, person_id, role — which since
+    feature 89 is the *whole* row (bar ``created_at``): the surrogate ``id``
+    is gone and that tuple is the primary key.  There is therefore nothing
+    left for ``DO UPDATE`` to set, so the conflict action is ``DO NOTHING``
+    and the row is read back by its natural key.
+
+    ``ACTOR`` never reaches here any more: the cast is written to
+    ``item_cast`` (``backlogg.shared.credits.upsert_item_cast``).
     """
-    stmt = (
-        pg_insert(Credit)
-        .values(**data)
-        .on_conflict_do_update(
-            constraint="uq_credit",
-            set_={
-                "character_name": data.get("character_name"),
-                "billing_order": data.get("billing_order"),
-            },
-        )
-        .returning(Credit.id)
-    )
-    result = await db.execute(stmt)
-    credit_id = result.scalar_one()
+    stmt = pg_insert(Credit).values(**data).on_conflict_do_nothing(constraint="credits_pkey")
+    await db.execute(stmt)
     await db.flush()
 
-    credit_result = await db.execute(select(Credit).where(Credit.id == credit_id))
+    credit_result = await db.execute(
+        select(Credit).where(
+            Credit.item_type == data["item_type"],
+            Credit.item_id == data["item_id"],
+            Credit.person_id == data["person_id"],
+            Credit.role == data["role"],
+        )
+    )
     return credit_result.scalar_one()
