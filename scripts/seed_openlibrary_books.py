@@ -91,7 +91,7 @@ from backlogg.books.adapters.openlibrary_dump import (  # noqa: E402
     whitelist_threshold,
 )
 from backlogg.core.database import async_session_factory, engine  # noqa: E402
-from backlogg.scheduler.jobs import BatchWriter, refresh_catalog_search  # noqa: E402
+from backlogg.scheduler.jobs import BatchWriter  # noqa: E402
 from backlogg.shared.bulk_load import BulkItem  # noqa: E402
 from backlogg.shared.external_ids import collect_link_skips  # noqa: E402
 
@@ -366,10 +366,9 @@ async def phase_load(work_dir: Path) -> dict:
                     continue
                 await writer.add(item)
             await writer.flush()
-            try:
-                await refresh_catalog_search(session)
-            except Exception:
-                logger.exception("seed_openlibrary_books: failed to refresh catalog_search")
+            # No refresh step (feature 91): ``search_vector`` is a generated
+            # column on ``books``, so every work this batch wrote is already
+            # searchable.
 
     return {
         "candidates": len(records),

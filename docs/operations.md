@@ -263,6 +263,183 @@ Qué procesa cada run depende del tipo (feature 86):
   rellenan la rebanada con los ítems de `last_synced_at` más antiguo. No hay
   cursor: el campo `offset` de la respuesta es siempre `0` para estos dos tipos.
 
+**El nocturno ya no refresca nada.** Hasta la feature 91 cada job terminaba con
+`REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search`, y ese paso es
+justamente el que dejó de caber en el techo de Neon (issue #28): construía una
+copia completa de la vista —137 MB— antes de intercambiarla. La vista ya no
+existe; `search_vector` es una columna generada `STORED` en `movies`, `series`,
+`books` y `games`, que Postgres rellena dentro de la misma sentencia que
+escribe la fila. Consecuencias operativas:
+
+- No hay paso de refresco que pueda fallar, tardar o quedarse a medias, ni en
+  el nocturno ni en el backfill ni en la siembra de dumps.
+- **Desaparece la ventana de obsolescencia**: antes un ítem recién sincronizado
+  no aparecía en `/v1/search` hasta el siguiente refresco. Ahora es visible en
+  cuanto commitea la rebanada.
+- Si en un log antiguo ves `failed to refresh catalog_search`, es anterior a
+  esta feature.
+
+### Despliegue de la migración `0038` — el orden importa
+
+Es la migración que retira `catalog_search` y añade las cuatro columnas
+generadas. **Añadir una columna generada `STORED` reescribe la tabla**: durante
+la reescritura Postgres tiene en disco el heap viejo y el nuevo a la vez, y no
+suelta el viejo hasta el `COMMIT`. `alembic/env.py` envuelve todo el `upgrade`
+en **una** transacción, así que el `DROP MATERIALIZED VIEW` que abre la
+migración **no libera nada mientras esta corre**.
+
+Medido en la DB de dev (60.000 películas, vista de 25 MB, base de 62 MB):
+
+| Momento | `DROP` dentro del `BEGIN` | `DROP` commiteado antes |
+|---|---|---|
+| inicio | 62 MB | 62 MB |
+| tras el `DROP` | **62 MB** | 36 MB |
+| pico, a mitad del `ALTER` | **93 MB** | **67 MB** |
+| tras el `COMMIT` | 40 MB | 40 MB |
+
+Mismo estado final; 26 MB de diferencia en el pico — exactamente el tamaño de
+la vista. Proyectado a producción (385 MB, vista de 137 MB, tablas de contenido
+~90 MB): **~557 MB si la vista se dropea dentro de la migración (no cabe en los
+512) frente a ~420 MB si se dropea antes**.
+
+```bash
+# 1. Medir. El techo de Neon es por CLUSTER, no por base.
+psql "$DATABASE_URL" -c "SELECT pg_size_pretty(sum(pg_database_size(datname))) FROM pg_database;"
+
+# 2. Dropear la vista como sentencia propia, COMMITEADA, antes de desplegar.
+#    A partir de aquí /v1/search devuelve 500 hasta que el paso 3 termine:
+#    el código que sigue en Render consulta la vista. En free tier son minutos.
+psql "$DATABASE_URL" -c "DROP MATERIALIZED VIEW catalog_search;"
+
+# 3. Desplegar main. Render aplica 0038 (su DROP ... IF EXISTS ya es no-op).
+
+# 4. Estadísticas para la nueva columna — el planner las necesita para elegir
+#    el índice GIN. La reescritura deja ficheros nuevos, así que NO hace falta
+#    VACUUM FULL (al contrario que en la feature 89).
+psql "$DATABASE_URL" -c "ANALYZE movies, series, books, games;"
+
+# 5. Volver a medir y comprobar el ahorro (~55 MB esperados).
+```
+
+Si el paso 3 aun así no cabe, los cuatro `ALTER TABLE ... ADD COLUMN
+search_vector ... STORED` + sus `CREATE INDEX ... USING GIN` se pueden aplicar a
+mano **uno por tabla, cada uno en su propia transacción** (la más pequeña
+primero) y luego `alembic stamp 0038`. Eso baja el pico al de una sola
+reescritura en vez de cuatro. El DDL exacto está en
+`alembic/versions/0038_search_expression_index.py`.
+
+Vuelta atrás: `alembic downgrade 0037` recrea la vista y sus tres índices
+(incluido el único, sin el cual `REFRESH ... CONCURRENTLY` se niega a correr).
+Necesita el mismo margen en sentido inverso, porque reconstruye los 137 MB de
+la vista **mientras** las cuatro columnas generadas siguen existiendo.
+
+#### Si el despliegue aborta después del `DROP` manual
+
+Es el escenario realista, no el raro: entre el paso 2 y el paso 3 hay una
+ventana en la que **`/v1/search` devuelve 500 y la migración no está aplicada**.
+La migración corre en una sola transacción, así que si falta a mitad se
+deshace entera: no hay estado intermedio. El único estado persistente es «la
+vista no está».
+
+Lo primero es saber en cuál de los dos casos estás:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT version_num FROM alembic_version;"
+```
+
+- **Devuelve `0038`** → la migración sí entró y lo que falló es el arranque de
+  la app. La vuelta atrás es `alembic downgrade 0037`, que recrea la vista por
+  ti (ojo al margen: reconstruye 137 MB con las columnas generadas todavía
+  puestas).
+- **Devuelve `0037`** → la migración no entró. La DB está en el esquema
+  anterior **menos la vista**, y ninguna herramienta te la va a devolver: el
+  `downgrade` de la `0038` no se puede invocar desde `0037`. Hay que recrearla
+  a mano.
+
+**Antes de recrearla, decide.** Recrear la vista cuesta los 137 MB y deja el
+cluster otra vez en 385 MB, es decir, de vuelta en el estado en el que la
+migración *no cabe*: habría que volver a dropearla antes del siguiente intento.
+Así que:
+
+- Si el arreglo es de minutos (un fallo de build, una variable mal puesta),
+  **no la recrees**: corrige y relanza el despliegue. `/v1/search` sigue caído
+  ese rato y nada más se rompe (ver el apartado siguiente).
+- Recréala solo si la vuelta va a durar horas o días y no puedes tener la
+  búsqueda caída tanto tiempo.
+
+DDL de recuperación — es el de la migración `0031`, que es la definición
+vigente si la `0038` no entró. `CREATE MATERIALIZED VIEW` puebla la vista al
+crearla (`WITH DATA` es el defecto), así que **no** hace falta ningún `REFRESH`
+después:
+
+```bash
+psql "$DATABASE_URL" <<'SQL'
+CREATE MATERIALIZED VIEW catalog_search AS
+SELECT id, 'MOVIE' AS item_type, slug, title, overview, poster_url,
+       release_date, rating_external, rating_internal,
+       to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, '')) AS search_vector
+FROM movies
+UNION ALL
+SELECT id, 'SERIES', slug, title, overview, poster_url,
+       first_air_date, rating_external, rating_internal,
+       to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
+FROM series
+UNION ALL
+SELECT id, 'BOOK', slug, title, overview, poster_url,
+       first_publish_date, rating_external, rating_internal,
+       to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
+FROM books
+UNION ALL
+SELECT id, 'GAME', slug, title, overview, poster_url,
+       release_date, rating_external, rating_internal,
+       to_tsvector('simple', title || ' ' || regexp_replace(title, '[^a-zA-Z0-9\s]', '', 'g') || ' ' || COALESCE(overview, ''))
+FROM games;
+
+CREATE INDEX idx_catalog_search_vector ON catalog_search USING GIN (search_vector);
+CREATE INDEX idx_catalog_search_type ON catalog_search (item_type);
+-- Obligatorio: sin este índice único, REFRESH ... CONCURRENTLY se niega a
+-- correr (migración 0007, feature 40).
+CREATE UNIQUE INDEX uq_catalog_search_type_id ON catalog_search (item_type, id);
+SQL
+```
+
+#### Qué pasa si el nocturno dispara en esa ventana
+
+Entre el `DROP` manual y el despliegue, el código que corre en Render sigue
+siendo el viejo: termina cada job con `REFRESH MATERIALIZED VIEW CONCURRENTLY
+catalog_search` sobre una vista que ya no existe.
+
+**No revienta el job.** La llamada está envuelta en su propio `try/except` que
+solo loguea, y es la **última** sentencia del bloque de sesión en los tres
+sitios (`sync_movies`/`sync_series`, `sync_books`, `sync_games`): lo que
+escribió la rebanada ya está commiteado antes —`session.commit()` en la ruta de
+`seed_targets`, y `_persist_cursor` commitea en las de books/games—, y después
+del refresco solo se leen contadores en memoria. Lo mismo vale para el
+`backfill_sync.py` (reusa los mismos jobs) y para el fan-out de `/v1/search`.
+
+Consecuencia real: el job sincroniza y avanza su cursor con normalidad,
+`POST /v1/admin/sync/{type}` devuelve 200 con sus contadores de siempre, la
+verificación de `GET /v1/admin/stats` del workflow (`last_synced_at` < 2 h)
+pasa, y en el log aparece una línea
+
+```
+failed to refresh catalog_search ... UndefinedTableError: relation "catalog_search" does not exist
+```
+
+que es ruido: ese refresco no iba a servir para nada de todos modos. **Lo único
+que está roto en esa ventana es `/v1/search`**, y lo está desde el instante del
+`DROP`, dispare o no el nocturno.
+
+Aun así, para no mezclar señales al leer los logs del despliegue, conviene
+elegir la ventana: el cron es `0 2 * * *` **UTC**
+(`.github/workflows/nightly-sync.yml`), y el sync no corre in-process —lo
+dispara GitHub Actions, porque en el free tier de Render APScheduler no
+llegaría a ejecutarse—, así que basta con **hacer el `DROP` justo después de un
+run nocturno**: eso da ~24 h de margen para desplegar sin que el cron se cruce.
+Si hay que desplegar cerca de las 02:00 UTC, se puede desactivar el schedule
+temporalmente (`gh workflow disable nightly-sync.yml`) y volver a activarlo
+(`gh workflow enable nightly-sync.yml`) tras el paso 4.
+
 ### Targets retirados (`stuck`)
 
 Un target puede ser **imposible de enlazar**, por dos motivos independientes:
@@ -455,8 +632,9 @@ gh run view <run-id> --log | grep backfill
   recalculando la diferencia contra el catálogo).
 - Un error de API externa que persiste tras los reintentos deja el **run en
   rojo** (exit 1) con el cursor intacto — relanzar cuando la API se recupere.
-- Los backfills de tipos distintos pueden correr **en paralelo** (tablas y
-  APIs independientes; el refresh de `catalog_search` es CONCURRENTLY).
+- Los backfills de tipos distintos pueden correr **en paralelo**: tablas y
+  APIs independientes, y desde la feature 91 tampoco hay ningún refresco de
+  vista que serializar.
 
 También ejecutable en local (usa el `DATABASE_URL` del entorno/`.env`):
 
@@ -662,8 +840,9 @@ siguiente run recalcula el hueco restante).
 - **`skipped_no_external_id`**: ítems sin `external_ids` de la fuente que
   toca. No se pueden trabajar (no hay id que pedir) y no rompen el run; si el
   número es alto, el problema está en la ingestión, no en el backfill.
-- El modo `credits` **no** refresca `catalog_search`: la vista no expone
-  credits, así que no hay nada que refrescar.
+- Ningún modo refresca nada: la vista `catalog_search` desapareció en la
+  feature 91 y la búsqueda lee `search_vector` directamente de las cuatro
+  tablas de contenido.
 
 ### Cobertura de credits: medir antes y después
 

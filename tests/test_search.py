@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from backlogg.books import repository as books_repo
 from backlogg.games import repository as games_repo
@@ -100,9 +99,6 @@ def _game_dict(slug: str = "witcher-3-2015") -> dict:
     }
 
 
-_REFRESH_PATCH = "backlogg.search.repository.SearchRepository.refresh_catalog_search"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _no_real_fanout_by_default():
     """Prevent accidental real external-API calls for tests that don't opt in.
@@ -122,7 +118,6 @@ async def _no_real_fanout_by_default():
         patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     ):
         yield
 
@@ -143,14 +138,14 @@ async def client(db):
 
 @pytest_asyncio.fixture
 async def seeded_db(db):
-    """Seed one item of each type, then refresh the materialized view."""
+    """Seed one item of each type. Nothing else is needed: since feature 91
+    ``search_vector`` is a generated column on the four content tables, so the
+    flush is what makes these rows searchable."""
     await movies_repo.upsert_movie(db, _movie_dict("inception-2010-search-test"))
     await series_repo.upsert_series(db, _series_dict("breaking-bad-2008-search-test"))
     await books_repo.upsert_book(db, _book_dict("dune-1965-search-test"))
     await games_repo.upsert_game(db, _game_dict("witcher-3-2015-search-test"))
     await db.flush()
-    # Refresh the materialized view so the inserted rows are visible to search
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
@@ -200,7 +195,6 @@ async def test_search_pagination(client, seeded_db):
         patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     ):
         response = await client.get("/v1/search?q=inception&page=1&limit=5")
     assert response.status_code == 200
@@ -245,7 +239,6 @@ async def test_search_no_results(client, seeded_db):
             "backlogg.search.service._ingest_games",
             new=AsyncMock(return_value=None),
         ),
-        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
     assert response.status_code == 200
@@ -277,9 +270,9 @@ async def test_search_result_fields(client, seeded_db):
 
 @pytest_asyncio.fixture
 async def rating_internal_seeded_db(db):
-    """One item of each type, one with rating_internal set and one without,
-    then a REFRESH — regression coverage for the recreated catalog_search
-    materialized view (feature 69, rating_internal_list_exposure)."""
+    """One item of each type, one with rating_internal set and one without —
+    regression coverage for feature 69 (rating_internal_list_exposure). No
+    refresh step: since feature 91 the search reads the base tables directly."""
     await movies_repo.upsert_movie(
         db,
         _movie_dict("f69-movie-with-internal-search-test")
@@ -311,15 +304,11 @@ async def rating_internal_seeded_db(db):
         _game_dict("f69-game-with-internal-search-test") | {"rating_internal": 4.9},
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
-async def test_search_catalog_search_view_exposes_rating_internal_per_type(
-    client, rating_internal_seeded_db
-):
-    """After the migration recreates catalog_search + a REFRESH, every item
-    type surfaces its own rating_internal value (or null).
+async def test_search_exposes_rating_internal_per_type(client, rating_internal_seeded_db):
+    """Every item type surfaces its own rating_internal value (or null).
 
     Movies are checked via full-text ``q`` (two movies sharing a title, one
     with a value and one without); series/books/games are checked via the
@@ -357,14 +346,12 @@ async def test_search_fallback_fires_when_no_local_results(client, seeded_db):
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
@@ -374,8 +361,6 @@ async def test_search_fallback_fires_when_no_local_results(client, seeded_db):
     ingest_series_mock.assert_called_once()
     ingest_books_mock.assert_called_once()
     ingest_games_mock.assert_called_once()
-    # Materialized view refresh must have been called
-    refresh_mock.assert_called_once()
 
 
 async def test_search_fallback_page1_fires_first_time_even_when_local_page_full(client, seeded_db):
@@ -391,14 +376,12 @@ async def test_search_fallback_page1_fires_first_time_even_when_local_page_full(
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=inception&limit=1")
 
@@ -409,7 +392,6 @@ async def test_search_fallback_page1_fires_first_time_even_when_local_page_full(
     ingest_series_mock.assert_called_once()
     ingest_books_mock.assert_called_once()
     ingest_games_mock.assert_called_once()
-    refresh_mock.assert_called_once()
 
 
 async def test_search_fallback_page1_not_refired_within_ttl_for_same_query(client, seeded_db):
@@ -418,14 +400,12 @@ async def test_search_fallback_page1_not_refired_within_ttl_for_same_query(clien
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         first = await client.get("/v1/search?q=inception&limit=1")
         second = await client.get("/v1/search?q=inception&limit=1")
@@ -437,7 +417,6 @@ async def test_search_fallback_page1_not_refired_within_ttl_for_same_query(clien
     ingest_series_mock.assert_called_once()
     ingest_books_mock.assert_called_once()
     ingest_games_mock.assert_called_once()
-    refresh_mock.assert_called_once()
 
 
 async def test_search_fallback_page1_different_item_type_fires_separately(client, seeded_db, db):
@@ -454,18 +433,15 @@ async def test_search_fallback_page1_different_item_type_fires_separately(client
         | {"title": "Inception Chronicles", "original_title": "Inception Chronicles"},
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
 
     ingest_movie_mock = AsyncMock(return_value=None)
     ingest_series_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         movie_response = await client.get("/v1/search?q=inception&limit=1&type=movie")
         series_response = await client.get("/v1/search?q=inception&limit=1&type=series")
@@ -476,7 +452,6 @@ async def test_search_fallback_page1_different_item_type_fires_separately(client
     assert len(series_response.json()["results"]) == 1
     ingest_movie_mock.assert_called_once()
     ingest_series_mock.assert_called_once()
-    assert refresh_mock.call_count == 2
 
 
 async def test_search_fallback_page_gt1_still_fires_when_incomplete_after_page1_cached(
@@ -495,14 +470,12 @@ async def test_search_fallback_page_gt1_still_fires_when_incomplete_after_page1_
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         page1 = await client.get("/v1/search?q=inception&limit=1")
         page2 = await client.get("/v1/search?q=inception&limit=1&page=2")
@@ -515,7 +488,6 @@ async def test_search_fallback_page_gt1_still_fires_when_incomplete_after_page1_
     assert ingest_series_mock.call_count == 2
     assert ingest_books_mock.call_count == 2
     assert ingest_games_mock.call_count == 2
-    assert refresh_mock.call_count == 2
 
 
 async def test_search_fallback_fires_when_local_page_incomplete(client, seeded_db):
@@ -529,14 +501,12 @@ async def test_search_fallback_fires_when_local_page_incomplete(client, seeded_d
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=inception")
 
@@ -547,7 +517,6 @@ async def test_search_fallback_fires_when_local_page_incomplete(client, seeded_d
     ingest_series_mock.assert_called_once()
     ingest_books_mock.assert_called_once()
     ingest_games_mock.assert_called_once()
-    refresh_mock.assert_called_once()
 
 
 async def test_search_fallback_type_movie_only_calls_tmdb_movies(client, seeded_db):
@@ -556,14 +525,12 @@ async def test_search_fallback_type_movie_only_calls_tmdb_movies(client, seeded_
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=movie")
 
@@ -580,14 +547,12 @@ async def test_search_fallback_type_series_only_calls_tmdb_series(client, seeded
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=series")
 
@@ -604,14 +569,12 @@ async def test_search_fallback_type_book_only_calls_open_library(client, seeded_
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=book")
 
@@ -628,14 +591,12 @@ async def test_search_fallback_type_game_only_calls_igdb(client, seeded_db):
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente&type=game")
 
@@ -655,14 +616,12 @@ async def test_search_fallback_api_failure_does_not_abort_others(client, seeded_
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=failing_ingest),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
@@ -675,8 +634,8 @@ async def test_search_fallback_api_failure_does_not_abort_others(client, seeded_
 
 
 async def test_search_fallback_one_ingest_failure_does_not_abort_others(client, seeded_db):
-    """If one _ingest_* raises an unhandled exception, the remaining ingests and
-    refresh_catalog_search must still execute (each ingest owns its own session).
+    """If one _ingest_* raises an unhandled exception, the remaining ingests
+    must still execute (each ingest owns its own session).
     """
     call_log: list[str] = []
 
@@ -692,24 +651,20 @@ async def test_search_fallback_one_ingest_failure_does_not_abort_others(client, 
     async def ok_games_ingest(q, page, limit):
         call_log.append("games")
 
-    refresh_mock = AsyncMock(return_value=None)
-
     with (
         patch("backlogg.search.service._ingest_movies", new=failing_movies_ingest),
         patch("backlogg.search.service._ingest_series", new=ok_series_ingest),
         patch("backlogg.search.service._ingest_books", new=ok_books_ingest),
         patch("backlogg.search.service._ingest_games", new=ok_games_ingest),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=xxxxxxxxxxxxxxxxxxxxxxxx_inexistente")
 
     # Must not 500 — each ingest has its own isolated session
     assert response.status_code == 200
-    # The other ingests and refresh must have executed despite the movies failure
+    # The other ingests must have executed despite the movies failure
     assert "series" in call_log
     assert "books" in call_log
     assert "games" in call_log
-    refresh_mock.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -726,14 +681,12 @@ async def test_search_fallback_page_2_maps_to_external_page(client, seeded_db):
     ingest_series_mock = AsyncMock(return_value=None)
     ingest_books_mock = AsyncMock(return_value=None)
     ingest_games_mock = AsyncMock(return_value=None)
-    refresh_mock = AsyncMock(return_value=None)
 
     with (
         patch("backlogg.search.service._ingest_movies", new=ingest_movie_mock),
         patch("backlogg.search.service._ingest_series", new=ingest_series_mock),
         patch("backlogg.search.service._ingest_books", new=ingest_books_mock),
         patch("backlogg.search.service._ingest_games", new=ingest_games_mock),
-        patch(_REFRESH_PATCH, new=refresh_mock),
     ):
         response = await client.get("/v1/search?q=inception&page=2&limit=10")
 
@@ -757,7 +710,6 @@ async def test_search_fallback_page_3_maps_to_external_page_2(client, seeded_db)
         patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
         patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-        patch(_REFRESH_PATCH, new=AsyncMock(return_value=None)),
     ):
         response = await client.get("/v1/search?q=inception&page=3&limit=10")
 
@@ -773,7 +725,8 @@ async def test_search_fallback_page_3_maps_to_external_page_2(client, seeded_db)
 
 @pytest_asyncio.fixture
 async def punctuation_seeded_db(db):
-    """Seed movies with punctuated titles, then refresh the materialized view."""
+    """Seed movies with punctuated titles — searchable straight away (the
+    generated ``search_vector`` is filled by the INSERT itself)."""
     await movies_repo.upsert_movie(
         db,
         _movie_dict("spider-man-homecoming-2017-search-test")
@@ -794,7 +747,6 @@ async def punctuation_seeded_db(db):
         | {"title": "X-Men '97", "original_title": "X-Men '97"},
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
@@ -897,7 +849,6 @@ async def tied_rank_seeded_db(db):
         },
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
@@ -947,7 +898,6 @@ async def distinct_rank_seeded_db(db):
         },
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
@@ -973,8 +923,8 @@ async def test_search_distinct_rank_orders_by_rating_external_over_ts_rank(
 # Regression (feature 66 — rating_display_internal_only, updated by feature
 # 69 — rating_internal_list_exposure): SearchRepository.search() is the
 # explicit exception that keeps ordering by rating_external DESC NULLS LAST
-# even though catalog_search now exposes a rating_internal column (feature
-# 69) on every row — the ORDER BY itself must never consult it.
+# even though every result row carries a rating_internal field (feature 69)
+# — the ORDER BY itself must never consult it.
 # ---------------------------------------------------------------------------
 
 
@@ -1006,7 +956,6 @@ async def rating_internal_present_seeded_db(db):
         },
     )
     await db.flush()
-    await db.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
     return db
 
 
@@ -1061,9 +1010,6 @@ async def test_search_fallback_returns_ingested_items(client, db):
         await movies_repo.upsert_movie(db, dict(movie_data))
         await db.flush()
 
-    async def fake_refresh(self):
-        await self._session.execute(text("REFRESH MATERIALIZED VIEW catalog_search"))
-
     from backlogg.core.database import get_db
 
     async def override_get_db():
@@ -1076,7 +1022,6 @@ async def test_search_fallback_returns_ingested_items(client, db):
             patch("backlogg.search.service._ingest_series", new=AsyncMock(return_value=None)),
             patch("backlogg.search.service._ingest_books", new=AsyncMock(return_value=None)),
             patch("backlogg.search.service._ingest_games", new=AsyncMock(return_value=None)),
-            patch(_REFRESH_PATCH, new=fake_refresh),
         ):
             response = await ac.get("/v1/search?q=galactic+traveler")
     app.dependency_overrides.clear()

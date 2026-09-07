@@ -250,7 +250,6 @@ async def test_sync_movies_job_catches_external_error():
             new_callable=AsyncMock,
             side_effect=RuntimeError("network error"),
         ),
-        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
@@ -321,7 +320,6 @@ async def test_sync_series_job_catches_external_error():
             new_callable=AsyncMock,
             side_effect=RuntimeError("tmdb down"),
         ),
-        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
@@ -373,11 +371,6 @@ async def test_sync_movies_is_idempotent(db):
             "get_movie_detail",
             new_callable=AsyncMock,
             return_value=movie_raw,
-        ),
-        patch.object(
-            sync_jobs,
-            "refresh_catalog_search",
-            new_callable=AsyncMock,
         ),
         # Use the test DB session factory so writes land in the test DB
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
@@ -440,10 +433,6 @@ async def test_sync_books_calls_get_work_detail_for_authors():
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
         ) as mock_factory,
-        patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
-        ),
         patch(
             "backlogg.scheduler.jobs.collect_book_authors",
             new_callable=AsyncMock,
@@ -533,10 +522,6 @@ async def test_sync_movies_maps_credits_from_the_detail_payload():
             new_callable=AsyncMock,
         ) as mock_collect_credits,
         patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
-        ),
-        patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
@@ -607,10 +592,6 @@ async def test_sync_movies_people_write_failure_does_not_increment_errors():
             side_effect=RuntimeError("people write failed"),
         ),
         patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
-        ),
-        patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
@@ -678,10 +659,6 @@ async def test_sync_series_maps_cast_and_creators_from_one_payload():
             return_value=[],
         ) as mock_collect_creators,
         patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
-        ),
-        patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
@@ -745,10 +722,6 @@ async def test_sync_series_people_write_failure_does_not_increment_errors():
             side_effect=RuntimeError("people write failed"),
         ),
         patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
-        ),
-        patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
@@ -810,10 +783,6 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
             "backlogg.scheduler.jobs.collect_book_authors",
             new_callable=AsyncMock,
             side_effect=RuntimeError("authors API down"),
-        ),
-        patch(
-            "backlogg.scheduler.jobs.refresh_catalog_search",
-            new_callable=AsyncMock,
         ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):

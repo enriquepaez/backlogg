@@ -59,7 +59,6 @@ def _job_patches(cursor_offset: int):
             return_value=cursor_offset,
         ),
         patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs.refresh_catalog_search", new_callable=AsyncMock),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
     )
 
@@ -86,11 +85,10 @@ async def test_sync_movies_slice_size_overrides_setting(monkeypatch):
     exactly what the backfill script raises to process bigger slices.
     """
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    _get_cursor, _set_cursor, refresh, factory = _job_patches(cursor_offset=0)
+    _get_cursor, _set_cursor, factory = _job_patches(cursor_offset=0)
 
     with (
         _seed_work_list_patch() as mock_work_list,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_movies(slice_size=7)
@@ -103,11 +101,10 @@ async def test_sync_movies_slice_size_none_uses_setting(monkeypatch):
     """slice_size=None preserves the settings-based behaviour."""
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_MOVIES", None)
-    _get_cursor, _set_cursor, refresh, factory = _job_patches(cursor_offset=0)
+    _get_cursor, _set_cursor, factory = _job_patches(cursor_offset=0)
 
     with (
         _seed_work_list_patch() as mock_work_list,
-        refresh,
         factory,
     ):
         await sync_jobs.sync_movies(slice_size=None)
@@ -119,7 +116,7 @@ async def test_sync_slice_size_is_capped_by_target(monkeypatch):
     """The override never fetches beyond SEED_TOP_N_* - offset."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=4)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=4)
 
     with (
         patch.object(
@@ -130,7 +127,6 @@ async def test_sync_slice_size_is_capped_by_target(monkeypatch):
         ) as mock_fetch,
         get_cursor,
         set_cursor,
-        refresh,
         factory,
     ):
         await sync_jobs.sync_games(slice_size=500)
@@ -151,7 +147,7 @@ async def test_sync_books_fetch_error_reports_error_and_keeps_cursor(monkeypatch
     """An adapter exception yields errors=1 and never writes the cursor."""
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 100)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=500)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=500)
 
     with (
         patch.object(
@@ -162,7 +158,6 @@ async def test_sync_books_fetch_error_reports_error_and_keeps_cursor(monkeypatch
         ),
         get_cursor,
         set_cursor as mock_set,
-        refresh,
         factory,
     ):
         result = await sync_jobs.sync_books()
@@ -180,7 +175,7 @@ async def test_backfill_guard_aborts_on_fetch_error(monkeypatch):
     as an empty listing and produced a false-green wraparound stop.
     """
     monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
-    get_cursor, set_cursor, refresh, factory = _job_patches(cursor_offset=500)
+    get_cursor, set_cursor, factory = _job_patches(cursor_offset=500)
     script_cursor, script_factory = _backfill_patches(cursor_reads=[500])
 
     with (
@@ -192,7 +187,6 @@ async def test_backfill_guard_aborts_on_fetch_error(monkeypatch):
         ),
         get_cursor,
         set_cursor,
-        refresh,
         factory,
         script_cursor,
         script_factory,

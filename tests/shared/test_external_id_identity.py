@@ -434,7 +434,6 @@ async def test_sync_games_renaming_a_game_updates_its_row(db):
         patch.object(
             sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
         ),
-        patch.object(sync_jobs, "refresh_catalog_search", new_callable=AsyncMock),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=lambda *args, **kwargs: session_cm,
