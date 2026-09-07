@@ -242,3 +242,58 @@ llegan menos elementos en el array. Por tanto **no dispara el criterio 8**
 **A + B**, tabla lateral `item_cast`, `/people` intacto. `apps/web` no se toca:
 no enlaza a páginas de persona y `ItemCredits` seguirá recibiendo el reparto
 completo por el mismo contrato de los endpoints de detalle.
+
+---
+
+## 12. Medición DESPUÉS, contra producción (criterios 10 y 11) — 2026-09-07
+
+Migración `0037` aplicada por Render tras el merge de la PR #202. Datos
+verificados antes de tocar nada más: `item_cast` recibió **517.600 actores** en
+55.590 fichas — exactamente los credits ACTOR que había, **cero pérdida**.
+
+### El ahorro real
+
+| Tabla | Antes | Después | Δ |
+|---|---|---|---|
+| `credits` | 136 MB | **27 MB** | −109 |
+| `external_ids` | 74 MB | **32 MB** | −42 |
+| `people` | 56 MB | **15 MB** | −41 |
+| `item_cast` | — | **40 MB** | +40 |
+| **Grafo de personas** | **266 MB** | **114 MB** | **−152 MB (−57 %)** |
+
+Filas: `credits` 710.772 → 193.173 · `people` 240.615 → 65.310 ·
+`external_ids` PERSON/TMDB 229.105 → 53.799. Las 13.718 de Open Library
+**intactas**: los autores se conservan, que era el riesgo nº1 de la purga.
+
+Cada tabla cayó dentro de lo proyectado en §5. Cluster: 515 → **385 MB**.
+
+### ⚠️ Dos correcciones que la medición obliga a hacer
+
+**1. El denominador era el equivocado.** Ver `progress/deploy_89.md`: el techo
+de Neon es por **cluster**, no por base. Las bases del sistema cuestan ~22 MB
+permanentes que hay que descontar de los 512.
+
+**2. `catalog_search` es más cara de lo que decía §10, y ya es la pared.**
+La vista que se midió en 105 MB **estaba obsoleta**: sus estadísticas decían
+66.363 filas cuando el catálogo tiene 85.530 — no se refrescó nunca tras morir
+la siembra. Recreada completa pesa **137 MB** (109 de heap + 28 de índices),
+1,6 KB por ítem.
+
+Con ese número, la proyección a catálogo completo (119.225 ítems) sube a
+**~488 MB de 512: unos 24 MB de margen**, no los 46 que estimaba la corrección
+anterior ni los 68 de la original.
+
+### 🔴 El riesgo que esto abre, y que NO es de esta feature
+
+`REFRESH MATERIALIZED VIEW CONCURRENTLY` **construye una copia completa antes
+de intercambiar**. Con la vista en 137 MB necesita ~137 MB libres; hoy hay
+**127**. El sync nocturno lo ejecuta en `backlogg/scheduler/jobs.py:153`.
+
+A catálogo completo la vista pesaría ~191 MB y el refresh necesitaría otros
+tantos: **no cabe**. Sembrar el catálogo restante sin resolver esto vuelve a
+chocar con la misma pared, esta vez por el lado de la búsqueda.
+
+Opciones a evaluar, ninguna dentro del alcance de la 89: `REFRESH` no
+concurrente (bloquea, pero no duplica), una tabla real mantenida por triggers en
+vez de vista materializada, o mover el índice GIN a la tabla de cada tipo y
+retirar la vista. **Merece issue propio antes de retomar la siembra.**
