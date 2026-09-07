@@ -1,164 +1,95 @@
 # Sesión actual
 
-**Estado: sin tarea en curso.** El 2026-09-07 se cerraron **tres features**:
-la **89** `credits_people_storage_redesign`, la **91** `search_expression_index`
-—ambas desplegadas en producción y medidas— y la **81** `trending_local`.
+**Estado: sin tarea en curso.** El 2026-09-07 fue una sesión larga que terminó
+con **el catálogo de producción sembrado y publicable por primera vez**.
 
-## Lo único en marcha: la siembra de producción
+## El catálogo, hoy
 
-La ejecuta el usuario a mano. Todo lo que hace falta está en «Runbook de la
-siembra» aquí abajo.
+| Tipo | Ítems | |
+|---|---|---|
+| movies | 57.024 | de 57.166 targets |
+| **series** | **10.873** | de 10.880 — **estaba a 0** |
+| books | 19.159 | |
+| games | 10.000 | **topados**: los 31.958 reales esperan a la feature 90 |
+| **Total** | **97.056** | |
 
-> **La feature 81 ya está hecha** (PR #207). Este archivo decía que se estaba
-> haciendo «en otra conversación» y que no se cogiera: quedó obsoleto. Resumen
-> completo en `progress/history.md`; desbloqueó **FE-68** y derivó los issues
-> **#29**, **#30** y **#31**.
+**Cluster de Neon: 392 MB de 512, con 120 MB de holgura.**
 
-## ⚠️ Este archivo se trunca al cerrar sesión
+Cobertura de credits, que es lo que cerró la feature 74 y el issue #15:
+movies **99,8 %** de grafo y 98,6 % de reparto · series **82,6 %** y 96,1 % ·
+books **~100 %**. (El 82,6 % de series no es un hueco de ingesta: muchas series
+pequeñas o extranjeras no declaran creador en TMDB.)
 
-`AGENTS.md` §6.4 manda vaciar `progress/current.md` al terminar una sesión, y el
-runbook de abajo vive aquí. **Antes de truncarlo, comprueba si la siembra sigue
-pendiente**: si lo está, mueve el runbook a `docs/` o a
-`progress/priority_order.md` —que no se trunca— en vez de perderlo.
+## Qué se cerró hoy
 
----
+- **Feature 89** `credits_people_storage_redesign` — grafo de personas de 266 a
+  114 MB.
+- **Feature 91** `search_expression_index` — retirada `catalog_search`, y con
+  ella el `REFRESH` que bloqueaba la siembra (issue #28).
+- **Feature 81** `trending_local` — hecha en sesión paralela; desbloqueó FE-68.
+- **Siembra de producción** — punto 7 de `priority_order.md`.
+- **Feature 74** e **issue #15**, juntos, con la cobertura medida arriba. Eso
+  **desbloquea FE-65**.
 
-# Runbook de la siembra (punto 7 de `priority_order.md`)
+## Qué está ejecutable ahora
 
-## Qué falta, medido contra producción el 2026-09-07
-
-| Tipo | Estado |
+| | |
 |---|---|
-| **SERIES** | **10.880 pendientes** — están todas: `series` tiene 0 filas |
-| **MOVIE** | **795 pendientes** de 57.166 |
-| BOOK | 19.159 cargados; la fase `load` del dump es idempotente |
-| GAME | 10.000 de 31.958, **topados** hasta la feature 90 |
+| **FE-65** `credits_source_author_writer_display` | `pending` — desbloqueada hoy |
+| **FE-68** `trending_period_books_games` | `pending` — desbloqueada por la 81 |
+| **Feature 90** `igdb_targets_seeding` | quita el tope de games: +21.958 ítems, ~53 MB. Caben en los 120 de holgura |
+| **Issue #23** | ya dimensionado, **toca decidirlo** (ver abajo) |
 
-Consulta para recalcular lo pendiente en cualquier momento (converge por
-construcción: es la diferencia contra `external_ids`, así que da igual cómo
-muriera un run anterior):
+## El issue #23 pide una decisión, y ya tiene los números
 
-```sql
-SELECT st.item_type, count(*) AS pendientes
-FROM seed_targets st
-WHERE NOT EXISTS (SELECT 1 FROM external_ids e
-                  WHERE e.item_type=st.item_type AND e.source=st.source
-                    AND e.external_id=st.external_id)
-GROUP BY 1 ORDER BY 1;
-```
+La siembra perdió **149 targets de 68.046 (0,22 %)**: movies 142 (0,25 %),
+series 7 (0,064 %). La cola decía que se decidiría «cuando la siembra lo
+dimensione», y ya está dimensionado.
 
-## Cómo se lanza
+**Mecanismo, confirmado con un caso**: el target TMDB 812 (*Aladdín* 1992,
+12.231 votos) produce el slug `aladdin-1992`, que ya ocupa el movie 263 con TMDB
+343693. El ítem existente ya tiene su fila de TMDB y `uq_item_source` prohíbe
+una segunda, así que el 812 nunca se enlaza. **El slug hace de identidad cuando
+no puede** — mismo fondo que los issues #18 y #24.
 
-Por **GitHub Actions**, no por Render (que corta a los ~15 min por petición):
+Tres cosas que no estaban en el issue y ahora sí:
+1. **`skipped_links` reporta 0** en este camino: la instrumentación del issue #22
+   no lo ve. Es un hueco propio.
+2. **No hay huérfanos**: los 57.024 movies tienen su `external_id`. Es ausencia,
+   no corrupción.
+3. **Hay efecto de calidad**: gana el primero, así que a veces el slug lo ocupa
+   la entrada con menos votos y la popular queda fuera.
+
+Los 149 **no están perdidos**: siguen en `seed_targets` con `attempts=3`,
+reabribles cuando haya arreglo.
+
+## Cómo se lanza la siembra (por si hay que repetirla)
 
 ```bash
-gh workflow run backfill-sync.yml -f content_type=movie  -f mode=hydrate
-gh workflow run backfill-sync.yml -f content_type=series -f mode=hydrate
-
+gh workflow run backfill-sync.yml -f content_type=<movie|series> -f mode=hydrate
 gh run list --workflow=backfill-sync.yml
-gh run watch
 ```
 
-`seed_top_n` es **inerte** para movie y series desde la feature 86 (solo aplica
-a book y game, que siguen con cursor). No hace falta pasarlo.
+`seed_top_n` es inerte para movie y series desde la feature 86. Lo pendiente se
+calcula por diferencia contra `external_ids`, así que converge por construcción
+y da igual cómo muriera un run anterior.
 
-**Movies primero, aunque sea lo pequeño**: es un test de humo. La ingesta ahora
-escribe en `item_cast` y calcula `search_vector` en cada `INSERT` — dos caminos
-que las migraciones `0037` y `0038` estrenaron hoy y que **nunca se han
-ejercitado contra producción a escala**. 795 ítems son ~40 min; 10.880 series
-son ~9 h. Mejor descubrir un fallo en 40 minutos.
+## Tres cosas de Neon que costaron caro
 
-**Series necesitará dos despachos**: el script se para solo a los 300 min
-(`BACKFILL_TIME_BUDGET`). El segundo retoma donde quedó.
-
-## Qué verificar entre tanda y tanda
-
-**1. Que los caminos nuevos se pueblan** (lo que estrena esta siembra):
-
-```sql
-SELECT count(*) FROM item_cast WHERE item_type = 2;          -- 2 = SERIES
-SELECT count(*) FROM series WHERE search_vector IS NOT NULL;  -- debe igualar count(*)
-```
-
-**2. `skipped_links`**, el panel de instrumentos del issue #22. Viaja en el
-resumen del job y sale como `::warning::` en el workflow. **Si sube, hay enlaces
-perdiéndose en silencio** — es el mecanismo que encadenó los issues #7, #15 y #20.
-
-**3. El disco, contra el CLUSTER y no contra `neondb`:**
-
-```sql
-SELECT pg_size_pretty(sum(pg_database_size(datname))) AS cluster,
-       pg_size_pretty(512*1024*1024 - sum(pg_database_size(datname))::bigint) AS holgura
-FROM pg_database;
-```
-
-Punto de partida: **343 MB, 169 de holgura**. Coste estimado de lo que falta:
-**~53 MB** (795 movies + 10.880 series a ~4,5 KB/ítem todo incluido). Debería
-acabar en ~396 MB.
-
-⚠️ Ese 4,5 KB/ítem está **extrapolado de movies**, no medido para series, y el
-**reparto de series suele ser más largo** que el de cine, así que `item_cast`
-puede salir más caro. Hay margen para absorberlo, pero conviene medir tras la
-primera tanda de series en vez de esperar al final.
-
-## Qué se cierra cuando la siembra termine
-
-- **Feature 74** `credits_source_author_role` (hoy `blocked`) y **issue #15**, que
-  se cierran **juntos**: el criterio 9 de la 74 es «issue #15 verificado para
-  movies, series **y** books», y series estaba a 0.
-- Con la 74 en `done` se desbloquea **FE-65** en el frontend.
-- Quedan pendientes de decisión los issues **#20** y **#18**, que siguen `open` a
-  propósito esperando a medirse contra la siembra real.
-
-## Lo que liberaron las dos features
-
-| | Antes | Después |
-|---|---|---|
-| Grafo de personas (89) | 266 MB | **114 MB** |
-| `catalog_search` (91) | 137 MB | **0** |
-| **Cluster** | **515 MB** ❌ | **343 MB** |
-| **Holgura** | 0 (rechazaba un INSERT) | **169 MB** |
-
-La 89 movió el reparto a `item_cast` (JSONB) dejando en `credits` solo el grafo;
-la 91 retiró la vista materializada y puso un índice GIN sobre una columna
-generada en cada tabla base. Detalle en `progress/measure_89.md` y
-`progress/measure_91.md`.
-
-## Tres cosas de Neon que costaron caro y no se deducen del código
-
-**1. El techo de 512 MB es por CLUSTER, no por base.** `neon.max_cluster_size`
-suma todas las bases. Medir con `pg_database_size('neondb')` es el denominador
-equivocado — por eso parecía haber 28 MB de margen mientras producción rechazaba
-un `INSERT` de una fila. Las bases del sistema cuestan **~22 MB permanentes**.
-Consulta correcta:
+**1. El techo de 512 MB es por CLUSTER, no por base.** Medir con
+`pg_database_size('neondb')` es el denominador equivocado; las bases del sistema
+cuestan ~22 MB permanentes. Consulta correcta:
 
 ```sql
 SELECT pg_size_pretty(sum(pg_database_size(datname))) FROM pg_database;
 ```
 
-**2. La métrica «Storage» del dashboard no es el tamaño vivo.** Marcaba
-0,54 / 0,5 GB con el cluster ya en 400 MB y las escrituras funcionando.
+**2. La métrica «Storage» del dashboard no es el tamaño vivo.**
 
-**3. Un `DROP` dentro de la transacción de una migración no libera nada.**
-Postgres desenlaza los ficheros en el `COMMIT`. Si hace falta espacio para que
-una migración quepa, el `DROP` tiene que ir **commiteado antes**, como sentencia
-propia — y antes del merge, porque Render aplica la migración al desplegar.
-Saltarse ese paso hizo fallar el despliegue de la 91 tres veces.
-
-## Una trampa que ya mordió una vez
-
-**`catalog_search` se redefinió en tres migraciones (`0006` → `0028` → `0031`).**
-Al recrearla a mano durante el despliegue de la 89 se usó el DDL de la `0028` sin
-comprobar cuál era la última: la vista quedó sin `rating_internal` y `/v1/search`
-estuvo roto ~1 h. Ya no aplica —la 91 retiró la vista— pero la lección sí: al
-recrear algo a mano desde una migración, **la definición buena es la última**.
-
-## La feature 74 está en `blocked` a propósito
-
-Su código está mergeado desde el PR #197. Su criterio 9 depende de la siembra.
-La 74 y el issue #15 se cierran **juntos** cuando la siembra esté hecha y medida.
-Pasó de `in_progress` a `blocked` el 2026-09-07: describe mejor la situación
-—nadie trabaja en ella— y `init.sh` solo admite una feature en `in_progress`.
+**3. Un `DROP` dentro de la transacción de una migración no libera nada** —
+Postgres desenlaza los ficheros en el `COMMIT`. Si una migración necesita sitio,
+el `DROP` va **commiteado antes**, y antes del merge, porque Render aplica la
+migración al desplegar. Saltárselo hizo fallar el despliegue de la 91 tres veces.
 
 ## Credenciales
 
