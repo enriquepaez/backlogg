@@ -356,6 +356,12 @@ export const seriesGenresFixture: GenreListOut = {
   genres: [{ name: "Drama", slug: "drama", item_type: "series", count: 8 }],
 };
 
+/**
+ * Unfiltered trending: a mix of all four types, like the real
+ * `GET /v1/trending` (backend features 68/81 — "hasta ~5 de cada uno,
+ * intercalados", `docs/api.md`). It used to hold movie+series only, which is
+ * precisely the assumption issue #32 was built on.
+ */
 export const trendingFixture: TrendingOut = {
   results: [
     {
@@ -375,6 +381,24 @@ export const trendingFixture: TrendingOut = {
       release_date: seriesListFixture.items[0].release_date,
       rating_external: seriesListFixture.items[0].rating_external,
       rating_internal: seriesListFixture.items[0].rating_internal,
+    },
+    {
+      item_type: "BOOK",
+      title: duneBookFixture.title,
+      slug: duneBookFixture.slug,
+      poster_url: duneBookFixture.poster_url,
+      release_date: duneBookFixture.first_publish_date,
+      rating_external: duneBookFixture.rating_external,
+      rating_internal: duneBookFixture.rating_internal,
+    },
+    {
+      item_type: "GAME",
+      title: hadesFixture.title,
+      slug: hadesFixture.slug,
+      poster_url: hadesFixture.poster_url,
+      release_date: hadesFixture.release_date,
+      rating_external: hadesFixture.rating_external,
+      rating_internal: hadesFixture.rating_internal,
     },
   ],
 };
@@ -527,15 +551,20 @@ export const handlers = [
   }),
 
   // Respects `type` (FE-12 `/trending?type=`) so tests can exercise the
-  // filtered state; ignores `period` (the fixture doesn't vary by period).
+  // filtered state for any of the four types — books and games included
+  // since FE-68; ignores `period` (the fixture doesn't vary by period).
   http.get(`${MOCK_API_BASE_URL}/v1/trending`, ({ request }) => {
     const url = new URL(request.url);
     const type = url.searchParams.get("type");
 
-    if (type === "movie") {
-      return HttpResponse.json(trendingMoviesOnlyFixture);
+    if (!type) {
+      return HttpResponse.json(trendingFixture);
     }
-    return HttpResponse.json(trendingFixture);
+    return HttpResponse.json({
+      results: trendingFixture.results.filter(
+        (item) => item.item_type === type.toUpperCase(),
+      ),
+    } satisfies TrendingOut);
   }),
 
   // FE-11 global search, re-scoped by `browse_search_filters` Fase 1

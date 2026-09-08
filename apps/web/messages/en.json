@@ -139,9 +139,11 @@
     "error": "Something went wrong loading trending titles. Please try again.",
     "filters": {
       "typeLabel": "Type",
-      "all": "Movies & series",
+      "all": "All types",
       "movie": "Movies",
       "series": "Series",
+      "book": "Books",
+      "game": "Games",
       "periodLabel": "Period",
       "period": {
         "day": "Today",

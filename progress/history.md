@@ -917,3 +917,90 @@ está**: una clave inerte no justifica otra ronda de implementer + reviewer.
 
 `pnpm --filter web`: typecheck, lint, build y **1193 tests** en verde (1181 en
 `main`). `bash init.sh` verde: 1499 tests de backend.
+
+## 2026-09-08 — FE-68 `trending_period_books_games` + issue #32 (rama `feat/trending_period_books_games`)
+
+Detalle en `progress/impl_FE-68.md` y `progress/review_FE-68.md`.
+
+### La entrada del backlog describía un problema que ya no existía
+
+FE-68 se creó el 2026-09-02 como «el selector de `period` no afecta a books y
+games». Eso dejó de ser cierto el 2026-09-07: la feature backend 81 da `period`
+real a los cuatro tipos y el front ya lo enviaba sin tocarlo. **Esa mitad no
+requería trabajo.**
+
+Lo que sí había, medido contra el backend real al arrancar la tarea, era un
+**bug vivo en producción** que la entrada no mencionaba, registrado como
+**issue #32** (frontend, high):
+
+- `TRENDING_TYPES` era `["movie", "series"]`: books y games no se podían
+  seleccionar, y la opción «todo» se llamaba «Películas y series».
+- `GET /v1/trending` sin `type` devuelve los cuatro tipos — medido: 5 de cada.
+- `trendingItemType()` era `item_type === "MOVIE" ? "movie" : "series"`.
+
+Resultado: **10 de las 20 tarjetas de `/trending` llevaban badge «Series» y
+enlazaban a `/series/{slug}`**. Y lo grave no era el 404, sino que a veces
+**resolvía a otro ítem real**: el libro *Un cuento perfecto* aterrizaba en la
+serie «A Perfect Story» y el juego *Escape from Tarkov* en la serie «Escape from
+Tarkov. Raid.», disparando de paso ingesta on-demand de series que nadie pidió.
+**La home tenía una copia privada del mismo mapeo**, con el mismo efecto.
+
+### El arreglo
+
+`trendingItemType` se movió a `lib/catalog-types.ts` con firma
+`(item) => CatalogType | undefined`: `toLowerCase()` más el guard
+`isCatalogType`, y un valor desconocido devuelve `undefined` en vez de caer en
+«series» — los llamantes descartan esa tarjeta.
+
+Y se **eliminó** el vocabulario estrecho `TrendingType`/`TRENDING_TYPES` en
+favor de `CatalogType`/`CATALOG_TYPES`. Ese es el fondo del asunto: el query
+param `type` de `/v1/trending` es literalmente `ItemTypeEnum`
+(`"movie"|"series"|"book"|"game"`), así que **el subtipo más estrecho era la
+causa del bug**, no un detalle de estilo. Copy reutilizado de `Search.filters`,
+no inventado.
+
+### `packages/api-client` estaba desincronizado
+
+Medido antes de tocarlo: **3 cambios**. Dos son las descripciones de trending
+que la feature 81 ya había corregido en `backlogg/trending/router.py` —el
+backend decía la verdad y el cliente generado no, incluida la frase «period is
+accepted but has no effect for those two types», justo el tema de esta feature—
+y el tercero un `skipped_links` aditivo del issue #22. Regenerado con
+`gen:api`; `@backlogg/api-client typecheck` verde.
+
+### El criterio de aceptación que no se pudo observar entero
+
+FE-68 exigía verificar contra el backend real que `day` y `week` dan resultados
+distintos para book y game. Reproducido por implementer y reviewer por separado:
+
+```
+movie   day n=20 week n=20  distintos (10 exclusivos de cada uno)
+series  day n=20 week n=20  distintos (7 y 7)
+game    day n= 5 week n=16  distintos (11 exclusivos de week)
+book    day n=20 week n=20  IDÉNTICOS
+```
+
+**No es un fallo del frontend, y está medido**: de los 391 libros de la DB de
+dev, **cero** tienen `first_publish_date` dentro de 365 días ni de 90 — el más
+reciente es de 2025-01-01, 616 días atrás. Las dos ventanas quedan vacías y se
+relajan al catálogo completo, que es la rama que `docs/api.md` especifica y
+anticipa por nombre («el caso normal en libros, cuya fecha es la de publicación
+original»). `game` recorre el mismo código y sí diverge, lo que acredita el
+camino de punta a punta. Quedará observable con actividad real de usuarios.
+
+### QA manual del leader
+
+Contra el backend real, `es` y `en`: la tarjeta del libro abre el libro y la del
+juego abre el juego (antes, dos series distintas); reparto de enlaces 5/5/5/5
+sin filtro; filtro con las cinco opciones en los dos idiomas; home con 13 de
+cada tipo; `type=game` da 5 ítems en `day` y 16 en `week`.
+
+### Derivado
+
+**Issue #33** (frontend, low): `recommendationItemType` sigue haciendo
+`item_type.toLowerCase() as CatalogType` sin guard — mismo patrón que causó el
+#32, en otra superficie. Hoy sin síntoma; se registra porque el #32 demostró que
+esta clase de bug llega a producción sin que nadie lo note.
+
+`pnpm --filter web`: **1229 tests** en 133 archivos, más typecheck, lint, build y
+`@backlogg/api-client typecheck`. `bash init.sh` verde.

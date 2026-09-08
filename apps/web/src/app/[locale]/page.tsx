@@ -9,8 +9,7 @@ import {
   CATALOG_TYPES,
   getAllFeatured,
   getTrending,
-  type CatalogType,
-  type TrendingItem,
+  trendingItemType,
 } from "@/lib/catalog";
 
 /**
@@ -33,11 +32,6 @@ export async function generateMetadata({
     description,
     openGraph: { title, description, type: "website" },
   };
-}
-
-/** Maps the trending endpoint's uppercase `item_type` to the lowercase `CatalogType` vocabulary used elsewhere (routes, `Home.typeBadge`). */
-function trendingItemType(item: TrendingItem): Extract<CatalogType, "movie" | "series"> {
-  return item.item_type === "MOVIE" ? "movie" : "series";
 }
 
 export default async function Home({ params }: PageProps<"/[locale]">) {
@@ -73,6 +67,14 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
       >
         {trending.map((item) => {
           const type = trendingItemType(item);
+          // Unknown `item_type`: skip the card instead of linking it
+          // somewhere wrong. This section used to keep a private two-type
+          // copy of the mapping — the second half of issue #32, since
+          // `getTrending()` returns all four types too — and now shares the
+          // one in `@/lib/catalog`.
+          if (!type) {
+            return null;
+          }
           return (
             <CatalogCard
               key={`${item.item_type}-${item.slug}`}

@@ -3043,7 +3043,7 @@
           "trending"
         ],
         "summary": "Get trending items",
-        "description": "Up to 20 trending items. Movies/series come from TMDB's Trending API (new items are persisted locally). Books/games have no external trending endpoint, so they use a local popularity heuristic (rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST as tie-break) \u2014 period is accepted but has no effect for those two types.",
+        "description": "Up to 20 trending items, ranked from the platform's own recent activity (ratings, reviews and backlog changes) with exponential time decay. No external API is involved. A content type with too little activity in the window falls back to the catalog's canonical order (rating_internal DESC NULLS LAST, rating_external DESC NULLS LAST as tie-break) restricted to recent releases. period sets both windows and has a real effect for all four types.",
         "operationId": "get_trending_v1_trending_get",
         "parameters": [
           {
@@ -8785,6 +8785,11 @@
             "type": "integer",
             "title": "People Errors",
             "default": 0
+          },
+          "skipped_links": {
+            "type": "integer",
+            "title": "Skipped Links",
+            "default": 0
           }
         },
         "type": "object",
@@ -9538,7 +9543,7 @@
     },
     {
       "name": "trending",
-      "description": "Trending movies and series from the TMDB Trending API."
+      "description": "Trending items ranked from the platform's own recent activity, with a catalog fallback when activity is too thin."
     },
     {
       "name": "auth",

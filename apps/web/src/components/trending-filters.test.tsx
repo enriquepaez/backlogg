@@ -20,13 +20,38 @@ beforeEach(() => {
 });
 
 describe("TrendingFilters", () => {
-  it("renders an 'all' option plus movie/series for the type select", () => {
+  // FE-68: the filter used to offer movie/series only, so `/trending`'s two
+  // other types were unreachable even though the backend has ranked them
+  // since backend feature 68.
+  it("renders an 'all' option plus all four catalog types", () => {
     render(<TrendingFilters selectedPeriod="week" />);
 
     const select = screen.getByLabelText("typeLabel");
     expect(
       Array.from(select.querySelectorAll("option")).map((o) => o.value),
-    ).toEqual(["", "movie", "series"]);
+    ).toEqual(["", "movie", "series", "book", "game"]);
+  });
+
+  it("labels every option from a Trending.filters message key", () => {
+    render(<TrendingFilters selectedPeriod="week" />);
+
+    const select = screen.getByLabelText("typeLabel");
+    // The fake translator echoes the key, so this asserts each option's copy
+    // is looked up (never hardcoded) — `catalog-types.test.ts` checks the
+    // matching es/en strings actually exist.
+    expect(
+      Array.from(select.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual(["all", "movie", "series", "book", "game"]);
+  });
+
+  it("navigates with book and game like any other type", () => {
+    render(<TrendingFilters selectedPeriod="week" />);
+
+    for (const type of ["book", "game"]) {
+      fireEvent.change(screen.getByLabelText("typeLabel"), { target: { value: type } });
+
+      expect(replace).toHaveBeenCalledWith({ pathname: "/trending", query: { type } });
+    }
   });
 
   it("renders day/week options for the period select", () => {

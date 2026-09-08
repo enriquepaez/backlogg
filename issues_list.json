@@ -479,6 +479,32 @@
       "impact": "Hoy irrelevante: el resultado se sirve de la cache in-process con CACHE_TTL_TRENDING=900, asi que son 4 conteos cada 15 minutos por combinacion de (type, period). Deja de serlo si se baja el TTL, y el coste crece con el catalogo — el objetivo son ~100k items por tipo.",
       "options": "1) Parametro para omitir el conteo en los list_*. 2) Query propia en el repositorio de trending, a costa de duplicar el criterio de orden en un quinto sitio. La 1 es preferible: mantiene el orden canonico en un solo lugar.",
       "notes": "Detectado por el reviewer en la review de la feature 81 (progress/review_81.md, punto 6 de deuda legitima). Acoplado a la decision sobre CACHE_TTL_TRENDING: si el TTL baja, este issue sube de severidad."
+    },
+    {
+      "id": 32,
+      "title": "En /trending, todo item que no sea MOVIE se pinta y enlaza como serie: books y games llevan a la ficha equivocada",
+      "area": "frontend",
+      "severity": "high",
+      "status": "resolved",
+      "discovered": "2026-09-08",
+      "symptom": "trendingItemType() (apps/web/src/lib/catalog.ts:324) es `item.item_type === \"MOVIE\" ? \"movie\" : \"series\"`. GET /v1/trending sin type devuelve mezcla de los cuatro tipos (medido el 2026-09-08 contra la DB de dev: 5 MOVIE, 5 SERIES, 5 BOOK, 5 GAME), asi que la mitad de las tarjetas de /trending salen hoy con badge 'Series' y href /series/{slug}. No siempre da 404: el slug puede resolver a OTRO item real de tipo serie. Comprobado en dev — el libro 'un-cuento-perfecto-2020' aterriza en la serie 'A Perfect Story', y el juego 'escape-from-tarkov' en la serie 'Escape from Tarkov. Raid.'. Ademas dispara la ingesta on-demand de series que nadie pidio.",
+      "cause": "La feature backend 68 (2026-08-26) anadio book y game a /trending y se cerro con la nota 'sin frontend pareja todavia'. El frontend se quedo con el vocabulario de dos tipos: TRENDING_TYPES = ['movie','series'] (apps/web/src/lib/catalog-types.ts:132), la opcion 'todo' etiquetada 'Peliculas y series', y el mapeo binario de trendingItemType. El bug no es el mapeo en si, es que el backend cambio de contrato y el frontend no.",
+      "impact": "Enlace roto o, peor, enlace silenciosamente incorrecto en 10 de las 20 tarjetas de /trending sin filtro. Afecta a produccion hoy. Tambien impide filtrar trending por book o game, que el backend soporta desde la feature 68.",
+      "options": "Se arregla dentro de FE-68 (rama feat/trending_period_books_games), que es exactamente el area afectada: ampliar TRENDING_TYPES a los cuatro tipos, mapear item_type completo en trendingItemType, y reetiquetar la opcion 'todo'.",
+      "resolution": "Resuelto el 2026-09-08 dentro de FE-68 (rama feat/trending_period_books_games), que era exactamente el area afectada. trendingItemType se movio a apps/web/src/lib/catalog-types.ts con firma (item) => CatalogType | undefined: toLowerCase() mas guard isCatalogType contra CATALOG_TYPES, y un valor desconocido devuelve undefined en vez de caer en 'series' — los dos llamantes descartan esa tarjeta. Se elimino ademas el vocabulario estrecho TrendingType/TRENDING_TYPES en favor de CatalogType/CATALOG_TYPES: el query param type de /v1/trending es literalmente ItemTypeEnum (packages/api-client/src/schema.d.ts:1943, 'movie'|'series'|'book'|'game'), asi que el subtipo mas estrecho ERA la causa del bug. La home tenia una copia privada del mismo mapeo y quedo arreglada; grep confirma que no queda una tercera. QA del leader contra el backend real: la tarjeta del libro 'un-cuento-perfecto-2020' enlaza ya a /es/book/... y abre 'Un cuento perfecto' (antes abria la SERIE 'A Perfect Story'), y la del juego 'escape-from-tarkov' a /es/game/... y abre el juego (antes la serie 'Escape from Tarkov. Raid.'). Reparto de enlaces sin filtro: 5 de cada tipo, antes 5 movie y 15 series."
+    },
+    {
+      "id": 33,
+      "title": "recommendationItemType castea item_type a ciegas, sin guard: un tipo nuevo del backend daria un enlace roto en silencio",
+      "area": "frontend",
+      "severity": "low",
+      "status": "open",
+      "discovered": "2026-09-08",
+      "symptom": "apps/web/src/lib/recommendations.ts:83 es `item.item_type.toLowerCase() as CatalogType`. Para los cuatro tipos actuales el resultado es correcto, asi que hoy no hay sintoma visible. Si el backend anadiera un quinto tipo, la tarjeta enlazaria a /{tipo-desconocido}/{slug} sin que nada lo detecte.",
+      "cause": "Mismo patron que causo el issue #32 en trending, en otra superficie: confiar en un cast en vez de en un guard. Al arreglar el #32 (2026-09-08) trendingItemType paso a devolver CatalogType | undefined con isCatalogType; recommendations quedo con el cast.",
+      "impact": "Ninguno hoy — es riesgo latente, no defecto activo. Se registra porque es exactamente la clase de bug que el #32 demostro que llega a produccion sin que nadie lo note.",
+      "options": "Reutilizar el guard isCatalogType de catalog-types.ts, como ya hacen trendingItemType y toCatalogType. El reviewer de FE-68 apunta ademas que hay cinco funciones *ItemType casi identicas (trending, feed, review, notification, search) y que la duplicacion es donde volveria a nacer un #32 — unificarlas es una opcion mas amplia, no obligatoria.",
+      "resolution": ""
     }
   ]
 }

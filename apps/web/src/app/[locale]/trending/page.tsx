@@ -5,11 +5,11 @@ import { CatalogCard } from "@/components/catalog-card";
 import { TrendingFilters } from "@/components/trending-filters";
 import {
   DEFAULT_TRENDING_PERIOD,
-  TRENDING_TYPES,
   getTrendingPage,
+  isCatalogType,
   trendingItemType,
+  type CatalogType,
   type TrendingPeriod,
-  type TrendingType,
 } from "@/lib/catalog";
 
 type RawParam = string | string[] | undefined;
@@ -18,9 +18,16 @@ function firstValue(value: RawParam): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function parseType(value: RawParam): TrendingType | undefined {
+/**
+ * `?type=` → the filter's value, or `undefined` for "all types" (also the
+ * fallback for anything outside the vocabulary, so a hand-typed URL degrades
+ * to the unfiltered list instead of 422-ing the backend). Validated against
+ * {@link isCatalogType}, i.e. all four types since FE-68 — books and games
+ * included.
+ */
+function parseType(value: RawParam): CatalogType | undefined {
   const raw = firstValue(value);
-  return raw && (TRENDING_TYPES as readonly string[]).includes(raw) ? (raw as TrendingType) : undefined;
+  return raw && isCatalogType(raw) ? raw : undefined;
 }
 
 function parsePeriod(value: RawParam): TrendingPeriod {
@@ -80,6 +87,12 @@ export default async function TrendingPage({
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {result.results.map((item) => {
             const itemType = trendingItemType(item);
+            // Unknown `item_type` (a fifth type added backend-side before
+            // this vocabulary catches up): skip the card rather than link it
+            // somewhere wrong — see `trendingItemType`'s doc/issue #32.
+            if (!itemType) {
+              return null;
+            }
             return (
               <CatalogCard
                 key={`${item.item_type}-${item.slug}`}
