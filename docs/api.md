@@ -1094,17 +1094,19 @@ El endpoint **bloquea hasta que el sync termina** y devuelve el resultado real.
 Usar `--max-time 600` en curl para evitar timeout de cliente.
 
 Cada ejecución procesa un **tramo** de hasta `SYNC_SLICE_SIZE` items. De dónde
-sale ese tramo depende del tipo (feature 86):
+sale ese tramo depende del tipo (features 86 y 90):
 
-- **`book` y `game`** — del listado popular de la API externa, empezando en el
-  offset persistido en `sync_cursors` para el tipo. El cursor avanza al
-  terminar y vuelve a 0 al alcanzar `SEED_TOP_N_*` o cuando la API externa
-  devuelve menos items de los pedidos.
-- **`movie` y `series`** — de la lista objetivo de `seed_targets`: los targets
-  que aún no tienen fila en `external_ids` y, si no queda ninguno, los ítems
-  del catálogo con `last_synced_at` más antiguo. **No hay cursor.** Los targets
-  que no pueden enlazarse nunca (404 en TMDB, o id ya reclamado por otro tipo)
-  se retiran de esa lista y se contabilizan aparte — ver `docs/operations.md`.
+- **`book`** — del listado popular de Open Library, empezando en el offset
+  persistido en `sync_cursors` para el tipo. El cursor avanza al terminar y
+  vuelve a 0 al alcanzar `SEED_TOP_N_BOOKS` o cuando la API externa devuelve
+  menos items de los pedidos. Es el **único** tipo con cursor desde la
+  feature 90.
+- **`movie`, `series` y `game`** — de la lista objetivo de `seed_targets`: los
+  targets que aún no tienen fila en `external_ids` y, si no queda ninguno, los
+  ítems del catálogo con `last_synced_at` más antiguo. **No hay cursor.** Los
+  targets que no pueden enlazarse nunca (la fuente ya no sirve el id, o el id
+  ya está reclamado por otra fila del mismo tipo) se retiran de esa lista y se
+  contabilizan aparte — ver `docs/operations.md`.
 
 Response:
 ```json
@@ -1122,15 +1124,18 @@ Response:
 - `synced` — número de items insertados/actualizados correctamente.
 - `errors` — número de items que fallaron (logged en servidor).
 - `offset` — offset (0-based) del tramo procesado en esta ejecución. **Siempre
-  `0` para `movie` y `series`**: no hay cursor detrás desde la feature 86. El
-  campo se mantiene porque el contrato lo declara obligatorio; el progreso de
-  esos dos tipos se lee en el log del job (`N targets still pending`) o
-  consultando `seed_targets` (ver `docs/operations.md`).
+  `0` para `movie`, `series` y `game`**: no hay cursor detrás (feature 86 para
+  los dos primeros, feature 90 para games). El campo se mantiene porque el
+  contrato lo declara obligatorio; el progreso de esos tres tipos se lee en el
+  log del job (`N targets still pending`) o consultando `seed_targets` (ver
+  `docs/operations.md`).
 - `duration_s` — segundos que tardó el sync.
 - `people_errors` — items cuyo detalle se guardó pero cuyos credits fallaron al
   **persistirse**. Desde la feature 86 movies y series traen los credits en la
   misma petición del detalle, así que ya no existe un fallo *de red*
-  independiente para ellos: un fallo de fetch cuenta en `errors`.
+  independiente para ellos: un fallo de fetch cuenta en `errors`. Para `game`
+  es siempre 0: los juegos no tienen credits de persona, solo de empresa, y
+  esos viajan dentro del propio payload del ítem.
 - `skipped_links` — enlaces de `external_ids` que este tramo quiso escribir y no
   pudo porque la terna `(item_type, source, external_id)` ya la tenía **otro
   ítem del mismo tipo** (issue #22). El ítem sí queda escrito en su tabla, pero

@@ -775,7 +775,29 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
     "similar games" relation (id, name, slug, ...), used by
     `GET /games/{slug}/similar` (feature 45) instead of a local genre-overlap
     heuristic.
-  - **Category allowlist** (feature 65): `get_top_games`'s query filters
+  - **Enumeración del catálogo por keyset** (feature 90): la siembra de games
+    ya no recorre el ranking de `rating_count` por offset. `get_catalog_page`
+    pide solo tres campos y avanza por id:
+    ```
+    POST /games
+    Body: fields id,rating_count,first_release_date;
+          where game_type = (0,1,2,4,6,7,8,9) & rating > 0 & id > 100000;
+          sort id asc;
+          limit 500;
+    ```
+    - **31.988 juegos** pasan ese filtro (medido el 2026-09-08 con
+      `/games/count`; 337.291 pasan solo la allowlist). A 500 por petición son
+      **64 peticiones**: **52 s** en el recorrido completo del 2026-09-09, que
+      devolvió 32.000 ids (el suelo a 4 req/s son 16 s).
+    - **Keyset y no `offset`** aunque el offset de IGDB funcione hasta el final
+      (`offset 31.900` → 88 resultados; `offset 40.000` → 0; **no hay tope de
+      500 páginas** como en TMDB). `rating > 0` cambia sin publicación de por
+      medio —basta un voto— y un offset sobre un conjunto que se mueve se salta
+      ítems en silencio.
+    - La hidratación es `where id = (...)`, hasta **500 juegos con todos los
+      campos en una sola petición** — IGDB no tiene el problema de TMDB, que
+      paga una petición de detalle por ítem.
+  - **Category allowlist** (feature 65): la query de siembra filtra
     `game_type = (0,1,2,4,6,7,8,9)` — the 8 allowed IGDB categories, defined
     once in `backlogg/games/constants.py`. The other three ingestion paths
     (`get_game_by_slug`/`get_similar_games` in `backlogg/games/service.py`
@@ -968,14 +990,14 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
 | `TWITCH_CLIENT_SECRET` | IGDB client   | Twitch app client secret                         |
 | `SEED_TOP_N_MOVIES`    | — | **INERTE desde la feature 86.** El catálogo de movies lo define `TMDB_SEED_MIN_VOTES_MOVIES`, no un número de ítems. Se conserva porque Render y el workflow de backfill la exportan (default: 100) |
 | `SEED_TOP_N_SERIES`    | — | **INERTE desde la feature 86**, ídem (default: 100) |
-| `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed (default: 100)            |
-| `SEED_TOP_N_GAMES`     | Sync job      | How many games to seed (default: 100)            |
+| `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed on the cursor path (default: 100) |
+| ~~`SEED_TOP_N_GAMES`~~ | — | **RETIRADA en la feature 90.** El catálogo de games lo define la allowlist de `game_type` + `rating > 0`, enumerado a `seed_targets` por `scripts/seed_igdb_targets.py`; no hay cursor ni objetivo de wraparound. Mientras existió topaba el catálogo en 10.000 sobre ~31.988 |
 | `TMDB_SEED_MIN_VOTES_MOVIES` | Enumeración TMDB | Umbral `vote_count.gte` que define el catálogo de películas (default: 25 → 57.135 movies) |
 | `TMDB_SEED_MIN_VOTES_SERIES` | Enumeración TMDB | Ídem para series (default: 25 → 10.880 series) |
 | `TMDB_SEED_START_YEAR` | Enumeración TMDB | Primer año de estreno a enumerar (default: 1874, el más antiguo de TMDB) |
 | `TMDB_SEED_END_YEAR`   | Enumeración TMDB | Último año; vacío = año actual + 1 (TMDB ya trae estrenos futuros fechados) |
 | `TMDB_SEED_CONCURRENCY`| Enumeración + hidratación TMDB | Peticiones TMDB en vuelo (`Semaphore`). Default 8 ≈ 32 req/s frente al límite de ~50 |
-| `TMDB_SEED_MAX_ATTEMPTS`| Hidratación TMDB | Pasadas **concluyentes** que recibe un target antes de retirarse de la lista de trabajo como no enlazable (default: 3). Una petición fallida no cuenta, así que una caída de TMDB no retira targets sanos |
+| `TMDB_SEED_MAX_ATTEMPTS`| Hidratación de `seed_targets` (TMDB **e IGDB**) | Pasadas **concluyentes** que recibe un target antes de retirarse de la lista de trabajo como no enlazable (default: 3). Una petición fallida no cuenta, así que una caída de la fuente no retira targets sanos. El prefijo `TMDB_` es histórico (feature 86): desde la feature 90 gobierna también games, y no se renombró porque una variable renombrada en Render no falla, cae al default en silencio |
 | `TMDB_INCREMENTAL_MAX_AGE_DAYS` | Incremental TMDB | Días hacia atrás que la puerta de estreno admite un ID nuevo del fichero diario (default: 90) |
 | `TMDB_INCREMENTAL_HORIZON_DAYS` | Incremental TMDB | Días hacia adelante; más allá es un anuncio, no un estreno (default: 180) |
 | `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS` | Incremental TMDB | Atraso máximo del fichero base antes de re-baselinear en vez de difear (default: 7) |

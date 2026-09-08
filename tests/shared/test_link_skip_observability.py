@@ -38,6 +38,7 @@ from backlogg.games.models import Game
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
+from backlogg.scheduler.repository import SeedTargetRow, upsert_seed_targets
 from backlogg.shared.bulk_load import (
     BulkItem,
     BulkPerson,
@@ -578,6 +579,9 @@ async def test_sync_games_reports_the_links_it_could_not_write(db):
     db.add(
         ExternalId(item_type="GAME", item_id=orphan_item_id, source="IGDB", external_id="9300001")
     )
+    # Since feature 90 the game slice takes its work from ``seed_targets``
+    # instead of IGDB's ranking, so the id under test has to be a target.
+    await upsert_seed_targets(db, [SeedTargetRow("GAME", "IGDB", "9300001", vote_count=100)])
     await db.flush()
 
     raw = [
@@ -591,7 +595,7 @@ async def test_sync_games_reports_the_links_it_could_not_write(db):
 
     with (
         patch.object(
-            sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
+            sync_jobs._igdb_client, "get_games_by_ids", new_callable=AsyncMock, return_value=raw
         ),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_session_factory(db)),
     ):
@@ -618,6 +622,8 @@ async def _movie_or_game_id(db, slug: str) -> int:
 
 async def test_a_clean_sync_reports_zero_skipped_links(db):
     """The key is always present, so the response schema never has to guess."""
+    await upsert_seed_targets(db, [SeedTargetRow("GAME", "IGDB", "9300002", vote_count=100)])
+    await db.flush()
     raw = [
         {
             "id": 9300002,
@@ -628,7 +634,7 @@ async def test_a_clean_sync_reports_zero_skipped_links(db):
     ]
     with (
         patch.object(
-            sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
+            sync_jobs._igdb_client, "get_games_by_ids", new_callable=AsyncMock, return_value=raw
         ),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_session_factory(db)),
     ):

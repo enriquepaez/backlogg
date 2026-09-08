@@ -5,17 +5,24 @@ propagated so that a failure in one job does not abort the others.
 
 Two enumeration models live here since feature 86:
 
-* **Books and games** keep the original one: each run processes a slice of
-  the external API's popular listing, reading the persisted cursor for its
-  type from ``sync_cursors`` (0 if absent), fetching up to the type's slice
-  size starting at that offset (never beyond ``settings.SEED_TOP_N_<TYPE>``)
-  and advancing the cursor at the end.  The cursor wraps around to 0 when the
+* **Books** keep the original one: each run processes a slice of the external
+  API's popular listing, reading the persisted cursor for its type from
+  ``sync_cursors`` (0 if absent), fetching up to the type's slice size
+  starting at that offset (never beyond ``settings.SEED_TOP_N_BOOKS``) and
+  advancing the cursor at the end.  The cursor wraps around to 0 when the
   target is reached or when the API returns fewer items than requested.
-* **Movies and series** are driven by the enumerated target list in
-  ``seed_targets`` instead (feature 86).  There is no cursor and no offset:
-  the work list is the *difference* between what the catalog wants and what
-  it has, and once that difference is empty the slice is filled by
-  ``last_synced_at`` rotation.  See the section at the bottom of this file.
+  Books are the *last* type on this model and it is not a good one: the
+  wraparound target caps the catalog below what the quality filter selects
+  (issue #27, still open — it is closed by moving the nightly book walk off
+  the cursor, not by anything in feature 90).
+* **Movies, series and games** are driven by the enumerated target list in
+  ``seed_targets`` instead (features 86 and 90).  There is no cursor and no
+  offset: the work list is the *difference* between what the catalog wants
+  and what it has, and once that difference is empty the slice is filled by
+  ``last_synced_at`` rotation.  See the sections at the bottom of this file.
+  The two halves differ only in the fetch: TMDB has no bulk detail endpoint
+  and pays one request per item, while IGDB answers ``where id = (...)`` with
+  up to 500 fully-hydrated games in a single request.
 
 Slice size is resolved per type (feature 84): an explicit ``slice_size``
 argument wins (that is how ``scripts/backfill_sync.py`` processes bigger
@@ -61,8 +68,13 @@ in ``sync_watermarks``.
 * IGDB runs two: ``where created_at > <watermark>`` for new games (gated on the
   ``game_type`` allowlist, which is the only bar a game released today *can*
   clear) and ``where updated_at > <watermark>`` to refresh the ones the catalog
-  already holds.  It needs no promotion lane — the nightly ``sync_games``
-  already re-walks IGDB's ``rating_count`` ranking every night.
+  already holds.  Promotion — a game that had no rating when the catalog was
+  enumerated and has one now — is served by re-running
+  ``scripts/seed_igdb_targets.py``: the same mechanism as TMDB's promotion
+  sweep (re-enumerate, then hydrate the difference) but **not** the same
+  trigger, because TMDB's is a lane of the incremental job and runs on a
+  schedule while games' is run by the operator at the cadence
+  ``docs/operations.md`` recommends.  Automating it is issue #34.
 
 Books are not here: their incremental is a diff of Open Library's *monthly*
 dump and belongs to the script layer (``scripts/incremental_sync.py``), for the
@@ -100,7 +112,7 @@ notice.
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -112,8 +124,12 @@ from backlogg.core.config import settings
 from backlogg.core.database import async_session_factory
 from backlogg.core.metrics import get_metrics
 from backlogg.games import repository as games_repo
-from backlogg.games.adapters.igdb import IGDBClient, parse_igdb_timestamp
-from backlogg.games.constants import ALLOWED_GAME_CATEGORY_IDS, GAME_TYPE_MAP
+from backlogg.games.adapters.igdb import IGDB_PAGE_SIZE, IGDBClient, parse_igdb_timestamp
+from backlogg.games.constants import (
+    ALLOWED_GAME_CATEGORY_IDS,
+    ALLOWED_GAME_TYPES,
+    GAME_TYPE_MAP,
+)
 from backlogg.movies import repository as movies_repo
 from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.service import collect_movie_credits, map_movie_credits
@@ -218,8 +234,13 @@ async def _read_slice(
 ) -> tuple[int, int]:
     """Return (offset, slice_size) for the next sync slice of ``item_type``.
 
+    ⚠️ **Books only** since feature 90.  Movies and series left the cursor in
+    feature 86 and games in feature 90; ``sync_books`` is the single caller
+    left, and it stays here rather than being inlined because the cursor walk
+    is unchanged and issue #27 will retire it whole.
+
     Reads the persisted cursor (0 if absent).  A stale cursor at or beyond
-    ``target`` (e.g. after lowering SEED_TOP_N) is normalised back to 0.
+    ``target`` (e.g. after lowering SEED_TOP_N_BOOKS) is normalised back to 0.
 
     ``slice_size`` overrides the configured size when provided (used by the
     direct backfill script to process bigger slices without touching the
@@ -610,7 +631,7 @@ async def _read_seed_work_list(
     would have kept this branch from ever running — and with it TMDB's
     6-month cache-window obligation from ever being met.
     """
-    max_attempts = max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
+    max_attempts = _seed_max_attempts()
     async with async_session_factory() as session:
         progress = await count_seed_target_progress(session, item_type, source, max_attempts)
         pending = await get_pending_seed_targets(
@@ -630,6 +651,98 @@ async def _fetch_seed_item_guarded(
     """Fetch one item under *sem*; exceptions propagate to ``gather``."""
     async with sem:
         return await spec.fetch(external_id)
+
+
+def _seed_max_attempts() -> int:
+    """Conclusive passes a seed target gets before it is retired.
+
+    One knob for every target-driven type.  The name is historical — it was
+    introduced by feature 86, when TMDB was the only source with a target
+    list — and it was deliberately *not* renamed in feature 90: it is exported
+    as an environment variable on Render, and renaming a deployed variable
+    silently falls back to the default instead of failing loudly.  What it
+    means is source-independent: how many times a target may resolve without
+    ever producing an ``external_ids`` row before it stops costing a slice
+    slot every single night.
+    """
+    return max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
+
+
+def _seed_result(
+    start: float,
+    *,
+    synced: int,
+    errors: int,
+    people_errors: int,
+    skipped_links: int,
+    progress: SeedTargetProgress,
+    refreshed: int,
+) -> dict:
+    """The result dict every target-driven slice returns.
+
+    Shared by ``_sync_tmdb_type`` and ``sync_games`` so the two cannot drift:
+    ``POST /admin/sync/{type}`` (``SyncResponse``) and
+    ``scripts/backfill_sync.py`` read these keys by name, and the loop of the
+    latter stops on ``pending``.
+
+    ``offset`` is a constant 0.  There is no cursor behind these types any
+    more, but the field is declared required in ``SyncResponse`` and dropping
+    it would turn a 200 into a 500.
+    """
+    return {
+        "synced": synced,
+        "errors": errors,
+        "people_errors": people_errors,
+        "skipped_links": skipped_links,
+        "offset": 0,
+        "duration_s": round(time.monotonic() - start, 1),
+        "pending": progress.pending,
+        "stuck": progress.stuck,
+        "refreshed": refreshed,
+    }
+
+
+async def _stamp_seed_outcomes(
+    session,
+    item_type: str,
+    source: str,
+    resolved: Sequence[str],
+    gone: Sequence[str],
+    job_name: str,
+) -> None:
+    """Book-keeping for the pending targets a slice worked on conclusively.
+
+    Shared by both target-driven jobs, which is the point: counting only
+    conclusive outcomes is what makes retirement safe (an outage costs a
+    target nothing, while a target that keeps resolving and never linking runs
+    out of passes and leaves the work list), and a second copy of that rule
+    would eventually disagree with this one.
+
+    ``resolved`` are targets whose fetch came back with a payload; ``gone``
+    the ones the source no longer serves.  Commits, and a failure to stamp is
+    logged and rolled back rather than raised: the items of the slice are
+    already written, and losing the whole slice over its book-keeping would be
+    a worse trade than re-attempting those targets next run.
+    """
+    try:
+        now = datetime.now(UTC)
+        await mark_seed_targets_attempted(session, item_type, source, resolved, now)
+        await mark_seed_targets_unreachable(session, item_type, source, gone, now)
+        await session.commit()
+    except Exception:
+        logger.exception("%s: failed to stamp seed target outcomes", job_name)
+        await rollback_quietly(session, job_name)
+
+
+async def _recount_seed_progress(
+    session, item_type: str, source: str, fallback: SeedTargetProgress, job_name: str
+) -> SeedTargetProgress:
+    """Re-read the target progress after a slice, or keep ``fallback``."""
+    try:
+        return await count_seed_target_progress(session, item_type, source, _seed_max_attempts())
+    except Exception:
+        logger.exception("%s: failed to recount seed target progress", job_name)
+        return fallback
 
 
 def _seed_failure_result(start: float) -> dict:
@@ -694,17 +807,15 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
     )
     if not work:
         logger.info("%s: nothing to do — no pending targets and an empty catalog", spec.job_name)
-        return {
-            "synced": 0,
-            "errors": 0,
-            "people_errors": 0,
-            "skipped_links": 0,
-            "offset": 0,
-            "duration_s": round(time.monotonic() - start, 1),
-            "pending": progress.pending,
-            "stuck": progress.stuck,
-            "refreshed": 0,
-        }
+        return _seed_result(
+            start,
+            synced=0,
+            errors=0,
+            people_errors=0,
+            skipped_links=0,
+            progress=progress,
+            refreshed=0,
+        )
 
     sem = asyncio.Semaphore(max(1, settings.TMDB_SEED_CONCURRENCY))
     chunk_size = max(1, settings.BULK_LOAD_BATCH_SIZE)
@@ -759,26 +870,12 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
                     await writer.add(BulkItem(data=data, external_id=external_id, people=people))
                 await writer.flush()
 
-            # Book-keeping for the pending targets this slice actually resolved.
-            # Counting only conclusive outcomes is what makes retirement safe: a
-            # TMDB outage costs nothing, while a target that keeps resolving and
-            # never linking runs out of passes and leaves the work list.
-            try:
-                now = datetime.now(UTC)
-                await mark_seed_targets_attempted(session, spec.item_type, source, resolved, now)
-                await mark_seed_targets_unreachable(session, spec.item_type, source, gone, now)
-                await session.commit()
-            except Exception:
-                logger.exception("%s: failed to stamp seed target outcomes", spec.job_name)
-                await rollback_quietly(session, spec.job_name)
-
-            after = progress
-            try:
-                after = await count_seed_target_progress(
-                    session, spec.item_type, source, max(1, settings.TMDB_SEED_MAX_ATTEMPTS)
-                )
-            except Exception:
-                logger.exception("%s: failed to recount seed target progress", spec.job_name)
+            await _stamp_seed_outcomes(
+                session, spec.item_type, source, resolved, gone, spec.job_name
+            )
+            after = await _recount_seed_progress(
+                session, spec.item_type, source, progress, spec.job_name
+            )
 
     synced = writer.synced
     errors += writer.errors
@@ -807,19 +904,17 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
             "resolve at the source but never get an external_ids row",
             spec.job_name,
             after.unlinkable,
-            max(1, settings.TMDB_SEED_MAX_ATTEMPTS),
+            _seed_max_attempts(),
         )
-    return {
-        "synced": synced,
-        "errors": errors,
-        "people_errors": people_errors,
-        "skipped_links": skipped_links,
-        "offset": 0,
-        "duration_s": round(time.monotonic() - start, 1),
-        "pending": after.pending,
-        "stuck": after.stuck,
-        "refreshed": len(refresh),
-    }
+    return _seed_result(
+        start,
+        synced=synced,
+        errors=errors,
+        people_errors=people_errors,
+        skipped_links=skipped_links,
+        progress=after,
+        refreshed=len(refresh),
+    )
 
 
 async def sync_movies(slice_size: int | None = None) -> dict:
@@ -1605,14 +1700,18 @@ async def sync_series_incremental() -> dict:
     return await _sync_tmdb_incremental(_series_incremental_spec())
 
 
-# ── Ranking jobs: books and games ────────────────────────────────────────────
+# ── Cursor job: books ────────────────────────────────────────────────────────
 #
-# These two keep the cursor walk unchanged.  Open Library's seed query is
-# already a *filtered* search (feature 73's notoriety thresholds), not a raw
-# popularity ranking, and IGDB returns 500 fully-hydrated games per request
-# with its own quality clause — neither suffers the problems that forced
-# movies and series off ``/popular``.  Books get their own enumeration rework
-# in feature 87 (Open Library dumps); games need none.
+# The last job on the offset walk.  Open Library's seed query is already a
+# *filtered* search (feature 73's notoriety thresholds) rather than a raw
+# popularity ranking, so it never suffered the reordering that forced movies
+# and series off ``/popular`` — but it does suffer the other defect:
+# ``SEED_TOP_N_BOOKS`` is the wraparound target, production has it at 10.000,
+# and the filter selects 18.874 works, so the cursor turns around before
+# covering the catalog.  That is issue #27, it is still **open**, and feature
+# 90 does not touch it: converting games changes nothing about the book walk.
+# The seeding of books does not go through here at all since feature 87 (it is
+# ``scripts/seed_openlibrary_books.py``, from the monthly dumps).
 
 
 async def sync_books(slice_size: int | None = None) -> dict:
@@ -1739,89 +1838,257 @@ async def sync_books(slice_size: int | None = None) -> dict:
     }
 
 
-async def sync_games(slice_size: int | None = None) -> dict:
-    """Fetch a slice of top-rated games from IGDB and upsert them locally.
+# ── IGDB job: target-driven hydration (feature 90) ───────────────────────────
+#
+# ``sync_games`` used to walk IGDB's ``rating_count`` ranking by offset and
+# wrap around at ``SEED_TOP_N_GAMES``.  That is gone.  Games were the last type
+# still seeded by a cursor and it cost three concrete things
+# (``backend_feature_list.json`` #90):
+#
+# 1. **A catalog capped at 10.000** over the ~31.988 games that pass the
+#    quality filter — the seeding of 2026-09-07 left exactly 10.000 rows in
+#    ``games``, which is the wraparound target and not a product decision.
+# 2. **An operational trap**: the backfill dispatch needed ``-f
+#    seed_top_n=10000`` and it had to *match* the Render variable, because both
+#    wrote the same ``sync_cursors`` row.  No other type had that.
+# 3. **Four ways of seeding** where two are enough.
+#
+# The replacement is the mechanism of feature 86, unchanged in shape: the
+# catalog is enumerated into ``seed_targets`` (``scripts/seed_igdb_targets.py``,
+# keyset over ``game_type`` allowlist + ``rating > 0``) and each slice hydrates
+# the **difference** against ``external_ids``, topped up by the
+# ``last_synced_at`` rotation once nothing is pending.  Retirement
+# (``attempts``/``unreachable_at``) and the ``skipped_links`` accounting are
+# the *same* code as movies and series — ``_read_seed_work_list``,
+# ``_stamp_seed_outcomes``, ``_recount_seed_progress``, ``_seed_result``,
+# ``collect_link_skips`` — not a second copy of it.
+#
+# What is **not** shared is the fetch, and that is why this is a sibling of
+# ``_sync_tmdb_type`` rather than a fifth ``_TmdbSeedSpec``.  TMDB has no bulk
+# detail endpoint: it pays one HTTP request per item, so its engine is built
+# around ``asyncio.gather`` under a semaphore and a per-item 404.  IGDB answers
+# ``where id = (...)`` with up to 500 fully-hydrated games in **one** request,
+# so the loop here is one request per chunk and "gone" is an id missing from
+# the answer.  Generalising the TMDB engine to cover both would have meant
+# reshaping the per-item fetch path that has been running in production since
+# feature 86 to serve a case it does not have — a bad trade against the one
+# rule that matters here: do not break what works.
+#
+# The ``sync_cursors`` row for GAME stops being read and written, exactly like
+# the MOVIE and SERIES rows did in feature 86.  It is left in the table rather
+# than deleted (see the ``SyncCursor`` model docstring): a stale row costs
+# nothing and deleting rows nobody reads is a migration with no upside.
 
-    ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_GAMES`` (which itself
-    overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``skipped_links``,
-    ``offset`` and ``duration_s``.  There is no ``people_errors``: games carry
-    no people credits, only company credits that travel inside the payload.
+
+async def sync_games(slice_size: int | None = None) -> dict:
+    """Hydrate a slice of the enumerated game catalog from IGDB.
+
+    Work list: the game targets in ``seed_targets`` that the catalog does not
+    have yet (the ``game_type`` allowlist plus ``rating > 0`` decides which
+    games are targets at all — see ``scripts/seed_igdb_targets.py``), topped up
+    by the least recently synced games once none are pending.  ``slice_size``
+    overrides ``settings.SYNC_SLICE_SIZE_GAMES`` (which itself overrides the
+    global ``settings.SYNC_SLICE_SIZE``).
+
+    The ``game_type`` allowlist is re-checked on every payload before it is
+    written, not only when the target was enumerated: see the gate inside the
+    loop.  It is reported in the log rather than in the result dict — the keys
+    below are a contract shared with ``_sync_tmdb_type``, ``SyncResponse`` and
+    ``scripts/backfill_sync.py``, and a games-only counter has no place in it.
+
+    Returns a dict with ``synced``, ``errors``, ``skipped_links``, ``offset``
+    (always 0 — no cursor), ``duration_s``, ``pending`` (workable targets
+    left), ``stuck`` (targets retired as unreachable/unlinkable) and
+    ``refreshed``.  ``people_errors`` is always 0 and present only because the
+    key is part of the shared result contract: games carry no people credits,
+    only company credits that travel inside the payload.
     """
     logger.info("sync_games: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "game"})
     start = time.monotonic()
+    source = SEED_TARGET_SOURCES["GAME"]
+    size = max(1, _resolve_slice_size("GAME", slice_size))
+
+    try:
+        pending, refresh, progress = await _read_seed_work_list("GAME", source, size)
+    except Exception:
+        logger.exception("sync_games: failed to read the seed work list")
+        return _seed_failure_result(start)
+
+    work = pending + refresh
+    logger.info(
+        "sync_games: %d workable target(s) pending (%d gone from IGDB, %d unlinkable) — this "
+        "slice takes %d of them plus %d refresh item(s) by oldest last_synced_at",
+        progress.pending,
+        progress.gone,
+        progress.unlinkable,
+        len(pending),
+        len(refresh),
+    )
+    if not work:
+        logger.info("sync_games: nothing to do — no pending targets and an empty catalog")
+        return _seed_result(
+            start,
+            synced=0,
+            errors=0,
+            people_errors=0,
+            skipped_links=0,
+            progress=progress,
+            refreshed=0,
+        )
+
     errors = 0
-    target = settings.SEED_TOP_N_GAMES
-
-    try:
-        offset, slice_size = await _read_slice("GAME", target, slice_size)
-    except Exception:
-        logger.exception("sync_games: failed to read sync cursor")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "skipped_links": 0,
-            "offset": 0,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
-
-    try:
-        raw_list = await _igdb_client.get_top_games(limit=slice_size, offset=offset)
-    except Exception:
-        logger.exception("sync_games: failed to fetch from IGDB")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "skipped_links": 0,
-            "offset": offset,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
+    # Same split as the TMDB engine: only *conclusive* outcomes are booked.
+    # A request that raised belongs to neither list and is retried next run
+    # without spending any of its targets' budget.
+    resolved: list[str] = []
+    gone: list[str] = []
+    pending_targets = set(pending)
+    # Targets refused by the ``game_type`` allowlist on arrival, and catalog
+    # items IGDB has reclassified out of it since they were written.
+    gated_out = 0
+    reclassified = 0
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
             writer = BatchWriter(session, games_repo.GAME_BULK_SPEC, "sync_games")
-            for raw in raw_list:
+            for chunk_start in range(0, len(work), IGDB_PAGE_SIZE):
+                chunk = work[chunk_start : chunk_start + IGDB_PAGE_SIZE]
                 try:
-                    igdb_id = raw.get("id")
-                    if not igdb_id:
-                        continue
-
-                    game_data = _igdb_client.game_to_dict(raw)
+                    raw_list = await _igdb_client.get_games_by_ids(chunk)
                 except Exception:
-                    logger.exception("sync_games: error mapping igdb_id=%s", raw.get("id"))
+                    # One error for the request, not one per id: the chunk is
+                    # the unit of work that failed. The ids keep their attempt
+                    # counters untouched and come back next run.
+                    logger.exception(
+                        "sync_games: failed to fetch %d id(s) from IGDB — not counted as "
+                        "attempts, will retry next run",
+                        len(chunk),
+                    )
                     errors += 1
                     continue
 
-                # Games carry no people: developers/publishers are company credits
-                # and travel inside ``game_data`` itself.
-                await writer.add(BulkItem(data=game_data, external_id=str(igdb_id)))
+                returned: set[str] = set()
+                for raw in raw_list:
+                    igdb_id = raw.get("id")
+                    if not igdb_id:
+                        continue
+                    external_id = str(igdb_id)
+                    returned.add(external_id)
+                    try:
+                        game_data = _igdb_client.game_to_dict(raw)
+                    except Exception:
+                        logger.exception("sync_games: error mapping igdb_id=%s", igdb_id)
+                        errors += 1
+                        continue
+                    # The allowlist gate, re-applied on the payload.  The
+                    # hydration query carries no ``game_type`` clause on
+                    # purpose (see ``get_games_by_ids``), so the enumeration's
+                    # verdict can be stale by the time an id is hydrated: a
+                    # target enumerated as MAIN_GAME and reclassified to BUNDLE
+                    # in between would otherwise walk straight into the catalog
+                    # past issue #14.  Checked on the *mapped* value, not on
+                    # the raw field, so the gate cannot disagree with what the
+                    # row would actually store.
+                    if game_data["game_type"] not in ALLOWED_GAME_TYPES:
+                        if external_id in pending_targets:
+                            # Never in the catalog and no longer wanted in it:
+                            # do not write, and book the pass as conclusive so
+                            # the target spends its attempts and retires as
+                            # unlinkable instead of costing a slice slot every
+                            # night for ever.  Attempts rather than immediate
+                            # retirement because a reclassification can be
+                            # undone, and a target that becomes eligible again
+                            # within its budget then links with no operator.
+                            gated_out += 1
+                            resolved.append(external_id)
+                            logger.info(
+                                "sync_games: external_id=%s is %s, outside the allowlist — not "
+                                "written (issue #14)",
+                                external_id,
+                                game_data["game_type"],
+                            )
+                            continue
+                        # Already in the catalog: this is the refresh rotation,
+                        # and refreshing is not the place to evict.  Users have
+                        # library entries, ratings and reviews pointing at the
+                        # row, so dropping it here would delete their data as a
+                        # side effect of a nightly refresh, and skipping the
+                        # write would only freeze it on a stale payload.  It is
+                        # written like any other refresh and logged loudly, so
+                        # a reclassified catalog item is visible to the
+                        # operator instead of silent.
+                        reclassified += 1
+                        logger.warning(
+                            "sync_games: external_id=%s is in the catalog but IGDB now "
+                            "classifies it as %s, outside the allowlist (issue #14) — refreshed, "
+                            "not removed",
+                            external_id,
+                            game_data["game_type"],
+                        )
+                    if external_id in pending_targets:
+                        resolved.append(external_id)
+                    # Games carry no people: developers/publishers are company
+                    # credits and travel inside ``game_data`` itself.
+                    await writer.add(BulkItem(data=game_data, external_id=external_id))
+
+                # An id IGDB did not answer for is this source's 404: it was
+                # enumerated but the record is gone (deleted or merged). A
+                # definitive answer, so the target retires now instead of
+                # costing a slot on every future run.
+                for external_id in chunk:
+                    if external_id in returned:
+                        continue
+                    logger.info(
+                        "sync_games: external_id=%s is gone from IGDB — retiring the target",
+                        external_id,
+                    )
+                    if external_id in pending_targets:
+                        gone.append(external_id)
             await writer.flush()
 
-            await _persist_cursor(
-                session,
-                "GAME",
-                _next_offset(offset, len(raw_list), slice_size, target),
-                "sync_games",
-            )
+            await _stamp_seed_outcomes(session, "GAME", source, resolved, gone, "sync_games")
+            after = await _recount_seed_progress(session, "GAME", source, progress, "sync_games")
 
     synced = writer.synced
     errors += writer.errors
     skipped_links = link_skips.count
     logger.info(
-        "sync_games: done — %d items upserted, %d errors, %d skipped_links (offset %d)",
+        "sync_games: done — %d items upserted, %d errors, %d skipped_links, %d gone from "
+        "IGDB (%d targets still pending, %d stuck: %d gone, %d unlinkable)",
         synced,
         errors,
         skipped_links,
-        offset,
+        len(gone),
+        after.pending,
+        after.stuck,
+        after.gone,
+        after.unlinkable,
     )
-    return {
-        "synced": synced,
-        "errors": errors,
-        "skipped_links": skipped_links,
-        "offset": offset,
-        "duration_s": round(time.monotonic() - start, 1),
-    }
+    if after.unlinkable:
+        logger.warning(
+            "sync_games: %d target(s) retired as unlinkable after %d conclusive passes — they "
+            "resolve at IGDB but never get an external_ids row (a target IGDB has reclassified "
+            "out of the game_type allowlist retires this way)",
+            after.unlinkable,
+            _seed_max_attempts(),
+        )
+    if gated_out or reclassified:
+        logger.warning(
+            "sync_games: game_type allowlist — %d target(s) refused on arrival (not written), "
+            "%d catalog item(s) reclassified out of it (refreshed, not removed)",
+            gated_out,
+            reclassified,
+        )
+    return _seed_result(
+        start,
+        synced=synced,
+        errors=errors,
+        people_errors=0,
+        skipped_links=skipped_links,
+        progress=after,
+        refreshed=len(refresh),
+    )
 
 
 # ── IGDB incremental updates (feature 88) ────────────────────────────────────
@@ -1842,15 +2109,25 @@ async def sync_games(slice_size: int | None = None) -> dict:
 #   re-written only if the catalog already holds it, exactly like the TMDB
 #   ``/changes`` lane.
 #
-# There is deliberately **no promotion lane** for games, and its absence is not
-# the hole it is for movies and series.  Promotion means "an item that was
-# below the bar has crossed it"; for games the bar is IGDB's own
-# ``rating_count`` ranking, and the nightly ``sync_games`` already re-walks
-# that ranking by cursor every night, so a game that becomes notable is picked
-# up by the walk it was always going to be picked up by.  What the nightly walk
-# could never see is a game released *today*, which has no rating at all and
-# therefore no rank — and that is exactly the hole the ``CREATED_AT`` lane
-# closes.
+# There is **no promotion lane** for games, and since feature 90 the reason is
+# the same one movies and series have.  Promotion means "an item that was below
+# the bar has crossed it": for games the bar is ``rating > 0``, which a game can
+# cross with no publication event at all, just by someone rating it.  Feature 88
+# argued the nightly cursor walk covered that by re-walking IGDB's ranking every
+# night; **that argument expired with the cursor**.  The *mechanism* that covers
+# it now is the same one TMDB uses — re-enumerating, which upserts
+# newly-qualifying items as targets and lets the nightly slice hydrate them like
+# any other target — but the **trigger is not the same**, and that asymmetry is
+# the point: TMDB's re-enumeration is an automatic daily lane inside the
+# incremental job (``_incremental_promotion``), while games' is an operator
+# running ``scripts/seed_igdb_targets.py`` by hand.  ``docs/operations.md``
+# ("Games", in the enumeration section) recommends a cadence and gives the
+# measured cost of a run.  Automating it is **issue #34**, not something this
+# module does today.
+#
+# The ``CREATED_AT`` lane is untouched by any of that and still closes a hole
+# neither mechanism can: a game released *today* has no rating, so it cannot be
+# enumerated at all until somebody rates it.
 #
 # Each lane is wrapped in its own ``try``: one failing must not abort the other
 # (checkpoint C19), which is the whole reason the two watermarks are separate
@@ -1973,8 +2250,12 @@ async def _incremental_new_games(*, now: datetime) -> dict:
 
     The allowlist check on ``game_type`` is what makes this lane a gate rather
     than a funnel — a game that is a bundle, a mod, a port, a pack or an update
-    is counted in ``gated_out`` and never written, exactly as the nightly
-    ranking walk would have refused it.
+    is counted in ``gated_out`` and never written, exactly as the enumeration
+    refuses it: ``IGDB_CATALOG_WHERE`` is ``game_type = (allowlist) & rating >
+    0``, so a bundle is not a catalog target no matter how it is discovered.
+    (This used to say "as the nightly ranking walk would have refused it";
+    feature 90 retired that walk, and the bar it stood for now lives in the
+    enumeration.)
     """
     since = await _read_game_watermark(_WATERMARK_CREATED_AT)
     cold_start = since is None

@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 
 import httpx
@@ -14,8 +15,12 @@ from backlogg.shared.slugs import external_id_slug, slugify
 _TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 _IGDB_BASE = "https://api.igdb.com/v4"
 
-# Delay between paginated requests — IGDB allows at most 4 req/s
-_PAGE_THROTTLE_S = 0.3
+# Delay between paginated requests — IGDB allows at most 4 req/s.  Public
+# because the catalog enumeration of feature 90 owns its own page loop (it
+# lives in ``backlogg.scheduler.igdb_catalog``, where the keyset cursor is) and
+# must not re-invent the rate limit: this constant is the single place that
+# knows what IGDB allows.
+IGDB_PAGE_THROTTLE_S = 0.3
 
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
@@ -58,6 +63,27 @@ _GAME_FIELDS = (
 # How many games one incremental request asks for. IGDB caps a response at 500
 # regardless of what ``limit`` says, so this is the ceiling, not a preference.
 IGDB_PAGE_SIZE = 500
+
+# ── The catalog filter (feature 65, made explicit by feature 90) ─────────────
+#
+# The clause that *defines* which games the catalog wants: the ``game_type``
+# allowlist (no bundles, mods, ports, packs or updates — issue #14) plus
+# ``rating > 0``.  Measured against IGDB on 2026-09-08: 337.291 games pass the
+# allowlist, 31.988 of those have a rating.  Dropping ``rating > 0`` would
+# multiply the catalog by ten with ~300.000 unrated entries, which is the exact
+# noise the filter exists to keep out (docs/seeding-plan.md §2.1).
+#
+# ``get_top_games`` keeps its own literal copy on purpose: it is a feature-65
+# code path with its own tests, and this constant must not be able to change
+# what it asks for.
+IGDB_CATALOG_WHERE = f"game_type = ({_ALLOWED_CATEGORY_CLAUSE}) & rating > 0"
+
+# What the enumeration asks for per game, and no more: the id, the notoriety
+# signal that orders the hydration work list (``rating_count``) and the release
+# year.  The enumeration writes no catalog row — the 31.988-row answer to
+# "which games does the catalog want" travels in 64 requests because each row
+# is three fields instead of twenty.
+_CATALOG_ENUMERATION_FIELDS = "id,rating_count,first_release_date"
 
 
 def parse_igdb_timestamp(value: object) -> datetime | None:
@@ -195,8 +221,102 @@ class IGDBClient:
                 break
             current_offset += len(batch)
             if len(results) < limit:
-                await asyncio.sleep(_PAGE_THROTTLE_S)
+                await asyncio.sleep(IGDB_PAGE_THROTTLE_S)
         return results[:limit]
+
+    # ── Catalog enumeration and hydration by id (feature 90) ─────────────────
+    #
+    # ``get_top_games`` above walks IGDB's ``rating_count`` ranking by offset,
+    # which is what the nightly cursor used to consume.  Feature 90 replaces
+    # that with the same two-step split movies and series got in feature 86:
+    # *enumerate* which games the catalog wants into ``seed_targets``, then
+    # *hydrate* the difference against ``external_ids``.  Two queries, one for
+    # each half, and neither of them uses ``offset``.
+
+    @_igdb_retry
+    async def get_catalog_page(self, after: int = 0, limit: int = IGDB_PAGE_SIZE) -> list[dict]:
+        """One keyset page of the games that pass the catalog filter.
+
+        One page in, one payload out — the loop, the cursor and the throttle
+        live in ``backlogg.scheduler.igdb_catalog``, the same separation
+        ``discovery.py`` documents for the TMDB ``/discover`` adapters.
+
+        **Keyset, not offset.**  ``where ... & id > {after}; sort id asc`` and
+        never ``offset N``.  Offset does work against IGDB all the way to the
+        end (measured 2026-09-08: ``offset 31.900`` still answers, unlike
+        TMDB's 500-page cap), so this is not a limitation being worked around —
+        it is the lesson of ``docs/seeding-plan.md`` §1.  An offset walks a set
+        that moves underneath it, and ``rating > 0`` changes on its own as
+        players vote: a game crossing the threshold mid-walk shifts every
+        later page by one and an already-enumerated game silently drops out of
+        the window.  A keyset cut is a concrete id, so that cannot happen.  It
+        costs exactly the same 64 requests.
+
+        Retried per page (429/5xx, timeouts, transport errors) rather than per
+        walk: re-running the walk would re-request every page already served,
+        and IGDB's budget is 4 req/s.
+        """
+        query = (
+            f"fields {_CATALOG_ENUMERATION_FIELDS};"
+            f" where {IGDB_CATALOG_WHERE} & id > {int(after)};"
+            " sort id asc;"
+            f" limit {min(limit, IGDB_PAGE_SIZE)};"
+        )
+        return await self._post("games", query)
+
+    @_igdb_retry
+    async def get_games_by_ids(self, ids: Sequence[str | int]) -> list[dict]:
+        """Full payloads for an explicit list of IGDB ids, in one request.
+
+        This is the hydration half, and it is why converting games to
+        ``seed_targets`` is cheap where TMDB's was not: TMDB has no bulk detail
+        endpoint and pays one request per item, while ``where id = (...)``
+        returns up to 500 fully-hydrated games at once.
+
+        No ``game_type``/``rating`` clause: the ids come from the work list,
+        which is either a target the enumeration already put through the
+        filter or an item the catalog already holds.  Re-applying the filter
+        here would make a game that *lost* its rating silently unfetchable —
+        it would look like a 404 and get retired — instead of simply refreshed.
+        That argument covers ``rating``, which moves on its own; it does not
+        cover ``game_type``, which a reclassification can move after the
+        enumeration ran.  So the caller re-checks ``game_type`` on the payload
+        (``sync_games``), the same way the ``created_at`` lane does: the clause
+        is a filter applied by a third party, the check is the gate this
+        codebase owns (issue #14).
+
+        An id IGDB does not answer for is absent from the result; the caller
+        compares what it asked for against what came back (that is the games
+        equivalent of TMDB's 404).  Returns ``[]`` for an empty request without
+        touching the network.
+
+        Every id is normalised through ``int`` before it reaches the query, the
+        same way ``get_catalog_page`` normalises its keyset cursor.  Apicalypse
+        has no bound parameters, so the id list *is* string interpolation; the
+        ids in practice come from ``seed_targets``/``external_ids`` and are
+        written by this codebase from IGDB's own answers, so today nothing but
+        a number can get here — the conversion makes that contract explicit and
+        fails loudly with ``ValueError`` if it ever stops holding, instead of
+        letting whatever arrived travel into the ``where`` clause.
+        """
+        try:
+            wanted = [str(int(item_id)) for item_id in ids]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("get_games_by_ids: every id must be a numeric IGDB id") from exc
+        if not wanted:
+            return []
+        if len(wanted) > IGDB_PAGE_SIZE:
+            raise ValueError(
+                f"get_games_by_ids: {len(wanted)} ids requested but IGDB caps a "
+                f"response at {IGDB_PAGE_SIZE} — chunk the list in the caller"
+            )
+        query = (
+            f"fields {_GAME_FIELDS};"
+            f" where id = ({','.join(wanted)});"
+            " sort id asc;"
+            f" limit {len(wanted)};"
+        )
+        return await self._post("games", query)
 
     # ── Incremental updates (feature 88) ─────────────────────────────────────
     #
@@ -240,7 +360,7 @@ class IGDBClient:
           and games created *during* the walk land at the end instead of
           shifting the offsets of the pages already read.
 
-        Sleeps ``_PAGE_THROTTLE_S`` between pages, like ``get_top_games``:
+        Sleeps ``IGDB_PAGE_THROTTLE_S`` between pages, like ``get_top_games``:
         IGDB allows 4 requests per second.
         """
         cutoff = int(since.timestamp())
@@ -261,7 +381,7 @@ class IGDBClient:
                 break
             current_offset += len(batch)
             if len(results) < limit:
-                await asyncio.sleep(_PAGE_THROTTLE_S)
+                await asyncio.sleep(IGDB_PAGE_THROTTLE_S)
         return results[:limit]
 
     async def get_games_created_since(

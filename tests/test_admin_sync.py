@@ -264,16 +264,26 @@ async def test_sync_movies_job_catches_external_error():
 
 async def test_sync_games_job_catches_external_error():
     """sync_games logs and returns a result dict when IGDB raises."""
-    get_cursor, set_cursor = _cursor_patches()
     with (
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
+            new_callable=AsyncMock,
+            return_value=(
+                ["9320001"],
+                [],
+                SeedTargetProgress(total=1, pending=1, gone=0, unlinkable=0),
+            ),
+        ),
         patch.object(
             sync_jobs._igdb_client,
-            "get_top_games",
+            "get_games_by_ids",
             new_callable=AsyncMock,
             side_effect=RuntimeError("igdb down"),
         ),
-        get_cursor,
-        set_cursor,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
         result = await sync_jobs.sync_games()
 

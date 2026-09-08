@@ -157,15 +157,23 @@ detallado en [`docs/operations.md`](docs/operations.md).
 
 **Un `content_type` por dispatch.** Los `hydrate` de TMDB tardan ~5 h cada uno.
 
+**Dos formas de sembrar, no cuatro** (feature 90):
+
+| Forma | Tipos | Cómo |
+|---|---|---|
+| Lista objetivo (`seed_targets`) | `movie`, `series`, `game` | `mode=enumerate` decide qué quiere el catálogo, `mode=hydrate` baja la diferencia contra `external_ids` |
+| Dumps mensuales | `book` | `mode=dump`: la selección y la escritura son la misma pasada |
+
 ```bash
 # 0. Borrado previo, si se siembra desde cero. IRREVERSIBLE.
 #    La URL de producción NO está en .env — sale de Neon o de Render.
 psql "$PROD_DATABASE_URL" -f scripts/wipe_production.sql
 
 # 1. Enumerar la lista objetivo — minutos, NO escribe catálogo (solo seed_targets).
-#    Obligatorio ANTES del primer hydrate de movies/series.
+#    Obligatorio ANTES del primer hydrate de movies/series/games.
 gh workflow run backfill-sync.yml -f content_type=movie  -f mode=enumerate
 gh workflow run backfill-sync.yml -f content_type=series -f mode=enumerate
+gh workflow run backfill-sync.yml -f content_type=game   -f mode=enumerate
 
 # 2. Hidratar TMDB — lo largo. Secuencial entre ellos: comparten el
 #    presupuesto de peticiones de TMDB.
@@ -175,7 +183,7 @@ gh workflow run backfill-sync.yml -f content_type=series -f mode=hydrate
 # 3. Books y games — fuentes distintas (Open Library e IGDB), así que pueden
 #    ir en paralelo con la hidratación de TMDB.
 gh workflow run backfill-sync.yml -f content_type=book -f mode=dump
-gh workflow run backfill-sync.yml -f content_type=game -f mode=hydrate -f seed_top_n=10000
+gh workflow run backfill-sync.yml -f content_type=game -f mode=hydrate
 
 # Seguimiento
 gh run list --workflow=backfill-sync.yml --limit 5
@@ -183,9 +191,10 @@ gh run watch
 gh run view <run-id> --log | grep backfill
 ```
 
-`seed_top_n` **debe coincidir** con `SEED_TOP_N_GAMES` en Render, o el cursor
-compartido da la vuelta antes de tiempo. Aplica solo a `book` y `game`:
-`SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la feature 86.
+`seed_top_n` **debe coincidir** con `SEED_TOP_N_BOOKS` en Render, o el cursor
+compartido da la vuelta antes de tiempo. Aplica **solo a `book`**:
+`SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la feature 86 y
+`SEED_TOP_N_GAMES` no existe desde la 90.
 
 **Qué mirar mientras corre.** El contador que importa es `skipped_links`: cada
 unidad es una fila del catálogo que se guardó **sin enlace en `external_ids`**,
@@ -194,8 +203,9 @@ a tramo, para y mira los `WARNING` de `backlogg.shared.external_ids`. Los otros
 dos son `errors` (el ítem no se escribió) y `people_errors` (el ítem sí, sus
 credits no; se recupera después con `mode=credits`).
 
-Volumen esperado: movies 57.135 · series 10.880 · books ~19.221 · games 31.958
-(topado en 10.000 por `seed_top_n`).
+Volumen esperado: movies 57.135 · series 10.880 · books ~19.221 · games 31.988
+(medido contra IGDB el 2026-09-08; ya **no** topado en 10.000 — la feature 90
+retiró el cursor y su `seed_top_n`).
 
 ## Documentación
 

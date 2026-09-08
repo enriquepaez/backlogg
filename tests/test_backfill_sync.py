@@ -5,10 +5,10 @@ Covers:
   settings-based behaviour, an explicit value takes precedence);
 - IGDB pagination beyond 500 items with throttling between pages;
 - the backfill loop in ``scripts/backfill_sync.py``: multiple iterations,
-  stop on cursor wraparound (book/game), stop on an exhausted target list
-  (movie/series, feature 86) even when part of that list is permanently
-  stuck, stop on time budget, abort on an iteration with zero progress, and
-  CLI exit codes;
+  stop on cursor wraparound (book — the only cursor type left since feature
+  90), stop on an exhausted target list (movie/series/game, features 86 and
+  90) even when part of that list is permanently stuck, stop on time budget,
+  abort on an iteration with zero progress, and CLI exit codes;
 - error propagation from a failing adapter fetch: ``sync_books`` reports
   ``errors=1`` without touching the cursor, and the backfill guard turns
   that into a ``BackfillError`` (red run) instead of a false wraparound.
@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from backlogg.games.adapters.igdb import _PAGE_THROTTLE_S, IGDBClient
+from backlogg.games.adapters.igdb import IGDB_PAGE_THROTTLE_S, IGDBClient
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.scheduler.repository import SeedTargetProgress
 
@@ -113,23 +113,29 @@ async def test_sync_movies_slice_size_none_uses_setting(monkeypatch):
 
 
 async def test_sync_slice_size_is_capped_by_target(monkeypatch):
-    """The override never fetches beyond SEED_TOP_N_* - offset."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
+    """The override never fetches beyond SEED_TOP_N_* - offset.
+
+    Written against ``sync_books`` since feature 90: the cap only exists on the
+    cursor path, and books are the only type still on it.  It used to be
+    written against ``sync_games``.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=4)
 
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._ol_client,
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=[{"id": None}] * 6,
+            return_value=[{"key": "", "title": ""}] * 6,
         ) as mock_fetch,
+        patch.object(sync_jobs._ol_client, "book_to_dict", return_value={"title": ""}),
         get_cursor,
         set_cursor,
         factory,
     ):
-        await sync_jobs.sync_games(slice_size=500)
+        await sync_jobs.sync_books(slice_size=500)
 
     mock_fetch.assert_awaited_once_with(limit=6, offset=4)
 
@@ -221,7 +227,7 @@ async def test_igdb_paginates_beyond_500_with_throttle():
     # One sleep between each pair of consecutive requests (4 req/s limit)
     assert mock_sleep.await_count == 2
     for call in mock_sleep.await_args_list:
-        assert call.args == (_PAGE_THROTTLE_S,)
+        assert call.args == (IGDB_PAGE_THROTTLE_S,)
 
 
 async def test_igdb_pagination_starts_at_offset():
@@ -494,23 +500,53 @@ async def test_backfill_stops_on_time_budget():
 
 
 async def test_backfill_wraparound_on_first_iteration():
-    """A single slice covering the whole target stops immediately with exit reason."""
+    """A single slice covering the whole target stops immediately with exit reason.
+
+    ``book`` since feature 90: ``game`` is target-driven now, so wraparound is
+    no longer one of its stop reasons (see the test below).
+    """
     get_cursor, factory = _backfill_patches(cursor_reads=[0, 0])
 
     with (
         patch(
-            "backlogg.scheduler.jobs.sync_games",
+            "backlogg.scheduler.jobs.sync_books",
             new_callable=AsyncMock,
             return_value=_job_result(synced=80, offset=0),
         ),
         get_cursor,
         factory,
     ):
-        summary = await backfill_sync.run_backfill("game", slice_size=500, time_budget_s=3600)
+        summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
 
     assert summary["stop_reason"] == "wraparound"
     assert summary["iterations"] == 1
     assert summary["synced"] == 80
+
+
+async def test_backfill_game_stops_on_an_exhausted_target_list():
+    """Feature 90: ``game`` joins ``movie``/``series`` on the target-driven loop.
+
+    The cursor is never read for it — which is also what makes the old
+    ``seed_top_n`` dispatch argument meaningless for games — and the loop
+    stops on ``pending == 0``, not on a wraparound that can no longer happen.
+    """
+    with (
+        patch(
+            "backlogg.scheduler.jobs.sync_games",
+            new_callable=AsyncMock,
+            return_value=_job_result(synced=500, pending=0, stuck=3),
+        ) as mock_job,
+        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock) as mock_cursor,
+        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
+    ):
+        summary = await backfill_sync.run_backfill("game", slice_size=500, time_budget_s=3600)
+
+    mock_job.assert_awaited_once_with(slice_size=500)
+    mock_cursor.assert_not_awaited()
+    assert summary["stop_reason"] == "exhausted"
+    assert summary["pending"] == 0
+    assert summary["stuck"] == 3
+    assert summary["next_offset"] == 0
 
 
 async def test_backfill_aborts_when_iteration_makes_no_progress():

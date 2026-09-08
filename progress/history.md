@@ -1098,3 +1098,97 @@ avanzó y el script salió `DEGRADED`.
   `IGDB_INCREMENTAL_MAX_ITEMS`, ese carril no alcanza el presente.
 - Issues **#26** (Open Library sin throttle) y **#27**: intactos a propósito. La
   decisión de books los esquiva en vez de arrastrarlos a esta rama.
+
+## 2026-09-09 — Feature 90 `igdb_targets_seeding` (rama `feat/igdb_targets_seeding`)
+
+Punto 9 de `progress/priority_order.md`. Games era **el último tipo que se
+sembraba por cursor**; ahora movies, series y games van por `seed_targets` y
+books por dumps: **dos formas de sembrar en vez de cuatro**. Reviewer
+`APPROVED` (10/10 acceptance, ningún hallazgo bloqueante ni medio).
+`init.sh` verde con **1634 tests** (1599 de partida).
+
+### Lo que cambia
+
+- **Enumeración keyset** (`where … & id > <último>; sort id asc`), no por
+  offset. Offset funciona hasta el final en IGDB —comprobado: no hay tope de
+  páginas como el de 500 de TMDB— pero avanza sobre un conjunto que se mueve
+  bajo sus pies, y `rating > 0` cambia solo. Es la misma razón por la que se
+  retiró el recorrido de `/popular` (`docs/seeding-plan.md` §1).
+- **Hidratación por diferencia** contra `external_ids`, con `pending`/`stuck`/
+  `skipped_links` funcionando igual que en movies y series.
+- **Gemelo de games, no generalización de `_sync_tmdb_type`.** La diferencia
+  entre los dos motores no es de configuración sino de forma: TMDB no tiene
+  endpoint bulk de detalle y paga una petición por ítem con un 404 por ítem;
+  IGDB devuelve hasta 500 juegos hidratados en una sola petición y
+  «desaparecido» es un id ausente de la respuesta. Generalizar habría obligado
+  a reescribir el camino por ítem que corre en producción. Lo que sí se
+  comparte se extrajo a seis helpers (`_seed_max_attempts`, `_seed_result`,
+  `_stamp_seed_outcomes`, `_recount_seed_progress`, `_seed_failure_result`, más
+  `_read_seed_work_list` y `collect_link_skips`, que ya existían).
+- **`SEED_TOP_N_GAMES` borrada, no dejada inerte**, a diferencia de las de
+  movies y series: aquellas no hacían daño, ésta era el objetivo de wraparound
+  de un cursor **compartido con el workflow** y es la que topó la siembra del
+  2026-09-07 en exactamente 10.000 juegos. La fila de `sync_cursors` de GAME se
+  deja de leer y escribir pero **no se borra**, que es la convención que fijó la
+  feature 86 para MOVIE/SERIES.
+- `seed_top_n` del workflow pasa a aplicar **solo a `book`**.
+
+### Un test destapó un bucle infinito
+
+`test_backfill_credits_targeted.py` simulaba el dict antiguo de `sync_games`,
+sin `pending`. Con games ya dirigido por targets, el bucle de backfill nunca
+alcanzaba `pending == 0` y giraba hasta agotar el presupuesto de tiempo. En
+producción no puede darse (`pending: None` solo llega con `errors >= 1` y
+`synced = 0`, que dispara `BackfillError`), pero el test estaba mintiendo.
+
+### QA manual del leader (IGDB y DB reales)
+
+| Prueba | Resultado |
+|---|---|
+| Enumeración keyset completa | **64 páginas, 32.000 targets, 52 s** |
+| Hidratación de esos 32.000 | **90 s, 0 errores, 0 `skipped_links`**, `pending` → 0 |
+| Catálogo resultante | **32.740** juegos (antes topado en 10.000) |
+| Tipos presentes | solo allowlist: ni un `BUNDLE`, `MOD`, `PORT`, `PACK`, `UPDATE` |
+| Cursor de `GAME` | intacto (`updated_at` del 2026-09-03): el job ya no lo toca |
+
+Eso demuestra el criterio que solo una ejecución real podía demostrar: el tope
+de 10.000 desapareció.
+
+### El hueco de promoción → **issue #34**
+
+Al retirar el recorrido nocturno del ranking, un juego que gana su primera
+valoración ya no entra solo. Es el análogo del `_incremental_promotion` que la
+88 construyó para TMDB, y el carril `UPDATED_AT` no lo cubre porque descarta
+los ids desconocidos por diseño.
+
+El dato que cambia cómo se lee: **lo retirado promocionaba mucho menos de lo que
+suena.** El recorrido estaba topado en 10.000 sobre 31.988, y un juego recién
+cruzado el umbral tiene `rating_count` mínimo, o sea que entraba por la cola del
+ranking, lejísimos de las 10.000 primeras posiciones. La 88 lo dio por bueno sin
+comprobarlo. El trato es «promoción teórica sobre un catálogo topado al 31 %»
+por «catálogo completo + promoción manual», y cerrarlo cuesta 64 peticiones.
+
+### Derivado del review: la allowlist en la hidratación (hallazgo B3)
+
+La hidratación no reaplicaba `game_type` sobre el payload, mientras el carril
+`CREATED_AT` sí. Un target enumerado como `MAIN_GAME` y reclasificado a
+`BUNDLE` antes de hidratarse entraba violando el issue #14. Se cerró
+reaplicando el gate, con dos comportamientos distintos y deliberados:
+
+- **Target pendiente**: no se escribe, y el intento cuenta como **conclusivo**,
+  no como «gone». El id resuelve en IGDB, simplemente ya no se quiere; marcarlo
+  `unreachable_at` sería mentir y además irreversible.
+- **Ítem ya en catálogo (rotación)**: **se refresca y no se retira**, con una
+  marca en el log. Borrar la fila sería borrar datos de usuario —hay biblioteca,
+  ratings y reseñas apuntando a ella— desde un job nocturno; saltarse la
+  escritura la congelaría en un payload viejo y en silencio. La evicción es una
+  política de curaduría propia, no una rama dentro de la hidratación.
+
+### Anotado
+
+- El **issue #27 sigue abierto** y no lo toca esta feature: es
+  `SEED_TOP_N_BOOKS` por el camino nocturno de books. La entrada del backlog ya
+  advertía de este error y se respetó.
+- Queda sin política la **evicción** de un ítem del catálogo reclasificado fuera
+  de la allowlist: hoy se queda dentro, refrescado y logueado. El log dirá si el
+  caso es real o teórico.

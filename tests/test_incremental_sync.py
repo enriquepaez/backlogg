@@ -37,7 +37,7 @@ from backlogg.books.adapters import openlibrary_dump as dump
 from backlogg.books.models import Book
 from backlogg.core.config import settings
 from backlogg.games.adapters.igdb import (
-    _PAGE_THROTTLE_S,
+    IGDB_PAGE_THROTTLE_S,
     IGDBClient,
     parse_igdb_timestamp,
 )
@@ -172,7 +172,7 @@ async def test_the_incremental_query_paginates_and_throttles():
     offsets = [call.args[1] for call in mock_post.await_args_list]
     assert "offset 0;" in offsets[0]
     assert "offset 500;" in offsets[1]
-    assert mock_sleep.await_args_list[0].args == (_PAGE_THROTTLE_S,)
+    assert mock_sleep.await_args_list[0].args == (IGDB_PAGE_THROTTLE_S,)
 
 
 @pytest.mark.parametrize("bad", [None, "not-a-number", object()])

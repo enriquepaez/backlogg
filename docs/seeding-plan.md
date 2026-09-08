@@ -8,7 +8,7 @@
 > | Movies | **57.135** | `vote_count ≥ 25` |
 > | Series | **10.880** | `vote_count ≥ 25` |
 > | Books | **18.874** | Filtro de la feature 73, sin cambios |
-> | Games | **31.958** | Filtro de la feature 65, sin cambios |
+> | Games | **31.988** | Filtro de la feature 65 (allowlist de `game_type` + `rating > 0`), sin cambios; cifra remedida el 2026-09-08 (31.958 el 2026-09-02) |
 > | **Total** | **~118.850** | |
 >
 > Todas las cifras están **medidas contra las fuentes reales** el 2026-09-02, no
@@ -28,8 +28,11 @@ endpoints y límites de cada proveedor vive en `docs/external-apis.md`.
 > camino de la siembra: `sync_movies`/`sync_series` se alimentan de la lista
 > objetivo de `seed_targets` (§3). Se conserva el diagnóstico porque es lo que
 > justifica el diseño y lo que evita que alguien lo deshaga por comodidad.
-> Books y games nunca tuvieron este problema: su enumeración no es un ranking
-> de popularidad.
+> **Games se convirtió en la feature 90** y por la razón de en medio, no por
+> el techo: su enumeración *sí* era un ranking (`sort rating_count desc` por
+> offset) y su `SEED_TOP_N_GAMES` sí era un tope — 10.000 sobre ~31.988. Ahora
+> se enumera a `seed_targets` por keyset (§3). Books es el único que sigue con
+> cursor en el nocturno (issue #27).
 
 ### Techo duro de 10.000 por tipo
 
@@ -126,9 +129,12 @@ es el que esos filtros entregan:
   corregido.
 - **Games** (feature 65): allowlist de `game_type` **y `rating > 0`**.
   `/games/count` real: 374.223 juegos en total, 336.653 pasan la allowlist, pero
-  solo **31.958** tienen valoración. Quitar `rating > 0` los multiplicaría por
-  diez metiendo ~300.000 juegos sin ninguna valoración, que es justo el ruido que
-  el filtro existe para excluir.
+  solo **31.958** tienen valoración (**31.988** remedido el 2026-09-08 — el
+  conjunto crece solo, que es justo por lo que la enumeración es por keyset).
+  Quitar `rating > 0` los multiplicaría por diez metiendo ~300.000 juegos sin
+  ninguna valoración, que es justo el ruido que el filtro existe para excluir.
+  Ese filtro **es** el criterio del catálogo de games desde la feature 90: lo
+  que antes lo definía de facto era `SEED_TOP_N_GAMES=10000`.
 
 ### 2.2 Almacenamiento — no es limitante
 
@@ -197,16 +203,27 @@ El repositorio es **público**, así que los minutos de Actions son ilimitados. 
 ### 2.5 Conclusión
 
 **Ni el coste ni la infraestructura limitan nada a esta escala.** Los límites
-reales son dos: el techo de 10.000 del método de enumeración actual (§3 lo
-resuelve) y la ventana de 6 meses de TMDB para movies (§2.3 lo resuelve).
+reales son dos: el techo de 10.000 del método de enumeración por cursor (§3 lo
+resuelve — para movies y series en la feature 86, para games en la 90) y la
+ventana de 6 meses de TMDB para movies (§2.3 lo resuelve).
 
 ---
 
 ## 3. Cómo se enumera cada fuente
 
-El cambio de fondo es **separar la enumeración de la hidratación**. Hoy están
-fundidas en el cursor de `/popular`, y de ahí vienen el techo, la inestabilidad
+El cambio de fondo es **separar la enumeración de la hidratación**. Estaban
+fundidas en un cursor por offset, y de ahí venían el techo, la inestabilidad
 del recorrido y la imposibilidad de saber qué falta.
+
+**Quedan dos formas de sembrar, no cuatro** (feature 90):
+
+| Forma | Tipos | Enumeración | Hidratación |
+|---|---|---|---|
+| **Lista objetivo** (`seed_targets`) | movies, series, games | `/discover` por año (TMDB) · keyset por id (IGDB) | la diferencia contra `external_ids`, más rotación por `last_synced_at` |
+| **Dumps mensuales** | books | — | la selección y la escritura son la misma pasada |
+
+El nocturno de books sigue además recorriendo `search.json` por cursor
+(issue #27, abierto); es un camino heredado, no una tercera forma de sembrar.
 
 ### TMDB — `/discover` con `vote_count.gte`, troceado por año
 
@@ -358,8 +375,17 @@ que los despliegues declaran se leería como un descuido.
 **inerte para la siembra** (`scripts/seed_openlibrary_books.py` selecciona por
 los umbrales `BOOKS_SEED_MIN_*`, sin corte por número de ítems) y **viva para
 el camino por cursor** (`sync_books` y `scripts/backfill_sync.py book` siguen
-paginando `search.json` y haciendo wraparound sobre ella).
-`SEED_TOP_N_GAMES` sigue viva del todo: la enumeración de games no cambia.
+paginando `search.json` y haciendo wraparound sobre ella). Es el issue #27 y
+**sigue abierto**: la feature 90 no lo toca.
+
+`SEED_TOP_N_GAMES` **está retirada** desde la feature 90 — borrada del código,
+del workflow de backfill y del `.env.example`, no dejada inerte. La diferencia
+con movies/series es deliberada: aquellas quedaron inertes y no hacían daño,
+mientras que ésta era el objetivo de wraparound de un cursor **compartido** con
+el workflow, de modo que la siembra del 2026-09-07 paró en exactamente 10.000
+juegos de los ~31.988 que pasan el filtro, y el dispatch necesitaba un
+`-f seed_top_n` que debía coincidir con Render a mano. Un nombre que capaba el
+catálogo se retira; uno que no hace nada se puede dejar.
 
 ### TMDB — los ficheros diarios de IDs son para el incremental
 
@@ -450,11 +476,49 @@ fallback on-demand y `get_book` siguen sobre `search.json`. El incremental
 desde dumps es la feature 88 (§6), que reutiliza estas mismas cinco fases con
 `--only-new`.
 
-### IGDB — nada que cambiar
+### IGDB — `where` por keyset sobre el filtro de calidad
 
-`get_top_games` ya trae **500 juegos con todos los campos en un solo request**
-(`backlogg/games/adapters/igdb.py:137-162`), a 4 req/s, sin llamada de detalle por
-ítem. Los 31.958 juegos son 64 requests: **~16 segundos**.
+> ✅ **Implementado en la feature 90** (`scripts/seed_igdb_targets.py`,
+> `backlogg/scheduler/igdb_catalog.py` y `IGDBClient.get_catalog_page` /
+> `get_games_by_ids`). Antes, esta sección decía «nada que cambiar»: era
+> verdad sobre el **coste** y falsa sobre el **método**. El coste siempre fue
+> trivial —500 juegos por request, 4 req/s—, pero lo que recorría era el
+> ranking `sort rating_count desc` por offset, con el cursor de `sync_cursors`
+> y `SEED_TOP_N_GAMES` como tope. Eso es exactamente el patrón del §1.
+
+**Enumeración** (64 requests para los ~32.000; **52 s medidos** el 2026-09-09,
+sobre un suelo teórico de 16 s a 4 req/s):
+
+```
+POST /games
+fields id,rating_count,first_release_date;
+where game_type = (0,1,2,4,6,7,8,9) & rating > 0 & id > <último id visto>;
+sort id asc;
+limit 500;
+```
+
+Tres campos y no veinte: la enumeración solo decide **qué** quiere el catálogo.
+`rating_count` va a `seed_targets.vote_count` y ordena la hidratación por
+notoriedad, igual que el `vote_count` de TMDB.
+
+**Keyset y no offset.** Medido contra IGDB el 2026-09-08, las dos paginaciones
+llegan hasta el final: `offset` 0 / 5.000 / 9.500 / 15.000 / 31.000 devuelven
+500, `offset 31.900` devuelve 88 y `offset 40.000` devuelve 0 — **no hay tope
+de páginas** como el de 500 de TMDB. La elección no es por límite sino por
+corrección: `rating > 0` cambia sin que nadie publique nada (basta un voto), y
+un offset avanza sobre un conjunto que se mueve bajo sus pies, saltándose ítems
+en silencio. Es el mismo defecto del §1. Un corte por id no puede fallar así y
+cuesta lo mismo.
+
+**Hidratación**: `where id = (...)` devuelve hasta **500 juegos con todos los
+campos en una sola petición**, así que la separación enumeración/hidratación
+sale casi gratis aquí — a diferencia de TMDB, que paga una petición de detalle
+por ítem.
+
+**Promoción**: un juego que no tenía valoración cuando se sembró y ahora la
+tiene entra **re-lanzando la enumeración**, igual que el barrido de promoción de
+TMDB (§6). El nocturno ya no re-recorre ningún ranking, así que esa vía no
+existe por otro lado.
 
 Los dumps de IGDB (`GET /v4/dumps`) existen pero son **solo para partners**, y no
 hacen falta.
@@ -530,8 +594,8 @@ impacto del plan y es **prerrequisito de los demás**.
 | Movies | 57.135 | ~2.900 (`/discover` × año, 20/página) | 57.135 |
 | Series | 10.880 | ~600 | 10.880 |
 | Books | 18.874 | 4 descargas de dump | 0 |
-| Games | 31.958 | 64 | 0 |
-| **Total** | **~118.850** | **~3.600** | **68.015** |
+| Games | 31.988 | 64 (keyset, feature 90) | 64 (`where id = (...)`, 500 por petición) |
+| **Total** | **~118.880** | **~3.660** | **68.079** |
 
 Tiempos estimados:
 
@@ -539,7 +603,8 @@ Tiempos estimados:
 - Hidratación TMDB: 68.015 peticiones a 30-40 req/s → **~30-38 min**.
 - Books: descarga y parseo en streaming de los dumps → **~30-60 min** (dominado
   por los 9,2 GB de editions).
-- Games: 64 requests a 4 req/s → **~16 s**.
+- Games: 64 requests de enumeración + 64 de hidratación a 4 req/s → **~2,5 min**
+  (52 s + 90 s, medidos el 2026-09-09; el cálculo a 4 req/s daba 32 s).
 - Escritura con `COPY`: minutos.
 
 **Total: ~1-1,5 h en un solo job de GitHub Actions** (tope 6 h, minutos gratis
@@ -644,11 +709,17 @@ implementados:
   puerta de estreno rechaza tampoco se pierde — `too_old` significa «por esta
   puerta no», no «nunca».
 
-Games no necesita carril de promoción y su ausencia no es un hueco: la barra
-del catálogo de juegos es el ranking por `rating_count` de IGDB, y el nocturno
-`sync_games` ya lo re-recorre por cursor cada noche. Lo que ese recorrido nunca
-podría ver es un juego publicado hoy, que no tiene rating y por tanto no tiene
-puesto — y eso es exactamente lo que cierra el carril `created_at`.
+Games tampoco tiene carril de promoción en el incremental, y **desde la
+feature 90 el motivo es el mismo que en TMDB**, no el que decía este documento.
+La versión anterior argumentaba que el nocturno `sync_games` re-recorría el
+ranking de `rating_count` cada noche; ese recorrido ya no existe. Lo que cubre
+la promoción ahora es **re-lanzar la enumeración**
+(`scripts/seed_igdb_targets.py`), que upsertea en `seed_targets` los juegos que
+han cruzado `rating > 0` desde la última vez y deja que el nocturno los hidrate
+— exactamente lo que hace el barrido de promoción de TMDB, solo que a mano en
+vez de en el job. Lo que ninguna de las dos vías puede ver es un juego
+publicado hoy, que no tiene rating y por tanto no puede enumerarse: eso es lo
+que cierra el carril `created_at`.
 
 ### Books: por qué el dump mensual y no `/recentchanges`
 

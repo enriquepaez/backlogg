@@ -2,9 +2,9 @@
 
 Only this module touches SQLAlchemy for the ``sync_cursors`` table, for the
 credits-gap query that drives the targeted backfill (feature 85), for the
-``seed_targets`` work list that drives the TMDB seeding (feature 86) and for
-the ``sync_watermarks`` table and the known-id lookups that drive the
-incremental updates (feature 88).
+``seed_targets`` work list that drives the TMDB seeding (feature 86) and the
+IGDB one (feature 90), and for the ``sync_watermarks`` table and the known-id
+lookups that drive the incremental updates (feature 88).
 """
 
 from collections.abc import Sequence
@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.books.models import Book
+from backlogg.games.models import Game
 from backlogg.movies.models import Movie
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import ExternalId
@@ -61,13 +62,17 @@ CREDIT_GAP_SOURCES: dict[str, str] = {
 # credits-gap query and by the seed-target convergence check, which both have
 # to go from an ``item_type``/``item_id`` pair to the real row: ``credits`` and
 # ``external_ids`` carry no FK, so "does this id point at anything?" is a
-# question only a join can answer.  GAME is absent because neither query serves
-# it (games have no person credits and no seed targets); asking for it raises
-# instead of silently answering about nothing.
+# question only a join can answer.
+#
+# GAME joined this map in feature 90, when games moved to ``seed_targets``.
+# It is *not* an admission that games have person credits — they do not, and
+# ``CREDIT_GAP_SOURCES`` above is still the gate the credits queries check
+# first, so ``get_credit_gaps("GAME")`` keeps raising as it always did.
 _ITEM_MODELS: dict[str, Any] = {
     "MOVIE": Movie,
     "SERIES": Series,
     "BOOK": Book,
+    "GAME": Game,
 }
 
 
@@ -267,10 +272,13 @@ async def get_credit_gaps(db: AsyncSession, item_type: str, *, recheck: bool = F
     Ordered by item id so a run that stops on its time budget resumes on the
     same, stable sequence.
     """
+    source = CREDIT_GAP_SOURCES.get(item_type)
     model = _ITEM_MODELS.get(item_type)
-    if model is None:
+    # ``CREDIT_GAP_SOURCES`` is the gate, not ``_ITEM_MODELS``: since feature
+    # 90 the latter knows about GAME (for the seed-target joins) and games
+    # still have no person credits, so this must keep refusing them.
+    if source is None or model is None:
         raise ValueError(f"get_credit_gaps: unsupported item_type {item_type!r}")
-    source = CREDIT_GAP_SOURCES[item_type]
 
     stmt = (
         select(model.id, ExternalId.external_id)
@@ -315,7 +323,7 @@ async def mark_credits_synced(
     """
     if not item_ids:
         return
-    model = _ITEM_MODELS.get(item_type)
+    model = _ITEM_MODELS.get(item_type) if item_type in CREDIT_GAP_SOURCES else None
     if model is None:
         raise ValueError(f"mark_credits_synced: unsupported item_type {item_type!r}")
     await db.execute(
@@ -327,12 +335,18 @@ async def mark_credits_synced(
 #
 # Item types whose catalog is defined by an enumerated target list instead of
 # by an offset into a popularity ranking, with the external source the ids
-# belong to.  BOOK and GAME are absent on purpose: their enumerations are
-# unchanged (Open Library's filtered search and IGDB's single bulk query) and
-# still use ``sync_cursors``.
+# belong to.  GAME joined in feature 90 (enumerated by keyset from IGDB under
+# the ``game_type`` allowlist plus ``rating > 0``).
+#
+# BOOK is the only one left out, and not by oversight: since feature 87 its
+# catalog is selected from the Open Library *monthly dumps*, which carry every
+# field, so there is no "enumerate now, hydrate later" split to make — the
+# selection and the write are the same pass.  Its nightly job still walks
+# ``search.json`` by offset with the cursor in ``sync_cursors`` (issue #27).
 SEED_TARGET_SOURCES: dict[str, str] = {
     "MOVIE": "TMDB",
     "SERIES": "TMDB",
+    "GAME": "IGDB",
 }
 
 # How many rows one INSERT ... ON CONFLICT statement carries. Each row spends
@@ -491,8 +505,9 @@ def _retired_clause(max_attempts: int):
 
     Two unrelated causes, both terminal:
 
-    * ``unreachable_at`` — TMDB answered 404. Definitive; nothing will come
-      back by asking again.
+    * ``unreachable_at`` — the source no longer serves the id: a 404 from
+      TMDB, or an id absent from IGDB's answer to ``where id = (...)``
+      (feature 90). Definitive; nothing will come back by asking again.
     * ``attempts >= max_attempts`` — the fetch keeps resolving fine and the
       item keeps *not* getting linked. In practice that means two ids sharing
       one row: ``series.slug``/``movies.slug`` are unique, so two TMDB entries
@@ -543,8 +558,8 @@ async def get_pending_seed_targets(
     """Return up to ``limit`` **workable** external ids missing from the catalog.
 
     Retired targets (``_retired_clause``) are excluded outright: leaving them
-    in would mean re-spending a slice slot and a TMDB request on them every
-    single run, forever, for an outcome already known.
+    in would mean re-spending a slice slot and an external request on them
+    every single run, forever, for an outcome already known.
 
     Ordered by ``attempts`` ascending first, so never-tried targets always go
     before ones a previous run could not link, and a struggling target drifts
@@ -607,13 +622,15 @@ async def mark_seed_targets_unreachable(
     external_ids: Sequence[str],
     observed_at: datetime,
 ) -> None:
-    """Stamp ``unreachable_at`` on targets the source answered 404 for.
+    """Stamp ``unreachable_at`` on targets the source no longer serves.
 
-    A 404 is a *different* signal from "resolved but did not link", and a
-    definitive one: the id was enumerated but TMDB no longer serves it
-    (deleted, merged into another entry).  Stamping it on the first
-    observation retires the target immediately instead of spending
-    ``TMDB_SEED_MAX_ATTEMPTS`` slice slots on an answer that will not change.
+    "Gone" is a *different* signal from "resolved but did not link", and a
+    definitive one: the id was enumerated but the source does not answer for
+    it any more (deleted, merged into another entry).  TMDB says so with a
+    404; IGDB says so by leaving the id out of its answer to
+    ``where id = (...)``.  Stamping it on the first observation retires the
+    target immediately instead of spending ``TMDB_SEED_MAX_ATTEMPTS`` slice
+    slots on an answer that will not change.
 
     Recorded rather than deleted so a later re-enumeration can tell "never
     seen" from "seen and gone", and so the operator can count them.  Does not
@@ -644,6 +661,12 @@ async def get_stale_catalog_external_ids(
     would have removed that coverage, so it is replaced by an explicit and
     strictly better rule — once nothing is pending, the nightly slice is
     filled with whatever has gone longest without being re-synced.
+
+    Games use it too since feature 90.  IGDB imposes no cache window, so there
+    the rotation is not an obligation but the same safety net the other types
+    get: it re-visits what the ``UPDATED_AT`` incremental lane may have missed
+    while its watermark was stuck, and it is what keeps the nightly slice
+    doing useful work once the target list is fully hydrated.
 
     Disjoint from ``get_pending_seed_targets`` by construction: this query
     only returns items that *have* an ``external_ids`` row and that one only

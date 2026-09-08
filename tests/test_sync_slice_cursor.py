@@ -7,15 +7,21 @@ Covers:
   mocked): intermediate slice advances the cursor, final slice wraps to 0, and
   a short API response wraps to 0.
 
-⚠️ Since feature 86 the cursor drives **books and games only**.  Movies and
-series are hydrated from the ``seed_targets`` work list and never read or
-write ``sync_cursors``, so the four job-slice cases below — which used to be
-written against ``sync_movies`` — are now written against ``sync_games``: the
-logic under test (``_read_slice``/``_next_offset``) is shared and unchanged,
-only its remaining callers moved.  The movie/series equivalents live in
-``tests/test_tmdb_discover_seeding.py``.  The adapter offset tests for
-``get_top_movies``/``get_top_series`` stay: those methods still exist as
-documented clients of ``/movie/popular`` and ``/tv/popular``.
+⚠️ Since feature 90 the cursor drives **books only**.  Movies and series left
+in feature 86 and games in feature 90; all three are hydrated from the
+``seed_targets`` work list and never read or write ``sync_cursors``.  The four
+job-slice cases below have therefore moved twice — they were written against
+``sync_movies``, then against ``sync_games``, and are now against
+``sync_books``.  The logic under test (``_read_slice``/``_next_offset``) is
+shared and unchanged; only its remaining caller moved.  That games really did
+leave is asserted here (``test_sync_games_no_longer_touches_the_cursor``) and
+in ``tests/test_igdb_targets_seeding.py``; the movie/series equivalents live
+in ``tests/test_tmdb_discover_seeding.py``.
+
+The adapter offset tests for ``get_top_movies``/``get_top_series``/
+``get_top_games`` stay: those three methods still exist as documented clients
+of ``/movie/popular``, ``/tv/popular`` and IGDB's ``rating_count`` ranking,
+even though no seeding path calls them any more.
 """
 
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -29,6 +35,7 @@ from backlogg.movies.adapters.tmdb import TMDBClient
 from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.scheduler.repository import (
+    SeedTargetProgress,
     SeedTargetRow,
     get_sync_offset,
     set_sync_offset,
@@ -189,103 +196,119 @@ def _job_patches(cursor_offset: int):
     )
 
 
+def _skipped_books(count: int) -> list[dict]:
+    """``count`` Open Library docs the upsert loop drops for having no title.
+
+    They are still *fetched*, which is what the cursor advances on — the same
+    role ``{"id": None}`` played for games before feature 90.
+    """
+    return [{"key": "", "title": ""}] * count
+
+
+def _book_mapping_patch():
+    """Make every fetched doc map to an empty title, so nothing is written."""
+    return patch.object(sync_jobs._ol_client, "book_to_dict", return_value={"title": ""})
+
+
 async def test_intermediate_slice_advances_cursor(monkeypatch):
     """A full intermediate slice advances the cursor by the fetched count."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=3)
 
-    # Items without an external id are skipped by the upsert loop but still
-    # count as fetched for cursor advancement.
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._ol_client,
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=[{"id": None}] * 3,
+            return_value=_skipped_books(3),
         ) as mock_fetch,
+        _book_mapping_patch(),
         get_cursor,
         set_cursor as mock_set,
         factory,
     ):
-        result = await sync_jobs.sync_games()
+        result = await sync_jobs.sync_books()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=3)
-    mock_set.assert_awaited_once_with(ANY, "GAME", 6)
+    mock_set.assert_awaited_once_with(ANY, "BOOK", 6)
     assert result["offset"] == 3
     assert result["errors"] == 0
 
 
 async def test_final_slice_wraps_to_zero(monkeypatch):
-    """Reaching SEED_TOP_N_GAMES wraps the cursor back to 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
+    """Reaching SEED_TOP_N_BOOKS wraps the cursor back to 0."""
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=8)
 
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._ol_client,
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=[{"id": None}] * 2,
+            return_value=_skipped_books(2),
         ) as mock_fetch,
+        _book_mapping_patch(),
         get_cursor,
         set_cursor as mock_set,
         factory,
     ):
-        result = await sync_jobs.sync_games()
+        result = await sync_jobs.sync_books()
 
     # Only target - offset = 2 items are requested for the final slice
     mock_fetch.assert_awaited_once_with(limit=2, offset=8)
-    mock_set.assert_awaited_once_with(ANY, "GAME", 0)
+    mock_set.assert_awaited_once_with(ANY, "BOOK", 0)
     assert result["offset"] == 8
 
 
 async def test_short_fetch_wraps_to_zero(monkeypatch):
     """The API returning fewer items than requested wraps the cursor to 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=3)
 
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._ol_client,
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=[{"id": None}],  # 1 < slice of 3 → catalog exhausted
+            return_value=_skipped_books(1),  # 1 < slice of 3 → listing exhausted
         ) as mock_fetch,
+        _book_mapping_patch(),
         get_cursor,
         set_cursor as mock_set,
         factory,
     ):
-        result = await sync_jobs.sync_games()
+        result = await sync_jobs.sync_books()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=3)
-    mock_set.assert_awaited_once_with(ANY, "GAME", 0)
+    mock_set.assert_awaited_once_with(ANY, "BOOK", 0)
     assert result["offset"] == 3
 
 
 async def test_stale_cursor_normalises_to_zero(monkeypatch):
     """A cursor at or beyond the target (e.g. after lowering SEED_TOP_N) restarts at 0."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 10)
+    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=25)
 
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._ol_client,
+            "get_popular_books",
             new_callable=AsyncMock,
-            return_value=[{"id": None}] * 3,
+            return_value=_skipped_books(3),
         ) as mock_fetch,
+        _book_mapping_patch(),
         get_cursor,
         set_cursor as mock_set,
         factory,
     ):
-        result = await sync_jobs.sync_games()
+        result = await sync_jobs.sync_books()
 
     mock_fetch.assert_awaited_once_with(limit=3, offset=0)
-    mock_set.assert_awaited_once_with(ANY, "GAME", 3)
+    mock_set.assert_awaited_once_with(ANY, "BOOK", 3)
     assert result["offset"] == 0
 
 
@@ -314,28 +337,40 @@ async def test_sync_books_slice_uses_cursor(monkeypatch):
     assert result["offset"] == 10
 
 
-async def test_sync_games_slice_uses_cursor(monkeypatch):
-    """sync_games fetches from its cursor and advances it."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", 20)
+async def test_sync_games_no_longer_touches_the_cursor(monkeypatch):
+    """Feature 90: what used to be ``test_sync_games_slice_uses_cursor``.
+
+    The invariant that test fixed — "sync_games reads its offset from
+    ``sync_cursors`` and advances it" — does not exist any more, so it is
+    replaced rather than deleted: the job must now leave the table alone
+    entirely, and it must not read a fetch limit off any ``SEED_TOP_N``.
+    A ranking walk that quietly came back would cap the catalog at 10.000
+    again, and nothing else in the suite would notice.
+    """
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 5)
     get_cursor, set_cursor, factory = _job_patches(cursor_offset=5)
 
     with (
         patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
+            sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock
+        ) as mock_ranking,
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
             new_callable=AsyncMock,
-            return_value=[{"id": None}] * 5,
-        ) as mock_fetch,
-        get_cursor,
+            return_value=([], [], SeedTargetProgress(total=0, pending=0, gone=0, unlinkable=0)),
+        ) as mock_work_list,
+        get_cursor as mock_get,
         set_cursor as mock_set,
         factory,
     ):
         result = await sync_jobs.sync_games()
 
-    mock_fetch.assert_awaited_once_with(limit=5, offset=5)
-    mock_set.assert_awaited_once_with(ANY, "GAME", 10)
-    assert result["offset"] == 5
+    mock_work_list.assert_awaited_once_with("GAME", "IGDB", 5)
+    mock_ranking.assert_not_awaited()
+    mock_get.assert_not_awaited()
+    mock_set.assert_not_awaited()
+    assert result["offset"] == 0
+    assert not hasattr(sync_jobs.settings, "SEED_TOP_N_GAMES")
 
 
 # ── Idempotency of re-running the same slice (real test DB) ──────────────────
