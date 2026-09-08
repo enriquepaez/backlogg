@@ -139,9 +139,11 @@
     "error": "Algo salió mal al cargar las tendencias. Inténtalo de nuevo.",
     "filters": {
       "typeLabel": "Tipo",
-      "all": "Películas y series",
+      "all": "Todos los tipos",
       "movie": "Películas",
       "series": "Series",
+      "book": "Libros",
+      "game": "Juegos",
       "periodLabel": "Periodo",
       "period": {
         "day": "Hoy",

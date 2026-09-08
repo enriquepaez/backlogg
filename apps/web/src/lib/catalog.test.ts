@@ -253,8 +253,14 @@ describe("getGenrePage", () => {
 });
 
 describe("getTrendingPage", () => {
-  it("returns the mixed movie+series results by default", async () => {
+  it("returns the mix of all four types by default", async () => {
     expect(await getTrendingPage()).toEqual({ ok: true, results: trendingFixture.results });
+    expect(trendingFixture.results.map((item) => item.item_type)).toEqual([
+      "MOVIE",
+      "SERIES",
+      "BOOK",
+      "GAME",
+    ]);
   });
 
   it("applies the type filter", async () => {
@@ -262,6 +268,34 @@ describe("getTrendingPage", () => {
       ok: true,
       results: trendingMoviesOnlyFixture.results,
     });
+  });
+
+  // FE-68: `type=book`/`type=game` are valid filters (backend feature 68) and
+  // must reach the query string, not be dropped by a two-type vocabulary.
+  it.each(["book", "game"] as const)("forwards type=%s to the API", async (type) => {
+    const result = await getTrendingPage({ type });
+
+    expect(result).toEqual({
+      ok: true,
+      results: trendingFixture.results.filter(
+        (item) => item.item_type === type.toUpperCase(),
+      ),
+    });
+  });
+
+  // Same for `period`: backend feature 81 made it real for all four types.
+  it("forwards period alongside type", async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/trending`, ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({ results: [] });
+      }),
+    );
+
+    await getTrendingPage({ type: "game", period: "day" });
+
+    expect(seen).toEqual(["?type=game&period=day"]);
   });
 
   it("returns ok: false on a non-200 response — distinct from an empty result", async () => {

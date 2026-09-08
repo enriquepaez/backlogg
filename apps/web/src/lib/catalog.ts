@@ -11,13 +11,12 @@ import {
   type CatalogType,
   type GenreWithType,
   type TrendingPeriod,
-  type TrendingType,
 } from "./catalog-types";
 
 /**
  * Public (no-auth, no-cookies) fetch helpers for the catalog's public pages:
- * the home page's trending (TMDB-backed) and "featured" per-type sections
- * (FE-8), the `/browse/{type}` paginated, filterable list (FE-9), and the
+ * the home page's trending and "featured" per-type sections (FE-8), the
+ * `/browse/{type}` paginated, filterable list (FE-9), and the
  * `/{type}/{slug}` item detail page + its "similar" section (FE-10). Local
  * catalog only, no external fallback for any of it — except the item detail
  * fetch itself, which hits the backend's own on-demand fallback (see
@@ -54,10 +53,15 @@ export type TrendingItem = components["schemas"]["TrendingItemOut"];
 /**
  * ISR window for the trending section (fetch-level `next.revalidate`, see
  * `src/app/[locale]/page.tsx` for why a page-level `export const revalidate`
- * would not produce real ISR here). TMDB trending shifts through the day,
- * and an uncached hit both calls TMDB and writes newly-seen items to the
- * local DB (`backlogg/trending/service.py`) — not free to hit on every
- * request either.
+ * would not produce real ISR here). Shorter than the other windows because
+ * the ranking really does shift through the day: since backend feature 81 it
+ * is computed from the platform's own recent activity with an exponential
+ * time decay (`docs/api.md`, `GET /v1/trending`), so an hour-old snapshot is
+ * already slightly stale. It is *not* short because of an external API —
+ * `/trending` makes no external call at all any more (it used to proxy
+ * TMDB's Trending API and persist newly-seen items; discovery now belongs to
+ * the seeding + nightly sync). The backend also caches its own answer per
+ * `(type, period)` for `CACHE_TTL_TRENDING`.
  */
 const TRENDING_REVALIDATE_SECONDS = 60 * 60; // 1h
 
@@ -81,7 +85,13 @@ const BROWSE_REVALIDATE_SECONDS = FEATURED_REVALIDATE_SECONDS;
 /** Page size for the `/browse/{type}` grid. Not user-configurable (no `limit` picker in the UI). */
 export const BROWSE_PAGE_SIZE = 24;
 
-/** Trending movies + series (this week), TMDB-backed. */
+/**
+ * Trending for the home page section (FE-8): default `period` (`week`) and no
+ * `type` filter, so the backend returns a mix of **all four** catalog types
+ * (up to ~5 of each, capped at 20 — `docs/api.md`). Ranked from local
+ * activity, no external call. Callers must map `item_type` through
+ * {@link trendingItemType} rather than assuming movie/series (issue #32).
+ */
 export async function getTrending(): Promise<TrendingItem[]> {
   try {
     const { data, response } = await getApiClient().GET("/v1/trending", {
@@ -285,7 +295,7 @@ export async function getGenrePage(type?: CatalogType): Promise<GenrePageResult>
   }
 }
 
-export type TrendingPageOptions = { type?: TrendingType; period?: TrendingPeriod };
+export type TrendingPageOptions = { type?: CatalogType; period?: TrendingPeriod };
 
 export type TrendingPageResult = { ok: true; results: TrendingItem[] } | { ok: false };
 
@@ -296,6 +306,11 @@ export type TrendingPageResult = { ok: true; results: TrendingItem[] } | { ok: f
  * section, which silently degrades to an empty array since a failed home
  * section is a minor, non-blocking gap), this page's whole point IS the
  * trending list.
+ *
+ * Both filters are honest for all four types: `type` accepts any
+ * {@link CatalogType} (backend feature 68) and `period` shifts the ranking
+ * window for every one of them (backend feature 81 — the old "period is
+ * inert for book/game" caveat no longer applies, see `docs/api.md`).
  */
 export async function getTrendingPage(
   options: TrendingPageOptions = {},
@@ -313,16 +328,6 @@ export async function getTrendingPage(
     console.error("getTrendingPage: failed to reach the API", error);
     return { ok: false };
   }
-}
-
-/**
- * Maps the trending endpoint's uppercase `item_type` (`TrendingItemOut`) to
- * the lowercase {@link TrendingType} vocabulary used elsewhere (routes,
- * `Home.typeBadge`). Shared by the home page's trending section (FE-8) and
- * the `/trending` browse page (FE-12).
- */
-export function trendingItemType(item: TrendingItem): TrendingType {
-  return item.item_type === "MOVIE" ? "movie" : "series";
 }
 
 /** All four "featured" lists, fetched in parallel, keyed by {@link CatalogType}. */

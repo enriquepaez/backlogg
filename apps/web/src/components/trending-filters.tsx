@@ -4,15 +4,15 @@ import { useTranslations } from "next-intl";
 
 import { useRouter } from "@/i18n/navigation";
 import {
+  CATALOG_TYPES,
   DEFAULT_TRENDING_PERIOD,
   TRENDING_PERIODS,
-  TRENDING_TYPES,
+  type CatalogType,
   type TrendingPeriod,
-  type TrendingType,
 } from "@/lib/catalog-types";
 
 export type TrendingFiltersProps = {
-  selectedType?: TrendingType;
+  selectedType?: CatalogType;
   selectedPeriod: TrendingPeriod;
 };
 
@@ -34,7 +34,7 @@ export function TrendingFilters({ selectedType, selectedPeriod }: TrendingFilter
   const router = useRouter();
   const t = useTranslations("Trending.filters");
 
-  function navigate({ type, period }: { type?: TrendingType; period: TrendingPeriod }) {
+  function navigate({ type, period }: { type?: CatalogType; period: TrendingPeriod }) {
     const query: Record<string, string> = {};
     if (type) {
       query.type = type;
@@ -57,7 +57,7 @@ export function TrendingFilters({ selectedType, selectedPeriod }: TrendingFilter
           value={selectedType ?? ""}
           onChange={(event) =>
             navigate({
-              type: (event.target.value || undefined) as TrendingType | undefined,
+              type: (event.target.value || undefined) as CatalogType | undefined,
               period: selectedPeriod,
             })
           }
@@ -65,7 +65,7 @@ export function TrendingFilters({ selectedType, selectedPeriod }: TrendingFilter
           <option value="" className={OPTION_CLASSNAME}>
             {t("all")}
           </option>
-          {TRENDING_TYPES.map((type) => (
+          {CATALOG_TYPES.map((type) => (
             <option key={type} value={type} className={OPTION_CLASSNAME}>
               {t(type)}
             </option>

@@ -1282,7 +1282,7 @@
         "Sin strings hardcodeados: claves next-intl en es.json y en.json",
         "pnpm --filter web typecheck && lint && build && test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 68,

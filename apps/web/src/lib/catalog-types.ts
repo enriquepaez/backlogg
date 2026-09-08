@@ -15,9 +15,20 @@
  */
 
 /**
- * Route-segment vocabulary for `/browse/{type}` (FE-9) and for picking which
- * "featured" list to fetch (FE-8). Mirrors the backend's singular lowercase
- * type names.
+ * Route-segment vocabulary for `/browse/{type}` (FE-9), for picking which
+ * "featured" list to fetch (FE-8), and for `/trending`'s `?type=` filter
+ * (FE-12/FE-68). Mirrors the backend's singular lowercase type names —
+ * literally `ItemTypeEnum` in the generated schema, which is the very type
+ * `GET /v1/trending`'s `type` query param takes.
+ *
+ * `/trending` used to carry its own narrower `TrendingType`/`TRENDING_TYPES`
+ * pair (`"movie" | "series"`), from back when the endpoint proxied TMDB's
+ * Trending API, which only covers those two. Backend features 68 and 81
+ * dropped that source entirely (trending is now ranked from local activity,
+ * all four types, with a real `period`), so the two vocabularies describe the
+ * same set and keeping both only invited them to drift apart again — which is
+ * exactly what issue #32 was. Unified here on purpose: there is one list of
+ * catalog types.
  */
 export type CatalogType = "movie" | "series" | "book" | "game";
 
@@ -123,13 +134,34 @@ export type CatalogListPage = {
 export type GenreWithType = CatalogGenre & { item_type: CatalogType };
 
 /**
- * Trending only covers movies and series (TMDB Trending API — see
- * `docs/api.md`'s `/v1/trending`), unlike {@link CatalogType}, which also
- * includes books and games for the rest of the catalog.
+ * Maps the uppercase `item_type` the trending endpoint returns
+ * (`TrendingItemOut.item_type` ∈ `MOVIE`/`SERIES`/`BOOK`/`GAME`) to the
+ * lowercase {@link CatalogType} route vocabulary (`/{type}/{slug}`,
+ * `Home.typeBadge`). Shared by the home page's trending section (FE-8) and
+ * the `/trending` browse page (FE-12); re-exported from `./catalog.ts`.
+ *
+ * Lives here rather than in `./catalog.ts` for the same reason as the rest
+ * of this module: it's pure vocabulary with no network access, so tests (and
+ * any future Client Component) can reach it without dragging in
+ * `server-only` through `@/lib/auth/session`.
+ *
+ * Takes the structural `{ item_type: string }` instead of `TrendingItem` so
+ * this module keeps its zero imports; every `TrendingItem` satisfies it.
+ *
+ * Returns `undefined` for an `item_type` outside the vocabulary instead of
+ * guessing (issue #32: the previous `=== "MOVIE" ? "movie" : "series"` sent
+ * every book and game to `/series/{slug}`, which does not just 404 — it can
+ * resolve to a *different, real* series, and the detail route's on-demand
+ * fallback then ingests a title nobody asked for). Callers must skip such an
+ * item: a missing
+ * card is recoverable, a confidently wrong link is not. Same lowercase +
+ * {@link isCatalogType} guard as `feedItemType` (`feed-entry-list.tsx`) and
+ * `toCatalogType` (`@/lib/search.ts`) use for the same backend shape.
  */
-export type TrendingType = "movie" | "series";
-
-export const TRENDING_TYPES: readonly TrendingType[] = ["movie", "series"];
+export function trendingItemType(item: { item_type: string }): CatalogType | undefined {
+  const lower = item.item_type.toLowerCase();
+  return isCatalogType(lower) ? lower : undefined;
+}
 
 /** Sort of `/v1/trending`'s `period` query param (`docs/api.md`). */
 export type TrendingPeriod = "day" | "week";
