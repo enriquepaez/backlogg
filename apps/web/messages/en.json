@@ -634,7 +634,13 @@
     },
     "credits": {
       "heading": "Credits",
-      "empty": "No credit information available."
+      "empty": "No credit information available.",
+      "roles": {
+        "ACTOR": "Cast",
+        "WRITER": "Screenplay",
+        "AUTHOR": "Author",
+        "SOURCE_AUTHOR": "Author of the original work"
+      }
     },
     "similar": {
       "heading": "You might also like",

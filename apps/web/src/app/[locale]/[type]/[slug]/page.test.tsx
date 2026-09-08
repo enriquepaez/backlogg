@@ -46,11 +46,20 @@ vi.mock("@/components/item-hero", () => ({
   ),
 }));
 vi.mock("@/components/item-credits", () => ({
-  ItemCredits: (props: { heading: string; emptyMessage: string }) => (
+  ItemCredits: (props: {
+    credits: { person_name: string; role: string }[];
+    heading: string;
+    emptyMessage: string;
+    roleLabels: Record<string, string>;
+  }) => (
     <div
       data-testid="item-credits"
       data-heading={props.heading}
       data-empty-message={props.emptyMessage}
+      data-role-labels={JSON.stringify(props.roleLabels)}
+      data-credits={JSON.stringify(
+        props.credits.map((credit) => [credit.person_name, credit.role]),
+      )}
     />
   ),
 }));
@@ -123,6 +132,20 @@ const gameItem = {
   credits: [],
   companies: [],
   viewer_status: null,
+};
+
+/**
+ * A credit the "Credits" section actually renders. Needed by every test that
+ * expects the section to exist at all: since FE-65 the page hides it when the
+ * filtered list is empty, and `movieItem`/`gameItem` carry `credits: []`.
+ */
+const castCredit = {
+  person_name: "Timothée Chalamet",
+  person_slug: "timothee-chalamet",
+  profile_url: null,
+  role: "ACTOR",
+  character_name: "Paul Atreides",
+  billing_order: 0,
 };
 
 function buildProps(type: string, slug: string, locale = "en") {
@@ -775,12 +798,37 @@ describe("ItemDetailPage — 'Credits' section (full cast/crew) only renders for
   });
 
   it("movie/series render it with the generic 'Credits' heading", async () => {
-    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, credits: [castCredit] },
+    });
     const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
     const credits = container.querySelector('[data-testid="item-credits"]');
     expect(credits).not.toBeNull();
     expect(credits?.getAttribute("data-heading")).toBe("credits.heading");
     expect(credits?.getAttribute("data-empty-message")).toBe("credits.empty");
+  });
+
+  // FE-65: the role labels themselves are pre-translated here, like
+  // `heading`/`emptyMessage` — `ItemCredits` stays presentational and the
+  // page owns the `ItemDetail` translator. `SOURCE_AUTHOR`/`WRITER` (backend
+  // feature 74) must reach it as two separate keys, and `DIRECTOR`/`CREATOR`
+  // must not be there at all: the page filters those out, so copy for them
+  // would be dead.
+  it("passes the translated credit-role labels down, one key per renderable role", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, credits: [castCredit] },
+    });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    const credits = container.querySelector('[data-testid="item-credits"]');
+
+    expect(JSON.parse(credits?.getAttribute("data-role-labels") ?? "null")).toEqual({
+      ACTOR: "credits.roles.ACTOR",
+      WRITER: "credits.roles.WRITER",
+      AUTHOR: "credits.roles.AUTHOR",
+      SOURCE_AUTHOR: "credits.roles.SOURCE_AUTHOR",
+    });
   });
 
   it("book renders no 'Credits' section at all — the single author already has its own row in the fields dl", async () => {
@@ -796,6 +844,101 @@ describe("ItemDetailPage — 'Credits' section (full cast/crew) only renders for
     getItemDetail.mockResolvedValue({ status: "ok", item: gameItem });
     const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
     expect(container.querySelector('[data-testid="item-credits"]')).toBeNull();
+  });
+});
+
+// FE-65, per the user's decision: "los credits no deben incluir dirección, el
+// director va en el hero" / "Director en el hero y actores en credits". The
+// filtering lives in `getCredits`, not in `ItemCredits`, so it is asserted
+// here — on what the page hands the component.
+describe("ItemDetailPage — Credits excludes the roles the hero already shows (FE-65)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+  });
+
+  function creditsSentToSection(container: HTMLElement): [string, string][] {
+    const el = container.querySelector('[data-testid="item-credits"]');
+    return JSON.parse(el?.getAttribute("data-credits") ?? "null");
+  }
+
+  it("movie: drops DIRECTOR, keeps cast/WRITER/SOURCE_AUTHOR", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        credits: [
+          castCredit,
+          { ...castCredit, person_name: "Andy Muschietti", role: "DIRECTOR", character_name: null },
+          { ...castCredit, person_name: "Cary Fukunaga", role: "WRITER", character_name: null },
+          { ...castCredit, person_name: "Stephen King", role: "SOURCE_AUTHOR", character_name: null },
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "it-2017")));
+
+    expect(creditsSentToSection(container)).toEqual([
+      ["Timothée Chalamet", "ACTOR"],
+      ["Cary Fukunaga", "WRITER"],
+      ["Stephen King", "SOURCE_AUTHOR"],
+    ]);
+  });
+
+  it("series: drops CREATOR, keeps the rest", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        release_date: undefined,
+        first_air_date: "2008-01-20",
+        credits: [
+          { ...castCredit, person_name: "Vince Gilligan", role: "CREATOR", character_name: null },
+          castCredit,
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("series", "breaking-bad")));
+
+    expect(creditsSentToSection(container)).toEqual([["Timothée Chalamet", "ACTOR"]]);
+  });
+
+  // The consequence of the filter above: items whose *only* credit was the
+  // director (13 of 596 movies and 25 of 1142 series on the dev DB) would
+  // otherwise show a "Credits" heading over "no credit information
+  // available", right under a hero that does name the director.
+  it("renders no section at all — no heading, no empty message — when the only credit was the director", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: {
+        ...movieItem,
+        credits: [
+          { ...castCredit, person_name: "Denis Villeneuve", role: "DIRECTOR", character_name: null },
+        ],
+      },
+    });
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(container.querySelector('[data-testid="item-credits"]')).toBeNull();
+  });
+
+  it("renders no section at all for a movie/series with no credits whatsoever", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: { ...movieItem, credits: [] } });
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+    expect(container.querySelector('[data-testid="item-credits"]')).toBeNull();
+  });
+
+  // Deliberate divergence, decided by the leader: a game with no known
+  // platforms still shows its section and its empty message — that absence is
+  // information. Credits' empty state, after the filter, is not.
+  it("still renders ItemPlatforms with its empty message for a game with no platforms", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: { ...gameItem, platforms: [] } });
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+    const platforms = container.querySelector('[data-testid="item-platforms"]');
+    expect(platforms).not.toBeNull();
+    expect(platforms?.getAttribute("data-empty-message")).toBe("platformsEmpty");
   });
 });
 
@@ -856,7 +999,10 @@ describe("ItemDetailPage — Credits/Platforms sit right after the hero, before 
   }
 
   it("movie: hero, credits, rating-widget, reviews, similar — in that order", async () => {
-    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, credits: [castCredit] },
+    });
     const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
     expect(testIdOrder(container)).toEqual([
       "item-hero",

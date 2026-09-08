@@ -1229,7 +1229,7 @@
         "Test que fija las etiquetas de ambos roles y su separación",
         "pnpm --filter web typecheck && lint && build && test en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 65,
