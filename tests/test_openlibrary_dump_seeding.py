@@ -430,7 +430,7 @@ def test_main_turns_a_degraded_summary_into_exit_2(monkeypatch):
     tests above assert against the database.
     """
 
-    async def fake_run(work_dir, only, force):
+    async def fake_run(work_dir, only, force, only_new=False):
         return {"load": {"synced": 4, "errors": 1, "people_errors": 0, "skipped_links": 0}}
 
     monkeypatch.setattr(seed, "run", fake_run)
@@ -448,7 +448,7 @@ def test_main_turns_a_degraded_summary_into_exit_2(monkeypatch):
 
 
 def test_main_returns_0_on_a_clean_summary(monkeypatch):
-    async def fake_run(work_dir, only, force):
+    async def fake_run(work_dir, only, force, only_new=False):
         return {"load": {"synced": 4, "errors": 0, "people_errors": 0, "skipped_links": 0}}
 
     monkeypatch.setattr(seed, "run", fake_run)
@@ -552,7 +552,10 @@ async def test_phase_selects_only_the_requested_phase(db, monkeypatch, work_dir)
 
     summary = await seed.run(work_dir, "reading-log", False)
 
-    assert set(summary) == {"work_dir", "reading-log"}
+    # ``work_dir`` and ``only_new`` are run metadata, not phases: what this
+    # asserts is that no *other phase* left a key behind.
+    assert set(summary) - {"work_dir", "only_new"} == {"reading-log"}
+    assert summary["only_new"] is False
     assert (work_dir / seed.COUNTS_FILE).exists()
     assert not (work_dir / seed.SELECTED_FILE).exists()
     assert (await db.execute(select(func.count()).select_from(Book))).scalar_one() == 0

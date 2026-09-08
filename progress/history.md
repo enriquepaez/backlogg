@@ -1004,3 +1004,97 @@ esta clase de bug llega a producción sin que nadie lo note.
 
 `pnpm --filter web`: **1229 tests** en 133 archivos, más typecheck, lint, build y
 `@backlogg/api-client typecheck`. `bash init.sh` verde.
+
+## 2026-09-08 — Feature 88 `catalog_incremental_updates` (rama `feat/catalog_incremental_updates`)
+
+Cierra `docs/seeding-plan.md` §6 y el punto 8 de `progress/priority_order.md`.
+El catálogo deja de mantenerse re-recorriendo listados completos: cada fuente
+responde a «qué ha cambiado desde la última vez». Reviewer `APPROVED`
+(verificado por mutación: 9 mutaciones, 9 muertas). `init.sh` verde con **1599
+tests** (1499 de partida, +100).
+
+Implementada en tres fases secuenciales sobre una rama, más dos pasadas de
+cierre. La fase B la empezó un agente que murió por límite de sesión y la
+terminó otro sobre el árbol sin commitear; el reviewer verificó las costuras.
+
+### Qué se construyó
+
+- **Tabla `sync_watermarks`** (migración `0039`), clave `(source, kind,
+  item_type)`: siete filas, una por mecanismo. Dos columnas y no una porque el
+  cursor y la hora del run **no son el mismo reloj** — un run que consultó hasta
+  *T* y terminó en *T+9min* debe reanudar en *T*— ni el mismo tipo (un instante
+  para `/changes` e IGDB, una fecha de fichero para el export, una edición para
+  el dump).
+- **TMDB, tres vías**: alta inmediata de estrenos por el diff del fichero diario
+  de IDs; barrido de promoción por `/discover` + `vote_count.gte`; y
+  actualizaciones por `/movie/changes` y `/tv/changes`.
+- **La puerta de calidad de estrenos**: un estreno no tiene votos, así que el
+  umbral no puede juzgarlo. La puerta conserva su intención admitiendo solo lo
+  que el umbral *todavía* no puede juzgar: fecha presente y dentro de
+  `[hoy-90, hoy+180]`, no adult/video, `status` admisible, y póster **o**
+  sinopsis. Devuelve la **razón** del rechazo, no un booleano, para poder
+  distinguir una puerta que trabaja de una que rechaza todo en silencio.
+  `Canceled` se rechaza en movies y **no** en series: una serie cancelada
+  normalmente emitió una temporada y es catálogo legítimo.
+- **IGDB**: `where created_at > X` / `updated_at > X`, dos kinds independientes
+  porque pueden fallar por separado. Arranque en frío acotado por
+  `IGDB_INCREMENTAL_LOOKBACK_DAYS` (`created_at > 0` es la base entera de IGDB).
+- **Open Library — diff del dump mensual, `/recentchanges` descartado con
+  motivo**: el filtro de calidad de books se calcula sobre agregados
+  (`readinglog_count`, `edition_count`, páginas, y el `language`, que una obra
+  no tiene porque es la unión del de sus ediciones) que solo existen recorriendo
+  el dump de editions. Una obra llegada por `/recentchanges` **no se podría
+  filtrar**: entraría saltándose la puerta de calidad que esta misma feature
+  exige. El carril cuesta **una petición sin cuerpo 29 días de cada 30**:
+  resuelve la edición publicada por la URL final de la redirección y para si
+  coincide con su marca.
+- **`scripts/incremental_sync.py`** + `.github/workflows/incremental-sync.yml`,
+  cron `0 9 * * *` contra Neon. La hora no es arbitraria: TMDB publica el export
+  a las ~08:00 UTC, así que colgarlo del nocturno de las 02:00 habría recibido
+  un 404 cada noche.
+- Sin endpoint HTTP nuevo (precedente de las features 86 y 87 y tamaño de los
+  payloads frente al free tier de Render), así que `bruno/` y `docs/api.md` no
+  se tocan. El barrido nocturno **no se retira**: cambia de papel a red de
+  seguridad.
+
+### El bug que encontró la QA manual, y que los tests no veían
+
+`/movie/changes` **también tiene el tope de 500 páginas** de `/discover`. El
+código lo negaba explícitamente en su docstring («there is no 500-page cap to
+guard against because the window itself is the limit») y recorría `total_pages`
+sin tope. Medido contra la API el 2026-09-08: una ventana de 13 días de movies
+son **746 páginas** (74.593 resultados) y `page=501` responde `HTTP 400`; son
+~73 páginas/día en movies y ~13 en series.
+
+No era un caso raro: **es el primer run en producción.** El arranque en frío
+pide los 14 días de retención enteros, ~1.000 páginas. El carril de movies
+habría fallado el día uno y en cada recuperación tras una caída de varios días.
+
+Arreglado reutilizando el troceo que el módulo ya aplica a `/discover`, con el
+suelo real de un día definido y honesto (se recorren las 500 que TMDB sirve, el
+día se reporta en `truncated_labels`, y la marca de agua **no lo rebasa**).
+Verificado contra la API: la misma ventana se parte en dos y devuelve 70.988 ids
+sin error.
+
+El fallo original fue honesto, que es lo que permitió detectarlo: la marca no
+avanzó y el script salió `DEGRADED`.
+
+### QA manual del leader (contra APIs y DB reales)
+
+- Migración `0039` ida, vuelta y otra vez ida; tabla con PK compuesta y trigger.
+- **IGDB**: 583 juegos escritos en 8,2 s, 0 errores, dos marcas avanzadas.
+- **TMDB movies + series**: 782 ítems refrescados, 0 errores, exit 0. Troceo de
+  `/changes` ejercitado de verdad (746 páginas → 2 sub-ventanas).
+- **Books**: edición ya diffeada → 3,9 s, nada descargado.
+- **Coste del barrido de promoción, medido** (hallazgo N8 del review): movies
+  enumera 14.146 targets en 10 ventanas (~708 peticiones), series 5.214. El
+  carril entero, 56 s.
+
+### Anotado, no arreglado
+
+- El carril `UPDATED_AT` de IGDB salió **saturado** en la QA (`considered: 2000`,
+  su tope) y su cursor avanzó solo hasta el 1 de septiembre. Vigilar `saturated`
+  en producción: si IGDB actualiza más juegos al día que
+  `IGDB_INCREMENTAL_MAX_ITEMS`, ese carril no alcanza el presente.
+- Issues **#26** (Open Library sin throttle) y **#27**: intactos a propósito. La
+  decisión de books los esquiva en vez de arrastrarlos a esta rama.

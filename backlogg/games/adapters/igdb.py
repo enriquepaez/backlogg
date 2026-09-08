@@ -42,6 +42,45 @@ _igdb_retry = retry(
 # See backlogg.games.constants for the allowlist this is derived from.
 _ALLOWED_CATEGORY_CLAUSE = ",".join(str(i) for i in sorted(ALLOWED_GAME_CATEGORY_IDS))
 
+# The field set every game query asks for. Only the incremental queries below
+# use the constant: the three older methods keep their literal so this change
+# cannot alter what they request (they are feature 65 / feature 8 code paths
+# with their own tests). ``created_at``/``updated_at`` are appended by the
+# incremental queries alone — they are the watermark of feature 88 and no other
+# caller has any use for them.
+_GAME_FIELDS = (
+    "name,slug,summary,cover.*,first_release_date,rating,rating_count,"
+    "game_type,genres.name,genres.slug,platforms.name,platforms.slug,"
+    "involved_companies.company.name,involved_companies.company.slug,"
+    "involved_companies.developer,involved_companies.publisher"
+)
+
+# How many games one incremental request asks for. IGDB caps a response at 500
+# regardless of what ``limit`` says, so this is the ceiling, not a preference.
+IGDB_PAGE_SIZE = 500
+
+
+def parse_igdb_timestamp(value: object) -> datetime | None:
+    """Convert an IGDB epoch field (``created_at``/``updated_at``) to a datetime.
+
+    IGDB ships these as Unix seconds. The conversion is explicit and happens
+    here, at the adapter boundary, because that is where ``docs/conventions.md``
+    puts it (checkpoint C14): the watermark that resumes the incremental is
+    derived from these values, and a raw integer travelling into the scheduler
+    would be one ``int``/``datetime`` mix-up away from a cursor that no longer
+    means an instant. Always UTC-aware — ``set_sync_watermark`` rejects naive
+    datetimes on purpose.
+
+    Returns ``None`` for a missing, non-numeric or out-of-range value instead of
+    raising: one malformed field must cost that game, not the whole page.
+    """
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value), tz=UTC)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
 
 class IGDBClient:
     """Client for IGDB API with automatic Twitch token renewal."""
@@ -158,6 +197,84 @@ class IGDBClient:
             if len(results) < limit:
                 await asyncio.sleep(_PAGE_THROTTLE_S)
         return results[:limit]
+
+    # ── Incremental updates (feature 88) ─────────────────────────────────────
+    #
+    # IGDB needs no export file and no changes endpoint: its own query language
+    # answers "what is new" and "what changed" directly, because every record
+    # carries ``created_at`` and ``updated_at``.  Two separate queries and two
+    # separate watermarks (``CREATED_AT`` and ``UPDATED_AT``), never one:
+    # they can fail independently, and a shared cursor would make a failure of
+    # one hold the other back.
+
+    @_igdb_retry
+    async def _fetch_games_page(self, query: str) -> list[dict]:
+        """One page of an incremental query, with the shared retry policy.
+
+        The retry sits here — on a *single* page — and not on the paginating
+        method above it: retrying the walk would re-request every page already
+        delivered, and IGDB's budget is 4 req/s. Same policy as
+        ``search_games`` (429/5xx, timeouts and transport errors; never a 4xx).
+        """
+        return await self._post("games", query)
+
+    async def _get_games_since(
+        self, field: str, since: datetime, limit: int, offset: int = 0
+    ) -> list[dict]:
+        """Walk the games whose ``field`` is newer than *since*, oldest first.
+
+        ``field`` is ``created_at`` (new games) or ``updated_at`` (games whose
+        record changed).  Three properties of this query are load-bearing:
+
+        - **The category allowlist is in the ``where``.**  A game does not
+          enter the catalog just for being new: bundles, mods, ports, packs and
+          updates are excluded here exactly as they are in ``get_top_games``
+          (feature 65, issue #14).  The caller checks ``game_type`` again on
+          the payload — the clause is a filter, the check is the gate.
+        - **No ``rating > 0``.**  That clause belongs to the *ranking* walk. A
+          game released today has no rating yet, so requiring one here would
+          admit nothing at all — the same reason the TMDB lane cannot reuse
+          ``vote_count``.
+        - **``sort <field> asc``.**  Ascending, so the walk is resumable: the
+          caller advances its watermark to the newest value it actually saw,
+          and games created *during* the walk land at the end instead of
+          shifting the offsets of the pages already read.
+
+        Sleeps ``_PAGE_THROTTLE_S`` between pages, like ``get_top_games``:
+        IGDB allows 4 requests per second.
+        """
+        cutoff = int(since.timestamp())
+        results: list[dict] = []
+        current_offset = offset
+        while len(results) < limit:
+            per_request = min(limit - len(results), IGDB_PAGE_SIZE)
+            query = (
+                f"fields {_GAME_FIELDS},created_at,updated_at;"
+                f" where game_type = ({_ALLOWED_CATEGORY_CLAUSE}) & {field} > {cutoff};"
+                f" sort {field} asc;"
+                f" limit {per_request};"
+                f" offset {current_offset};"
+            )
+            batch = await self._fetch_games_page(query)
+            results.extend(batch)
+            if len(batch) < per_request:
+                break
+            current_offset += len(batch)
+            if len(results) < limit:
+                await asyncio.sleep(_PAGE_THROTTLE_S)
+        return results[:limit]
+
+    async def get_games_created_since(
+        self, since: datetime, limit: int = IGDB_PAGE_SIZE, offset: int = 0
+    ) -> list[dict]:
+        """Games added to IGDB after *since* — the "new releases" lane."""
+        return await self._get_games_since("created_at", since, limit, offset)
+
+    async def get_games_updated_since(
+        self, since: datetime, limit: int = IGDB_PAGE_SIZE, offset: int = 0
+    ) -> list[dict]:
+        """Games whose IGDB record changed after *since* — the "refresh" lane."""
+        return await self._get_games_since("updated_at", since, limit, offset)
 
     def game_to_dict(self, raw: dict) -> dict:
         """Convert an IGDB game object to a DB-ready dict."""

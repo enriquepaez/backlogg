@@ -13,7 +13,13 @@ hydration request left to schedule.  That is also why books do **not** get a
 What it does **not** touch: ``sync_books`` (the nightly job) still walks
 ``search.json`` with its cursor, and the on-demand fallback, ``search_book``
 and ``get_book`` are untouched.  This changes the *seeding*, not the request
-path.  The dump-based incremental is feature 88.
+path.
+
+Since feature 88 the same five phases also serve the monthly **incremental**:
+``--only-new`` writes just the selected works the catalog does not have yet,
+which is the diff of one dump edition against the local catalog.  It is driven
+by ``scripts/incremental_sync.py``, which owns the watermark that keeps an
+edition from being diffed twice.
 
 Five phases, each resumable
 ---------------------------
@@ -47,6 +53,7 @@ Usage::
     uv run python scripts/seed_openlibrary_books.py --work-dir /tmp/olseed
     uv run python scripts/seed_openlibrary_books.py --phase editions --force
     uv run python scripts/seed_openlibrary_books.py --phase load
+    uv run python scripts/seed_openlibrary_books.py --only-new   # feature 88 diff
 
 Exit codes: 0 on success; 1 on an unrecoverable failure (network, dump format,
 database); 2 when the run finished but is *degraded* — nothing selected, rows
@@ -92,6 +99,7 @@ from backlogg.books.adapters.openlibrary_dump import (  # noqa: E402
 )
 from backlogg.core.database import async_session_factory, engine  # noqa: E402
 from backlogg.scheduler.jobs import BatchWriter  # noqa: E402
+from backlogg.scheduler.repository import get_known_source_ids  # noqa: E402
 from backlogg.shared.bulk_load import BulkItem  # noqa: E402
 from backlogg.shared.external_ids import collect_link_skips  # noqa: E402
 
@@ -333,21 +341,49 @@ def build_item(work: SelectedWork, record: WorkRecord, names: dict[str, str]) ->
     )
 
 
-async def phase_load(work_dir: Path) -> dict:
+async def phase_load(work_dir: Path, only_new: bool = False) -> dict:
+    """Write the selected catalog, or — with ``only_new`` — only what is missing.
+
+    ``only_new`` is the **diff** mode of the incremental (feature 88): the
+    selection the four passes just produced is subtracted from the works this
+    deployment already has an ``external_ids`` row for, and only the remainder
+    is written.  What survives that subtraction is exactly the two things a
+    monthly diff is for — works Open Library published since the previous dump,
+    and works that were already there and have only now crossed the feature-73
+    quality thresholds (an extra edition, enough shelvings).
+
+    The subtraction has to happen **here** and not earlier: the thresholds are
+    computed from aggregates that only exist by walking the editions dump
+    (``readinglog_count``, ``edition_count``, ``number_of_pages_median``), so
+    the set of candidates is not known until phase 2 has run.  That is the same
+    fact that rules ``/recentchanges`` out as a source — see
+    ``docs/seeding-plan.md`` §6.
+
+    Existing rows are deliberately **not** re-written in diff mode.  Refreshing
+    the catalog is the nightly job's business; a monthly pass that re-upserted
+    19 k unchanged rows would cost a long transaction to change nothing.
+    """
     start = time.monotonic()
     selected = load_selected(work_dir)
     records = load_work_records(work_dir)
     names = load_author_names(work_dir)
     untitled = 0
+    already_known = 0
 
     mapping_errors = 0
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
+            known: set[str] = (
+                await get_known_source_ids(session, "BOOK", "OPEN_LIBRARY") if only_new else set()
+            )
             writer = BatchWriter(session, books_repo.BOOK_BULK_SPEC, "seed_openlibrary_books")
             for work_id in sorted(records):
                 work = selected.get(work_id)
                 if work is None:
+                    continue
+                if work_id in known:
+                    already_known += 1
                     continue
                 try:
                     item = build_item(work, records[work_id], names)
@@ -372,6 +408,7 @@ async def phase_load(work_dir: Path) -> dict:
 
     return {
         "candidates": len(records),
+        "already_known": already_known,
         "untitled": untitled,
         "synced": writer.synced,
         "errors": writer.errors + mapping_errors,
@@ -406,9 +443,14 @@ def _should_run(phase: str, work_dir: Path, only: str | None, force: bool) -> bo
     return True
 
 
-async def run(work_dir: Path, only: str | None, force: bool) -> dict:
-    """Run the requested phases in order and return one summary dict."""
-    summary: dict = {"work_dir": str(work_dir)}
+async def run(work_dir: Path, only: str | None, force: bool, only_new: bool = False) -> dict:
+    """Run the requested phases in order and return one summary dict.
+
+    ``only_new`` reaches the load phase untouched; the four dump passes are
+    identical in both modes, because the diff is computed against the local
+    catalog and not against the previous dump (see ``phase_load``).
+    """
+    summary: dict = {"work_dir": str(work_dir), "only_new": only_new}
     try:
         for phase, runner in (
             ("reading-log", phase_reading_log),
@@ -422,7 +464,7 @@ async def run(work_dir: Path, only: str | None, force: bool) -> dict:
                 logger.info("%s: %s", phase, summary[phase])
         if only in (None, "load"):
             logger.info("load: starting")
-            summary["load"] = await phase_load(work_dir)
+            summary["load"] = await phase_load(work_dir, only_new=only_new)
             logger.info("load: %s", summary["load"])
     finally:
         await engine.dispose()
@@ -433,9 +475,14 @@ def _exit_code(summary: dict) -> int:
     load = summary.get("load")
     if load is None:
         return 0
-    if load["synced"] == 0:
+    if load["synced"] == 0 and not summary.get("only_new"):
         logger.error("load: 0 books written — the selected catalog is empty, nothing was seeded")
         return 2
+    if load["synced"] == 0:
+        # Diff mode: nothing new is the *expected* outcome of a month in which
+        # no work crossed the thresholds. Saying "degraded" there would train
+        # the operator to ignore the only exit code that means something.
+        logger.info("load: nothing new in this dump edition — the catalog is already current")
     if load["errors"] or load["skipped_links"] or load["people_errors"]:
         logger.error(
             "load: finished DEGRADED — %d rejected rows, %d people errors, %d unlinked "
@@ -468,6 +515,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-run a phase even if its artifact is already in the work dir",
     )
+    parser.add_argument(
+        "--only-new",
+        action="store_true",
+        help="diff mode (feature 88): write only the selected works the catalog "
+        "does not have yet, instead of the whole selection. Used by "
+        "scripts/incremental_sync.py for the monthly dump diff",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -476,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        summary = asyncio.run(run(args.work_dir, args.phase, args.force))
+        summary = asyncio.run(run(args.work_dir, args.phase, args.force, args.only_new))
     except Exception:
         logger.exception("seed_openlibrary_books: run failed unrecoverably")
         return 1

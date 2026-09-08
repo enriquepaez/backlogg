@@ -827,6 +827,94 @@ mantiene el catálogo dentro de la ventana de caché de 6 meses de TMDB.
 `updated_at` sí tiene trigger (`set_updated_at_seed_targets`, reutilizando
 `trigger_set_updated_at()` de la migración 0001).
 
+## Sync watermarks (feature 88)
+
+Dónde se quedó **cada mecanismo incremental**. La feature 88 deja de mantener
+el catálogo re-recorriendo listados completos y pasa a preguntarle a cada
+fuente *qué ha cambiado desde la última vez*; esa pregunta necesita una
+respuesta persistida a «la última vez», y ninguna de las dos tablas anteriores
+puede darla: `sync_cursors` guarda un **offset** dentro de un listado (no un
+instante) y `seed_targets` es una **lista de trabajo por diferencia**, que
+converge precisamente porque no tiene estado temporal.
+
+```sql
+CREATE TABLE sync_watermarks (
+    source       VARCHAR(20)  NOT NULL,   -- TMDB | IGDB | OPEN_LIBRARY
+    kind         VARCHAR(40)  NOT NULL,   -- el mecanismo (tabla de abajo)
+    item_type    VARCHAR(20)  NOT NULL,   -- MOVIE | SERIES | BOOK | GAME
+    cursor_value TEXT,                    -- el corte que usará el PRÓXIMO run
+    last_run_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source, kind, item_type)
+);
+```
+
+Sin índice secundario, y es deliberado: la tabla tiene siete filas y todas las
+lecturas son búsqueda por clave primaria.
+
+### Las siete filas y qué guarda cada `cursor_value`
+
+| source | kind | item_type | `cursor_value` |
+|---|---|---|---|
+| `TMDB` | `DAILY_ID_EXPORT` | `MOVIE` | fecha del fichero de IDs ya procesado |
+| `TMDB` | `DAILY_ID_EXPORT` | `SERIES` | ídem |
+| `TMDB` | `CHANGES` | `MOVIE` | último día cubierto por `/movie/changes` |
+| `TMDB` | `CHANGES` | `SERIES` | ídem con `/tv/changes` |
+| `IGDB` | `CREATED_AT` | `GAME` | instante ISO-8601 del `created_at` más nuevo visto |
+| `IGDB` | `UPDATED_AT` | `GAME` | ídem con `updated_at` |
+| `OPEN_LIBRARY` | `MONTHLY_DUMP` | `BOOK` | edición del dump ya diffeada (`2026-08-31`) |
+
+**Las tres columnas de la clave cargan peso.** Solo `source` colapsaría los dos
+mecanismos de TMDB, que avanzan por separado: `/changes` puede ir cinco días
+atrasado mientras el fichero diario está al día, y reanudar uno desde el corte
+del otro pierde trabajo o lo repite. `(source, kind)` colapsaría movies y
+series, que son dos pasadas contra dos endpoints y pueden terminar la noche en
+puntos distintos. IGDB se modela con **dos kinds** por la misma razón: son dos
+queries independientes que pueden fallar por separado.
+
+**`item_type` es NOT NULL incluso para mecanismos de un solo tipo** (Open
+Library escribe `BOOK` explícitamente). No es pulcritud: Postgres trata los
+NULL como distintos dentro de un índice único, así que una columna nullable
+dentro de la PK haría que el `INSERT ... ON CONFLICT DO UPDATE` no casara nunca
+y cada run insertase una fila duplicada en vez de avanzar la marca.
+
+### Por qué dos columnas y no un solo cursor
+
+`last_run_at` y `cursor_value` parecen redundantes y no lo son:
+
+1. **No son el mismo reloj.** Un run que consultó hasta el instante *T* y
+   terminó en *T+9 min* tiene que reanudar en *T*; reanudar en su hora de fin
+   pierde esos nueve minutos de cambios para siempre. Y el fichero diario de
+   IDs se publica hacia las 08:00 UTC, así que un run a las 00:10 UTC procesa
+   el de *ayer*: derivar el corte del reloj del run se salta un día o relee
+   otro.
+2. **No son el mismo tipo.** El corte es un instante para `CHANGES` y los dos
+   kinds de IGDB, una **fecha de fichero** para `DAILY_ID_EXPORT` y una
+   **edición de dump** para `MONTHLY_DUMP`. Por eso `cursor_value` es `TEXT`,
+   opaco a la capa de persistencia y parseado por el mecanismo que lo escribió
+   (ISO-8601 por convención, para que ordene y se lea bien).
+
+`cursor_value` es nullable a propósito: «corrió pero no produjo corte
+utilizable» es un estado real y **distinto** de «no ha corrido nunca», que es
+la ausencia de la fila. `get_sync_watermark` devuelve `None` solo en el
+segundo caso.
+
+**Cómo se reanuda.** Cada mecanismo lee su fila, deriva de `cursor_value` el
+punto de partida y **solo la avanza cuando el tramo se ha cubierto entero**:
+`/changes` avanza por ventana y corta la vía si una falla, el diff diario no
+avanza si hubo `fetch_errors`, y el diff de Open Library no avanza si la pasada
+murió antes de escribir. «La marca se movió» significa siempre «ese rango se
+cubrió», nunca «lo intentamos». Un `cursor_value` ilegible se trata como
+«nunca corrió» y se avisa, porque la recuperación de un cursor corrupto **es**
+re-baselinear.
+
+`updated_at` tiene trigger (`set_updated_at_sync_watermarks`, reutilizando
+`trigger_set_updated_at()` de la migración 0001). Creada en la migración
+`0039`, que tiene `downgrade()` implementado.
+
+Inspección operativa (query y lectura) en `docs/operations.md`, sección
+«Incremental del catálogo».
+
 ## Users
 
 ```sql

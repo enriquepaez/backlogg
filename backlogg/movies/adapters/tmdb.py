@@ -175,6 +175,45 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
+    async def get_movie_changes_page(
+        self,
+        *,
+        page: int,
+        start_date: date,
+        end_date: date,
+    ) -> dict:
+        """Fetch one raw page of ``/movie/changes`` for a date window.
+
+        The ids of every movie TMDB changed inside ``[start_date, end_date]``,
+        **100 per page** (``/discover`` serves 20; this endpoint is its own
+        shape) and at most a 14-day span per request — TMDB only keeps 14 days
+        of change history at all.  Raw pagination only, exactly like
+        ``discover_movies_page``: the window slicing and the retention
+        arithmetic belong to ``backlogg.scheduler.discovery``
+        (``plan_change_windows``), and the whole payload is returned because
+        the caller needs ``total_pages`` to walk it.
+
+        The results carry ``id`` and ``adult`` and nothing else — no title, no
+        date, no ``vote_count``.  That is why this feed can only drive
+        *re-hydration* of items the catalog already has (feature 88): an id
+        arriving here has passed no quality gate, and nothing in the payload
+        would let it pass one.
+        """
+        params = {
+            "page": page,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/movie/changes",
+                headers=self._headers,
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_top_movies(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch top popular movies from TMDB by rank.
 

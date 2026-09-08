@@ -1767,7 +1767,7 @@
         "Tests: diff de IDs produce solo los nuevos; ventana de /changes mayor de 14 días se trocea; ítem nuevo que no pasa el filtro de calidad no se persiste",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 89,
