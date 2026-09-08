@@ -782,3 +782,138 @@ DB de dev restaurada a su estado original al terminar.
   con decisión de producto detrás, no un bug.
 
 `bash init.sh` verde: **1499 tests** (+17 sobre los 1482 de partida).
+
+## 2026-09-07 — Siembra de producción, features 89 y 91, cierre de la 74 y del issue #15
+
+Sesión larga que terminó con **el catálogo de producción sembrado y publicable
+por primera vez**. Detalle en `progress/measure_89.md`, `progress/deploy_89.md`,
+`progress/qa_89.md`, `progress/measure_91.md`, `progress/deploy_91.md` y
+`progress/qa_91.md`.
+
+**El catálogo resultante**: movies 57.024 (de 57.166 targets) · **series
+10.873** (de 10.880 — estaba a 0) · books 19.159 · games 10.000 **topados**
+(los 31.958 reales esperan a la feature 90). **Total 97.056 ítems**, cluster de
+Neon en 392 MB de 512.
+
+**Cobertura de credits**, que es lo que cerró la feature 74 y el issue #15:
+movies 99,8 % de grafo y 98,6 % de reparto · series 82,6 % y 96,1 % · books
+~100 %. El 82,6 % de series no es un hueco de ingesta: muchas series pequeñas o
+extranjeras no declaran creador en TMDB.
+
+**Qué se cerró**: feature **89** `credits_people_storage_redesign` (grafo de
+personas de 266 a 114 MB), feature **91** `search_expression_index` (retirada
+`catalog_search` y con ella el `REFRESH` que bloqueaba la siembra, issue #28),
+feature **81** `trending_local` (en sesión paralela, desbloqueó FE-68), la
+**siembra** (punto 7 de `priority_order.md`) y la feature **74** con el issue
+**#15**, que desbloquean **FE-65**.
+
+**Issue #23, dimensionado y resuelto**: la siembra perdió 149 targets de 68.046
+(0,22 %) — movies 142, series 7. Mecanismo confirmado con el target TMDB 812
+(*Aladdín* 1992): produce el slug `aladdin-1992`, que ya ocupa el movie 263 con
+TMDB 343693; el ítem existente ya tiene su fila de TMDB y `uq_item_source`
+prohíbe una segunda, así que el 812 nunca se enlaza. **El slug hace de identidad
+cuando no puede** — mismo fondo que los issues #18 y #24. `skipped_links`
+reportaba 0 en ese camino (hueco propio de la instrumentación del #22), no había
+huérfanos, y hay efecto de calidad: gana el primero, así que a veces el slug lo
+ocupa la entrada con menos votos.
+
+### Cómo se relanza la siembra
+
+```bash
+gh workflow run backfill-sync.yml -f content_type=<movie|series> -f mode=hydrate
+gh run list --workflow=backfill-sync.yml
+```
+
+`seed_top_n` es inerte para movie y series desde la feature 86: lo pendiente se
+calcula por diferencia contra `external_ids`, así que converge por construcción
+y da igual cómo muriera un run anterior.
+
+### Tres cosas de Neon que costaron caro
+
+1. **El techo de 512 MB es por CLUSTER, no por base.** Medir con
+   `pg_database_size('neondb')` es el denominador equivocado; las bases del
+   sistema cuestan ~22 MB permanentes. La consulta correcta es
+   `SELECT pg_size_pretty(sum(pg_database_size(datname))) FROM pg_database;`.
+2. **La métrica «Storage» del dashboard no es el tamaño vivo.**
+3. **Un `DROP` dentro de la transacción de una migración no libera nada** —
+   Postgres desenlaza los ficheros en el `COMMIT`. Si una migración necesita
+   sitio, el `DROP` va commiteado antes, y antes del merge, porque Render aplica
+   la migración al desplegar. Saltárselo hizo fallar el despliegue de la 91 tres
+   veces.
+
+**Credenciales**: la `DATABASE_URL` de producción no está en `.env` (esa apunta
+al contenedor local). Hay que pedírsela al usuario, y va con prefijo
+`postgresql+asyncpg://` que `psql` no entiende — hay que quitarle el `+asyncpg`.
+
+## 2026-09-08 — FE-65 `credits_source_author_writer_display` (rama `feat/credits_source_author_writer_display`)
+
+Primera tarea después de la siembra. La feature backend 74 ya persistía
+`SOURCE_AUTHOR` y `WRITER` en producción, pero `ItemCredits` pintaba
+`character_name ?? role` **crudo**: una película adaptada mostraba dos entradas
+etiquetadas literalmente `SOURCE_AUTHOR` y `WRITER`. Dato invisible y
+vocabulario de schema a la cara del usuario.
+
+Detalle en `progress/impl_FE-65.md` y `progress/review_FE-65.md`.
+
+### El cambio de alcance a mitad de camino
+
+La primera versión —traducir los seis roles del vocabulario y dejarlos todos en
+la sección— llegó a **APPROVED** y pasó la QA manual. Al presentarle las
+decisiones de copy, el usuario cortó: «creo que durante alguna feature has
+rizado el rizo. Todo esto debería ser mucho más simple. **Director en el hero y
+actores en credits**».
+
+Leído al pie de la letra eso dejaba FE-65 sin contenido, así que se le expuso y
+eligió la alternativa: **Credits = reparto + guion + autoría de la obra
+original**, con director y creador fuera por estar ya en el `dl` del hero.
+
+### Estado final
+
+| Rol | Dónde | Etiqueta |
+|---|---|---|
+| `ACTOR` | Credits | Muestra `character_name`; «Reparto»/«Cast» solo si no hay personaje |
+| `SOURCE_AUTHOR` | Credits | «Autoría de la obra original» / «Author of the original work» |
+| `WRITER` | Credits | «Guion» / «Screenplay» — **sin** «de la adaptación»: TMDB emite `Screenplay`/`Writer` también en películas originales, donde el matiz sería falso |
+| `DIRECTOR`, `CREATOR` | Solo hero | Filtrados por `HERO_ROLES` en `getCredits` |
+| `AUTHOR` | No llega | Books no renderiza la sección |
+
+Cuatro decisiones de diseño que sobreviven al cambio:
+
+1. **El filtro vive en `getCredits` (la página), no en `ItemCredits`.** El
+   componente es presentacional y no debe conocer el layout; la página es quien
+   sabe qué muestra el hero. La lista de exclusión es una constante explícita
+   (`HERO_ROLES`), no un comentario.
+2. **La sección se oculta entera si queda vacía** — decisión del leader, no del
+   usuario, y consecuencia directa del filtro: medido en dev, 13 movies de 596
+   y 25 series de 1.142 (2,2 %) tenían al director como único credit y habrían
+   mostrado «No hay información disponible» bajo un hero que sí lo nombra.
+   `ItemPlatforms` conserva su mensaje vacío: **divergencia consciente**, porque
+   ahí el vacío no contradice nada de arriba.
+3. **`roleLabels` obligatoria**, no opcional (observación O-4 del reviewer): un
+   caller que la olvidara no obtendría «el comportamiento anterior», obtendría
+   el defecto que la feature corrige, en silencio y sin error de tipos.
+4. **Fallback al rol crudo** para vocabulario que el backend añada después.
+
+### QA manual del leader, contra el backend real
+
+| Caso | Resultado |
+|---|---|
+| *The Shining* es/en | Hero «Director → Kubrick»; Credits: reparto + «Stephen King → Autoría de la obra original» + Kubrick y Johnson → «Guion»/«Screenplay». Sin «Dirección» |
+| *Wednesday* (series) | Hero «Creador → Gough, Millar»; Credits solo reparto, creadores no repetidos |
+| *Hércules 1998* (solo director) | Sección **ausente**, ni encabezado ni mensaje vacío |
+
+`docs/detail-page-layout.md` actualizado por el leader: tabla de qué rol entra
+y cuál no con el motivo de cada exclusión, el copy fijado, y la divergencia con
+Platforms.
+
+### Deuda conocida, aceptada
+
+`AUTHOR` sigue en `CREDIT_ROLE_CODES` con copy en los dos idiomas aunque hoy no
+puede renderizarse (books no monta la sección). El reviewer lo señaló como la
+única esquina de copy irrenderizable —misma categoría que las claves
+`DIRECTOR`/`CREATOR` que esta pasada sí borró—, y observó que el día que books
+tuviera sección, `AUTHOR` iría al hero, no a las etiquetas. **Se deja como
+está**: una clave inerte no justifica otra ronda de implementer + reviewer.
+
+`pnpm --filter web`: typecheck, lint, build y **1193 tests** en verde (1181 en
+`main`). `bash init.sh` verde: 1499 tests de backend.

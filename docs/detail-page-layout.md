@@ -103,16 +103,56 @@ entra en esta tabla de orden.
   llegaba gratis en la respuesta que se pedía. Investigación aparte si se
   quiere en el futuro.
 
-## Sección "Credits" (lista completa de cast/crew) — solo movie/series
+## Sección "Credits" — solo movie/series
 
 Distinto del campo "quién es responsable" de arriba: esta es la sección
-aparte (`ItemCredits`, tras "Reviews") con el reparto completo. Solo se
-renderiza para movie/series. Book no la lleva — su único rol (`AUTHOR`) ya
-está cubierto por el campo del `dl`, una sección aparte para uno o dos
-nombres sería redundante. Game tampoco — no tiene datos de person-credits
-(la feature backend `catalog_credits_ingestion_parity` sigue pendiente y
-no añade ninguno) y developer/publisher ya cubren "quién lo hizo" vía
+aparte (`ItemCredits`) con el reparto. Solo se renderiza para movie/series.
+Book no la lleva — su único rol (`AUTHOR`) ya está cubierto por el campo del
+`dl`, una sección aparte para uno o dos nombres sería redundante. Game
+tampoco — no tiene datos de person-credits (decisión de 2026-09-04, ver
+`docs/schema.md`) y developer/publisher ya cubren "quién lo hizo" vía
 company_credits.
+
+### Qué roles entran y cuáles no (FE-65, decisión del usuario 2026-09-08)
+
+**Nada que ya salga en el hero se repite aquí.** El usuario lo pidió así de
+explícito: «director en el hero y actores en credits». `credits[]` llega del
+backend con los cinco roles de grafo más el reparto, y la página filtra antes
+de pintar:
+
+| Rol | ¿En Credits? | Por qué |
+|---|---|---|
+| `ACTOR` | **Sí** | Es el contenido de la sección. Muestra `character_name`, no la etiqueta de rol |
+| `SOURCE_AUTHOR` | **Sí** | Autoría de la obra de origen (Stephen King en *El resplandor*). **No está en ningún otro sitio de la página** — es el pago visible de la feature backend 74 |
+| `WRITER` | **Sí** | Guionista. Tampoco aparece en el hero |
+| `DIRECTOR` | **No** | Ya está en el `dl` del hero, posición 2 |
+| `CREATOR` | **No** | Ya está en el `dl` del hero, posición 2 (series) |
+| `AUTHOR` | **No llega** | Solo existe para books, y books no renderiza la sección |
+
+El filtro vive en `getCredits` (`page.tsx`), no dentro de `ItemCredits`: el
+componente es presentacional y no debe conocer el layout. La lista de roles
+excluidos es una constante explícita, para que la relación «esto sale del
+hero, por eso no va en Credits» esté escrita en el código.
+
+**Etiquetas.** El `role` es vocabulario de backend, así que se traduce
+(`lib/credit-role-labels.ts` → `ItemDetail.credits.roles.*` en
+`messages/{es,en}.json`), con fallback al valor crudo si el backend añade
+vocabulario nuevo. `SOURCE_AUTHOR` es «Autoría de la obra original» y `WRITER`
+es «Guion» a secas — **no** «Guion de la adaptación», que sería falso en las
+películas originales, donde TMDB emite `Screenplay`/`Writer` igualmente.
+
+### Sección vacía: se oculta (divergencia consciente con Platforms)
+
+Si tras el filtro no queda ninguna entrada, **la sección no se renderiza**: ni
+encabezado ni mensaje vacío. Sin esto, un ítem cuyo único credit fuera el
+director mostraría "No hay información de créditos disponible" justo debajo de
+un hero que sí lo nombra. Medido en la DB de dev al tomar la decisión: 13
+movies de 596 y 25 series de 1.142 (2,2 % en ambos tipos).
+
+`ItemPlatforms` (game) **conserva** su encabezado + mensaje vacío. Los dos
+criterios divergen a propósito: en Credits el vacío es contradictorio con el
+hero, en Platforms no hay nada arriba que lo contradiga. Si algún día se
+unifican, es una decisión propia y afecta a FE-10 y FE-60.
 
 ## Orden de secciones de la página (no solo del `dl` de metadata)
 
@@ -122,10 +162,13 @@ poster, título, metadata, géneros, rating, botones de estado), antes de
 
 | Tipo | Sección justo debajo de la info |
 |---|---|
-| Movie | Credits (cast/crew completo) |
-| Series | Credits (cast/crew completo) |
+| Movie | Credits (reparto + guion + obra original) |
+| Series | Credits (reparto + guion + obra original) |
 | Book | *(nada)* |
 | Game | Platforms |
+
+Movie y series no muestran nada en este hueco si la sección Credits queda
+vacía tras el filtro — ver arriba.
 
 Orden completo de la página: Hero → [Credits \| Platforms \| nada] → Your
 rating → Reviews → You might also like.

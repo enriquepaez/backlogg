@@ -8,6 +8,7 @@ import { ItemPlatforms } from "@/components/item-platforms";
 import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
+import { HERO_ROLES, creditRoleLabels } from "@/lib/credit-role-labels";
 import { env } from "@/lib/env";
 import { gameTypeLabel } from "@/lib/game-type-labels";
 import {
@@ -329,6 +330,21 @@ function buildJsonLd(type: CatalogType, item: ItemDetail, url: string): Record<s
  * occupies this exact same slot as the type-appropriate alternative; book
  * gets neither, nothing renders in this slot for book.
  *
+ * {@link HERO_ROLES} (`DIRECTOR`, `CREATOR`) are filtered out here, per the
+ * user's explicit decision on FE-65: "los credits no deben incluir
+ * dirección, el director va en el hero" · "todo esto debería ser mucho más
+ * simple. Director en el hero y actores en credits". `buildFields` already
+ * puts those exact people in the hero's metadata `dl`, in the fixed
+ * "who's responsible" slot at position 2 (`docs/detail-page-layout.md`), so
+ * repeating them a section below is pure duplication — the same name twice
+ * on one page. What's left is what the section is *for*: cast + screenplay
+ * (`WRITER`) + authorship of the source work (`SOURCE_AUTHOR`).
+ *
+ * The filter lives here and not in `ItemCredits` on purpose: this page is
+ * the only place that knows what the hero renders, and the component is
+ * presentational — it must not have to reason about page layout to decide
+ * what to drop.
+ *
  * Defensive `?? []`: the generated `ItemDetail` type says `credits` is
  * always an array, but an empty `credits: []` from the backend has been
  * observed reaching this page as `undefined` for at least one real item
@@ -339,7 +355,8 @@ function buildJsonLd(type: CatalogType, item: ItemDetail, url: string): Record<s
  * handling below.
  */
 function getCredits(item: ItemDetail): ItemCredit[] {
-  return item.credits ?? [];
+  const heroRoles: readonly string[] = HERO_ROLES;
+  return (item.credits ?? []).filter((credit) => !heroRoles.includes(credit.role));
 }
 
 /** `backdrop_url` only exists on `MovieOut`/`SeriesOut`/`GameOut` — `BookOut` has none (`docs/api.md`). */
@@ -447,6 +464,9 @@ export default async function ItemDetailPage({
 
   const item = result.item;
   const jsonLd = buildJsonLd(type, item, `${env.SITE_URL}${itemPath(locale, type, slug)}`);
+  // Computed once: the render below needs both the list and whether it's
+  // empty (see the `ItemCredits` call for why an empty one renders nothing).
+  const credits = getCredits(item);
 
   return (
     <div className="flex flex-col">
@@ -482,11 +502,21 @@ export default async function ItemDetailPage({
         noRatingsLabel={t("noRatings")}
       />
 
-      {(type === "movie" || type === "series") && (
+      {/* Nothing at all when the filtered list is empty — not a "Credits"
+          heading over "No credit information available". Since `getCredits`
+          drops `DIRECTOR`/`CREATOR` (they're in the hero `dl`), there are
+          items whose only credit *was* the director: measured on the dev DB,
+          13 of 596 movies and 25 of 1142 series. Those would otherwise show
+          an empty-credits notice directly below a hero that does name the
+          director — visibly wrong. `ItemPlatforms` below deliberately keeps
+          its empty message: a game with no known platforms is information,
+          an absence the user should see. */}
+      {(type === "movie" || type === "series") && credits.length > 0 && (
         <ItemCredits
-          credits={getCredits(item)}
+          credits={credits}
           heading={t("credits.heading")}
           emptyMessage={t("credits.empty")}
+          roleLabels={creditRoleLabels(t)}
         />
       )}
 

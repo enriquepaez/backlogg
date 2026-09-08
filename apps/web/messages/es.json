@@ -634,7 +634,13 @@
     },
     "credits": {
       "heading": "Créditos",
-      "empty": "No hay información de créditos disponible."
+      "empty": "No hay información de créditos disponible.",
+      "roles": {
+        "ACTOR": "Reparto",
+        "WRITER": "Guion",
+        "AUTHOR": "Autoría",
+        "SOURCE_AUTHOR": "Autoría de la obra original"
+      }
     },
     "similar": {
       "heading": "También te puede interesar",
