@@ -5,15 +5,19 @@ infrastructure caps each request at ~15 minutes, which forces a small nightly
 slice (``SYNC_SLICE_SIZE`` / ``SYNC_SLICE_SIZE_<TYPE>``, ~100-350
 items/night/type).  This script bypasses Render entirely: it reuses the exact
 same job functions from ``backlogg.scheduler.jobs`` — same write path, same
-``sync_cursors`` cursor — but runs them directly against ``DATABASE_URL`` and
-the external APIs, iterating with a bigger slice until either:
+work list — but runs them directly against ``DATABASE_URL`` and the external
+APIs, iterating with a bigger slice until either:
 
-- the persisted cursor wraps around to 0 (target reached or API exhausted), or
+- there is no work left (the cursor wrapping to 0 for ``book``, the
+  pending-target count reaching 0 for the other three), or
 - a configurable time budget runs out (default 300 min, safely below the
   6 h GitHub Actions job limit).
 
-Because progress is persisted in ``sync_cursors`` (shared with the nightly
-sync), re-running the script resumes where the previous run stopped.
+Re-running the script resumes where the previous run stopped: from the cursor
+in ``sync_cursors`` for ``book``, and from the live difference between
+``seed_targets`` and ``external_ids`` for the other three — which is the
+stronger of the two guarantees, since it is recomputed rather than
+remembered.
 
 Since feature 84 those jobs write through the batch path
 (``backlogg.shared.bulk_load``): items are still fetched one by one, but each
@@ -25,27 +29,30 @@ much is fetched per iteration, while ``BULK_LOAD_BATCH_SIZE`` controls how
 much is written per transaction (and therefore how much a batch fallback has
 to redo).
 
-Two work lists (features 85 and 86)
------------------------------------
+Two work lists (features 85, 86 and 90)
+---------------------------------------
 
 **Default mode** runs the type's sync job in a loop.  What that job walks
 depends on the type, and since feature 86 the two are different:
 
-- ``book`` and ``game`` walk the external API's popular listing by offset,
-  with the cursor in ``sync_cursors``; the loop stops when it wraps to 0.
-- ``movie`` and ``series`` walk the enumerated target list in ``seed_targets``
-  — the difference between the catalog the quality threshold defines and the
-  catalog that exists.  There is no cursor: the job reports how many targets
-  are still ``pending`` and the loop stops when that reaches 0.  Fill that
-  list first with ``scripts/seed_tmdb_targets.py``; with an empty list there
-  is nothing pending and the run ends immediately (the nightly job would then
-  spend its slice on the ``last_synced_at`` refresh rotation instead, which is
-  its job and not a backfill's).
+- ``book`` walks Open Library's filtered search by offset, with the cursor in
+  ``sync_cursors``; the loop stops when it wraps to 0.  It is the last type
+  left on this model (issue #27).
+- ``movie``, ``series`` and ``game`` walk the enumerated target list in
+  ``seed_targets`` — the difference between the catalog the quality filter
+  defines and the catalog that exists.  There is no cursor: the job reports
+  how many targets are still ``pending`` and the loop stops when that reaches
+  0.  Fill that list first with ``scripts/seed_tmdb_targets.py``
+  (movie/series) or ``scripts/seed_igdb_targets.py`` (game); with an empty
+  list there is nothing pending and the run ends immediately (the nightly job
+  would then spend its slice on the ``last_synced_at`` refresh rotation
+  instead, which is its job and not a backfill's).
 
   That stop condition is reachable because ``pending`` counts *workable*
-  targets only.  A target TMDB answers 404 for, or one that resolves and still
-  never gets an ``external_ids`` row (see ``docs/schema.md``), is retired from the
-  work list and reported apart in ``stuck``.  Without that, the loop would
+  targets only.  A target the source no longer serves (a 404 from TMDB, an id
+  missing from IGDB's answer to ``where id = (...)``), or one that resolves
+  and still never gets an ``external_ids`` row (see ``docs/schema.md``), is
+  retired from the work list and reported apart in ``stuck``.  Without that, the loop would
   spin re-hydrating the same unlinkable items until the time budget expired:
   they *do* write their row, so ``synced > 0`` and the no-progress guard below
   would not fire either.
@@ -67,6 +74,7 @@ Usage::
 
     uv run python scripts/seed_tmdb_targets.py movie   # enumerate first
     uv run python scripts/backfill_sync.py movie
+    uv run python scripts/seed_igdb_targets.py          # the same, for games
     uv run python scripts/backfill_sync.py game --slice-size 500 --time-budget-minutes 300
     uv run python scripts/backfill_sync.py series --only-missing-credits
     uv run python scripts/backfill_sync.py movie --only-missing-credits --recheck
@@ -116,8 +124,9 @@ _JOB_NAMES: dict[str, str] = {
 }
 
 # Types whose progress is a pending-target count instead of a cursor offset
-# (feature 86).  ``sync_cursors`` is not read or written for these at all.
-_TARGET_DRIVEN: frozenset[str] = frozenset({"movie", "series"})
+# (features 86 and 90).  ``sync_cursors`` is not read or written for these at
+# all — which is also why ``seed_top_n`` no longer applies to ``game``.
+_TARGET_DRIVEN: frozenset[str] = frozenset({"movie", "series", "game"})
 
 
 class BackfillError(RuntimeError):
@@ -134,8 +143,9 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     """Run the sync job for ``content_type`` in a loop until done or out of budget.
 
     Stops when there is no work left — the persisted cursor wrapping around
-    to 0 for ``book``/``game``, the pending-target count reaching 0 for
-    ``movie``/``series`` (feature 86) — or when ``time_budget_s`` elapses.
+    to 0 for ``book``, the pending-target count reaching 0 for ``movie``,
+    ``series`` and ``game`` (features 86 and 90) — or when ``time_budget_s``
+    elapses.
     Raises :class:`BackfillError` if an iteration finishes with errors and
     zero synced items — retrying the same slice would loop forever.
 
@@ -148,8 +158,9 @@ async def run_backfill(content_type: str, slice_size: int, time_budget_s: float)
     the item itself was upserted fine.  It used to be read off each job result
     and thrown away here (feature 85): a run in which *every* credits fetch
     failed still reported "6000 synced, 0 errors", and the only trace was a
-    per-iteration log line.  ``sync_games`` does not report it (games carry no
-    people credits), hence the ``.get`` default.
+    per-iteration log line.  ``sync_games`` reports a constant 0 (games carry
+    no people credits); the ``.get`` default covers any job that omits the key
+    entirely.
 
     ``skipped_links`` (issue #22) is aggregated for the same reason and is the
     one number a *seeding* run needs live: it counts items written to their

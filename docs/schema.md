@@ -711,32 +711,45 @@ CREATE TABLE sync_cursors (
 `updated_at` is refreshed by the application on every cursor upsert
 (no trigger — the row is only written by the sync jobs).
 
-> ⚠️ **Desde la feature 86 solo `BOOK` y `GAME` usan esta tabla.** Movies y
-> series pasaron a la lista objetivo de `seed_targets` (abajo): no hay offset
-> que avanzar porque no hay ranking que recorrer. Las filas `MOVIE`/`SERIES`
-> que ya existan **se conservan** y simplemente dejan de leerse y escribirse —
-> borrarlas dejaría un `downgrade` de la migración 0035 apuntando a un catálogo
-> que el código anterior no sabría reanudar.
+> ⚠️ **Desde la feature 90 solo `BOOK` usa esta tabla.** Movies y series
+> salieron en la feature 86 y games en la 90: los tres pasaron a la lista
+> objetivo de `seed_targets` (abajo), donde no hay offset que avanzar porque no
+> hay ranking que recorrer. Las filas `MOVIE`/`SERIES`/`GAME` que ya existan
+> **se conservan** y simplemente dejan de leerse y escribirse — borrarlas
+> dejaría un `downgrade` de la migración 0035 apuntando a un catálogo que el
+> código anterior no sabría reanudar. Que exista una fila `GAME` no significa
+> nada salvo que existía antes de la feature 90.
 
-## Seed targets (feature 86)
+## Seed targets (features 86 y 90)
 
-La lista objetivo de TMDB: **qué ítems quiere el catálogo**, enumerada por
-`/discover` bajo el umbral de calidad antes de hidratar ninguno. Separa la
-*enumeración* (~3.600 peticiones baratas) de la *hidratación* (una petición de
-detalle por ítem), que es lo que permite reanudar, ordenar y auditar la
-segunda de forma independiente de la primera.
+La lista objetivo: **qué ítems quiere el catálogo**, enumerada antes de
+hidratar ninguno. Separa la *enumeración* de la *hidratación*, que es lo que
+permite reanudar, ordenar y auditar la segunda de forma independiente de la
+primera.
+
+| `item_type` | `source` | Enumeración | Coste |
+|---|---|---|---|
+| `MOVIE` / `SERIES` | `TMDB` | `/discover` bajo `vote_count.gte`, troceado por año (feature 86) | ~3.600 peticiones; hidratación de 1 petición por ítem |
+| `GAME` | `IGDB` | keyset (`id > N`, `sort id asc`) bajo la allowlist de `game_type` + `rating > 0` (feature 90) | 64 peticiones; hidratación de hasta 500 juegos por petición (`where id = (...)`) |
+
+`BOOK` no está: desde la feature 87 su catálogo se selecciona de los **dumps
+mensuales** de Open Library, que traen todos los campos, así que la selección y
+la escritura son la misma pasada y no hay nada que enumerar por separado.
 
 ```sql
 CREATE TABLE seed_targets (
     id              BIGSERIAL PRIMARY KEY,
-    item_type       VARCHAR(20)  NOT NULL,   -- MOVIE | SERIES
-    source          VARCHAR(20)  NOT NULL,   -- TMDB
+    item_type       VARCHAR(20)  NOT NULL,   -- MOVIE | SERIES | GAME
+    source          VARCHAR(20)  NOT NULL,   -- TMDB | IGDB
     external_id     VARCHAR(100) NOT NULL,   -- id del ítem en la fuente
     vote_count      INTEGER,                 -- observado al enumerar
+                                             -- (rating_count en IGDB)
     release_year    INTEGER,                 -- observado al enumerar
     attempts        INTEGER NOT NULL DEFAULT 0,
     last_attempt_at TIMESTAMPTZ,
-    unreachable_at  TIMESTAMPTZ,             -- 404 en la fuente
+    unreachable_at  TIMESTAMPTZ,             -- la fuente ya no sirve el id:
+                                             -- 404 en TMDB, ausente de la
+                                             -- respuesta de IGDB
     discovered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_seed_target UNIQUE (item_type, source, external_id)

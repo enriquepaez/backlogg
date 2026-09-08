@@ -11,8 +11,11 @@ class SyncResponse(BaseModel):
     errors: int
     offset: int
     duration_s: float
-    # Default 0 because sync_games does not return this key — games have no
-    # separate people/credits persistence step to fail independently.
+    # Defaulted because a job may omit the key: games have no separate
+    # people/credits persistence step to fail independently, so ``sync_games``
+    # reports a constant 0 (it did not report the key at all before feature
+    # 90). The default stays: it is what keeps a job that omits it from
+    # turning a 200 into a 500.
     people_errors: int = 0
     # Links this run wanted to write into ``external_ids`` and could not: the
     # (item_type, source, external_id) triple was already claimed by a

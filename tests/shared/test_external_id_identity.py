@@ -432,13 +432,16 @@ async def test_sync_games_renaming_a_game_updates_its_row(db):
 
     with (
         patch.object(
-            sync_jobs._igdb_client, "get_top_games", new_callable=AsyncMock, return_value=raw
+            sync_jobs._igdb_client, "get_games_by_ids", new_callable=AsyncMock, return_value=raw
         ),
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=lambda *args, **kwargs: session_cm,
         ),
     ):
+        # The game is already in the catalog and linked, so the slice reaches
+        # it through the ``last_synced_at`` refresh rotation (feature 90) —
+        # which is the rename path this test is about.
         result = await sync_jobs.sync_games(slice_size=1)
 
     assert result["synced"] == 1

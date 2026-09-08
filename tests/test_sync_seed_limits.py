@@ -1,22 +1,23 @@
 """Tests for feature 23 — seed_config_wiring.
 
-The cursor-driven jobs (``book`` and ``game``) must read their fetch limit
-from ``settings.SEED_TOP_N_*`` at execution time instead of from a hardcoded
-value.  We monkeypatch the setting to a value different from the default
-(100) and assert that the adapter receives exactly that value.
+The cursor-driven job (``book``, the only one left since feature 90) must read
+its fetch limit from ``settings.SEED_TOP_N_BOOKS`` at execution time instead of
+from a hardcoded value.  We monkeypatch the setting to a value different from
+the default (100) and assert that the adapter receives exactly that value.
 
 With the slice-cursor flow (feature 24) the effective limit is
 ``min(SYNC_SLICE_SIZE, SEED_TOP_N_* - offset)``; the cursor is mocked at 0
 and ``SEED_TOP_N_*`` is below the default slice size, so the adapter must
 still receive exactly the configured seed value.
 
-⚠️ **Movies and series are no longer covered by this file** (feature 86).
-Their catalog stopped being "the first N items of a popularity ranking" and
-became "every item over a ``vote_count`` threshold", enumerated into
-``seed_targets``; there is no fetch limit for ``SEED_TOP_N_*`` to configure
-and the setting is inert for them.  What sizes their slice now is
-``SYNC_SLICE_SIZE_<TYPE>``, and that is asserted below and in
-``tests/test_tmdb_discover_seeding.py``.
+⚠️ **Movies, series and games are no longer covered by this file** (features
+86 and 90).  Their catalog stopped being "the first N items of a popularity
+ranking" and became "every item over a quality bar", enumerated into
+``seed_targets``; there is no fetch limit for ``SEED_TOP_N_*`` to configure.
+For movies and series the setting is merely inert; for games it no longer
+exists at all.  What sizes their slice now is ``SYNC_SLICE_SIZE_<TYPE>``, and
+that is asserted below and in ``tests/test_tmdb_discover_seeding.py`` and
+``tests/test_igdb_targets_seeding.py``.
 
 All external API clients are mocked so no real network calls are made, and
 ``async_session_factory`` and the sync-cursor repository are mocked so no
@@ -150,26 +151,26 @@ async def test_sync_books_limit_comes_from_settings(monkeypatch):
     assert result["errors"] == 0
 
 
-async def test_sync_games_limit_comes_from_settings(monkeypatch):
-    """sync_games passes settings.SEED_TOP_N_GAMES as limit to the adapter."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_GAMES", _CUSTOM_LIMIT)
-    get_cursor, set_cursor = _cursor_patches()
+async def test_sync_games_slice_size_comes_from_the_per_type_setting(monkeypatch):
+    """Feature 90: SEED_TOP_N_GAMES is gone; SYNC_SLICE_SIZE_GAMES sizes the slice.
+
+    This replaces ``test_sync_games_limit_comes_from_settings``, which asserted
+    that the adapter received ``SEED_TOP_N_GAMES`` as its fetch limit.  That
+    invariant is exactly what the feature removed — the number was the
+    wraparound target of a cursor and it capped the catalog at 10.000 — so the
+    test asserts the invariant that replaced it instead of being deleted.
+    """
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_GAMES", _CUSTOM_LIMIT)
 
     with (
-        patch.object(
-            sync_jobs._igdb_client,
-            "get_top_games",
-            new_callable=AsyncMock,
-            return_value=[],
-        ) as mock_fetch,
+        _seed_work_list_patch() as mock_work_list,
         patch(
             "backlogg.scheduler.jobs.async_session_factory",
             new=_mocked_session_factory(),
         ),
-        get_cursor,
-        set_cursor,
     ):
         result = await sync_jobs.sync_games()
 
-    mock_fetch.assert_awaited_once_with(limit=_CUSTOM_LIMIT, offset=0)
+    mock_work_list.assert_awaited_once_with("GAME", "IGDB", _CUSTOM_LIMIT)
     assert result["errors"] == 0
+    assert not hasattr(sync_jobs.settings, "SEED_TOP_N_GAMES")

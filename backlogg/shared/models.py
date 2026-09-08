@@ -142,10 +142,13 @@ class SyncCursor(Base):
     (MOVIE, SERIES, BOOK, GAME).  ``next_offset`` is where the next sync
     run should start fetching from the external API's popular listing.
 
-    ⚠️ Since feature 86 only BOOK and GAME use this table.  Movies and series
-    are driven by ``seed_targets`` (below) plus a ``last_synced_at`` rotation,
-    with no offset in the picture; their rows are left in place but never read
-    or written again.  See ``docs/schema.md``.
+    ⚠️ Since feature 90 only BOOK uses this table.  Movies and series left in
+    feature 86 and games in feature 90: all three are driven by
+    ``seed_targets`` (below) plus a ``last_synced_at`` rotation, with no offset
+    in the picture.  Their rows are left in place but never read or written
+    again — same treatment for all three, so "there is a GAME row in
+    ``sync_cursors``" means nothing more than "there was one before feature
+    90".  See ``docs/schema.md``.
     """
 
     __tablename__ = "sync_cursors"
@@ -164,6 +167,14 @@ class SeedTarget(Base):
     items clear the quality threshold" in ~3.600 cheap requests; this table
     holds that answer so the expensive part (one detail request per item) can
     be resumed, ordered and audited independently.
+
+    Feature 90 put games on the same table (``source = 'IGDB'``).  The
+    enumeration there is 64 keyset requests under the ``game_type`` allowlist
+    plus ``rating > 0``, and the hydration is bulk — ``where id = (...)``
+    returns 500 games at once — so the split buys less speed than it does for
+    TMDB.  What it buys instead is the thing this docstring opens with: a
+    catalog defined by a filter rather than by a wraparound target, which is
+    what took the game catalog off its 10.000-row cap.
 
     Why a table and not a cursor: an offset into a listing that reorders
     itself resumes nothing (``docs/seeding-plan.md`` §1).  With the target list

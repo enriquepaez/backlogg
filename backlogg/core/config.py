@@ -14,27 +14,31 @@ class Settings(BaseSettings):
     # Ranking-walk target per type: how many items of the external API's
     # popular listing one full cursor cycle covers before wrapping to 0.
     #
-    # ⚠️ Since feature 86 SEED_TOP_N_MOVIES and SEED_TOP_N_SERIES are INERT.
-    # Movies and series are no longer enumerated by walking /movie/popular and
-    # /tv/popular: their catalog is defined by a *quality threshold*
-    # (TMDB_SEED_MIN_VOTES_*) and enumerated with /discover into the
-    # ``seed_targets`` table, so there is no item-count cutoff left to
-    # configure and no cursor left to wrap. They are kept (rather than
-    # deleted) because they are still set as environment variables on Render
-    # and in .github/workflows/backfill-sync.yml, and removing a name that
-    # deployments export would break nothing but read as an accident.
+    # ⚠️ Only SEED_TOP_N_BOOKS still does anything, and only on the cursor
+    # path (sync_books and scripts/backfill_sync.py book, which page
+    # search.json by offset and wrap on it). For the *seeding* of books it has
+    # been inert since feature 87: scripts/seed_openlibrary_books.py selects
+    # from the monthly Open Library dumps by the BOOKS_SEED_MIN_* thresholds
+    # below, with no item-count cutoff.
     #
-    # ⚠️ Since feature 87 SEED_TOP_N_BOOKS is inert for the *seeding* path too:
-    # scripts/seed_openlibrary_books.py selects the book catalog from the
-    # monthly Open Library dumps by the BOOKS_SEED_MIN_* thresholds below, with
-    # no item-count cutoff. It stays live for the *cursor* path — sync_books
-    # and scripts/backfill_sync.py book still page search.json and wrap on it.
-    # SEED_TOP_N_GAMES is fully live: games are unchanged.
+    # ⚠️ SEED_TOP_N_MOVIES and SEED_TOP_N_SERIES are INERT since feature 86,
+    # and they are kept (rather than deleted) because deployments still export
+    # them and removing a name a deployment declares reads as an accident.
+    #
+    # ⚠️ SEED_TOP_N_GAMES is **gone** since feature 90, and that is a different
+    # decision from the two above on purpose. Games moved to seed_targets like
+    # movies and series, so the setting became inert — but unlike them it was
+    # actively harmful while it existed: it was the wraparound target of a
+    # cursor *shared* with the backfill workflow, so the seeding of 2026-09-07
+    # stopped at exactly 10.000 of the ~31.988 games that pass the filter, and
+    # the dispatch needed a -f seed_top_n that had to match Render by hand. A
+    # name that used to cap the catalog is worth removing outright rather than
+    # leaving around to be re-wired by mistake. Deployments that still export
+    # it are ignored (model_config has extra="ignore").
     # See docs/seeding-plan.md §3 and docs/operations.md.
     SEED_TOP_N_MOVIES: int = 100
     SEED_TOP_N_SERIES: int = 100
     SEED_TOP_N_BOOKS: int = 100
-    SEED_TOP_N_GAMES: int = 100
 
     # TMDB catalog definition (feature 86, docs/seeding-plan.md §1 and §3).
     # The catalog is defined by a vote_count threshold, not by a number of
@@ -64,9 +68,14 @@ class Settings(BaseSettings):
 
     # How many *conclusive* hydration passes a seed target gets before it is
     # retired from the work list as unlinkable.  A pass counts only when the
-    # fetch actually resolved (item written, or 404): a network failure leaves
-    # the counter alone and is retried for free, so a TMDB outage can never
-    # retire a healthy target.
+    # fetch actually resolved (item written, or the source reporting the id
+    # gone): a network failure leaves the counter alone and is retried for
+    # free, so an outage can never retire a healthy target.
+    #
+    # The TMDB_ prefix is historical: since feature 90 this single knob governs
+    # every target-driven type, games included. It was deliberately not renamed
+    # because it is exported on Render, and a renamed variable does not fail —
+    # it silently falls back to the default.
     #
     # This exists because a target can be *permanently* unlinkable through no
     # fault of the seeding: the detail request resolves and the item still ends

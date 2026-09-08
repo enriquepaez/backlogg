@@ -474,19 +474,35 @@ async def test_run_backfill_summary_reports_people_errors():
 
 
 async def test_run_backfill_tolerates_jobs_without_people_errors():
-    """sync_games reports no people_errors key — the summary must not blow up."""
+    """A job that omits the people_errors key — the summary must not blow up.
+
+    Driven through ``game``, which is target-driven since feature 90 and
+    therefore stops on ``pending == 0`` instead of on a cursor wraparound.
+    ``sync_games`` now reports ``people_errors: 0`` explicitly (it is part of
+    the shared result contract of the target-driven jobs), so the payload here
+    omits the key deliberately: the ``.get`` default in the loop is what keeps
+    a job that does not report it from raising a ``KeyError``.
+    """
     with (
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock, side_effect=[0, 0]),
+        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
         patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
         patch(
             "backlogg.scheduler.jobs.sync_games",
             new_callable=AsyncMock,
-            return_value={"synced": 10, "errors": 0, "offset": 0, "duration_s": 0.1},
+            return_value={
+                "synced": 10,
+                "errors": 0,
+                "offset": 0,
+                "duration_s": 0.1,
+                "pending": 0,
+                "stuck": 0,
+            },
         ),
     ):
         summary = await backfill_sync.run_backfill("game", slice_size=500, time_budget_s=3600)
 
     assert summary["people_errors"] == 0
+    assert summary["stop_reason"] == "exhausted"
 
 
 # ── CLI wiring ───────────────────────────────────────────────────────────────
