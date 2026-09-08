@@ -62,6 +62,11 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 | `R2_BUCKET_NAME` | (config) | Bucket donde se guardan los avatares |
 | `R2_PUBLIC_BASE_URL` | (config) | Base pública desde la que se sirven los avatares subidos |
 
+Las variables del **incremental** (`TMDB_INCREMENTAL_*`, `TMDB_PROMOTION_YEARS`,
+`IGDB_INCREMENTAL_*`) no están en esta tabla a propósito: el incremental nunca
+corre dentro del servidor, sino en GitHub Actions contra Neon. Están
+documentadas en la sección *Incremental del catálogo*.
+
 El envío de email usa SMTP genérico de la stdlib (`smtplib`), sin dependencias
 externas. `SMTP_PASSWORD` es un secreto: configúralo en Render como
 *environment secret*. La app nunca lo escribe en logs ni lo incluye en
@@ -233,9 +238,9 @@ cambia.
 |---|---|
 | `RENDER_API_URL` | nightly-sync.yml |
 | `ADMIN_API_KEY` | nightly-sync.yml |
-| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml |
-| `TMDB_API_KEY` | backfill-sync.yml |
-| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | backfill-sync.yml |
+| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml, incremental-sync.yml |
+| `TMDB_API_KEY` | backfill-sync.yml, incremental-sync.yml |
+| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | backfill-sync.yml, incremental-sync.yml |
 
 Añadir/rotar con `gh secret set <NOMBRE>` (valor interactivo, nunca en chat/logs).
 
@@ -262,6 +267,13 @@ Qué procesa cada run depende del tipo (feature 86):
   `seed_targets` (los que aún no tienen fila en `external_ids`) y, si no quedan,
   rellenan la rebanada con los ítems de `last_synced_at` más antiguo. No hay
   cursor: el campo `offset` de la respuesta es siempre `0` para estos dos tipos.
+
+**Desde la feature 88 el nocturno es también la red de seguridad.** La
+frescura del catálogo la lleva ahora el incremental de las 09:00 UTC (sección
+*Incremental del catálogo*), que pregunta a cada fuente qué ha cambiado. La
+rotación por `last_synced_at` de `movie`/`series` **no se retira**: es lo único
+que puede cubrir los días que `/movie/changes` y `/tv/changes` ya no conservan
+(su historial es de 14 días y no más). Cambia de papel, no de existencia.
 
 **El nocturno ya no refresca nada.** Hasta la feature 91 cada job terminaba con
 `REFRESH MATERIALIZED VIEW CONCURRENTLY catalog_search`, y ese paso es
@@ -875,6 +887,159 @@ Un hueco que no baja tras un run `exhausted` con `people_errors = 0` y
 `skipped_no_external_id = 0` significa que esos ítems **no tienen credits en
 la fuente**: quedan sellados y ya no vuelven a entrar en la lista.
 
+## Incremental del catálogo
+
+Feature 88. Es lo que impide que el catálogo se congele el día de la siembra:
+sin él no entran estrenos y no promocionan los ítems que cruzan
+`vote_count >= 25` a posteriori. **No es un barrido**: le pregunta a cada
+fuente qué ha cambiado desde la última vez y escribe solo eso.
+
+### Cómo se dispara
+
+`.github/workflows/incremental-sync.yml`, cron **`0 9 * * *`** (diario, 09:00
+UTC), más `workflow_dispatch`. Corre `scripts/incremental_sync.py` **directo
+contra Neon**, no contra Render: el fichero diario de IDs de TMDB son 28 MB gz
+y una edición de dump de Open Library son 17,5 GB, y la instancia free duerme y
+corta a ~15 min. **No hay endpoint admin para esto** y por eso `bruno/` no lo
+recoge.
+
+Por qué a las 09:00 y no en el nocturno de las 02:00: TMDB publica el fichero
+del día **~08:00 UTC**, así que un run a las 02:00 recibiría un 404 y
+reprocesaría el de ayer. Por qué **diario**: las dos vías de TMDB tienen
+granularidad de día, y correr a diario deja 13 días de margen antes de que la
+retención de 14 días de `/changes` muerda.
+
+```bash
+# Lanzarlo manualmente (las cuatro fuentes)
+gh workflow run incremental-sync.yml
+
+# Una sola fuente
+gh workflow run incremental-sync.yml -f source=game
+
+# Re-diffear una edición de dump que la marca ya cubre (idempotente, no gratis)
+gh workflow run incremental-sync.yml -f source=book -f force_book=true
+
+# Ver los últimos runs / seguir el más reciente
+gh run list --workflow=incremental-sync.yml --limit 5
+gh run watch "$(gh run list --workflow=incremental-sync.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+
+# En local (usa la DATABASE_URL del entorno; NO toca .env)
+uv run python scripts/incremental_sync.py --source movie
+uv run python scripts/incremental_sync.py --skip book
+```
+
+**Códigos de salida**: `0` limpio · `2` **degradado** (una fuente falló o hubo
+ítems rechazados; el workflow lo convierte en una anotación de *warning*, no en
+un job rojo, porque un incremental parcial sigue siendo mejor que ninguno y la
+marca de la fuente caída **no avanzó**) · `1` el run no se pudo hacer (job
+rojo).
+
+### Qué corre cada fuente
+
+| Fuente | Carriles | Marca de agua (`sync_watermarks`) |
+|---|---|---|
+| `movie` / `series` | alta inmediata por fecha (fichero diario de IDs) · barrido de promoción (`/discover`) · re-hidratación (`/changes`) | `TMDB/DAILY_ID_EXPORT/{MOVIE,SERIES}` y `TMDB/CHANGES/{MOVIE,SERIES}` |
+| `game` | `where created_at > X` (altas, con la allowlist de `game_type`) · `where updated_at > X` (refresco de lo ya catalogado) | `IGDB/CREATED_AT/GAME` y `IGDB/UPDATED_AT/GAME` |
+| `book` | diff del dump mensual contra el catálogo; **no descarga nada** si la edición publicada es la ya diffeada | `OPEN_LIBRARY/MONTHLY_DUMP/BOOK` |
+
+Una fuente que falla **no aborta las demás** (C19), y su marca no avanza, así
+que el run siguiente vuelve a cubrir ese tramo.
+
+### Variables
+
+Todas son de **entorno del workflow / del script**, no de Render: el servidor
+nunca ejecuta el incremental in-process.
+
+| Env var | Default | Notas |
+|---|---|---|
+| `TMDB_INCREMENTAL_MAX_AGE_DAYS` | 90 | Días hacia atrás que la puerta de estreno admite un ID nuevo. Ancho para que un run caído dos semanas siga recogiendo lo que perdió |
+| `TMDB_INCREMENTAL_HORIZON_DAYS` | 180 | Días hacia adelante. Más allá es un anuncio, no un estreno |
+| `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS` | 7 | Atraso máximo del fichero base antes de **re-baselinear** en vez de difear. Difear contra un fichero de hace un mes cuesta N veces las peticiones de detalle |
+| `TMDB_PROMOTION_YEARS` | 10 | Años recientes que re-enumera el barrido de promoción. **Ventanas planificadas == este número**, salvo que `TMDB_SEED_START_YEAR` recorte el rango por abajo. El `windows` del resumen puede salir **mayor**: una ventana anual que supere las 500 páginas de `/discover` se parte en sus doce meses y cada mes cuenta como ventana |
+| `IGDB_INCREMENTAL_LOOKBACK_DAYS` | 7 | Ventana del arranque en frío sin marca. Evita `created_at > 0`, que es la base entera de IGDB |
+| `IGDB_INCREMENTAL_MAX_ITEMS` | 2000 | Techo por carril y por run. Tocarlo no pierde nada: el orden es ascendente y la marca avanza al último visto |
+
+Secrets que consume el workflow: `DATABASE_URL`, `TMDB_API_KEY`,
+`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` (los mismos de `backfill-sync.yml`).
+
+### Qué mirar
+
+1. **Que corrió**: `last_run_at` de cada fila de `sync_watermarks` (query
+   abajo). Es la señal de frescura; `cursor_value` es otra cosa.
+2. **Que la puerta no rechaza todo**: en el log del carril de estrenos,
+   `gate_reasons`. Un run con `admitted: 0` y `gate_reasons` repartido es una
+   puerta trabajando; uno con todo en `no_release_date` es un payload que
+   cambió de forma.
+3. **`uncovered_days` en el carril de `/changes`**: si aparece, hubo días que
+   TMDB ya no puede responder (ver abajo).
+4. **`truncated_windows` en el carril de `/changes`**: un día concreto declaró
+   más de 500 páginas y `/changes` no admite granularidad menor que el día, así
+   que se recorrieron las 500 primeras y **el resto de ese día no se cubrió**.
+   `truncated_labels` dice cuáles. La marca de agua se queda en el día anterior
+   (no se finge cobertura) y el carril para ahí: esos ítems los refresca el
+   barrido nocturno. Con ~73 páginas/día en movies esto no debería salir nunca;
+   si sale, TMDB creció 6,8× o el tope cambió.
+5. **`skipped_links`** (issue #22): filas escritas cuya terna
+   `(item_type, source, external_id)` ya pertenecía a otro ítem — invisibles
+   para toda búsqueda por id a partir de ahí.
+6. **`saturated: true`** en un carril de IGDB: tocó el techo de
+   `IGDB_INCREMENTAL_MAX_ITEMS`. No se perdió nada, pero si sale varios días
+   seguidos hay un atraso real que conviene subir de techo.
+7. **Carril de libros**: `skipped: true` con `reason: edition_already_diffed`
+   es lo **normal** 29 días de cada 30. Lo anómalo es que un mes entero no
+   aparezca nunca un run que lo diffee.
+
+### Estado de las marcas de agua
+
+```bash
+bash -c 'set -a; source .env; set +a; uv run python -c "
+import asyncio
+from sqlalchemy import text
+from backlogg.core.database import async_session_factory, engine
+async def m():
+    async with async_session_factory() as s:
+        rows = (await s.execute(text(\"SELECT source, kind, item_type, cursor_value, last_run_at FROM sync_watermarks ORDER BY source, kind, item_type\"))).all()
+        for r in rows:
+            print(r)
+    await engine.dispose()
+asyncio.run(m())"'
+```
+
+Se esperan **siete filas** (dos por cada tipo de TMDB, dos de IGDB, una de
+Open Library). Una fila **ausente** significa «ese mecanismo no ha corrido
+nunca» y es distinto de una fila con `cursor_value` NULL, que significa «corrió
+y no produjo corte utilizable».
+
+### Si lleva días sin correr
+
+Cada mecanismo se degrada distinto, y la diferencia importa:
+
+| Mecanismo | Aguanta | Qué pasa al pasarse |
+|---|---|---|
+| `/movie/changes`, `/tv/changes` | **14 días** | El historial anterior **ya no existe** en el endpoint. `plan_change_windows` pide solo lo que TMDB puede responder y devuelve el resto en `uncovered_start`/`uncovered_end` con un `WARNING`. **No se finge cobertura**. Ojo al volumen: `/changes` tiene el **mismo tope de 500 páginas** que `/discover` y movies produce ~73 páginas/día (medido 2026-09-08: 746 páginas en 13 días), así que la ventana de recuperación se trocea sola hasta caber |
+| Fichero diario de IDs | 3 meses de retención, pero el script corta a `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS` (7) | **Re-baselinea**: graba el fichero de hoy como línea base, reporta `rebaseline_reason` y `skipped_days`, y no admite nada de ese tramo |
+| IGDB | sin límite | La query sigue respondiendo por antigua que sea la marca; solo puede tocar el techo de `IGDB_INCREMENTAL_MAX_ITEMS` y tardar varios runs en ponerse al día |
+| Dump de Open Library | un mes | Se diffea la edición publicada; las intermedias no existen (el alias `latest` solo apunta a una) |
+
+**Qué hacer**:
+
+1. Lanzar el incremental a mano (`gh workflow run incremental-sync.yml`) y
+   dejar que cada carril se ponga al día por su cuenta. Es idempotente.
+2. Si el carril de `/changes` reportó `uncovered_days`, esos días **no se
+   recuperan por esa vía**. La conducta definida es dejar que los cubra el
+   **barrido nocturno por `last_synced_at`** (sección *Sync nocturno*), que la
+   feature 88 mantiene en pie precisamente como red de seguridad. Si el hueco
+   es grande y urge, un `backfill-sync.yml` en `mode=hydrate` fuerza el
+   refresco de golpe.
+3. Si lo que se perdió son **estrenos** (re-baseline del fichero diario), no
+   hace falta nada extra: entran por el barrido de promoción en cuanto ganen
+   sus primeros votos. Para forzarlo antes,
+   `backfill-sync.yml` en `mode=enumerate`.
+4. Si el carril de libros lleva más de un mes sin diffear, un run normal basta:
+   la marca está atrás y la edición publicada es nueva, así que hará la pasada
+   completa (~2 h). El work dir se cachea por edición, de modo que un run que
+   muera a mitad se reanuda sin volver a bajar los 12,59 GB de ediciones.
+
 ## Endpoints admin
 
 ```bash
@@ -909,6 +1074,10 @@ async def m():
     await engine.dispose()
 asyncio.run(m())"'
 ```
+
+Las **marcas de agua** del incremental (feature 88) son otra tabla y otra
+pregunta: `sync_watermarks` guarda un *corte temporal* por mecanismo, no un
+offset. Su consulta está en la sección *Incremental del catálogo*.
 
 ## Métricas (Prometheus)
 

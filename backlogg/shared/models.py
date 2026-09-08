@@ -19,7 +19,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backlogg.core.database import Base
 from backlogg.shared.codes import CreditRoleCode, ItemTypeCode
 
-__all__ = ["Base", "Person", "Credit", "ItemCast", "SyncCursor", "SeedTarget"]
+__all__ = [
+    "Base",
+    "Person",
+    "Credit",
+    "ItemCast",
+    "SyncCursor",
+    "SeedTarget",
+    "SyncWatermark",
+]
 
 
 class Person(Base):
@@ -212,4 +220,106 @@ class SeedTarget(Base):
     __table_args__ = (
         UniqueConstraint("item_type", "source", "external_id", name="uq_seed_target"),
         Index("idx_seed_targets_work_order", "item_type", "source", "attempts"),
+    )
+
+
+class SyncWatermark(Base):
+    """Where each incremental mechanism left off, per source and per mechanism.
+
+    Feature 88 stops maintaining the catalog by re-walking full listings and
+    starts asking every source *what changed since last time*.  That question
+    needs a persisted answer to "last time", and neither of the two existing
+    state tables can give it:
+
+    - ``sync_cursors`` holds a **numeric offset** into a listing
+      (``next_offset``).  It answers "how far down the page am I", not "up to
+      which instant have I already seen the world".  Its ``updated_at`` is a
+      row-touch timestamp, not a cut-off: it moves when the row is written,
+      which is *after* the window was queried, so resuming from it would
+      silently drop everything that happened while the run was running.
+    - ``seed_targets`` is a **work list by difference** against the catalog.
+      It converges without any cursor precisely because it is stateless in
+      time — which is its strength for hydration and exactly why it cannot
+      express "ask TMDB for the changes of the last N days".
+
+    Shape of the key: ``(source, kind, item_type)``
+    ----------------------------------------------
+
+    The watermark is per source *and* per mechanism, because two mechanisms of
+    the same source advance independently and can fail independently.  These
+    are the rows the incremental actually writes:
+
+    ========== ==================== ========= ==========================
+    source     kind                 item_type cursor_value holds
+    ========== ==================== ========= ==========================
+    TMDB       ``DAILY_ID_EXPORT``  MOVIE     date of the export file
+    TMDB       ``DAILY_ID_EXPORT``  SERIES    date of the export file
+    TMDB       ``CHANGES``          MOVIE     last instant covered
+    TMDB       ``CHANGES``          SERIES    last instant covered
+    IGDB       ``CREATED_AT``       GAME      last ``created_at`` covered
+    IGDB       ``UPDATED_AT``       GAME      last ``updated_at`` covered
+    OPEN_LIBR. ``MONTHLY_DUMP``     BOOK      edition of the dump diffed
+    ========== ==================== ========= ==========================
+
+    All three parts are load-bearing.  ``source`` alone collapses the two TMDB
+    mechanisms, which is wrong: ``/changes`` can be 5 days behind while the
+    daily export is current, and resuming either from the other's cut-off
+    loses or re-does work.  ``(source, kind)`` alone collapses movies and
+    series, which run as two separate passes against two separate endpoints
+    and, being independent, can end a night at different points.  ``item_type``
+    is the third axis and nothing smaller works.
+
+    ``item_type`` is **NOT NULL** even for mechanisms that only serve one type.
+    A nullable column inside the key would be a real bug and not just a
+    modelling preference: Postgres treats NULLs as distinct in a unique index,
+    so ``INSERT ... ON CONFLICT`` would never match an existing row and every
+    run would append a duplicate instead of advancing the watermark.  So
+    Open Library writes ``BOOK`` explicitly.
+
+    Why two columns and not one
+    ---------------------------
+
+    ``last_run_at`` (when the mechanism last completed successfully) and
+    ``cursor_value`` (the cut-off the *next* run must use) look redundant and
+    are not.  They differ in two independent ways:
+
+    1. **They are not the same clock.**  A run that queried up to instant *T*
+       and finished at *T+9min* must resume at *T*: resuming at its own
+       finish time drops the changes of those 9 minutes for good.  And the
+       daily ID export is published around 08:00 UTC, so a run at 00:10 UTC
+       processes *yesterday's* file — deriving the next cut-off from the run's
+       clock would skip a day or re-read one.
+    2. **They are not the same type.**  For ``CHANGES`` and the two IGDB kinds
+       the cut-off is an instant; for ``DAILY_ID_EXPORT`` it is the date of the
+       file already processed; for ``MONTHLY_DUMP`` it is which dump edition
+       was diffed.  ``cursor_value`` is therefore ``Text``, opaque to this
+       layer and parsed by the mechanism that wrote it (ISO-8601 in every case
+       so it sorts and reads sanely), instead of a ``timestamptz`` that would
+       force a fake midnight on a file date and a fake instant on a dump
+       edition.
+
+    ``last_run_at`` earns its place on the operational side: it is the freshness
+    signal ("did the incremental run last night?") and, for ``CHANGES``, the
+    input to the 14-day gap check — TMDB only answers for the last 14 days, so
+    a mechanism whose watermark is older than that has a hole that ``/changes``
+    can no longer fill and only the full sweep can (see
+    ``backlogg.scheduler.discovery.plan_change_windows``).
+
+    ``cursor_value`` is nullable so a row can exist for a mechanism that ran
+    but produced no usable cut-off yet (a first pass that found nothing), which
+    is different from the mechanism never having run at all — that is simply
+    the absence of the row.
+    """
+
+    __tablename__ = "sync_watermarks"
+
+    source: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40), primary_key=True)
+    item_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    cursor_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

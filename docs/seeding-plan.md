@@ -447,7 +447,8 @@ por autor, que es justo lo que la política de Open Library prohíbe.
 
 **Lo que esta feature no cambia**: `sync_books` (nocturno), `search_book`, el
 fallback on-demand y `get_book` siguen sobre `search.json`. El incremental
-desde dumps es la feature 88 (§6).
+desde dumps es la feature 88 (§6), que reutiliza estas mismas cinco fases con
+`--only-new`.
 
 ### IGDB — nada que cambiar
 
@@ -595,29 +596,102 @@ reintento eterno.
 
 ## 6. Mantenimiento: estrenos y publicaciones
 
+> ✅ **Implementado en la feature 88** (`scripts/incremental_sync.py`,
+> `.github/workflows/incremental-sync.yml`, los tres jobs `*_incremental` de
+> `backlogg/scheduler/jobs.py` y la tabla `sync_watermarks`). Esta sección
+> pasó de plan a mecanismo: lo que sigue describe lo que corre, no lo que se
+> pensaba hacer.
+
 El incremental **no es re-recorrer `/popular`**. Cada fuente tiene su mecanismo
-nativo:
+nativo, y todos guardan dónde se quedaron en `sync_watermarks`
+(`docs/schema.md`), una fila por fuente, mecanismo y tipo:
 
 | Fuente | Novedades | Actualizaciones |
 |---|---|---|
-| **TMDB** | Diff del fichero diario de IDs contra el estado local → IDs nuevos | [`/movie/changes` y `/tv/changes`](https://developer.themoviedb.org/reference/changes-movie-list): IDs cambiados, ventana máxima de **14 días**, 100 por página |
-| **Open Library** | Diff del dump mensual, o `/recentchanges` | Igual |
-| **IGDB** | `where created_at > <última ejecución>` en la propia query | `where updated_at > <última ejecución>` |
+| **TMDB** | Diff del fichero diario de IDs contra el estado local → IDs nuevos, filtrados por la **puerta de estreno** (fecha, no votos) | [`/movie/changes` y `/tv/changes`](https://developer.themoviedb.org/reference/changes-movie-list): IDs cambiados, ventana máxima de **14 días**, 100 por página y **tope de 500 páginas** (~73 páginas/día en movies, así que la ventana se trocea hasta caber, suelo de un día). **Solo re-hidrata lo que el catálogo ya tiene** |
+| **Open Library** | **Diff del dump mensual** contra el catálogo. `/recentchanges` evaluado y **descartado** (abajo) | Igual: la misma pasada mensual |
+| **IGDB** | `where created_at > <marca>` en la propia query, con la allowlist de `game_type` todavía en el `where` | `where updated_at > <marca>`, refrescando **solo** lo que el catálogo ya tiene |
 
-> ⚠️ **Un estreno no tiene votos el día que sale.** El incremental no puede usar
-> `vote_count ≥ 25` como puerta de entrada o no entraría ninguna novedad jamás.
-> Hacen falta dos caminos separados:
->
-> - **Alta inmediata de estrenos por fecha**, para que el catálogo tenga las
->   novedades desde el día uno.
-> - **Barrido periódico de promoción**: ítems que estaban por debajo del umbral y
->   lo han cruzado. `/discover` con `vote_count.gte=25` sobre los últimos años,
->   comparado con lo que ya está en el catálogo, resuelve esto sin estado extra.
->
-> Sin el segundo camino el catálogo se congela: una película de 2019 que gane
-> tracción en 2027 no entraría nunca.
+Cadencia: **diaria, 09:00 UTC**. La hora no es arbitraria — el fichero diario
+de IDs se publica ~08:00 UTC, así que un run antes de esa hora recibe un 404 y
+reprocesa el de ayer (ese es también el motivo de no colgarlo del nocturno de
+las 02:00). Y la frecuencia tampoco: correr a diario deja **13 días de margen**
+antes de que la retención de 14 días de `/changes` convierta una caída en
+información irrecuperable.
 
 Volumen diario real: unos pocos cientos de ítems.
+
+### Un estreno no tiene votos el día que sale
+
+El incremental no puede usar `vote_count >= 25` como puerta de entrada o no
+entraría ninguna novedad jamás. Hay **dos caminos separados**, y los dos están
+implementados:
+
+- **Alta inmediata de estrenos por fecha.** Los IDs que aparecen en el fichero
+  diario pasan la `ReleaseGate`: fecha presente y parseable dentro de
+  `[hoy-90, hoy+180]`, ni `adult` ni `video`, `status` fuera de la lista de
+  rechazo del tipo, y póster **o** sinopsis. **Un ID nuevo no es un ítem
+  nuevo**: TMDB gana ~1.000 IDs al día y la mayoría son relleno de catálogo de
+  títulos antiguos y oscuros, que es justo lo que el umbral de votos existe
+  para dejar fuera. La puerta devuelve la **razón** del rechazo, no un bool, y
+  el job cuenta por razón: así se distingue una puerta que trabaja de una que
+  rechaza todo en silencio.
+- **Barrido periódico de promoción.** `/discover` con `vote_count.gte` sobre
+  los últimos `TMDB_PROMOTION_YEARS` años, comparado con lo que ya está en el
+  catálogo → `seed_targets`. No escribe ninguna fila de catálogo: deja trabajo
+  pendiente que el nocturno hidrata. Sin este camino el catálogo se congela:
+  una película de 2019 que gane tracción en 2027 no entraría nunca. Y lo que la
+  puerta de estreno rechaza tampoco se pierde — `too_old` significa «por esta
+  puerta no», no «nunca».
+
+Games no necesita carril de promoción y su ausencia no es un hueco: la barra
+del catálogo de juegos es el ranking por `rating_count` de IGDB, y el nocturno
+`sync_games` ya lo re-recorre por cursor cada noche. Lo que ese recorrido nunca
+podría ver es un juego publicado hoy, que no tiene rating y por tanto no tiene
+puesto — y eso es exactamente lo que cierra el carril `created_at`.
+
+### Books: por qué el dump mensual y no `/recentchanges`
+
+La elección está tomada y el motivo es técnico, no de comodidad.
+
+El filtro de calidad de books (feature 73) se calcula sobre **agregados** —
+`readinglog_count`, `edition_count`, `number_of_pages_median`,
+`first_publish_year` y el `language`, que **una obra no tiene** porque es la
+unión del de sus ediciones. Ninguno vive en la obra: todos salen de recorrer el
+dump de editions. Una obra llegada por `/recentchanges` traería su clave y su
+revisión y **no esos agregados**, así que **no se podría filtrar**: entraría al
+catálogo saltándose la misma puerta de calidad que esta feature exige. Usarlo
+obligaría además a pedir `search.json` obra por obra para reconstruirlos, que
+es el patrón que la política de Open Library prohíbe explícitamente y que el
+adaptador sigue sin poder ritmar (**issue #26**, abierto).
+
+`/recentchanges` queda **descartado con motivo, no pendiente**. Coste asumido y
+dicho en voz alta: una obra publicada el día 2 no entra hasta el dump del mes
+siguiente. Para libros, donde la notoriedad se acumula en meses y no en un fin
+de semana de estreno, es un precio pequeño; para movies y series, donde no lo
+sería, existe la vía de alta inmediata.
+
+El diff **no repite trabajo**: la marca `(OPEN_LIBRARY, MONTHLY_DUMP, BOOK)`
+guarda qué edición se diffeó, el run resuelve qué edición está publicada con
+una petición que **no lee el cuerpo**, y si coinciden no descarga nada. Los
+dumps son mensuales y el incremental corre a diario: 29 días de cada 30 el
+carril de libros cuesta esa única petición.
+
+### El barrido nocturno se queda como red de seguridad
+
+`/changes` pasa a ser el mecanismo principal de frescura, pero la rotación por
+`last_synced_at` de `sync_movies`/`sync_series` **no se retira**: es lo que
+cubre el hueco si el incremental se cae más de 14 días, que es el plazo tras el
+cual esa vía pierde información de forma irrecuperable. Cambia de papel, no de
+existencia.
+
+Cubre además el otro tramo que `/changes` no puede dar: un **día que satura las
+500 páginas** del endpoint (hoy imposible — 73 páginas de 500 —, pero la
+guardia existe). Se reporta en `truncated_windows`/`truncated_labels`, la marca
+de agua se queda en el día anterior y esos ítems se refrescan por el barrido.
+
+Runbook, variables y qué hacer si lleva días sin correr: `docs/operations.md`,
+sección *Incremental del catálogo*.
 
 ---
 
@@ -629,7 +703,7 @@ Volumen diario real: unos pocos cientos de ítems.
 | 2 | **85 `backfill_credits_targeted`** ✅ | Cierra el issue #15, que hoy bloquea la feature 74 |
 | 3 | **86 `tmdb_discover_quality_seeding`** ✅ | Rompe el techo de 10.000 y aplica el criterio de `vote_count` |
 | 4 | **87 `openlibrary_dump_seeding`** ✅ | Elimina `search.json` del camino crítico de la siembra |
-| 5 | **88 `catalog_incremental_updates`** | Mantiene el catálogo sin barridos completos, incluida la promoción por umbral |
+| 5 | **88 `catalog_incremental_updates`** ✅ | Mantiene el catálogo sin barridos completos, incluida la promoción por umbral |
 
 Games no necesita feature de siembra propia: su enumeración actual ya es óptima y
 solo se beneficia de (1).

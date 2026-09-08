@@ -90,6 +90,8 @@ from collections import Counter
 from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from datetime import date
+from email.utils import parsedate_to_datetime
 from typing import IO, Any
 
 import httpx
@@ -158,11 +160,19 @@ _YEAR_RE = re.compile(r"(?<!\d)(1[0-9]{3}|20[0-9]{2})(?!\d)")
 # Used only as a pre-filter over the raw line — see ``aggregate_editions``.
 _WORK_KEY_RE = re.compile(r"/works/(OL\d+W)")
 
+# The dump edition inside the URL the ``latest`` alias redirects to
+# ("https://ia803103.us.archive.org/.../ol_dump_works_2026-08-31.txt.gz").
+# Open Library names every monthly dump after the day it was generated, and
+# that name is what the incremental persists as its watermark — see
+# ``latest_dump_edition``.
+_DUMP_EDITION_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
 __all__ = [
     "DUMP_AUTHORS",
     "DUMP_EDITIONS",
     "DUMP_READING_LOG",
     "DUMP_WORKS",
+    "DumpEditionUnknown",
     "EditionAggregate",
     "SelectedWork",
     "WorkRecord",
@@ -174,6 +184,7 @@ __all__ = [
     "collect_work_records",
     "count_reading_log",
     "dump_url",
+    "latest_dump_edition",
     "merge_edition",
     "parse_dump_line",
     "parse_reading_log_line",
@@ -192,6 +203,69 @@ __all__ = [
 def dump_url(name: str) -> str:
     """URL of the ``latest`` monthly dump *name* (redirects to archive.org)."""
     return _DUMP_URL.format(name=name)
+
+
+class DumpEditionUnknown(RuntimeError):
+    """Raised when the published dump edition cannot be identified."""
+
+
+def latest_dump_edition(name: str = DUMP_WORKS) -> date:
+    """Which monthly edition the ``latest`` alias currently points at.
+
+    This is the cheap question the book incremental (feature 88) asks *before*
+    doing anything else: Open Library publishes one dump a month, so on 29 days
+    out of 30 the answer equals the persisted watermark and the whole 17,5 GB
+    pass is skipped without a single byte downloaded. It costs one request that
+    reads **no body** — the redirect chain is followed, the headers are read,
+    and the response is closed before the first chunk.
+
+    The edition comes out of the *final* URL because that is where Open Library
+    puts it: ``ol_dump_works_latest.txt.gz`` is an alias that redirects to
+    archive.org, whose item and file are both named after the generation day
+    (``ol_dump_2026-08-31/ol_dump_works_2026-08-31.txt.gz``). The
+    ``Last-Modified`` header is the documented fallback and not the primary
+    source: it is the mtime of the *file*, which a re-upload or a mirror sync
+    can move without a new edition existing.
+
+    Raises :class:`DumpEditionUnknown` when neither yields a date. That is
+    deliberate rather than "assume it is new": guessing would either re-run a
+    two-hour pass every night or skip a real new edition for a month, and both
+    are worse than a red run that says the alias changed shape.
+
+    The date is built explicitly with ``date(...)``/``parsedate_to_datetime``
+    (checkpoint C14) — never handed to the database as the string it arrived as.
+    """
+    url = dump_url(name)
+    with httpx.Client(
+        headers=_DUMP_HEADERS, timeout=_DUMP_TIMEOUT, follow_redirects=True
+    ) as client:
+        with client.stream("GET", url) as response:
+            response.raise_for_status()
+            final_url = str(response.url)
+            last_modified = response.headers.get("last-modified")
+
+    match = _DUMP_EDITION_RE.search(final_url)
+    if match is not None:
+        year, month, day = (int(part) for part in match.groups())
+        try:
+            return date(year, month, day)
+        except ValueError as exc:  # e.g. a "2026-13-45" that is not a date
+            raise DumpEditionUnknown(
+                f"dump {name}: {final_url!r} carries {match.group(0)!r}, which is not a date"
+            ) from exc
+
+    if last_modified:
+        try:
+            return parsedate_to_datetime(last_modified).date()
+        except (TypeError, ValueError) as exc:
+            raise DumpEditionUnknown(
+                f"dump {name}: no edition in {final_url!r} and an unparseable "
+                f"Last-Modified {last_modified!r}"
+            ) from exc
+
+    raise DumpEditionUnknown(
+        f"dump {name}: no edition date in {final_url!r} and no Last-Modified header"
+    )
 
 
 class _ChunkReader(io.RawIOBase):

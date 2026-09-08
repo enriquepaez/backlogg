@@ -1,0 +1,123 @@
+name: Incremental catalog sync
+
+on:
+  schedule:
+    # 09:00 UTC daily. The hour is not arbitrary and neither is the cadence:
+    #
+    # * TMDB publishes the daily id export at ~08:00 UTC (the job starts around
+    #   07:00). A run before that would 404 on today's file and re-process
+    #   yesterday's, so 09:00 leaves an hour of slack. This is also why the
+    #   incremental does NOT ride the 02:00 nightly sync: at 02:00 the file of
+    #   the day does not exist yet.
+    # * DAILY, because the two TMDB feeds have daily granularity — the export
+    #   is published once a day and /changes is queried in whole days — so a
+    #   second run the same day would ask the same questions and get the same
+    #   answers.
+    # * Daily is also what keeps the 14-day retention of /movie/changes and
+    #   /tv/changes from ever biting: a daily run leaves 13 days of slack
+    #   before an outage turns into data this route can no longer recover
+    #   (see docs/operations.md, "Si lleva días sin correr"). The id export
+    #   files are kept 3 months, so they are not the binding constraint.
+    # * The book lane costs one request on 29 days out of 30: it compares the
+    #   published Open Library dump edition against its watermark and stops
+    #   there. The month the edition changes, it does the 17,5 GB pass — which
+    #   is why the timeout below is generous.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Run a single source instead of all four (blank = all)'
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - movie
+          - series
+          - game
+          - book
+      force_book:
+        description: 'book only — re-diff a dump edition the watermark already covers (idempotent, just not free)'
+        required: false
+        type: boolean
+        default: false
+
+# Runs straight against the production database (Neon) and the external APIs,
+# bypassing Render entirely: the TMDB daily id export is a 28 MB gzip stream
+# and an Open Library dump edition is 17,5 GB, neither of which fits in
+# Render's ~15 min per-request cap on an instance that sleeps when idle. There
+# is no admin endpoint for any of this, so nothing here talks HTTP to backlogg.
+#
+# Progress is persisted in sync_watermarks (one row per source, mechanism and
+# item type), so a re-dispatch never redoes covered ground and an interrupted
+# run costs the difference rather than the whole month.
+jobs:
+  incremental:
+    runs-on: ubuntu-latest
+    # Generous because of the one day a month the book lane does real work
+    # (four dump passes, ~2 h of download plus the write). Every other day the
+    # whole run is minutes.
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Resumability across dispatches: every dispatch gets a fresh runner, so
+      # without a restored work dir a book run that died in phase 3 would have
+      # to re-download the 12,59 GB of editions.
+      #
+      # Unlike backfill-sync.yml, restoring here is NOT opt-in and does not
+      # need to be: incremental_sync.py puts each edition's artifacts in a
+      # subdirectory named after the edition, so a restored work dir from an
+      # older month is simply never looked at. The trap that forced the opt-in
+      # there (silently re-seeding a stale dump) cannot happen when the
+      # edition is part of the path.
+      - name: Restore Open Library incremental work dir
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/openlibrary-incremental
+          key: openlibrary-incremental-workdir-${{ github.run_id }}
+          restore-keys: openlibrary-incremental-workdir-
+
+      # Exit code 2 = the run finished DEGRADED (a source failed, or items were
+      # rejected). The step below turns that into a warning annotation instead
+      # of a red job, because a partial incremental is still better than none
+      # and the failed source's watermark did not advance — tomorrow's run
+      # covers the same ground. Exit code 1 (the run could not be made at all)
+      # does fail the job.
+      - name: Run the incremental
+        run: |
+          set +e
+          uv run python scripts/incremental_sync.py \
+            --work-dir "${{ runner.temp }}/openlibrary-incremental" \
+            ${{ github.event.inputs.source != '' && format('--source {0}', github.event.inputs.source) || '' }} \
+            ${{ github.event.inputs.force_book == 'true' && '--force' || '' }}
+          status=$?
+          set -e
+          case "$status" in
+            0) echo "incremental: clean run" ;;
+            2) echo "::warning::incremental: DEGRADED run — a source failed or items were rejected. Its watermark did not advance, so the next run re-covers that ground. Check the log above." ;;
+            *) echo "::error::incremental: the run could not be made (exit $status)"; exit "$status" ;;
+          esac
+
+      - name: Save Open Library incremental work dir
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/openlibrary-incremental
+          key: openlibrary-incremental-workdir-${{ github.run_id }}

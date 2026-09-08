@@ -61,6 +61,83 @@ Detalles que importan:
   esos ítems siguen entrando por el fallback on-demand y por el fan-out de
   búsqueda.
 
+### Los dos mecanismos incrementales de TMDB (feature 88)
+
+Ninguno de los dos sirve para *sembrar*, y los dos son la única forma de
+mantener el catálogo al día sin re-recorrerlo entero. Límites literales, no
+aproximados.
+
+#### 1. Ficheros diarios de IDs
+
+```
+https://files.tmdb.org/p/exports/movie_ids_MM_DD_YYYY.json.gz      (28 MB gz)
+https://files.tmdb.org/p/exports/tv_series_ids_MM_DD_YYYY.json.gz  ( 5 MB gz)
+```
+
+- **Formato**: JSONL **comprimido** — un objeto JSON por línea, *no* un array.
+  Campos: `id`, `original_title`/`original_name`, `popularity`, `adult`,
+  `video`. Tamaños medidos el 2026-09-02.
+- **Nombre del fichero**: `MM_DD_YYYY` (mes primero), no ISO.
+- **Publicación**: el job de TMDB arranca **~07:00 UTC** y el fichero está
+  disponible **~08:00 UTC**. Pedir el fichero del día antes de esa hora
+  devuelve **404**; el adaptador lo codifica en `latest_export_date(now)`, que
+  exige un `now` con tzinfo porque la hora de publicación es un hecho UTC.
+- **Retención: 3 meses.** Es el límite que acota cuánto puede atrasarse el
+  diff antes de perder la referencia (ver
+  `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS`, que corta mucho antes por coste).
+- **Las entradas `adult` van en ficheros `adult_*` aparte**, así que el filtro
+  relevante dentro del fichero normal es `video=true` (62.264 entradas en
+  movies el 2026-09-02).
+- **No traen `vote_count`**, así que **no permiten aplicar el criterio de
+  calidad**: su papel es el **diff** («qué IDs aparecieron desde el fichero que
+  procesé la última vez»), y quién entra de esos IDs lo decide la puerta de
+  estreno tras pedir el detalle.
+- Se consumen en **streaming** (`httpx.stream` + `gzip` sobre el socket), nunca
+  a disco: son ~1,1 M de líneas.
+
+#### 2. `/movie/changes` y `/tv/changes`
+
+```
+GET /movie/changes?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=N
+GET /tv/changes?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=N
+```
+<https://developer.themoviedb.org/reference/changes-movie-list>
+
+- **Ventana máxima: 14 días** por petición. Un rango mayor se trocea
+  (`change_windows`, teselado exacto: sin solape ni hueco).
+- **100 resultados por página** — no los 20 del resto de endpoints de lista.
+- **Tope de 500 páginas, también aquí.** Este documento y el docstring de
+  `fetch_change_ids` afirmaron lo contrario («la ventana ya es el límite»); es
+  **falso** y el primer run real lo demostró con un `HTTP 400` en `page=501`.
+  Medido contra la API el **2026-09-08**:
+
+  | Consulta | `total_pages` | `total_results` |
+  |---|---|---|
+  | `/movie/changes` 2026-08-26..2026-09-08 (13 días) | **746** | 74.593 |
+  | `/movie/changes` 2026-09-07..2026-09-08 (1 día) | 73 | 7.237 |
+  | `/tv/changes` 2026-08-26..2026-09-08 (13 días) | 163 | 16.278 |
+
+  Es decir **~73 páginas/día en movies** y ~13 en series: cualquier ventana de
+  movies de más de ~6 días se pasa, y el caso que se pasa primero es el
+  **arranque en frío**, que pide los 14 días de retención enteros (~1.000
+  páginas). La guardia es la misma de `/discover` y con la misma constante
+  (`MAX_DISCOVER_PAGES`): si la página 1 declara más páginas que el tope, la
+  ventana se **parte por la mitad** y se recorre a trozos, hasta un **suelo de
+  un día** (el endpoint toma fechas, no horas). Un día que aun así se pase se
+  recorre hasta la página 500 y **se reporta como tramo no cubierto**
+  (`ChangeFeed.truncated_labels`): la marca de agua no lo rebasa y esos ítems
+  quedan para el barrido nocturno por `last_synced_at`. Con 73 páginas/día hace
+  falta un 6,8× de crecimiento para que ocurra: es guardia, no pronóstico.
+- **Retención: 14 días.** Es un límite **distinto** del anterior y confundirlos
+  es lo que produce la mentira: el de la ventana se resuelve troceando y no
+  pierde nada; el de retención **no se puede resolver**, porque si el último
+  run fue hace 30 días los días 15 a 30 ya no existen en el endpoint. El
+  planificador devuelve ese tramo como `uncovered_start`/`uncovered_end` y la
+  conducta definida es caer al barrido nocturno por `last_synced_at`.
+- **El payload solo trae `id` y `adult`**: sin título, sin fecha y sin
+  `vote_count`. Por eso esta vía **solo re-hidrata lo que el catálogo ya
+  tiene** — no hay nada ahí que pudiera justificar una admisión.
+
 ### `append_to_response` (feature 86)
 
 `GET /movie/{id}?append_to_response=credits,external_ids` devuelve el detalle,
@@ -629,6 +706,55 @@ claves de obra del corpus.
 Coste en tiempo y disco del run: `docs/operations.md`, sección *Siembra de
 libros desde los dumps de Open Library*.
 
+### Incremental de libros: diff del dump mensual (feature 88)
+
+El mismo dump que siembra el catálogo lo **mantiene**. El incremental no
+descarga nada nuevo: vuelve a hacer las cuatro pasadas cuando aparece una
+edición mensual nueva y escribe **solo** las obras seleccionadas que el
+catálogo todavía no tiene (`scripts/seed_openlibrary_books.py --only-new`,
+orquestado por `scripts/incremental_sync.py`).
+
+**Cómo se sabe qué edición está publicada.** `ol_dump_<name>_latest.txt.gz` es
+un alias que redirige a archive.org, cuyo item y fichero llevan el día de
+generación en el nombre (`ol_dump_2026-08-31/ol_dump_works_2026-08-31.txt.gz`).
+`latest_dump_edition()` sigue la redirección, **no lee el cuerpo** y saca la
+fecha de la URL final; el `Last-Modified` es el fallback documentado y no la
+fuente primaria, porque es el mtime del *fichero* y una resubida o una sync de
+mirror lo mueven sin que exista una edición nueva. Esa fecha es el
+`cursor_value` de la marca `(OPEN_LIBRARY, MONTHLY_DUMP, BOOK)`: si coincide
+con la publicada, el incremental **no descarga ni un byte**.
+
+**Cadencia real**: los dumps son mensuales, el incremental corre a diario. 29
+días de cada 30 el coste del carril de libros es esa única petición.
+
+#### `/recentchanges` — DESCARTADO CON MOTIVO (2026-09-08)
+
+```
+GET https://openlibrary.org/recentchanges/YYYY/MM/DD.json
+```
+
+Existe, devuelve las claves de las obras editadas y **no se usa**. No es una
+tarea pendiente: es una decisión, y el motivo es técnico.
+
+El filtro de calidad de books (feature 73) se calcula sobre **agregados**:
+`readinglog_count`, `edition_count`, `number_of_pages_median`,
+`first_publish_year` y el `language` —que una obra **no tiene**, porque es la
+unión del de sus ediciones—. Ninguno de esos campos vive en la obra: todos
+salen de recorrer el dump de editions (12,59 GB) y el de reading-log. Una obra
+que llegara por `/recentchanges` traería su clave y su revisión, **no esos
+agregados**, así que no habría con qué filtrarla: entraría en el catálogo
+saltándose la puerta de calidad que esta misma feature exige. Usarlo obligaría
+además a pedir `search.json` obra por obra para reconstruir los agregados, que
+es exactamente el patrón que la política de Open Library prohíbe («do not make
+hundreds of single-book requests», ver más arriba) y que el adaptador sigue sin
+poder ritmar (**issue #26**, abierto).
+
+Coste de la decisión, explícito: una obra publicada el día 2 no entra en el
+catálogo hasta el dump del mes siguiente. Es el precio de que todo lo que entra
+haya pasado el mismo filtro, y para libros —donde la notoriedad se acumula en
+meses, no en un fin de semana de estreno— es un precio pequeño. Para movies y
+series, donde no lo sería, existe la vía de alta inmediata por fecha.
+
 ## IGDB (Games)
 
 - **Auth**: Twitch client credentials OAuth2. Request token from
@@ -659,6 +785,33 @@ libros desde los dumps de Open Library*.
     against the same allowlist after `game_to_dict` and skip persisting
     (`upsert_game`) anything outside it. See `docs/schema.md`'s "Category
     allowlist" note for the full list and the excluded categories.
+  - **Novedades y actualizaciones** (feature 88): la propia query language las
+    resuelve, sin fichero de export ni endpoint de cambios, porque **todo
+    registro de IGDB lleva `created_at` y `updated_at`**:
+    ```
+    POST /games
+    Body: fields ...,created_at,updated_at;
+          where game_type = (0,1,2,4,6,7,8,9) & created_at > 1757000000;
+          sort created_at asc;
+          limit 500; offset 0;
+    ```
+    - **Los dos campos son epoch Unix en segundos** (igual que
+      `first_release_date`), no ISO-8601. Se convierten explícitamente con
+      `parse_igdb_timestamp` (checkpoint C14) antes de tocar la marca de agua.
+    - **500 resultados por respuesta**, sea cual sea el `limit` pedido, y
+      **4 req/s**: la paginación es `offset N;` con 0,3 s entre páginas.
+    - `sort <campo> asc` **importa**: con orden ascendente los juegos creados
+      *durante* el recorrido caen al final en vez de desplazar los offsets ya
+      leídos, así que el recorrido es reanudable y la marca puede avanzar al
+      valor más nuevo realmente visto.
+    - **La allowlist de `game_type` sigue en el `where`**: un juego no entra al
+      catálogo por ser nuevo. Lo que **no** va en esta query es `rating > 0`
+      (sí está en la de siembra): un juego publicado hoy no tiene rating, así
+      que exigirlo no admitiría nada — el mismo motivo por el que la vía de
+      TMDB no puede reutilizar `vote_count`.
+    - Dos marcas de agua independientes, `CREATED_AT` y `UPDATED_AT`: son dos
+      queries que pueden fallar por separado.
+    - **Sin dumps**: `GET /v4/dumps` existe pero es **solo para partners**.
   - `POST /covers` — cover art
   - `POST /companies` — developer/publisher for company_credits
   - `POST /involved_companies` — join between games and companies
@@ -823,6 +976,12 @@ libros desde los dumps de Open Library*.
 | `TMDB_SEED_END_YEAR`   | Enumeración TMDB | Último año; vacío = año actual + 1 (TMDB ya trae estrenos futuros fechados) |
 | `TMDB_SEED_CONCURRENCY`| Enumeración + hidratación TMDB | Peticiones TMDB en vuelo (`Semaphore`). Default 8 ≈ 32 req/s frente al límite de ~50 |
 | `TMDB_SEED_MAX_ATTEMPTS`| Hidratación TMDB | Pasadas **concluyentes** que recibe un target antes de retirarse de la lista de trabajo como no enlazable (default: 3). Una petición fallida no cuenta, así que una caída de TMDB no retira targets sanos |
+| `TMDB_INCREMENTAL_MAX_AGE_DAYS` | Incremental TMDB | Días hacia atrás que la puerta de estreno admite un ID nuevo del fichero diario (default: 90) |
+| `TMDB_INCREMENTAL_HORIZON_DAYS` | Incremental TMDB | Días hacia adelante; más allá es un anuncio, no un estreno (default: 180) |
+| `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS` | Incremental TMDB | Atraso máximo del fichero base antes de re-baselinear en vez de difear (default: 7) |
+| `TMDB_PROMOTION_YEARS` | Incremental TMDB | Años de estreno recientes que re-enumera el barrido de promoción (default: 10) |
+| `IGDB_INCREMENTAL_LOOKBACK_DAYS` | Incremental IGDB | Ventana del arranque en frío sin marca de agua; evita `created_at > 0`, que es la base entera de IGDB (default: 7) |
+| `IGDB_INCREMENTAL_MAX_ITEMS` | Incremental IGDB | Techo de juegos por carril y por run; tocarlo no pierde nada, la marca avanza y el run siguiente continúa (default: 2000) |
 | `BOOKS_SEED_MIN_READINGLOG`    | Open Library seed | Mínimo `readinglog_count` del stream inglés (default: 20 → 16.959 obras) |
 | `BOOKS_SEED_MIN_READINGLOG_ES` | Open Library seed | Ídem para el stream en castellano; la señal es ~10× menor, por eso es distinto (default: 5 → 1.858 obras) |
 | `BOOKS_SEED_MIN_PAGES`         | Open Library seed | Mínimo `number_of_pages_median`; descarta folletos (default: 100) |

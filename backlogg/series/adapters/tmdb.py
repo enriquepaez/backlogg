@@ -163,6 +163,41 @@ class TMDBSeriesClient:
             response.raise_for_status()
             return response.json()
 
+    @_tmdb_retry
+    async def get_series_changes_page(
+        self,
+        *,
+        page: int,
+        start_date: date,
+        end_date: date,
+    ) -> dict:
+        """Fetch one raw page of ``/tv/changes`` for a date window.
+
+        Twin of ``TMDBClient.get_movie_changes_page``: the ids of every series
+        TMDB changed inside ``[start_date, end_date]``, 100 per page, at most a
+        14-day span per request and only 14 days of history kept.  Raw
+        pagination only — the slicing and the retention arithmetic live in
+        ``backlogg.scheduler.discovery`` — and the whole payload is returned
+        because the caller needs ``total_pages``.
+
+        Like the movie feed, a result carries ``id`` and ``adult`` and nothing
+        else, so it can drive re-hydration of what the catalog already has and
+        never an admission (feature 88).
+        """
+        params = {
+            "page": page,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+        async with httpx.AsyncClient(timeout=_TMDB_TIMEOUT) as client:
+            response = await client.get(
+                f"{_TMDB_BASE}/tv/changes",
+                headers=self._headers,
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_top_series(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch popular TV series from TMDB by rank.
 

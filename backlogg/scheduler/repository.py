@@ -1,8 +1,10 @@
 """Scheduler repository — persistence for the sync/backfill data access.
 
 Only this module touches SQLAlchemy for the ``sync_cursors`` table, for the
-credits-gap query that drives the targeted backfill (feature 85) and for the
-``seed_targets`` work list that drives the TMDB seeding (feature 86).
+credits-gap query that drives the targeted backfill (feature 85), for the
+``seed_targets`` work list that drives the TMDB seeding (feature 86) and for
+the ``sync_watermarks`` table and the known-id lookups that drive the
+incremental updates (feature 88).
 """
 
 from collections.abc import Sequence
@@ -18,7 +20,7 @@ from backlogg.books.models import Book
 from backlogg.movies.models import Movie
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncCursor
+from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncCursor, SyncWatermark
 
 __all__ = [
     "CREDIT_GAP_SOURCES",
@@ -27,16 +29,21 @@ __all__ = [
     "CreditGaps",
     "SeedTargetProgress",
     "SeedTargetRow",
+    "Watermark",
     "count_seed_target_progress",
     "count_seed_targets",
+    "filter_catalogued_external_ids",
     "get_credit_gaps",
+    "get_known_source_ids",
     "get_pending_seed_targets",
     "get_stale_catalog_external_ids",
     "get_sync_offset",
+    "get_sync_watermark",
     "mark_credits_synced",
     "mark_seed_targets_attempted",
     "mark_seed_targets_unreachable",
     "set_sync_offset",
+    "set_sync_watermark",
     "upsert_seed_targets",
 ]
 
@@ -108,6 +115,126 @@ async def set_sync_offset(db: AsyncSession, item_type: str, next_offset: int) ->
         .on_conflict_do_update(
             index_elements=[SyncCursor.item_type],
             set_={"next_offset": next_offset, "updated_at": func.now()},
+        )
+    )
+    await db.execute(stmt)
+    await db.flush()
+
+
+@dataclass(frozen=True, slots=True)
+class Watermark:
+    """One incremental mechanism's persisted position.
+
+    ``cursor_value`` is the cut-off the **next** run must use and is opaque
+    here on purpose: an ISO-8601 instant for TMDB ``/changes`` and for the two
+    IGDB kinds, an ISO-8601 date for the TMDB daily id export, a dump edition
+    for Open Library.  Whoever wrote it parses it back (see the
+    ``SyncWatermark`` model docstring for why it is not a ``timestamptz``).
+
+    ``last_run_at`` is a different fact: when the mechanism last completed
+    successfully.  It is the freshness signal and the input to the 14-day gap
+    check of ``/changes`` — never a substitute for ``cursor_value``, because a
+    run that queried up to *T* and finished at *T+9min* has to resume at *T*.
+    """
+
+    source: str
+    kind: str
+    item_type: str
+    cursor_value: str | None
+    last_run_at: datetime
+
+
+async def get_sync_watermark(
+    db: AsyncSession, source: str, kind: str, item_type: str
+) -> Watermark | None:
+    """Return the watermark for one mechanism, or None if it never ran.
+
+    The absence of the row is meaningful and is *not* the same as a row with a
+    NULL ``cursor_value``: the first means "this mechanism has never completed
+    a pass" (the caller decides its cold-start behaviour — for ``/changes``
+    that is "take the whole retention window"), the second means "it ran but
+    had no usable cut-off to record".
+    """
+    result = await db.execute(
+        select(
+            SyncWatermark.source,
+            SyncWatermark.kind,
+            SyncWatermark.item_type,
+            SyncWatermark.cursor_value,
+            SyncWatermark.last_run_at,
+        ).where(
+            SyncWatermark.source == source,
+            SyncWatermark.kind == kind,
+            SyncWatermark.item_type == item_type,
+        )
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return Watermark(
+        source=row.source,
+        kind=row.kind,
+        item_type=row.item_type,
+        cursor_value=row.cursor_value,
+        last_run_at=row.last_run_at,
+    )
+
+
+async def set_sync_watermark(
+    db: AsyncSession,
+    source: str,
+    kind: str,
+    item_type: str,
+    *,
+    cursor_value: str | None,
+    last_run_at: datetime | None = None,
+) -> None:
+    """Upsert the watermark of one mechanism (idempotent).
+
+    Same ``INSERT ... ON CONFLICT DO UPDATE`` shape as ``set_sync_offset``:
+    the mechanism does not have to know whether it has ever run before, and a
+    retry of the same pass writes the same row instead of a second one.  The
+    conflict target is the whole ``(source, kind, item_type)`` primary key,
+    which is exactly why none of its three columns may be nullable — a NULL
+    there is distinct from itself in a unique index and the ``ON CONFLICT``
+    would never fire.
+
+    ``last_run_at`` defaults to the database clock, which is what a mechanism
+    that just finished wants.  It is passed explicitly only when the caller
+    needs a specific instant (tests, or a run replaying a fixed window).
+
+    An aware datetime is required: the column is ``timestamptz`` and a naive
+    value would be silently read in the session's timezone, which is how a
+    watermark ends up hours off and a window of ``/changes`` ends up with a
+    hole.  Raising here keeps that conversion where ``docs/conventions.md``
+    puts it — in the caller, explicitly.
+    """
+    if last_run_at is not None and last_run_at.tzinfo is None:
+        raise ValueError(
+            "set_sync_watermark: last_run_at must be timezone-aware "
+            f"(got naive {last_run_at!r} for {source}/{kind}/{item_type})"
+        )
+    run_at: Any = func.now() if last_run_at is None else last_run_at
+    stmt = (
+        insert(SyncWatermark)
+        .values(
+            source=source,
+            kind=kind,
+            item_type=item_type,
+            cursor_value=cursor_value,
+            last_run_at=run_at,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                SyncWatermark.source,
+                SyncWatermark.kind,
+                SyncWatermark.item_type,
+            ],
+            set_={
+                "cursor_value": cursor_value,
+                "last_run_at": run_at,
+                "updated_at": func.now(),
+            },
         )
     )
     await db.execute(stmt)
@@ -540,3 +667,77 @@ async def get_stale_catalog_external_ids(
         .limit(limit)
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+# ── Incremental updates (feature 88) ─────────────────────────────────────────
+
+# How many ids one ``... WHERE external_id IN (...)`` statement carries.
+# Postgres caps a statement at 32.767 bind parameters and a single ``/changes``
+# window can report tens of thousands of ids, so the IN list is chunked.
+_ID_LOOKUP_CHUNK = 5000
+
+
+async def get_known_source_ids(db: AsyncSession, item_type: str, source: str) -> set[str]:
+    """Every external id of ``(item_type, source)`` this deployment knows about.
+
+    The union of two tables, and both halves are needed for the daily-export
+    diff to mean "new":
+
+    - ``external_ids`` — the item is **in** the catalog;
+    - ``seed_targets`` — the item is enumerated and queued for hydration, or
+      already retired as unreachable.  Without this half, every target the
+      hydration has not reached yet would look like a brand new release on
+      every single run, and a target retired after a 404 would be resurrected
+      by the incremental for ever.
+
+    Returned as a set because the caller uses it for membership against a
+    million-line export file, one line at a time.
+    """
+    catalogued = (
+        await db.execute(
+            select(ExternalId.external_id).where(
+                ExternalId.item_type == item_type, ExternalId.source == source
+            )
+        )
+    ).scalars()
+    targeted = (
+        await db.execute(
+            select(SeedTarget.external_id).where(
+                SeedTarget.item_type == item_type, SeedTarget.source == source
+            )
+        )
+    ).scalars()
+    return set(catalogued) | set(targeted)
+
+
+async def filter_catalogued_external_ids(
+    db: AsyncSession, item_type: str, source: str, external_ids: Sequence[str]
+) -> set[str]:
+    """Which of ``external_ids`` already have a catalog item behind them.
+
+    The admission rule of the ``/changes`` feed (feature 88): an id TMDB
+    reports as changed is re-hydrated **only** if the catalog already holds it.
+    The rest are ids that never passed any quality gate — ``/changes`` carries
+    no title, no date and no ``vote_count``, so nothing in that payload could
+    justify admitting them — and they are dropped.
+
+    Asks ``external_ids`` rather than the catalog table because that is where
+    the link lives, and it is the same triple the hydration writes back.
+    """
+    if not external_ids:
+        return set()
+    unique = list(dict.fromkeys(external_ids))
+    found: set[str] = set()
+    for start in range(0, len(unique), _ID_LOOKUP_CHUNK):
+        chunk = unique[start : start + _ID_LOOKUP_CHUNK]
+        rows = (
+            await db.execute(
+                select(ExternalId.external_id).where(
+                    ExternalId.item_type == item_type,
+                    ExternalId.source == source,
+                    ExternalId.external_id.in_(chunk),
+                )
+            )
+        ).scalars()
+        found.update(rows)
+    return found

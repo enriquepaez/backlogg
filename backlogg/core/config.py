@@ -85,6 +85,62 @@ class Settings(BaseSettings):
     # costs three slice slots once instead of a target forever.
     TMDB_SEED_MAX_ATTEMPTS: int = 3
 
+    # ── TMDB incremental updates (feature 88, docs/seeding-plan.md §6) ───────
+    #
+    # The release gate for ids that arrive from the daily id export. They have
+    # no vote_count yet — that is the whole reason this route exists — so the
+    # bar is the release date instead: an item is admitted when it is a recent
+    # or imminent release, not when it is merely a new *id*. TMDB creates
+    # around a thousand ids a day and most of them are catalogue backfill of
+    # old, obscure titles; those keep entering the way they always have, through
+    # the vote_count threshold, once they earn an audience.
+    #
+    # 90 days back: wide enough that a run down for a fortnight still catches
+    # everything it missed (the export files themselves are only kept 3 months),
+    # narrow enough that "recently released" is still true.
+    TMDB_INCREMENTAL_MAX_AGE_DAYS: int = 90
+    # 180 days ahead: TMDB carries dated announcements years out, and a film
+    # dated 2031 is not a release, it is a plan. Half a year is roughly the
+    # marketing window in which an upcoming title is worth having on a page.
+    TMDB_INCREMENTAL_HORIZON_DAYS: int = 180
+
+    # How stale the last processed export may be before the "what appeared"
+    # diff is abandoned for this run and the baseline is reset to today's file.
+    # The diff needs *two* files; with a gap of N days the older one still
+    # exists (retention is 3 months) but the diff then covers N days of
+    # appearances at once, which is N times the detail requests. Seven days is
+    # the point where re-baselining and letting the promotion sweep pick up the
+    # stragglers is cheaper than a run that takes hours. Reported, never silent.
+    TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS: int = 7
+
+    # How many recent release years the promotion sweep re-enumerates through
+    # /discover. This is the route for items that were below the threshold when
+    # the catalog was seeded and have crossed it since — without it a 2019 film
+    # that gains traction in 2027 would never enter. Ten years rather than two
+    # or three because that is the timescale on which a film actually
+    # accumulates its first 25 votes; older than that, the full enumeration
+    # (scripts/seed_tmdb_targets.py) is still the tool.
+    TMDB_PROMOTION_YEARS: int = 10
+
+    # ── IGDB incremental updates (feature 88, docs/seeding-plan.md §6) ───────
+    #
+    # IGDB needs no export file and no changes endpoint: `where created_at > X`
+    # and `where updated_at > X` answer both questions in its own query
+    # language. What it does need is a bound on the first run and a bound per
+    # run, because "> 0" would be the whole database.
+    #
+    # Cold start: with no watermark, ask for the last week instead of
+    # everything. Bounded, immediately useful, and it converges on the second
+    # run — unlike TMDB's daily export, whose diff needs two files and
+    # therefore cannot admit anything at all on its first pass.
+    IGDB_INCREMENTAL_LOOKBACK_DAYS: int = 7
+    # Ceiling per lane per run. IGDB caps a response at 500 games and allows
+    # 4 req/s, so 2.000 games is four requests and about a second of throttle.
+    # Hitting the ceiling is not a loss: the query is sorted ascending and the
+    # watermark advances to the newest record actually seen, so the next run
+    # starts exactly where this one stopped.
+    IGDB_INCREMENTAL_MAX_ITEMS: int = 2000
+
     # Quality thresholds for the Open Library book catalog (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the
     # tunable numbers are env vars. Defaults are the calibrated values
