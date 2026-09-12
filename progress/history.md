@@ -1254,3 +1254,69 @@ datos. **La cuantización binaria deja de ser una opción entre varias y pasa a
 ser la única viable** en este plan: 384 bits son 48 bytes por ítem, ~6 MB para
 el catálogo entero, con `bit` de pgvector, distancia de Hamming y reranking.
 La alternativa es pagar Neon, ya descartada una vez.
+
+---
+
+## 2026-09-12 — Issue #34: barrido de promoción de games automatizado
+
+Rama `fix/igdb_promotion_lane`. Bugfix fuera del `backend_feature_list.json`,
+veredicto del reviewer `APPROVED` (texto, sin archivo en `progress/`, como
+manda `AGENTS.md` §5.4 para lo que no es una feature del backlog).
+
+### El agujero
+
+Desde que la feature 90 convirtió games a `seed_targets`, el recorrido nocturno
+del ranking de IGDB desapareció — y con él la única vía por la que un juego
+promocionaba solo. Un juego que cruza `rating > 0` **después** de haber sido
+enumerado no entraba hasta que alguien ejecutaba `scripts/seed_igdb_targets.py`
+a mano. Los dos carriles del incremental no lo tapaban: `CREATED_AT` solo admite
+altas, y `UPDATED_AT` descarta por diseño los ids que no están ya en catálogo.
+
+### Qué se hizo — opción (a) del issue
+
+`_incremental_game_promotion` como **tercer carril** de `sync_games_incremental`,
+simétrico con `_incremental_promotion` de TMDB. Re-ejecuta la enumeración keyset
+entera, hace upsert idempotente en `seed_targets` (conserva `attempts`,
+`discovered_at` y `unreachable_at`: el `set_` del upsert solo toca `vote_count`
+y `release_year`) y **no escribe ninguna fila de catálogo** — la hidratación la
+hace el nocturno por diferencia contra `external_ids`. Sin watermark, porque el
+barrido no tiene «since»: pregunta por el estado presente del filtro.
+
+Tres decisiones que conviene recordar:
+
+- **Va el último de los tres carriles.** Su coste es fijo (~64 peticiones todas
+  las noches) mientras que el de los otros dos está acotado por el delta desde
+  su marca de agua, así que es lo más barato que puede perder un run cortado.
+  Además `pending_after` sale calculado al final del run y no antes de las altas.
+- **`stalled` cuenta como error**, no como estadística. Un walk atascado deja la
+  lista incompleta, y un catálogo que deja de crecer en silencio es
+  indistinguible de «esos juegos ya no pasan el filtro». Vía `summary["errors"]`
+  hace que `scripts/incremental_sync.py` salga en degradado (exit 2), el mismo
+  aviso que da el exit 2 del script.
+- **El script se queda**, y no como resto: reanuda con `--start-after` (la
+  recuperación de un walk atascado), permite bajar el page size al depurar, y es
+  la forma de forzar una re-enumeración completa *ahora* tras tocar la allowlist,
+  cuando el delta no son decenas de ids sino el catálogo entero.
+
+### QA manual (leader, contra IGDB y la DB de dev reales)
+
+`scripts/incremental_sync.py --source game`: 65 páginas, 32.017 ids, sin
+`stalled`, 66 s. `seed_targets` de GAME pasó de 32.000 a **32.017** con
+`attempts_sum` intacto en 31.692 — upsert, no duplicado.
+
+Los 17 nuevos son promociones de verdad, y su reparto es el argumento del issue
+hecho dato: 1987, 2002, 2005, 2006, 2008, 2013, 2015, 2016, 2022, 2024, 2025 y
+2026. Juegos viejos que cruzaron `rating > 0` en los últimos cuatro días y que
+el carril `CREATED_AT` no podía ver por definición. `backfill_sync.py game` los
+hidrató acto seguido (17 pendientes → 0) y entraron al catálogo: entre ellos
+*Victory Run* (1987, igdb 42118). 1640 tests verdes.
+
+### Deuda de docs saldada de paso
+
+`docs/architecture.md` seguía describiendo games como enumerado por offset con
+cursor en `sync_cursors`, y `docs/seeding-plan.md` §7 afirmaba que «games no
+necesita feature de siembra propia: su enumeración actual ya es óptima». Las dos
+caducaron con la feature 90, no con este issue, pero eran dos líneas del mismo
+subsistema y se corrigieron aquí. También se arregló una afirmación nueva y
+falsa de `docs/operations.md` («las cuatro fuentes tienen la misma forma»):
+books no tiene barrido de promoción porque su incremental es un diff de dump.

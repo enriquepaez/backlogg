@@ -46,10 +46,23 @@ re-enumeration only adds newly-qualifying games and refreshes the observed
 ``rating_count``/``release_year``.  Each page is persisted as it arrives, so an
 interrupted run keeps everything it had already enumerated.
 
-**This is also the promotion route.**  A game that had no rating when the
-catalog was seeded and has one now enters by re-running this script — the same
-role TMDB's promotion sweep plays.  Nothing else notices it: the nightly job
-hydrates ``seed_targets`` and no longer re-walks any ranking.
+**This is also the promotion route** — the manual one.  A game that had no
+rating when the catalog was seeded and has one now enters by re-running this
+script, the same role TMDB's promotion sweep plays: the nightly job hydrates
+``seed_targets`` and no longer re-walks any ranking.  Since **issue #34** it is
+no longer the *only* trigger: ``sync_games_incremental`` runs the very same
+enumeration nightly as its third lane (``_incremental_game_promotion`` in
+``backlogg/scheduler/jobs.py``), so a promotion now takes a day rather than
+however long it took an operator to remember.
+
+The script stays, and not as a leftover.  Three things it does that the lane
+deliberately does not: it **resumes** (``--start-after`` is the recovery from a
+stalled walk, and the lane always starts from 0), it lets the **page size** be
+lowered while debugging a misbehaving query, and it is the way to force a full
+re-enumeration *now* — after touching ``ALLOWED_GAME_CATEGORY_IDS`` or the
+``rating > 0`` threshold, when the delta is not a few dozen ids but the whole
+catalog and waiting for tonight is not good enough.  It also runs outside the
+incremental, so it can be used when the other two lanes must stay untouched.
 
 Usage::
 

@@ -136,8 +136,12 @@ El catálogo se puebla por dos caminos además del fallback on-demand:
 De dónde sale ese tramo depende del tipo, porque **la enumeración está separada
 de la hidratación** (feature 86):
 
-- **Books y games** siguen recorriendo el listado de su fuente por offset, con
-  el cursor persistido en `sync_cursors`.
+- **Books** sigue recorriendo el listado de su fuente por offset, con el cursor
+  persistido en `sync_cursors`. Es el último tipo en ese modelo (issue #27).
+- **Games** se alimenta de `seed_targets` desde la feature 90: la lista objetivo
+  la enumera `scripts/seed_igdb_targets.py` por keyset (`id > N`) bajo la
+  allowlist de `game_type` y `rating > 0`, y desde el issue #34 la re-enumera
+  también el carril de promoción del incremental diario. No hay cursor.
 - **Movies y series** se alimentan de `seed_targets`, la lista objetivo que
   `scripts/seed_tmdb_targets.py` enumera desde `/discover` bajo un umbral de
   `vote_count`. Lo pendiente es la diferencia contra `external_ids`, no un

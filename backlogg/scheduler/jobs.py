@@ -65,16 +65,17 @@ in ``sync_watermarks``.
   recent years so items crossing ``vote_count >= 25`` after the seeding still
   enter, and ``/movie/changes``/``/tv/changes`` to re-hydrate what the catalog
   already holds.
-* IGDB runs two: ``where created_at > <watermark>`` for new games (gated on the
-  ``game_type`` allowlist, which is the only bar a game released today *can*
-  clear) and ``where updated_at > <watermark>`` to refresh the ones the catalog
-  already holds.  Promotion — a game that had no rating when the catalog was
-  enumerated and has one now — is served by re-running
-  ``scripts/seed_igdb_targets.py``: the same mechanism as TMDB's promotion
-  sweep (re-enumerate, then hydrate the difference) but **not** the same
-  trigger, because TMDB's is a lane of the incremental job and runs on a
-  schedule while games' is run by the operator at the cadence
-  ``docs/operations.md`` recommends.  Automating it is issue #34.
+* IGDB runs three, the same shape: ``where created_at > <watermark>`` for new
+  games (gated on the ``game_type`` allowlist, which is the only bar a game
+  released today *can* clear), ``where updated_at > <watermark>`` to refresh
+  the ones the catalog already holds, and a promotion sweep that re-enumerates
+  the whole catalog filter by keyset so a game that had no rating when the
+  catalog was enumerated and has one now still enters.  That third lane closed
+  issue #34: the mechanism was always the same as TMDB's (re-enumerate, then
+  hydrate the difference), but until then the *trigger* was a person running
+  ``scripts/seed_igdb_targets.py``, so the promotion delay was the gap between
+  two human decisions instead of a day.  The script stays as the manual and
+  resumable route (``--start-after``); it is no longer the only one.
 
 Books are not here: their incremental is a diff of Open Library's *monthly*
 dump and belongs to the script layer (``scripts/incremental_sync.py``), for the
@@ -144,6 +145,7 @@ from backlogg.scheduler.discovery import (
     release_gate_verdict,
     year_windows,
 )
+from backlogg.scheduler.igdb_catalog import IgdbEnumerationStats, enumerate_catalog
 from backlogg.scheduler.repository import (
     CREDIT_GAP_SOURCES,
     SEED_TARGET_SOURCES,
@@ -1386,6 +1388,12 @@ async def _persist_promotion_targets(item_type: str, targets: list[DiscoveredTar
     Per page rather than at the end so an interrupted sweep keeps what it had
     already enumerated — the same reason ``scripts/seed_tmdb_targets.py``
     commits per page.
+
+    Shared by **both** promotion sweeps since issue #34: the source is looked up
+    in ``SEED_TARGET_SOURCES`` rather than passed in, so ``MOVIE``/``SERIES``
+    land on TMDB and ``GAME`` on IGDB with no branch here.  The two enumerations
+    differ in how they walk (year windows against a keyset cursor) and in
+    nothing at all in where the answer goes, so this stays one function.
     """
     rows = [
         SeedTargetRow(
@@ -2096,7 +2104,8 @@ async def sync_games(slice_size: int | None = None) -> dict:
 # IGDB is the cheapest of the three sources to keep fresh, because its query
 # language answers both questions directly: every record carries ``created_at``
 # and ``updated_at``, so there is no export file to diff and no changes
-# endpoint to page through.  Two lanes, and **two independent watermarks**:
+# endpoint to page through.  Three lanes, of which the first two carry **two
+# independent watermarks**:
 #
 # * ``CREATED_AT`` — games added to IGDB since the last run.  This is the only
 #   lane that admits new rows, and the gate it admits them through is the
@@ -2109,29 +2118,31 @@ async def sync_games(slice_size: int | None = None) -> dict:
 #   re-written only if the catalog already holds it, exactly like the TMDB
 #   ``/changes`` lane.
 #
-# There is **no promotion lane** for games, and since feature 90 the reason is
-# the same one movies and series have.  Promotion means "an item that was below
-# the bar has crossed it": for games the bar is ``rating > 0``, which a game can
-# cross with no publication event at all, just by someone rating it.  Feature 88
-# argued the nightly cursor walk covered that by re-walking IGDB's ranking every
-# night; **that argument expired with the cursor**.  The *mechanism* that covers
-# it now is the same one TMDB uses — re-enumerating, which upserts
-# newly-qualifying items as targets and lets the nightly slice hydrate them like
-# any other target — but the **trigger is not the same**, and that asymmetry is
-# the point: TMDB's re-enumeration is an automatic daily lane inside the
-# incremental job (``_incremental_promotion``), while games' is an operator
-# running ``scripts/seed_igdb_targets.py`` by hand.  ``docs/operations.md``
-# ("Games", in the enumeration section) recommends a cadence and gives the
-# measured cost of a run.  Automating it is **issue #34**, not something this
-# module does today.
+# * ``PROMOTION`` — the third lane, and the one that closed **issue #34**.
+#   Promotion means "an item that was below the bar has crossed it": for games
+#   the bar is ``rating > 0``, which a game crosses with no publication event at
+#   all, just by someone rating it, so neither of the lanes above can see it
+#   (one only reports what is new to IGDB, the other refuses ids the catalog
+#   does not hold).  Feature 88 argued the nightly cursor walk covered that by
+#   re-walking IGDB's ranking every night; **that argument expired with the
+#   cursor** in feature 90, and what replaced it was a person running
+#   ``scripts/seed_igdb_targets.py``.  The mechanism was already the right one —
+#   the same as TMDB's: re-enumerate, upsert the newly-qualifying ids as
+#   targets, let the nightly slice hydrate them — but the trigger was a human
+#   decision, so the promotion delay was however long it took somebody to
+#   remember.  Now it is a lane: 64 requests and 52 s per run (measured
+#   2026-09-09), idempotent, and it writes no catalog row.  The script stays as
+#   the manual and resumable route (``--start-after`` after a stall), not as the
+#   only trigger.
 #
 # The ``CREATED_AT`` lane is untouched by any of that and still closes a hole
-# neither mechanism can: a game released *today* has no rating, so it cannot be
+# no enumeration can: a game released *today* has no rating, so it cannot be
 # enumerated at all until somebody rates it.
 #
-# Each lane is wrapped in its own ``try``: one failing must not abort the other
+# Each lane is wrapped in its own ``try``: one failing must not abort the others
 # (checkpoint C19), which is the whole reason the two watermarks are separate
-# rows instead of one.
+# rows instead of one — and the reason the watermark-less promotion sweep can be
+# added without putting the other two at risk.
 
 _IGDB_WATERMARK_SOURCE = "IGDB"
 _WATERMARK_CREATED_AT = "CREATED_AT"
@@ -2348,16 +2359,106 @@ async def _incremental_updated_games(*, now: datetime) -> dict:
     return result
 
 
+async def _incremental_game_promotion() -> dict:
+    """Lane 3 — re-enumerate the whole IGDB filter so promotions enter.
+
+    The exact counterpart of :func:`_incremental_promotion` on the TMDB side,
+    and it exists for the same reason: the bar a game has to clear is
+    ``rating > 0``, and a game crosses it with **no publication event at all**,
+    just by someone rating it.  Neither of the other two lanes can see that —
+    ``CREATED_AT`` only reports games that are new to IGDB, and ``UPDATED_AT``
+    refuses ids the catalog does not already hold, by design.  Until issue #34
+    this lane *was* an operator running ``scripts/seed_igdb_targets.py`` by
+    hand, which made the promotion delay the gap between two human decisions.
+
+    It writes **no catalog rows**: the walk upserts into ``seed_targets`` and
+    the nightly ``sync_games`` hydrates the difference against ``external_ids``
+    with no further intervention.  Re-enumerating is idempotent — an existing
+    target keeps its ``attempts`` and its ``discovered_at`` — so running this
+    every night adds the delta (a few dozen ids a day) and costs the requests
+    and nothing else.
+
+    It carries no watermark, and that is not an omission: the sweep has no
+    "since".  It asks a question about the present state of the filter (which
+    ids clear ``rating > 0`` today) whose answer does not depend on when it was
+    last asked, so there is nothing to resume.  The whole walk is **64 requests
+    and 52 s** (measured end to end on 2026-09-09; 16 s of that is the 4 req/s
+    floor), which is what makes running it nightly cheaper than maintaining an
+    argument about when it is worth running.
+
+    ``stalled`` is counted as an **error** rather than reported as a statistic:
+    it means a page came back with no id above the keyset cursor, which cannot
+    happen with ``sort id asc``, so the enumerated list is incomplete — and a
+    catalog that silently stops growing would be indistinguishable from "those
+    games no longer pass the filter".  Surfacing it in ``errors`` is what makes
+    ``scripts/incremental_sync.py`` finish degraded (exit 2), the same signal
+    ``scripts/seed_igdb_targets.py`` gives with its own exit code 2.
+    """
+    logger.info("incremental_games: promotion sweep — re-enumerating the IGDB catalog filter")
+
+    stats: IgdbEnumerationStats = await enumerate_catalog(
+        fetch_page=_igdb_client.get_catalog_page,
+        on_targets=partial(_persist_promotion_targets, "GAME"),
+        page_size=IGDB_PAGE_SIZE,
+    )
+
+    async with async_session_factory() as session:
+        progress = await count_seed_target_progress(
+            session,
+            "GAME",
+            SEED_TARGET_SOURCES["GAME"],
+            max(1, settings.TMDB_SEED_MAX_ATTEMPTS),
+        )
+
+    if stats.stalled:
+        logger.error(
+            "incremental_games: the promotion sweep stalled at id %d after %d page(s) — the "
+            "enumerated list is INCOMPLETE and this run is degraded; re-run "
+            "scripts/seed_igdb_targets.py --start-after %d once the query is understood",
+            stats.last_id,
+            stats.pages,
+            stats.last_id,
+        )
+
+    result = {
+        "pages": stats.pages,
+        "enumerated": stats.targets,
+        "last_id": stats.last_id,
+        "stalled": stats.stalled,
+        "pending_after": progress.pending,
+        "stuck_after": progress.stuck,
+        # A stalled walk is a failed walk, so it travels to the job summary as
+        # an error and not as a flag somebody has to go looking for.
+        "errors": 1 if stats.stalled else 0,
+    }
+    logger.info("incremental_games: promotion lane — %s", result)
+    return result
+
+
 async def sync_games_incremental() -> dict:
-    """Run the IGDB incremental: new games and changed games.
+    """Run the IGDB incremental: new games, changed games and promotion.
 
     Not part of the nightly slice and not exposed over HTTP — same reasoning as
     the TMDB incrementals: this runs from GitHub Actions straight against Neon
     (``scripts/incremental_sync.py``), where no request cap applies.
 
-    Both lanes are isolated: an exception in one is logged, counted in
-    ``errors`` and does not stop the other (checkpoint C19).  They are
-    sequential rather than concurrent because they share IGDB's 4 req/s budget.
+    The three lanes are isolated: an exception in one is logged, counted in
+    ``errors`` and does not stop the others (checkpoint C19).  They are
+    sequential rather than concurrent because they share IGDB's 4 req/s budget,
+    and the promotion sweep goes **last** because it is the longest lane and
+    the only one with nothing to resume from.  The other two are not a single
+    request each: ``get_games_created_since`` / ``get_games_updated_since``
+    paginate internally, so after a few missed nights they walk several pages
+    apiece.  But their cost is bounded by the *delta* since their watermark,
+    while the sweep re-walks the whole filter (~64 requests) every night
+    regardless of how quiet the day was.  So it goes last: if the run is cut
+    short there, the two watermarked lanes have already covered their ground
+    and tomorrow's sweep asks the same question again.
+
+    ``synced`` counts written catalog rows only — admissions plus refreshes.
+    The promotion lane writes none by design (it only enumerates targets), so
+    it contributes to ``errors`` but never to ``synced``, exactly as on the
+    TMDB side.
     """
     logger.info("incremental_games: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "game"})
@@ -2367,6 +2468,7 @@ async def sync_games_incremental() -> dict:
     lanes: dict[str, Callable[[], Awaitable[dict]]] = {
         "new_games": partial(_incremental_new_games, now=now),
         "updated_games": partial(_incremental_updated_games, now=now),
+        "promotion": _incremental_game_promotion,
     }
     results: dict[str, dict] = {}
     lane_errors = 0
@@ -2377,7 +2479,7 @@ async def sync_games_incremental() -> dict:
                 results[name] = await lane()
             except Exception:
                 logger.exception(
-                    "incremental_games: lane %s failed — the other lane continues", name
+                    "incremental_games: lane %s failed — the other lanes continue", name
                 )
                 results[name] = {"failed": True}
                 lane_errors += 1
@@ -2395,6 +2497,7 @@ async def sync_games_incremental() -> dict:
         "duration_s": round(time.monotonic() - start, 1),
         "new_games": results["new_games"],
         "updated_games": results["updated_games"],
+        "promotion": results["promotion"],
     }
     logger.info(
         "incremental_games: done — %d game(s) written, %d error(s), %d skipped_links in %.1fs",

@@ -735,10 +735,11 @@ uv run python scripts/seed_tmdb_targets.py movie --start-year 2000 --end-year 20
   external_id)` conservando su contador de intentos, así que re-enumerar solo
   añade lo que ha cruzado el umbral y refresca `vote_count`/`release_year`.
   Cada página se persiste según llega: un run interrumpido conserva lo hecho.
-- Cuándo relanzarla: antes de la primera siembra, al cambiar
-  `TMDB_SEED_MIN_VOTES_*`, y periódicamente para el barrido de promoción
-  (ítems que estaban por debajo del umbral y lo han cruzado —
-  `docs/seeding-plan.md` §6).
+- Cuándo relanzarla: antes de la primera siembra y al cambiar
+  `TMDB_SEED_MIN_VOTES_*`. El **barrido de promoción** (ítems que estaban por
+  debajo del umbral y lo han cruzado — `docs/seeding-plan.md` §6) ya no hay que
+  lanzarlo a mano en ninguna de las dos fuentes: es un carril del incremental
+  diario para movies/series y, desde el issue #34, también para games.
 - **Exit code 2** = alguna ventana chocó con el tope de 500 páginas de TMDB
   incluso tras el troceo mensual. La lista enumerada está **incompleta**: hay
   que subir el umbral o añadir un nivel de troceo más fino antes de fiarse de
@@ -762,30 +763,41 @@ uv run python scripts/seed_igdb_targets.py --start-after 100000   # reanudar
   de la allowlist**. 31.988 juegos pasaban el filtro el 2026-09-08 y 32.000 el
   2026-09-09: el conjunto crece solo, unas decenas por día. 337.291 pasan solo
   la allowlist, y ese es el ruido que `rating > 0` excluye.
-- **Cadencia recomendada: semanal**, y como mínimo mensual. Es una recomendación
-  y no un `schedule:` porque hoy la lanza el operador (automatizarla es el
-  **issue #34**). El razonamiento: dos minutos y medio de reloj, 128 peticiones
-  en total e idempotente es tan barato que no hace falta apurar, y la
-  contrapartida de espaciarla sí se nota — este script es la **única** vía por
-  la que un juego que gana su primera valoración entra al catálogo, así que el
-  retraso de la promoción es exactamente el hueco entre dos ejecuciones. Semanal
-  deja ese hueco en 7 días y no compite con nada: sobre una lista ya sembrada la
-  enumeración solo añade el delta (decenas de targets), que el nocturno absorbe
-  en su siguiente pasada sin desplazar a la rotación de refresco. Ejecutarla
-  **siempre** además, sin esperar a la fecha, en dos casos: antes de la primera
-  siembra y después de tocar el filtro (`ALLOWED_GAME_CATEGORY_IDS` o el umbral
-  `rating > 0`), porque ahí el delta no son decenas sino el catálogo entero.
+- **Ya no hay cadencia que recordar: la enumeración corre sola cada noche**
+  desde que el **issue #34** la convirtió en el tercer carril de
+  `sync_games_incremental` (`_incremental_game_promotion`, en
+  `backlogg/scheduler/jobs.py`). Antes esta sección recomendaba lanzarlo semanal
+  y como mínimo mensual, porque era la **única** vía por la que un juego que
+  gana su primera valoración entraba al catálogo y el retraso de la promoción
+  era exactamente el hueco entre dos ejecuciones humanas. El coste medido es lo
+  que hizo la decisión fácil: 64 peticiones y 52 s, idempotente y sin escribir
+  ninguna fila de catálogo, es más barato que mantener el argumento de cuándo
+  merece la pena lanzarlo. Sobre una lista ya sembrada cada pasada solo añade el
+  delta (decenas de targets), que el nocturno absorbe sin desplazar a la
+  rotación de refresco. El hueco de promoción pasa de «lo que tarde alguien en
+  acordarse» a **un día**.
+- **Cuándo lanzarlo a mano igualmente**, que es para lo que sigue existiendo el
+  script: (1) antes de la primera siembra, cuando no hay todavía ningún
+  incremental corriendo; (2) después de tocar el filtro
+  (`ALLOWED_GAME_CATEGORY_IDS` o el umbral `rating > 0`), porque ahí el delta no
+  son decenas sino el catálogo entero y esperar a la noche no basta; (3) para
+  **reanudar** con `--start-after` tras un recorrido atascado — el carril
+  siempre empieza en 0 y no acepta cursor; (4) para bajar `--page-size` mientras
+  se depura una query que se porta mal.
 - **Keyset y no offset**, aunque el offset de IGDB funcione hasta el final (no
   hay tope de 500 páginas como en TMDB): `rating > 0` cambia sin que nadie
   publique nada — basta con que alguien vote — y un offset sobre un conjunto
   que se mueve se salta ítems en silencio. Es el mismo motivo por el que se
   retiró el recorrido de `/popular` (`docs/seeding-plan.md` §1).
-- Idempotente igual que el de TMDB, y **es también la vía de promoción**: un
-  juego que no tenía valoración cuando se sembró y ahora la tiene entra
-  re-lanzando este script. El nocturno ya no recorre ningún ranking. La
-  diferencia con TMDB no es el mecanismo sino el disparador: el barrido de
-  promoción de movies/series corre solo, como carril del incremental diario
-  (`_incremental_promotion`); el de games lo lanza una persona. Issue #34.
+- Idempotente igual que el de TMDB, y **es la vía de promoción**: un juego que
+  no tenía valoración cuando se sembró y ahora la tiene entra al re-enumerar. El
+  nocturno ya no recorre ningún ranking. Desde el issue #34 las **tres fuentes
+  que salen de `scheduler/jobs.py`** tienen además la misma forma: el barrido de
+  promoción de movies/series corre como carril del incremental diario
+  (`_incremental_promotion`) y el de games también
+  (`_incremental_game_promotion`). Books queda fuera porque su incremental no es
+  un barrido sino un diff del dump mensual, sin nada que promocionar. Este
+  script es el mismo recorrido lanzado a mano, no otro mecanismo.
 - La allowlist de `game_type` se comprueba **dos veces**: en el `where` de la
   enumeración y otra vez sobre el payload al hidratar (`sync_games`). Un target
   enumerado como `MAIN_GAME` y reclasificado a `BUNDLE` antes de hidratarse no
@@ -1053,11 +1065,20 @@ rojo).
 | Fuente | Carriles | Marca de agua (`sync_watermarks`) |
 |---|---|---|
 | `movie` / `series` | alta inmediata por fecha (fichero diario de IDs) · barrido de promoción (`/discover`) · re-hidratación (`/changes`) | `TMDB/DAILY_ID_EXPORT/{MOVIE,SERIES}` y `TMDB/CHANGES/{MOVIE,SERIES}` |
-| `game` | `where created_at > X` (altas, con la allowlist de `game_type`) · `where updated_at > X` (refresco de lo ya catalogado) | `IGDB/CREATED_AT/GAME` y `IGDB/UPDATED_AT/GAME` |
+| `game` | `where created_at > X` (altas, con la allowlist de `game_type`) · `where updated_at > X` (refresco de lo ya catalogado) · barrido de promoción (re-enumeración keyset completa, issue #34) | `IGDB/CREATED_AT/GAME` y `IGDB/UPDATED_AT/GAME`; el barrido **no tiene marca** |
 | `book` | diff del dump mensual contra el catálogo; **no descarga nada** si la edición publicada es la ya diffeada | `OPEN_LIBRARY/MONTHLY_DUMP/BOOK` |
 
 Una fuente que falla **no aborta las demás** (C19), y su marca no avanza, así
-que el run siguiente vuelve a cubrir ese tramo.
+que el run siguiente vuelve a cubrir ese tramo. Lo mismo entre carriles de una
+misma fuente: cada uno va en su `try`.
+
+Los **dos barridos de promoción** (movies/series y games) son los únicos
+carriles sin marca de agua, y no es un olvido: no tienen «desde cuándo». Le
+preguntan a la fuente qué ítems superan hoy el umbral —`vote_count >= 25` en
+TMDB, `rating > 0` en IGDB—, una pregunta cuya respuesta no depende de cuándo
+se hizo la última vez. Tampoco escriben ninguna fila de catálogo: upsertean
+`seed_targets` y el nocturno hidrata la diferencia. El de games cuesta **64
+peticiones y 52 s** (medido el 2026-09-09).
 
 ### Variables
 
@@ -1099,7 +1120,19 @@ Secrets que consume el workflow: `DATABASE_URL`, `TMDB_API_KEY`,
 6. **`saturated: true`** en un carril de IGDB: tocó el techo de
    `IGDB_INCREMENTAL_MAX_ITEMS`. No se perdió nada, pero si sale varios días
    seguidos hay un atraso real que conviene subir de techo.
-7. **Carril de libros**: `skipped: true` con `reason: edition_already_diffed`
+7. **`stalled: true` en el carril de promoción de games**: una página volvió
+   con un id que no supera el cursor, imposible con `sort id asc`. La lista
+   enumerada está **incompleta**, el carril lo cuenta como error y el run sale
+   degradado (exit 2) — es el equivalente exacto del exit code 2 de
+   `scripts/seed_igdb_targets.py`. Recuperación: entender la query y relanzar
+   el script a mano con `--start-after <last_id>` (el log lo dice).
+8. **`pending_after` del carril de promoción de games**: cuántos targets quedan
+   sin hidratar tras el barrido. Un número que crece noche tras noche significa
+   que la enumeración añade más de lo que el nocturno absorbe; `stuck_after`
+   son los retirados (404 en IGDB o no enlazables) y no bajan solos.
+   `enumerated` en cambio es el tamaño del filtro entero (~32.000), no el
+   delta: no mide cuánto entró.
+9. **Carril de libros**: `skipped: true` con `reason: edition_already_diffed`
    es lo **normal** 29 días de cada 30. Lo anómalo es que un mes entero no
    aparezca nunca un run que lo diffee.
 
@@ -1122,7 +1155,9 @@ asyncio.run(m())"'
 Se esperan **siete filas** (dos por cada tipo de TMDB, dos de IGDB, una de
 Open Library). Una fila **ausente** significa «ese mecanismo no ha corrido
 nunca» y es distinto de una fila con `cursor_value` NULL, que significa «corrió
-y no produjo corte utilizable».
+y no produjo corte utilizable». Siguen siendo siete después del issue #34: los
+dos barridos de promoción no escriben marca porque no tienen «desde cuándo», así
+que para saber si corrieron hay que mirar el log del run, no esta tabla.
 
 ### Si lleva días sin correr
 
@@ -1132,7 +1167,8 @@ Cada mecanismo se degrada distinto, y la diferencia importa:
 |---|---|---|
 | `/movie/changes`, `/tv/changes` | **14 días** | El historial anterior **ya no existe** en el endpoint. `plan_change_windows` pide solo lo que TMDB puede responder y devuelve el resto en `uncovered_start`/`uncovered_end` con un `WARNING`. **No se finge cobertura**. Ojo al volumen: `/changes` tiene el **mismo tope de 500 páginas** que `/discover` y movies produce ~73 páginas/día (medido 2026-09-08: 746 páginas en 13 días), así que la ventana de recuperación se trocea sola hasta caber |
 | Fichero diario de IDs | 3 meses de retención, pero el script corta a `TMDB_INCREMENTAL_MAX_EXPORT_GAP_DAYS` (7) | **Re-baselinea**: graba el fichero de hoy como línea base, reporta `rebaseline_reason` y `skipped_days`, y no admite nada de ese tramo |
-| IGDB | sin límite | La query sigue respondiendo por antigua que sea la marca; solo puede tocar el techo de `IGDB_INCREMENTAL_MAX_ITEMS` y tardar varios runs en ponerse al día |
+| IGDB (`created_at`/`updated_at`) | sin límite | La query sigue respondiendo por antigua que sea la marca; solo puede tocar el techo de `IGDB_INCREMENTAL_MAX_ITEMS` y tardar varios runs en ponerse al día |
+| Barridos de promoción (TMDB y games) | sin estado que caducar | No hay nada que recuperar: el barrido siguiente vuelve a preguntar lo mismo y enumera todo lo que haya cruzado el umbral mientras tanto. El coste de los días perdidos es solo retraso en la promoción, y se salda entero en un run |
 | Dump de Open Library | un mes | Se diffea la edición publicada; las intermedias no existen (el alias `latest` solo apunta a una) |
 
 **Qué hacer**:

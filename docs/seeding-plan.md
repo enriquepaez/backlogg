@@ -518,7 +518,9 @@ por ítem.
 **Promoción**: un juego que no tenía valoración cuando se sembró y ahora la
 tiene entra **re-lanzando la enumeración**, igual que el barrido de promoción de
 TMDB (§6). El nocturno ya no re-recorre ningún ranking, así que esa vía no
-existe por otro lado.
+existe por otro lado. Desde el **issue #34** el re-lanzamiento no lo hace una
+persona: es el tercer carril del incremental diario de games, con
+`scripts/seed_igdb_targets.py` como vía manual para reanudar o forzar.
 
 Los dumps de IGDB (`GET /v4/dumps`) existen pero son **solo para partners**, y no
 hacen falta.
@@ -709,17 +711,22 @@ implementados:
   puerta de estreno rechaza tampoco se pierde — `too_old` significa «por esta
   puerta no», no «nunca».
 
-Games tampoco tiene carril de promoción en el incremental, y **desde la
-feature 90 el motivo es el mismo que en TMDB**, no el que decía este documento.
-La versión anterior argumentaba que el nocturno `sync_games` re-recorría el
-ranking de `rating_count` cada noche; ese recorrido ya no existe. Lo que cubre
-la promoción ahora es **re-lanzar la enumeración**
-(`scripts/seed_igdb_targets.py`), que upsertea en `seed_targets` los juegos que
-han cruzado `rating > 0` desde la última vez y deja que el nocturno los hidrate
-— exactamente lo que hace el barrido de promoción de TMDB, solo que a mano en
-vez de en el job. Lo que ninguna de las dos vías puede ver es un juego
-publicado hoy, que no tiene rating y por tanto no puede enumerarse: eso es lo
-que cierra el carril `created_at`.
+Games **también tiene carril de promoción** en el incremental desde el **issue
+#34**, y hace exactamente lo mismo que el de TMDB: re-enumera el filtro entero
+por keyset y upsertea en `seed_targets` los juegos que han cruzado `rating > 0`
+desde la última vez, sin escribir ninguna fila de catálogo, para que el nocturno
+los hidrate por diferencia. La historia de este párrafo explica por qué llegó
+tarde: la feature 88 no le puso carril a games porque el nocturno `sync_games`
+re-recorría el ranking de `rating_count` cada noche; la feature 90 retiró ese
+recorrido y el argumento caducó con él, dejando la promoción en manos de un
+operador que relanzase `scripts/seed_igdb_targets.py`. El coste medido es lo
+que cerró el issue: 64 peticiones y 52 s, idempotente, más barato que razonar
+cuándo tocaba lanzarlo. El script sigue siendo la vía manual —reanudar con
+`--start-after` tras un atasco, o forzar la re-enumeración completa después de
+tocar el filtro—, no el único disparador.
+
+Lo que ningún barrido puede ver es un juego publicado hoy, que no tiene rating
+y por tanto no puede enumerarse: eso es lo que cierra el carril `created_at`.
 
 ### Books: por qué el dump mensual y no `/recentchanges`
 
@@ -776,5 +783,9 @@ sección *Incremental del catálogo*.
 | 4 | **87 `openlibrary_dump_seeding`** ✅ | Elimina `search.json` del camino crítico de la siembra |
 | 5 | **88 `catalog_incremental_updates`** ✅ | Mantiene el catálogo sin barridos completos, incluida la promoción por umbral |
 
-Games no necesita feature de siembra propia: su enumeración actual ya es óptima y
-solo se beneficia de (1).
+> Esta tabla se escribió antes de la feature 90 y decía que «games no necesita
+> feature de siembra propia: su enumeración actual ya es óptima». No lo era: el
+> recorrido por cursor topaba el catálogo en `SEED_TOP_N_GAMES = 10.000` sobre
+> los ~31.988 juegos que pasan el filtro. La feature 90 lo sustituyó por la
+> enumeración keyset a `seed_targets` descrita en §3, y el issue #34 la convirtió
+> en carril diario del incremental.

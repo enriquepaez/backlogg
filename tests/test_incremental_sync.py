@@ -11,11 +11,15 @@ What is proved here, in the order of the feature's acceptance list:
 2. **A new game that fails the allowlist is not persisted** — the check the
    job owns, on the payload, not merely the clause a third party applies.
 3. **The two IGDB watermarks advance independently** and one lane failing does
-   not abort the other (checkpoint C19).
-4. **The Open Library diff produces only what is new** and **never re-diffs an
+   not abort the others (checkpoint C19).
+4. **The promotion sweep** (issue #34) — the third IGDB lane: it re-enumerates
+   the catalog filter into ``seed_targets``, writes no catalog row, is
+   idempotent across runs, reports a stalled walk as an error so the run
+   finishes degraded, and never inflates ``synced``.
+5. **The Open Library diff produces only what is new** and **never re-diffs an
    edition already covered** — the watermark is what stops a daily run from
    re-downloading 17,5 GB every night.
-5. **The orchestrator isolates a failing source** and reports the run as
+6. **The orchestrator isolates a failing source** and reports the run as
    degraded instead of green.
 
 Everything that touches the database uses the real test database; IGDB, the
@@ -26,25 +30,33 @@ touches the network.
 import importlib.util
 import sys
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from backlogg.books.adapters import openlibrary_dump as dump
 from backlogg.books.models import Book
 from backlogg.core.config import settings
 from backlogg.games.adapters.igdb import (
+    IGDB_PAGE_SIZE,
     IGDB_PAGE_THROTTLE_S,
     IGDBClient,
     parse_igdb_timestamp,
 )
 from backlogg.games.constants import ALLOWED_GAME_CATEGORY_IDS
 from backlogg.games.models import Game
+from backlogg.scheduler import igdb_catalog
 from backlogg.scheduler import jobs as sync_jobs
-from backlogg.scheduler.repository import get_sync_watermark, set_sync_watermark
+from backlogg.scheduler.repository import (
+    count_seed_targets,
+    get_sync_watermark,
+    mark_seed_targets_attempted,
+    set_sync_watermark,
+)
 from backlogg.shared.external_ids import ExternalId, upsert_external_id
 from tests.books import dump_fixtures as fx
 
@@ -98,12 +110,35 @@ def _igdb_game(igdb_id: int, *, game_type: int = 0, created_at: int, updated_at:
     }
 
 
+def _catalog_row(igdb_id: int, rating_count: int | None = 100, stamp: int | None = None) -> dict:
+    """A row of the *enumeration* query: three fields, no game detail.
+
+    The promotion sweep asks ``fields id,rating_count,first_release_date`` and
+    nothing else, so feeding it a full detail payload would test a shape the
+    lane never sees.
+    """
+    return {"id": igdb_id, "rating_count": rating_count, "first_release_date": stamp}
+
+
 def _epoch(moment: datetime) -> int:
     return int(moment.timestamp())
 
 
 async def _game_watermark(db, kind: str):
     return await get_sync_watermark(db, "IGDB", kind, "GAME")
+
+
+def _no_catalog_pages():
+    """Neutralise the promotion lane for the tests that are not about it.
+
+    ``sync_games_incremental`` grew a third lane (issue #34) that re-enumerates
+    the whole IGDB catalog filter.  An empty first page ends the keyset walk
+    immediately, so the lane runs, touches no network and reports zero — which
+    is what the ``created_at``/``updated_at`` tests below want it to do.
+    """
+    return patch.object(
+        sync_jobs._igdb_client, "get_catalog_page", new_callable=AsyncMock, return_value=[]
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -225,6 +260,7 @@ async def test_a_new_game_that_fails_the_allowlist_is_not_persisted(db, monkeypa
             new_callable=AsyncMock,
             return_value=[],
         ),
+        _no_catalog_pages(),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs.sync_games_incremental()
@@ -289,6 +325,7 @@ async def test_the_updated_lane_only_refreshes_games_the_catalog_holds(db, monke
             new_callable=AsyncMock,
             return_value=[known, unknown],
         ),
+        _no_catalog_pages(),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs.sync_games_incremental()
@@ -340,6 +377,7 @@ async def test_the_two_igdb_watermarks_advance_independently(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=updated_rows,
         ),
+        _no_catalog_pages(),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         await sync_jobs.sync_games_incremental()
@@ -375,6 +413,7 @@ async def test_the_created_lane_resumes_from_its_watermark(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=[],
         ) as mock_updated,
+        _no_catalog_pages(),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs.sync_games_incremental()
@@ -389,8 +428,8 @@ async def test_the_created_lane_resumes_from_its_watermark(db, monkeypatch):
     assert timedelta(0) < datetime.now(UTC) - cold_since <= lookback + timedelta(minutes=5)
 
 
-async def test_a_failing_igdb_lane_does_not_abort_the_other(db, monkeypatch):
-    """C19 — and the reason the two watermarks are separate rows."""
+async def test_a_failing_igdb_lane_does_not_abort_the_others(db, monkeypatch):
+    """C19 — one lane down, the other two run, and each watermark moves alone."""
     stamp = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=10)
 
     with (
@@ -406,6 +445,7 @@ async def test_a_failing_igdb_lane_does_not_abort_the_other(db, monkeypatch):
             new_callable=AsyncMock,
             return_value=[_igdb_game(880301, created_at=1, updated_at=_epoch(stamp))],
         ),
+        _no_catalog_pages(),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs.sync_games_incremental()
@@ -421,7 +461,367 @@ async def test_a_failing_igdb_lane_does_not_abort_the_other(db, monkeypatch):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 4. Open Library — the monthly dump diff
+# 4. The promotion sweep (issue #34)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The third IGDB lane. A game crosses ``rating > 0`` because somebody voted,
+# with no publication event, so neither ``created_at`` (only what is new to
+# IGDB) nor ``updated_at`` (refuses ids the catalog does not hold) can admit
+# it. Before this lane the only route was a person re-running
+# ``scripts/seed_igdb_targets.py``.
+
+
+async def _target_rows(db, ids: list[str]) -> list[tuple]:
+    """``(external_id, vote_count, release_year, attempts)`` for the given ids."""
+    return (
+        await db.execute(
+            text(
+                "SELECT external_id, vote_count, release_year, attempts FROM seed_targets "
+                "WHERE item_type = 'GAME' AND source = 'IGDB' AND external_id = ANY(:ids) "
+                "ORDER BY external_id"
+            ),
+            {"ids": ids},
+        )
+    ).all()
+
+
+async def test_the_promotion_lane_enumerates_targets_and_writes_no_catalog_row(db):
+    """The sweep answers "what does the catalog want", not "what does it say".
+
+    It upserts ``seed_targets`` and stops there: hydration is the nightly
+    slice's job, driven by the difference against ``external_ids``. Asserting
+    the *absence* of catalog rows is the point — a promotion lane that wrote
+    games would be a second, untested write path for the same table.
+    """
+    page = [_catalog_row(990101, 300, 1_262_304_000), _catalog_row(990102, 12, None)]
+    games_before = (await db.execute(select(func.count()).select_from(Game))).scalar_one()
+
+    with (
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_created_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_updated_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_catalog_page",
+            new_callable=AsyncMock,
+            return_value=page,
+        ) as mock_page,
+        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+    ):
+        result = await sync_jobs.sync_games_incremental()
+
+    # A short page ends the keyset walk: one request, asked from the top.
+    mock_page.assert_awaited_once_with(after=0, limit=IGDB_PAGE_SIZE)
+
+    promotion = result["promotion"]
+    assert promotion["pages"] == 1
+    assert promotion["enumerated"] == 2
+    assert promotion["last_id"] == 990102
+    assert promotion["stalled"] is False
+    assert promotion["errors"] == 0
+    # The whole point of the lane: two ids the catalog now wants and lacks.
+    assert promotion["pending_after"] == 2
+    assert promotion["stuck_after"] == 0
+
+    assert await _target_rows(db, ["990101", "990102"]) == [
+        ("990101", 300, 2010, 0),
+        ("990102", 12, None, 0),
+    ]
+    # No catalog row and no link: the sweep enumerated, it did not hydrate.
+    assert (await db.execute(select(func.count()).select_from(Game))).scalar_one() == games_before
+    assert (
+        await db.execute(
+            select(func.count())
+            .select_from(ExternalId)
+            .where(ExternalId.external_id.in_(["990101", "990102"]))
+        )
+    ).scalar_one() == 0
+    assert result["synced"] == 0
+    assert result["errors"] == 0
+
+
+async def test_re_running_the_promotion_sweep_upserts_instead_of_duplicating(db):
+    """Nightly only works if re-enumerating is free — and it is an upsert.
+
+    The target keeps its ``attempts`` **and** its ``discovered_at`` across runs
+    (resetting either would resurrect an id the hydration has already given up
+    on and re-spend a slice slot on it every night) while ``vote_count`` is
+    refreshed to what was just observed.
+    """
+
+    async def _discovered_at(external_id: str):
+        return (
+            await db.execute(
+                text(
+                    "SELECT discovered_at FROM seed_targets WHERE item_type = 'GAME' "
+                    "AND source = 'IGDB' AND external_id = :id"
+                ),
+                {"id": external_id},
+            )
+        ).scalar_one()
+
+    async def _sweep(page: list[dict]) -> dict:
+        with (
+            patch.object(
+                sync_jobs._igdb_client,
+                "get_games_created_since",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch.object(
+                sync_jobs._igdb_client,
+                "get_games_updated_since",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch.object(
+                sync_jobs._igdb_client,
+                "get_catalog_page",
+                new_callable=AsyncMock,
+                return_value=page,
+            ),
+            patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+        ):
+            return await sync_jobs.sync_games_incremental()
+
+    first = await _sweep([_catalog_row(990111, 300, 1_262_304_000)])
+    assert first["promotion"]["enumerated"] == 1
+    assert await count_seed_targets(db, "GAME", "IGDB") == 1
+
+    # A night of hydration that could not link it yet. ``discovered_at`` is
+    # backdated by hand because ``func.now()`` is the *transaction* clock: both
+    # sweeps run inside this test's transaction, so a refreshed timestamp would
+    # be indistinguishable from a preserved one without an older value to keep.
+    await mark_seed_targets_attempted(db, "GAME", "IGDB", ["990111"], datetime.now(UTC))
+    first_seen = datetime(2026, 8, 1, 3, 0, tzinfo=UTC)
+    await db.execute(
+        text(
+            "UPDATE seed_targets SET discovered_at = :seen WHERE item_type = 'GAME' "
+            "AND source = 'IGDB' AND external_id = '990111'"
+        ),
+        {"seen": first_seen},
+    )
+    await db.flush()
+
+    second = await _sweep(
+        [_catalog_row(990111, 450, 1_262_304_000), _catalog_row(990112, 10, None)]
+    )
+
+    assert second["promotion"]["enumerated"] == 2
+    assert await count_seed_targets(db, "GAME", "IGDB") == 2
+    assert await _target_rows(db, ["990111", "990112"]) == [
+        ("990111", 450, 2010, 1),  # counter kept, notoriety refreshed
+        ("990112", 10, None, 0),
+    ]
+    # ...and the id still dates from the night it was first enumerated: the
+    # upsert's ``set_`` leaves ``discovered_at`` alone on purpose, so the age
+    # of a target means "how long the catalog has wanted it", not "when it was
+    # last seen" — which is what makes a stuck target visible.
+    assert await _discovered_at("990111") == first_seen
+
+
+async def test_a_stalled_promotion_sweep_is_an_error_and_degrades_the_run(db, tmp_path):
+    """A page with no higher id cannot happen with ``sort id asc`` — and is not green.
+
+    ``stalled`` means the enumerated list is incomplete, which downstream is
+    indistinguishable from "those games stopped passing the filter". It has to
+    reach ``errors`` so the orchestrator exits 2, the same signal
+    ``scripts/seed_igdb_targets.py`` gives with its own exit code 2.
+
+    Driven through ``run_incremental`` rather than through the job directly:
+    the claim is about the *chain* (lane -> job summary -> run summary -> exit
+    code), and the run-level sum is a line of its own in the orchestrator that
+    a hand-built dict would not exercise.
+    """
+    # Two ids per page, so a page of two is a *full* page and the walk asks for
+    # another one instead of stopping on a short page.
+    monkeypatch_size = patch.object(sync_jobs, "IGDB_PAGE_SIZE", 2)
+    stuck = [_catalog_row(990121, 5, None), _catalog_row(990122, 6, None)]
+    # The real walk, minus the 4 req/s floor it would otherwise sleep through
+    # between the two pages: the throttle is IGDB's business and is covered in
+    # tests/test_igdb_targets_seeding.py, not worth 0,3 s of suite time here.
+    no_throttle = patch.object(
+        sync_jobs, "enumerate_catalog", partial(igdb_catalog.enumerate_catalog, throttle_s=0)
+    )
+
+    with (
+        monkeypatch_size,
+        no_throttle,
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_created_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_updated_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_catalog_page",
+            new_callable=AsyncMock,
+            side_effect=[list(stuck), list(stuck)],
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+    ):
+        summary = await incremental.run_incremental(["game"], tmp_path)
+
+    result = summary["sources"]["game"]
+    promotion = result["promotion"]
+    assert promotion["stalled"] is True
+    assert promotion["pages"] == 2
+    assert promotion["last_id"] == 990122
+    assert promotion["errors"] == 1
+    assert result["errors"] == 1
+    # The source did not *fail* — it ran and came back incomplete, which is the
+    # case a green run would otherwise hide...
+    assert summary["failed"] == []
+    assert summary["errors"] == 1
+    # ...and a stalled sweep is exactly what "degraded" means at the run level.
+    assert incremental._exit_code(summary) == 2
+
+
+async def test_a_failing_promotion_lane_does_not_stop_the_other_two(db):
+    """C19 for the new lane: IGDB refusing the enumeration is not a lost night.
+
+    The sweep has no watermark, so losing it costs nothing but a day of
+    promotion delay — while the two lanes that *do* carry state must still
+    advance, or a transient failure of the cheapest lane would hold the
+    catalog's freshness hostage.
+    """
+    stamp = _epoch(datetime.now(UTC) - timedelta(hours=1))
+
+    with (
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_created_since",
+            new_callable=AsyncMock,
+            return_value=[_igdb_game(990131, created_at=stamp, updated_at=stamp)],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_updated_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_catalog_page",
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("igdb is down"),
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+    ):
+        result = await sync_jobs.sync_games_incremental()
+
+    assert result["promotion"] == {"failed": True}
+    assert result["errors"] == 1
+    assert result["new_games"]["admitted"] == 1
+    assert result["updated_games"]["considered"] == 0
+    assert await _game_watermark(db, "CREATED_AT") is not None
+
+
+async def test_a_failing_created_lane_does_not_stop_the_promotion_sweep(db):
+    """The other direction of the same rule."""
+    page = [_catalog_row(990141, 70, None)]
+
+    with (
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_created_since",
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("igdb is down"),
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_updated_since",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_catalog_page",
+            new_callable=AsyncMock,
+            return_value=page,
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+    ):
+        result = await sync_jobs.sync_games_incremental()
+
+    assert result["new_games"] == {"failed": True}
+    assert result["errors"] == 1
+    assert result["promotion"]["enumerated"] == 1
+    assert await _target_rows(db, ["990141"]) == [("990141", 70, None, 0)]
+
+
+async def test_the_promotion_sweep_never_counts_towards_synced(db):
+    """``synced`` means catalog rows written, and the sweep writes none.
+
+    Counting enumerated targets there would report 32.000 "synced" games on a
+    night that wrote a handful, which is the number the operator reads to
+    decide whether the incremental is doing anything.
+    """
+    stamp = _epoch(datetime.now(UTC) - timedelta(hours=2))
+    known = _igdb_game(990151, created_at=stamp, updated_at=stamp)
+    game = Game(
+        title="Known Game",
+        slug="known-game-990151",
+        game_type="MAIN_GAME",
+        last_synced_at=datetime.now(UTC),
+    )
+    db.add(game)
+    await db.flush()
+    await upsert_external_id(db, "GAME", game.id, "IGDB", "990151")
+    await db.flush()
+
+    with (
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_created_since",
+            new_callable=AsyncMock,
+            return_value=[_igdb_game(990152, created_at=stamp, updated_at=stamp)],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_games_updated_since",
+            new_callable=AsyncMock,
+            return_value=[known],
+        ),
+        patch.object(
+            sync_jobs._igdb_client,
+            "get_catalog_page",
+            new_callable=AsyncMock,
+            return_value=[
+                _catalog_row(990161, 5, None),
+                _catalog_row(990162, 6, None),
+                _catalog_row(990163, 7, None),
+            ],
+        ),
+        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
+    ):
+        result = await sync_jobs.sync_games_incremental()
+
+    assert result["promotion"]["enumerated"] == 3
+    assert result["new_games"]["admitted"] == 1
+    assert result["updated_games"]["refreshed"] == 1
+    assert result["synced"] == 2  # one admission plus one refresh, and nothing else
+    assert result["errors"] == 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 5. Open Library — the monthly dump diff
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -713,7 +1113,7 @@ async def test_a_dump_pass_that_dies_leaves_the_watermark_alone(db, monkeypatch,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 5. The orchestrator
+# 6. The orchestrator
 # ═════════════════════════════════════════════════════════════════════════════
 
 
