@@ -36,23 +36,44 @@ esto» del final**.
 
 ---
 
-## Estado (2026-09-04)
+## Estado (2026-09-09)
 
 > Contado contra los tres archivos fuente, no de memoria. Si vuelves a tocar
 > esta sección, vuelve a contarlos.
 
-- **11 features backend pendientes**: 74-83 y 88. Ninguna en `in_progress`.
-  Las 84, 85, 86 y **87** están `done` (la 87, el 2026-09-06).
-- **5 features frontend en `blocked`** (FE-65 a FE-69, ids 64-68): ninguna
-  ejecutable hoy, cada una espera a su feature backend pareja. Las 63 anteriores
-  están `done`. Índice en el apartado «Frontend».
-- **8 issues abiertos**: #15, #18, #19, #20, #23, #24, #25 y **#26**. El **#22
-  pasó a `resolved` el 2026-09-04**; los #23, #24 y #25 nacieron de su arreglo, y
-  el **#26** —Open Library sin `User-Agent` ni límite de ritmo, contra su
-  política vigente— de la investigación de la feature 87. ⚠️ El **#18 sigue
-  `open` aunque su arreglo se mergeó** en el PR #195 el 2026-09-04: nadie lo
-  cerró. Mismo caso que el #20. Decidir si se cierran los dos ahora o se esperan
-  a medirlos contra la siembra real. Detalle y ubicación en la cola justo debajo.
+- **8 features backend pendientes**: 75, 76, 77, 78, 79, 80, 82 y 83. Ninguna en
+  `in_progress`. **El bloque A está completo**: la 84, 85, 86, 87, 89, 74, 88 y
+  90 están `done` (la 88 y la 90 se mergearon el 2026-09-08 y el 2026-09-09, PR
+  #211 y #212). Todo lo que queda es bloque B en adelante, y empieza por la
+  **75 `pgvector_item_embeddings`**.
+- **3 features frontend en `blocked`** (ids 65, 66 y 68): cada una espera a su
+  feature backend pareja — `item_detail_adaptations_section` a la 79,
+  `similar_cross_type_presentation` a la 80 y `recommendations_reason_display`
+  a la 82. Las otras 65 están `done`.
+- **11 issues abiertos**: #18, #19, #20, #24, #26, #27, #29, #30, #31, #33 y
+  **#34**. El #34 nació de la feature 90 (el barrido de promoción de games dejó
+  de ser automático al retirarse el recorrido nocturno del ranking); el #15 se
+  cerró el 2026-09-07 y el #22 el 2026-09-04.
+
+> ✅ **Paso operativo hecho el 2026-09-12: el catálogo de games está completo
+> en producción.** La feature 90 había retirado el tope de 10.000 del código el
+> 2026-09-09, pero la base seguía con los 10.000 de la siembra. Enumeración
+> (54 s, 32.017 targets) + hidratación (5 m 33 s): **10.671 → 32.688 juegos, 0
+> pendientes**. Antes hubo que recuperar 46 MB con un `VACUUM FULL` (398 → 352
+> MB), porque los ~86 MB que costaba la carga no cabían con holgura en los 92
+> libres. Detalle en `progress/history.md` y runbook en `docs/operations.md`
+> §«Recuperar espacio en Neon».
+>
+> **Catálogo total: 120.032 ítems.** Base en 421 MB, **~69 MB libres**.
+
+> ⚠️ **Lo que ese número le hace a la feature 75.** Con ~69 MB libres, los
+> embeddings en `float32` quedan descartados **por medición**: 120.032 ítems a
+> 384 dimensiones son ~180 MB solo de datos, más un índice HNSW que suele pesar
+> tanto como los datos. La 75 no se empieza escribiendo código sino decidiendo
+> representación, y la única que entra en este plan es la **cuantización
+> binaria** (384 bits = 48 bytes/ítem ≈ 6 MB para todo el catálogo, con `bit` de
+> pgvector, distancia de Hamming y reranking). La alternativa es pagar Neon, ya
+> descartada una vez.
 
 ### Issues abiertos y dónde caen en la cola
 
