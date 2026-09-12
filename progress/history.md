@@ -1192,3 +1192,65 @@ reaplicando el gate, con dos comportamientos distintos y deliberados:
 - Queda sin política la **evicción** de un ítem del catálogo reclasificado fuera
   de la allowlist: hoy se queda dentro, refrescado y logueado. El log dirá si el
   caso es real o teórico.
+
+## 2026-09-12 — Paso operativo: se completa el catálogo de games en producción
+
+No es una feature: es la mitad de datos de la **feature 90**, que retiró el tope
+de 10.000 **del código** el 2026-09-09. La base seguía con los 10.000 que dejó
+la siembra del 2026-09-07, porque el tope estaba justo en el código que había
+cambiado y los ~21.000 juegos que faltaban no aparecen solos.
+
+### Primero hubo que hacer sitio
+
+La medición de partida desmintió al registro: **398 MB, no 343**, o sea ~92 MB
+libres de los ~490 utilizables. Completar games costaba ~86 MB, así que entraba
+sobre el papel dejando la base al 98 % — que es exactamente el muro contra el
+que se estrelló la siembra del 2026-09-07.
+
+Un `VACUUM FULL` tabla por tabla, de menor a mayor y midiendo entre cada una,
+bajó la base de **398 a 352 MB**: 46 MB recuperados, `movies` de 108 a 91 y
+`item_cast` de 53 a 47. El autovacuum corría, pero recicla espacio *dentro* del
+fichero y no lo devuelve al sistema. Runbook completo en `docs/operations.md`
+§«Recuperar espacio en Neon».
+
+Se vigiló que el tamaño bajara tabla a tabla porque en Neon el WAL del
+`VACUUM FULL` cuenta en el tamaño del proyecto y podría haber crecido. No pasó.
+
+**Podar `seed_targets` se descartó al mirarlo**: el barrido de promoción del
+incremental diario reinserta cada target que enumera, enlazado o no, así que las
+68.000 filas volverían en menos de 24 h. Es trabajo que se deshace solo.
+
+### La carga
+
+`mode=enumerate` (54 s) dejó **32.017 targets**; `mode=hydrate` (5 m 33 s)
+los hidrató todos. Ambos `success`.
+
+| | Antes | Después |
+|---|---|---|
+| Juegos | 10.671 | **32.688** |
+| Pendientes / retirados | — | **0 / 0** |
+| Base | 398 MB | **421 MB** |
+
+**Catálogo total: 120.032 ítems** — 57.237 movies, 32.688 games, 19.159 books,
+10.948 series.
+
+### Verificación
+
+- Solo tipos de la allowlist: ni un `BUNDLE`, `MOD`, `PORT`, `PACK` ni `UPDATE`.
+- 0 sin título, 0 sin slug y **0 slugs duplicados** — el riesgo real, porque el
+  slug hace de identidad y ya causó los issues #18 y #23.
+- 671 juegos sin `rating_external`, y el número cuadra solo: 32.688 − 32.017
+  targets = 671. Son los que entraron por el carril `created_at` del incremental
+  (estrenos sin valoración todavía), que es justo para lo que existe.
+- Los huecos restantes son de origen (1.110 sin fecha, 860 sin sinopsis, 1.101
+  sin portada): datos que IGDB no tiene.
+
+### Consecuencia para la feature 75
+
+Quedan **~69 MB libres**. Con eso, los embeddings en `float32` quedan
+descartados por medición y no por estimación: 120.032 ítems a 384 dimensiones
+son ~180 MB solo de datos, más un índice HNSW que suele pesar tanto como los
+datos. **La cuantización binaria deja de ser una opción entre varias y pasa a
+ser la única viable** en este plan: 384 bits son 48 bytes por ítem, ~6 MB para
+el catálogo entero, con `bit` de pgvector, distancia de Hamming y reranking.
+La alternativa es pagar Neon, ya descartada una vez.

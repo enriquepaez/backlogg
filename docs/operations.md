@@ -608,6 +608,53 @@ Dos trampas al usarla a mano:
 
    Si el número se parece al de tu catálogo de dev, es dev.
 
+## Recuperar espacio en Neon (`VACUUM FULL`)
+
+El free tier de Neon da **512 MB**, de los que ~490 son utilizables. Ese techo
+ya tumbó la siembra del 2026-09-07 con un `DiskFullError` a mitad, así que antes
+de cualquier carga masiva **se mide primero**:
+
+```bash
+psql "$PGURL" -c "SELECT pg_size_pretty(pg_database_size(current_database()));"
+```
+
+### Qué se recuperó de verdad (medido el 2026-09-12)
+
+Un `VACUUM FULL` tabla por tabla bajó la base de **398 MB a 352 MB: 46 MB**, que
+es lo que hizo posible completar el catálogo de games sin chocar con el tope.
+
+| | Antes | Después |
+|---|---|---|
+| Base | 398 MB | **352 MB** |
+| `movies` | 108 MB | 91 MB |
+| `item_cast` | 53 MB | 47 MB |
+
+El autovacuum corría, pero dejaba ~13 % de tuplas muertas en `movies`, 9 % en
+`seed_targets` y 11 % en los joins de games: el autovacuum recicla espacio
+*dentro* del fichero, no lo devuelve al sistema. Eso solo lo hace `VACUUM FULL`.
+
+### Cómo hacerlo sin sustos
+
+1. **De menor a mayor tabla, midiendo después de cada una.** `VACUUM FULL`
+   reescribe la tabla entera, así que necesita espacio libre equivalente a su
+   tamaño final *mientras* trabaja. Empezar por las pequeñas va liberando
+   margen para las grandes: `movies` (91 MB) es la última.
+2. **Vigilar que el número baja.** En Neon el `VACUUM FULL` genera mucho WAL, y
+   el tamaño del proyecto incluye historial: en teoría podría subir en vez de
+   bajar. Medido el 2026-09-12 **no pasó** —bajó de forma monótona en las doce
+   tablas— pero se comprueba tabla a tabla y se para si sube.
+3. **Toma `ACCESS EXCLUSIVE`**: la tabla queda bloqueada mientras se reescribe.
+   En el free tier, con la instancia dormida la mayor parte del día, no se nota;
+   en horario de uso real sí.
+
+### Podar `seed_targets` NO sirve
+
+Parece el candidato obvio —68.000 filas de movies y series ya hidratadas, 14 MB
+de lista de trabajo consumida— y es trabajo que se deshace solo: el **barrido de
+promoción** del incremental diario (feature 88) reinserta cada target que
+enumera, esté enlazado o no, así que las filas vuelven en menos de 24 h. Se
+descartó por eso, no por riesgo.
+
 ## Backfill del catálogo
 
 `.github/workflows/backfill-sync.yml` ejecuta `scripts/backfill_sync.py`
