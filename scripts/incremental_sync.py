@@ -19,16 +19,29 @@ movie   ``jobs.sync_movies_incremental`` — daily id export diff (new
 series  ``jobs.sync_series_incremental`` — the same three lanes on
         ``/tv/changes`` and ``tv_series_ids``
 game    ``jobs.sync_games_incremental`` — ``where created_at > X``
-        (new, gated on the ``game_type`` allowlist) and
-        ``where updated_at > X`` (refresh what the catalog holds)
+        (new, gated on the ``game_type`` allowlist), ``where updated_at
+        > X`` (refresh what the catalog holds) and a promotion sweep
+        that re-enumerates the whole catalog filter by keyset
 book    this script — diff of Open Library's monthly dump against the
         local catalog, skipped entirely while the published edition is
         the one already diffed
 ======  ===========================================================
 
+The three sources that come from ``scheduler/jobs.py`` have the **same
+three-lane shape**: admit what is new, refresh what is held, and re-enumerate
+so that what crossed the quality bar without a publication event still enters.
+That third lane was TMDB-only until issue #34 — the games half of it was a
+person running ``scripts/seed_igdb_targets.py``, so the promotion delay was the
+gap between two human decisions rather than a day.  It costs 64 requests and
+52 s per run (measured 2026-09-09) and writes no catalog row: only
+``seed_targets``, which the nightly slice hydrates by difference.
+
 Where each one resumes from lives in ``sync_watermarks`` (one row per source,
 mechanism and item type), so re-running the script never redoes covered ground
-and an interrupted run costs the difference, not the whole month.
+and an interrupted run costs the difference, not the whole month.  The two
+promotion sweeps are the exception and carry **no** watermark: they ask what
+clears the bar *today*, a question whose answer does not depend on when it was
+last asked, so there is nothing to resume and re-asking is the whole point.
 
 Why the book lane is here and not in ``scheduler/jobs.py``
 ---------------------------------------------------------

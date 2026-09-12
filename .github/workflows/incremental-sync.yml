@@ -18,6 +18,11 @@ on:
     #   before an outage turns into data this route can no longer recover
     #   (see docs/operations.md, "Si lleva días sin correr"). The id export
     #   files are kept 3 months, so they are not the binding constraint.
+    # * Daily is also the promotion delay for games since issue #34: the game
+    #   source re-enumerates the whole IGDB catalog filter on every run (64
+    #   requests, 52 s measured 2026-09-09), which is what a person used to do
+    #   by hand with scripts/seed_igdb_targets.py. It adds under a minute to a
+    #   run of this length, so it needed no schedule of its own.
     # * The book lane costs one request on 29 days out of 30: it compares the
     #   published Open Library dump edition against its watermark and stops
     #   there. The month the edition changes, it does the 17,5 GB pass — which
