@@ -13,7 +13,7 @@ on:
           - book
           - game
       mode:
-        description: 'enumerate = fill seed_targets from the source (movie/series via TMDB /discover, feature 86; game via the IGDB keyset walk, feature 90); dump = seed the whole book catalog from the Open Library monthly dumps (book only, feature 87); hydrate = run the sync job in a loop (mass seeding); credits = fill credit holes from the local catalog (issue #15, not for game)'
+        description: 'enumerate = fill seed_targets from the source (movie/series via TMDB /discover, feature 86; game via the IGDB keyset walk, feature 90); dump = seed the whole book catalog from the Open Library monthly dumps (book only, feature 87); hydrate = run the sync job in a loop (mass seeding for movie/series/game; for book it is a refresh rotation over the catalog, bounded by the time budget); credits = fill credit holes from the local catalog (issue #15, not for game)'
         required: true
         type: choice
         default: hydrate
@@ -47,19 +47,15 @@ on:
         required: false
         type: boolean
         default: false
-      seed_top_n:
-        description: 'hydrate mode, book only — cursor wraparound target, must match SEED_TOP_N_BOOKS on Render. Inert for movie/series (feature 86) and no longer applies to game at all (feature 90: games are hydrated from seed_targets, with no cursor to wrap)'
-        required: false
-        type: string
-        default: '10000'
 
 # Runs the sync jobs directly against the production database (Neon) and the
 # external APIs, bypassing Render's ~15 min per-request timeout. Re-dispatching
-# the workflow resumes where the previous run stopped: from sync_cursors for
-# book, and from the live difference between seed_targets and external_ids for
-# movie, series and game. The script stops itself after BACKFILL_TIME_BUDGET
-# (default 300 min); timeout-minutes leaves headroom for setup plus the
-# iteration in flight when the budget expires.
+# the workflow resumes where the previous run stopped: from the live difference
+# between seed_targets and external_ids for movie, series and game, and from
+# the oldest last_synced_at for book, whose hydrate mode is a refresh rotation
+# and not a seeding (books are seeded by mode=dump). The script stops itself
+# after BACKFILL_TIME_BUDGET (default 300 min); timeout-minutes leaves headroom
+# for setup plus the iteration in flight when the budget expires.
 jobs:
   backfill:
     runs-on: ubuntu-latest
@@ -69,20 +65,6 @@ jobs:
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-      # Wraparound target for the one type still driven by a cursor — must
-      # match production's SEED_TOP_N_BOOKS (Render), otherwise the shared
-      # sync_cursors cursor wraps too early. SEED_TOP_N_MOVIES/_SERIES are
-      # inert since feature 86 (movies and series are driven by seed_targets,
-      # not by a cursor); they are still exported so the two configurations
-      # stay literally identical and nothing drifts unnoticed.
-      #
-      # SEED_TOP_N_GAMES is NOT here since feature 90: the setting no longer
-      # exists. Exporting it would have re-created the exact trap the feature
-      # removed — a number in a dispatch that had to match a number in Render
-      # or the game catalog silently stopped at 10.000 of ~31.988.
-      SEED_TOP_N_MOVIES: ${{ github.event.inputs.seed_top_n }}
-      SEED_TOP_N_SERIES: ${{ github.event.inputs.seed_top_n }}
-      SEED_TOP_N_BOOKS: ${{ github.event.inputs.seed_top_n }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -174,8 +156,8 @@ jobs:
         run: uv run python scripts/backfill_sync.py "${{ github.event.inputs.content_type }}"
 
       # Targeted credits backfill (feature 85): the work list comes from a
-      # local query over the catalog, not from sync_cursors, so SEED_TOP_N_*
-      # is irrelevant here and re-dispatching simply re-computes the gap.
+      # local query over the catalog, so re-dispatching simply re-computes the
+      # gap.
       - name: Run backfill (targeted credits mode)
         if: ${{ github.event.inputs.mode == 'credits' }}
         run: |

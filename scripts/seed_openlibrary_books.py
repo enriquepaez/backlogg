@@ -414,6 +414,12 @@ async def phase_load(work_dir: Path, only_new: bool = False) -> dict:
         "errors": writer.errors + mapping_errors,
         "people_errors": writer.people_errors,
         "skipped_links": link_skips.count,
+        # Issue #24: external ids this load could not keep because the row
+        # already held another one of the same source (two homonymous authors
+        # merged into one ``people`` row). Not an error — the row is written
+        # and linked — but it is a source identity the catalog can no longer
+        # resolve, so it is reported rather than dropped on the floor.
+        "skipped_identities": link_skips.identity_count,
         "elapsed_s": round(time.monotonic() - start, 1),
     }
 

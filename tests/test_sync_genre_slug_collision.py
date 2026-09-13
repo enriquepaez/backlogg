@@ -7,9 +7,8 @@ Covers the two production failure modes seen in the first real books backfill:
    slug constraint.  ``_get_or_create_genre`` must reuse the existing row
    (slug is the genre's real identity for ``?genre=<slug>`` filters).
 2. Session poisoning — one item failing with an IntegrityError used to abort
-   the shared session transaction, making every later item in the slice fail
-   and losing the cursor commit.  A bad item must neither block the rest of
-   the slice nor prevent the cursor from advancing.
+   the shared session transaction, making every later item in the slice fail.
+   A bad item must not block the rest of the slice.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,7 +26,6 @@ from backlogg.movies.models import Movie
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.scheduler.repository import (
     SeedTargetRow,
-    set_sync_offset,
     upsert_seed_targets,
 )
 
@@ -265,11 +263,9 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
     same slug before they ever reach the repository. Both books must be synced
     with errors=0 and share a single genre row.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 2)
-    await set_sync_offset(db, "BOOK", 0)
 
-    popular_raw = [
+    search_docs = [
         {
             "key": "/works/OL86201W",
             "title": "Umbral Collision Alpha",
@@ -289,17 +285,22 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
     ]
 
     with (
+        patch(
+            "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
+            new_callable=AsyncMock,
+            return_value=[doc["key"].removeprefix("/works/") for doc in search_docs],
+        ),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
-            return_value=popular_raw,
+            return_value=search_docs,
         ),
         patch.object(
             sync_jobs._ol_client,
             "get_work_detail",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
@@ -327,28 +328,21 @@ async def test_sync_books_colliding_genre_slugs_across_docs(db, monkeypatch):
     books = list(books_result.scalars().unique().all())
     assert len(books) == 2
 
-    # _persist_cursor commits, so remove the row we left in the shared test
-    # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
-    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
-    await db.commit()
-
 
 async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
-    """Bugfix: sync_books must copy `isbn` from the raw OL doc into the
-    hand-built search_doc it passes to book_to_dict, so the persisted Book
-    row ends up with `isbn` populated — not just an in-memory dict.
+    """The nightly book lane must persist the `isbn` of the doc it read.
 
-    Regression coverage for the nightly-sync path: `raw` (as returned by
-    `get_popular_books`) carries `isbn`, but the `search_doc` sync_books
-    reconstructs by hand used to drop that key, so every book seeded via
-    the nightly job persisted with `isbn=None` even though Open Library
-    provided one.
+    Regression coverage for Issue #17: the job used to rebuild a reduced
+    `search_doc` field by field before handing it to `book_to_dict`, and the
+    rebuild dropped `isbn`, so every book written by the nightly job persisted
+    with `isbn=None` while the on-demand path (which forwards the whole doc)
+    kept working. Since issue #27 the doc from `get_works_by_ids` is forwarded
+    whole, which is what makes that class of bug unreachable — this test pins
+    it down rather than trusting the shape.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 1)
-    await set_sync_offset(db, "BOOK", 0)
 
-    popular_raw = [
+    search_docs = [
         {
             "key": "/works/OL86301W",
             "title": "Isbn Sync Job Fixture",
@@ -360,17 +354,22 @@ async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
     ]
 
     with (
+        patch(
+            "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
+            new_callable=AsyncMock,
+            return_value=[doc["key"].removeprefix("/works/") for doc in search_docs],
+        ),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
-            return_value=popular_raw,
+            return_value=search_docs,
         ),
         patch.object(
             sync_jobs._ol_client,
             "get_work_detail",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
     ):
@@ -388,27 +387,16 @@ async def test_sync_books_persists_isbn_from_raw_doc(db, monkeypatch):
     book = book_result.scalar_one()
     assert book.isbn == "9780000000001"
 
-    # _persist_cursor commits, so remove the row we left in the shared test
-    # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
-    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
-    await db.commit()
-
 
 async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, monkeypatch):
-    """Regression (feature 72): sync_books must copy `ddc`/`lcc`/`subject_facet`
-    from the raw Open Library doc into the hand-built `search_doc` it passes to
-    `book_to_dict`.
+    """Regression (feature 72): `ddc`/`lcc`/`subject_facet` must reach `book_to_dict`.
 
-    Same class of bug as the `isbn` one above (Issue #17): the nightly job does
-    not forward `raw` as-is, it rebuilds a reduced dict field by field. A field
-    missing there is lost silently — the on-demand search path keeps working,
-    so the catalogue only degrades for books seeded by the nightly sync. Here
+    Same class of bug as the `isbn` one above (Issue #17), and the same reason
+    it cannot come back: the doc the refresh reads is forwarded whole. Here
     `lcc` must win over `ddc` and the persisted genres must be the controlled
     labels, proving the fields actually reached the adapter.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 2)
-    await set_sync_offset(db, "BOOK", 0)
 
     captured_docs: list[dict] = []
     real_book_to_dict = sync_jobs._ol_client.book_to_dict
@@ -417,7 +405,7 @@ async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, m
         captured_docs.append(search_doc)
         return real_book_to_dict(search_doc, work_detail)
 
-    popular_raw = [
+    search_docs = [
         {
             "key": "/works/OL86401W",
             "title": "Classification Propagation Alpha",
@@ -440,17 +428,22 @@ async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, m
     ]
 
     with (
+        patch(
+            "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
+            new_callable=AsyncMock,
+            return_value=[doc["key"].removeprefix("/works/") for doc in search_docs],
+        ),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
-            return_value=popular_raw,
+            return_value=search_docs,
         ),
         patch.object(
             sync_jobs._ol_client,
             "get_work_detail",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch.object(sync_jobs._ol_client, "book_to_dict", side_effect=_spy),
         patch("backlogg.scheduler.jobs.async_session_factory") as mock_factory,
@@ -465,7 +458,7 @@ async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, m
     assert result["synced"] == 2
     assert result["errors"] == 0
 
-    # The reconstructed search_doc carries the three classification fields
+    # The doc handed to the adapter carries the three classification fields
     assert captured_docs[0]["lcc"] == ["PZ-0007.00000000.R79835 Ha 1998"]
     assert captured_docs[0]["ddc"] == ["813/.54"]
     assert captured_docs[0]["subject_facet"] == ["Cooking"]
@@ -486,8 +479,3 @@ async def test_sync_books_propagates_classification_fields_to_book_to_dict(db, m
     )
     beta = beta_result.scalar_one()
     assert {g.slug for g in beta.genres} == {"poetry", "literature"}
-
-    # _persist_cursor commits, so remove the row we left in the shared test
-    # DB — test_get_sync_offset_returns_zero_when_absent expects no BOOK row.
-    await db.execute(text("DELETE FROM sync_cursors WHERE item_type = 'BOOK'"))
-    await db.commit()

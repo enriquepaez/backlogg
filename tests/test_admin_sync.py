@@ -18,7 +18,7 @@ from backlogg.scheduler.repository import (
     upsert_seed_targets,
 )
 
-_SYNC_RESULT = {"synced": 5, "errors": 0, "offset": 0, "duration_s": 1.2}
+_SYNC_RESULT = {"synced": 5, "errors": 0, "duration_s": 1.2}
 _VALID_KEY = "test-admin-secret"
 
 
@@ -66,18 +66,12 @@ def _seed_work_list(pending: list[str]):
     )
 
 
-def _cursor_patches(offset: int = 0):
-    """Patches for the sync-cursor repository: cursor at ``offset``, writes mocked."""
-    return (
-        patch(
-            "backlogg.scheduler.jobs.get_sync_offset",
-            new_callable=AsyncMock,
-            return_value=offset,
-        ),
-        patch(
-            "backlogg.scheduler.jobs.set_sync_offset",
-            new_callable=AsyncMock,
-        ),
+def _book_work_list(external_ids: list[str]):
+    """Patch the book refresh rotation to hand the job exactly these ids."""
+    return patch(
+        "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
+        new_callable=AsyncMock,
+        return_value=external_ids,
     )
 
 
@@ -104,7 +98,7 @@ async def test_sync_movie_returns_200(client):
     assert body["type"] == "movie"
     assert body["synced"] == 5
     assert body["errors"] == 0
-    assert body["offset"] == 0
+    assert "offset" not in body
     assert body["duration_s"] == 1.2
 
 
@@ -119,7 +113,7 @@ async def test_sync_series_returns_200(client):
     assert body["type"] == "series"
     assert body["synced"] == 5
     assert body["errors"] == 0
-    assert body["offset"] == 0
+    assert "offset" not in body
     assert body["duration_s"] == 1.2
 
 
@@ -134,7 +128,7 @@ async def test_sync_book_returns_200(client):
     assert body["type"] == "book"
     assert body["synced"] == 5
     assert body["errors"] == 0
-    assert body["offset"] == 0
+    assert "offset" not in body
     assert body["duration_s"] == 1.2
 
 
@@ -149,7 +143,7 @@ async def test_sync_game_returns_200(client):
     assert body["type"] == "game"
     assert body["synced"] == 5
     assert body["errors"] == 0
-    assert body["offset"] == 0
+    assert "offset" not in body
     assert body["duration_s"] == 1.2
 
 
@@ -294,16 +288,18 @@ async def test_sync_games_job_catches_external_error():
 
 async def test_sync_books_job_catches_external_error():
     """sync_books logs and returns a result dict when Open Library raises."""
-    get_cursor, set_cursor = _cursor_patches()
     with (
+        _book_work_list(["OL1W"]),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
             side_effect=RuntimeError("ol down"),
         ),
-        get_cursor,
-        set_cursor,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(),
+        ),
     ):
         result = await sync_jobs.sync_books()
 
@@ -411,7 +407,7 @@ async def test_sync_books_calls_get_work_detail_for_authors():
     (``collect_book_authors``) and hands them to the write path inside the
     batch, instead of persisting them one by one after each item.
     """
-    popular_raw = [
+    search_docs = [
         {
             "key": "/works/OL123W",
             "title": "Test Book",
@@ -424,15 +420,13 @@ async def test_sync_books_calls_get_work_detail_for_authors():
         "title": "Test Book",
         "authors": [],
     }
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
+        _book_work_list(["OL123W"]),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
-            return_value=popular_raw,
+            return_value=search_docs,
         ),
         patch.object(
             sync_jobs._ol_client,
@@ -491,7 +485,7 @@ async def test_sync_movies_maps_credits_from_the_detail_payload():
 
     Feature 84 moved the credit *write* into the batch; feature 86 moved the
     credit *fetch* into the detail request itself
-    (``append_to_response=credits,external_ids``).  So the job calls
+    (``append_to_response=credits``).  So the job calls
     ``map_movie_credits`` — pure mapping over the payload it already has — and
     never ``collect_movie_credits``, which would spend a second request.
     """
@@ -512,7 +506,6 @@ async def test_sync_movies_maps_credits_from_the_detail_payload():
         "vote_count": 200,
         "genres": [],
         "credits": {"cast": [], "crew": []},
-        "external_ids": {"imdb_id": "tt88801"},
     }
 
     with (
@@ -552,7 +545,7 @@ async def test_sync_movies_maps_credits_from_the_detail_payload():
             mock_upsert.return_value = mock_movie
             result = await sync_jobs.sync_movies()
 
-    mock_detail.assert_awaited_once_with(88801, append_to_response="credits,external_ids")
+    mock_detail.assert_awaited_once_with(88801, append_to_response="credits")
     mock_map_credits.assert_called_once_with(movie_raw["credits"])
     mock_collect_credits.assert_not_awaited()  # no second request
     assert result["synced"] == 1
@@ -689,7 +682,7 @@ async def test_sync_series_maps_cast_and_creators_from_one_payload():
             mock_upsert.return_value = mock_series
             result = await sync_jobs.sync_series()
 
-    mock_detail.assert_awaited_once_with(77701, append_to_response="credits,external_ids")
+    mock_detail.assert_awaited_once_with(77701, append_to_response="credits")
     mock_map_cast.assert_called_once_with(series_raw["credits"])
     mock_collect_creators.assert_called_once_with(series_raw["created_by"])
     assert result["synced"] == 1
@@ -759,7 +752,7 @@ async def test_sync_series_people_write_failure_does_not_increment_errors():
 
 async def test_sync_books_persist_authors_failure_does_not_increment_errors():
     """If the authors step raises, errors stays 0 but people_errors increments."""
-    popular_raw = [
+    search_docs = [
         {
             "key": "/works/OL999W",
             "title": "Credits Failure Book",
@@ -773,15 +766,13 @@ async def test_sync_books_persist_authors_failure_does_not_increment_errors():
         "authors": [],
     }
 
-    get_cursor, set_cursor = _cursor_patches()
     with (
-        get_cursor,
-        set_cursor,
+        _book_work_list(["OL999W"]),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
-            return_value=popular_raw,
+            return_value=search_docs,
         ),
         patch.object(
             sync_jobs._ol_client,

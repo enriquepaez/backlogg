@@ -8773,10 +8773,6 @@
             "type": "integer",
             "title": "Errors"
           },
-          "offset": {
-            "type": "integer",
-            "title": "Offset"
-          },
           "duration_s": {
             "type": "number",
             "title": "Duration S"
@@ -8790,6 +8786,11 @@
             "type": "integer",
             "title": "Skipped Links",
             "default": 0
+          },
+          "skipped_identities": {
+            "type": "integer",
+            "title": "Skipped Identities",
+            "default": 0
           }
         },
         "type": "object",
@@ -8797,7 +8798,6 @@
           "type",
           "synced",
           "errors",
-          "offset",
           "duration_s"
         ],
         "title": "SyncResponse"

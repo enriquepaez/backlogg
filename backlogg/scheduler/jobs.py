@@ -3,26 +3,21 @@
 Each job is an independent async coroutine.  Errors are logged but never
 propagated so that a failure in one job does not abort the others.
 
-Two enumeration models live here since feature 86:
+No job walks an external listing by offset any more (features 86, 90 and issue
+#27).  Two models are left:
 
-* **Books** keep the original one: each run processes a slice of the external
-  API's popular listing, reading the persisted cursor for its type from
-  ``sync_cursors`` (0 if absent), fetching up to the type's slice size
-  starting at that offset (never beyond ``settings.SEED_TOP_N_BOOKS``) and
-  advancing the cursor at the end.  The cursor wraps around to 0 when the
-  target is reached or when the API returns fewer items than requested.
-  Books are the *last* type on this model and it is not a good one: the
-  wraparound target caps the catalog below what the quality filter selects
-  (issue #27, still open — it is closed by moving the nightly book walk off
-  the cursor, not by anything in feature 90).
 * **Movies, series and games** are driven by the enumerated target list in
-  ``seed_targets`` instead (features 86 and 90).  There is no cursor and no
-  offset: the work list is the *difference* between what the catalog wants
-  and what it has, and once that difference is empty the slice is filled by
-  ``last_synced_at`` rotation.  See the sections at the bottom of this file.
-  The two halves differ only in the fetch: TMDB has no bulk detail endpoint
-  and pays one request per item, while IGDB answers ``where id = (...)`` with
-  up to 500 fully-hydrated games in a single request.
+  ``seed_targets`` (features 86 and 90).  The work list is the *difference*
+  between what the catalog wants and what it has, and once that difference is
+  empty the slice is filled by ``last_synced_at`` rotation.  See the sections
+  at the bottom of this file.  The two halves differ only in the fetch: TMDB
+  has no bulk detail endpoint and pays one request per item, while IGDB
+  answers ``where id = (...)`` with up to 500 fully-hydrated games in a single
+  request.
+* **Books** have no enumeration here at all: they are seeded and kept current
+  from Open Library's monthly dumps, which is script territory (features 87
+  and 88).  Their slice is the second half of the model above on its own —
+  the ``last_synced_at`` rotation — and nothing else.
 
 Slice size is resolved per type (feature 84): an explicit ``slice_size``
 argument wins (that is how ``scripts/backfill_sync.py`` processes bigger
@@ -88,9 +83,9 @@ This module also exposes ``sync_missing_credits``
 used to close credit holes the ranking route structurally cannot reach
 (issue #15).  See the section at the bottom of this file.
 
-Each job returns a dict with ``synced``, ``errors``, ``offset`` (the offset
-of the processed slice), ``duration_s``, ``people_errors`` and
-``skipped_links`` so the admin endpoint can expose the result synchronously.
+Each job returns a dict with ``synced``, ``errors``, ``duration_s``,
+``people_errors``, ``skipped_links`` and ``skipped_identities`` so the admin
+endpoint can expose the result synchronously.
 ``people_errors`` counts failures persisting people/credits (cast, crew,
 authors) for an otherwise successfully upserted item — those failures are
 logged but intentionally do not increment ``errors`` (a missing credit must
@@ -108,6 +103,16 @@ and reads the total. It is the panel light for a seeding run: a number that
 grows slice after slice means catalog is being dropped *while* the run is
 still going, which is exactly what issues #7, #15 and #20 each cost months to
 notice.
+
+``skipped_identities`` (issue #24) is the same idea on the other unique key.
+``uq_item_source`` fits **one** external id per ``(item, source)``, so when two
+identities of the source resolve to the same catalog row — two people whose
+names slugify identically, most often — the second id takes the link and the
+first one stops being resolvable for good.  The item keeps *an* id, which is
+why ``skipped_links`` cannot see it (there the ``item_id`` is the same and that
+is its idempotency discriminant), and why it needs a counter of its own.  It
+travels the same road: same collector, same result dict, same admin response,
+same ``::warning::`` in the workflow.
 """
 
 import asyncio
@@ -119,7 +124,7 @@ from datetime import UTC, date, datetime, timedelta
 from functools import partial
 
 from backlogg.books import repository as books_repo
-from backlogg.books.adapters.open_library import OpenLibraryClient
+from backlogg.books.adapters.open_library import OL_WORKS_BY_ID_CHUNK, OpenLibraryClient
 from backlogg.books.service import collect_book_authors
 from backlogg.core.config import settings
 from backlogg.core.database import async_session_factory
@@ -159,12 +164,10 @@ from backlogg.scheduler.repository import (
     get_known_source_ids,
     get_pending_seed_targets,
     get_stale_catalog_external_ids,
-    get_sync_offset,
     get_sync_watermark,
     mark_credits_synced,
     mark_seed_targets_attempted,
     mark_seed_targets_unreachable,
-    set_sync_offset,
     set_sync_watermark,
     upsert_seed_targets,
 )
@@ -229,49 +232,6 @@ def _resolve_slice_size(item_type: str, slice_size: int | None) -> int:
     if per_type is not None:
         return per_type
     return settings.SYNC_SLICE_SIZE
-
-
-async def _read_slice(
-    item_type: str, target: int, slice_size: int | None = None
-) -> tuple[int, int]:
-    """Return (offset, slice_size) for the next sync slice of ``item_type``.
-
-    ⚠️ **Books only** since feature 90.  Movies and series left the cursor in
-    feature 86 and games in feature 90; ``sync_books`` is the single caller
-    left, and it stays here rather than being inlined because the cursor walk
-    is unchanged and issue #27 will retire it whole.
-
-    Reads the persisted cursor (0 if absent).  A stale cursor at or beyond
-    ``target`` (e.g. after lowering SEED_TOP_N_BOOKS) is normalised back to 0.
-
-    ``slice_size`` overrides the configured size when provided (used by the
-    direct backfill script to process bigger slices without touching the
-    production settings); otherwise ``_resolve_slice_size`` picks the
-    per-type value, falling back to the global one.
-    """
-    size = _resolve_slice_size(item_type, slice_size)
-    async with async_session_factory() as session:
-        offset = await get_sync_offset(session, item_type)
-    if offset >= target:
-        offset = 0
-    return offset, min(size, target - offset)
-
-
-def _next_offset(offset: int, fetched: int, slice_size: int, target: int) -> int:
-    """Advance the cursor, wrapping to 0 at ``target`` or on a short fetch."""
-    advanced = offset + fetched
-    if fetched < slice_size or advanced >= target:
-        return 0
-    return advanced
-
-
-async def _persist_cursor(session, item_type: str, next_offset: int, job_name: str) -> None:
-    """Persist the cursor in the job's session; failures are logged, not raised."""
-    try:
-        await set_sync_offset(session, item_type, next_offset)
-        await session.commit()
-    except Exception:
-        logger.exception("%s: failed to persist sync cursor", job_name)
 
 
 # ── Write path ───────────────────────────────────────────────────────────────
@@ -521,15 +481,15 @@ class BatchWriter:
 #    TMDB's ~50 limit), then the feature-84 batch writer — ``AsyncSession`` is
 #    not safe for concurrent use.
 #
-# ``SEED_TOP_N_MOVIES``/``SEED_TOP_N_SERIES`` take no part in any of this: the
-# catalog is defined by ``TMDB_SEED_MIN_VOTES_*`` and the nightly volume by
-# ``SYNC_SLICE_SIZE_*``.  See ``backlogg/core/config.py``.
+# The catalog is defined by ``TMDB_SEED_MIN_VOTES_*`` and the nightly volume
+# by ``SYNC_SLICE_SIZE_*``.  See ``backlogg/core/config.py``.
 
 # Sub-resources folded into the detail request.  ``credits`` is what feeds the
-# people/credits rows (cast, director and the feature-74 writing crew).
-# ``external_ids`` is not read by any code path yet — feature 74 turned out to
-# need only ``credits`` — but it rides along for free in the same request.
-_TMDB_APPEND_TO_RESPONSE = "credits,external_ids"
+# people/credits rows (cast, director and the feature-74 writing crew), and it
+# is the only one asked for: ``external_ids`` rode along until nothing turned
+# out to read it, and an unread sub-resource is payload paid for on every item
+# of every slice.
+_TMDB_APPEND_TO_RESPONSE = "credits"
 
 
 async def _fetch_movie_detail(external_id: str) -> dict | None:
@@ -677,6 +637,7 @@ def _seed_result(
     errors: int,
     people_errors: int,
     skipped_links: int,
+    skipped_identities: int,
     progress: SeedTargetProgress,
     refreshed: int,
 ) -> dict:
@@ -686,17 +647,13 @@ def _seed_result(
     ``POST /admin/sync/{type}`` (``SyncResponse``) and
     ``scripts/backfill_sync.py`` read these keys by name, and the loop of the
     latter stops on ``pending``.
-
-    ``offset`` is a constant 0.  There is no cursor behind these types any
-    more, but the field is declared required in ``SyncResponse`` and dropping
-    it would turn a 200 into a 500.
     """
     return {
         "synced": synced,
         "errors": errors,
         "people_errors": people_errors,
         "skipped_links": skipped_links,
-        "offset": 0,
+        "skipped_identities": skipped_identities,
         "duration_s": round(time.monotonic() - start, 1),
         "pending": progress.pending,
         "stuck": progress.stuck,
@@ -760,7 +717,7 @@ def _seed_failure_result(start: float) -> dict:
         "errors": 1,
         "people_errors": 0,
         "skipped_links": 0,
-        "offset": 0,
+        "skipped_identities": 0,
         "duration_s": round(time.monotonic() - start, 1),
         "pending": None,
         "stuck": None,
@@ -771,16 +728,13 @@ def _seed_failure_result(start: float) -> dict:
 async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) -> dict:
     """Hydrate one slice of ``spec.item_type`` from the enumerated target list.
 
-    Returns the same keys the ranking jobs return — ``synced``, ``errors``,
-    ``people_errors``, ``offset`` and ``duration_s``, which is the contract
-    ``POST /admin/sync/{type}`` and ``.github/workflows/nightly-sync.yml``
-    consume — plus ``pending`` and ``refreshed``.
+    Returns ``synced``, ``errors``, ``people_errors`` and ``duration_s``,
+    which is the contract ``POST /admin/sync/{type}`` and
+    ``.github/workflows/nightly-sync.yml`` consume, plus ``pending`` and
+    ``refreshed``.
 
-    ``offset`` is kept at a constant 0: there is no cursor behind these two
-    types any more, but ``SyncResponse`` declares the field as required and
-    silently dropping it would turn a 200 into a 500.  ``pending`` (workable
-    targets still missing from the catalog after this slice) is what replaces
-    it as the progress signal, and it is what ``scripts/backfill_sync.py``
+    ``pending`` (workable targets still missing from the catalog after this
+    slice) is the progress signal, and it is what ``scripts/backfill_sync.py``
     loops on; ``stuck`` is the residue that was retired from the work list and
     will not come back on its own.
     """
@@ -815,6 +769,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
             errors=0,
             people_errors=0,
             skipped_links=0,
+            skipped_identities=0,
             progress=progress,
             refreshed=0,
         )
@@ -883,14 +838,17 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
     errors += writer.errors
     people_errors = writer.people_errors
     skipped_links = link_skips.count
+    skipped_identities = link_skips.identity_count
     logger.info(
         "%s: done — %d items upserted, %d errors, %d people_errors, %d skipped_links, "
+        "%d skipped_identities, "
         "%d gone from TMDB (%d targets still pending, %d stuck: %d gone, %d unlinkable)",
         spec.job_name,
         synced,
         errors,
         people_errors,
         skipped_links,
+        skipped_identities,
         len(gone),
         after.pending,
         after.stuck,
@@ -914,6 +872,7 @@ async def _sync_tmdb_type(spec: _TmdbSeedSpec, slice_size: int | None = None) ->
         errors=errors,
         people_errors=people_errors,
         skipped_links=skipped_links,
+        skipped_identities=skipped_identities,
         progress=after,
         refreshed=len(refresh),
     )
@@ -928,9 +887,9 @@ async def sync_movies(slice_size: int | None = None) -> dict:
     pending.  ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_MOVIES``
     (which itself overrides the global ``settings.SYNC_SLICE_SIZE``).
 
-    Returns a dict with ``synced``, ``errors``, ``people_errors``, ``offset``
-    (always 0 — no cursor), ``duration_s``, ``pending`` (workable targets left),
-    ``stuck`` (targets retired as unreachable/unlinkable) and ``refreshed``.
+    Returns a dict with ``synced``, ``errors``, ``people_errors``,
+    ``duration_s``, ``pending`` (workable targets left), ``stuck`` (targets
+    retired as unreachable/unlinkable) and ``refreshed``.
     """
     return await _sync_tmdb_type(_movie_seed_spec(), slice_size)
 
@@ -1669,18 +1628,21 @@ async def _sync_tmdb_incremental(spec: _TmdbIncrementalSpec) -> dict:
         "errors": errors,
         "people_errors": people_errors,
         "skipped_links": link_skips.count,
+        "skipped_identities": link_skips.identity_count,
         "duration_s": round(time.monotonic() - start, 1),
         "new_releases": results["new_releases"],
         "promotion": results["promotion"],
         "changes": results["changes"],
     }
     logger.info(
-        "%s: done — %d item(s) written, %d error(s), %d people_errors, %d skipped_links in %.1fs",
+        "%s: done — %d item(s) written, %d error(s), %d people_errors, %d skipped_links, "
+        "%d skipped_identities in %.1fs",
         spec.job_name,
         synced,
         errors,
         people_errors,
         link_skips.count,
+        link_skips.identity_count,
         summary["duration_s"],
     )
     return summary
@@ -1708,142 +1670,234 @@ async def sync_series_incremental() -> dict:
     return await _sync_tmdb_incremental(_series_incremental_spec())
 
 
-# ── Cursor job: books ────────────────────────────────────────────────────────
+# ── Refresh rotation: books ──────────────────────────────────────────────────
 #
-# The last job on the offset walk.  Open Library's seed query is already a
-# *filtered* search (feature 73's notoriety thresholds) rather than a raw
-# popularity ranking, so it never suffered the reordering that forced movies
-# and series off ``/popular`` — but it does suffer the other defect:
-# ``SEED_TOP_N_BOOKS`` is the wraparound target, production has it at 10.000,
-# and the filter selects 18.874 works, so the cursor turns around before
-# covering the catalog.  That is issue #27, it is still **open**, and feature
-# 90 does not touch it: converting games changes nothing about the book walk.
-# The seeding of books does not go through here at all since feature 87 (it is
-# ``scripts/seed_openlibrary_books.py``, from the monthly dumps).
+# Books were the last type driven by a cursor over the source's own listing,
+# and the last one with a ``SEED_TOP_N_*`` ceiling to keep in sync by hand
+# between Render and a workflow dispatch (issue #27).  Both are gone.
+#
+# What replaces it is *not* another way of discovering books: the catalog is
+# seeded from Open Library's monthly dumps
+# (``scripts/seed_openlibrary_books.py``, feature 87) and new works arrive
+# through the diff of the next dump (``scripts/incremental_sync.py --source
+# book``, feature 88).  Neither is a job — they stream 17,5 GB — so books have
+# no ``seed_targets`` and nothing for this lane to hydrate.  What the nightly
+# slice is for is keeping what the catalog already holds up to date, which is
+# exactly the ``last_synced_at`` rotation movies and series got in feature 86
+# and games in feature 90 (``get_stale_catalog_external_ids``).
+#
+# The walk by offset did cover that as a side effect — the cursor wrapped
+# around and eventually revisited everything — so the rotation is a
+# replacement, not a removal, and a strictly better one: it visits what has
+# actually gone longest without a refresh instead of whatever sits at the next
+# offset of a ranking that reorders itself between two runs.
+
+
+def _book_result(
+    start: float,
+    *,
+    synced: int,
+    errors: int,
+    people_errors: int,
+    refreshed: int,
+    skipped_links: int = 0,
+    skipped_identities: int = 0,
+) -> dict:
+    """The result dict ``sync_books`` returns.
+
+    The keys of the target-driven jobs minus ``pending``/``stuck``: books have
+    no ``seed_targets``, so "how much is left to hydrate" is not a question
+    this lane can answer, and answering 0 would tell ``scripts/backfill_sync.py``
+    that a catalog it never seeds is complete.
+    """
+    return {
+        "synced": synced,
+        "errors": errors,
+        "people_errors": people_errors,
+        "skipped_links": skipped_links,
+        "skipped_identities": skipped_identities,
+        "duration_s": round(time.monotonic() - start, 1),
+        "refreshed": refreshed,
+    }
 
 
 async def sync_books(slice_size: int | None = None) -> dict:
-    """Fetch a slice of popular books from Open Library and upsert them locally.
+    """Re-sync the least recently synced books from Open Library.
+
+    **Refresh only.**  This lane never discovers a book: it takes the
+    ``slice_size`` catalog rows with the oldest ``last_synced_at`` and asks
+    Open Library for them again.  New works enter through the monthly dump
+    diff (``scripts/incremental_sync.py --source book``), and the catalog was
+    seeded from the same dumps — so there is no pending work list here and no
+    ``seed_targets`` for books, unlike the other three types.
+
+    Each chunk of ``OL_WORKS_BY_ID_CHUNK`` ids is re-read as **search docs**
+    (``get_works_by_ids``), which is the shape ``book_to_dict`` consumes:
+    ``isbn``, ``cover_i`` and the ``ddc``/``lcc``/``subject_facet``
+    classifications only exist in the search index.  The work detail is
+    fetched per book on top of that, for the authors *and* for the
+    description — a refresh that wrote ``overview=None`` would erase, catalog
+    wide, the descriptions the dump seeding loaded.  That is also why a book
+    whose work detail cannot be read is **skipped** instead of written from
+    the search doc alone: its row keeps its old ``last_synced_at``, so the
+    next run picks it up first.
 
     ``slice_size`` overrides ``settings.SYNC_SLICE_SIZE_BOOKS`` (which itself
-    overrides the global ``settings.SYNC_SLICE_SIZE``) when provided.
-    Returns a dict with keys ``synced``, ``errors``, ``people_errors``,
-    ``skipped_links``, ``offset`` and ``duration_s``.
+    overrides the global ``settings.SYNC_SLICE_SIZE``).  Returns a dict with
+    keys ``synced``, ``errors``, ``people_errors``, ``skipped_links``,
+    ``skipped_identities``, ``duration_s`` and ``refreshed`` (how many items
+    the rotation put in the work list).
+
+    The two error counters are not interchangeable.  ``errors`` counts books
+    this run did **not** write — a chunk fetch that failed, a work detail that
+    could not be read, a payload that would not map — all of which keep their
+    old ``last_synced_at`` and come back next run.  ``people_errors`` counts
+    books that *were* written without their authors.  An unreachable Open
+    Library belongs in the first: it is the reason a slice of a seeding run
+    looks smaller than it should, not a slice of books that lost their
+    credits.
     """
     logger.info("sync_books: starting")
     get_metrics().inc_counter("backlogg_syncs_total", labels={"type": "book"})
     start = time.monotonic()
     errors = 0
     people_errors = 0
-    target = settings.SEED_TOP_N_BOOKS
+    size = max(1, _resolve_slice_size("BOOK", slice_size))
 
     try:
-        offset, slice_size = await _read_slice("BOOK", target, slice_size)
+        async with async_session_factory() as session:
+            work = await get_stale_catalog_external_ids(session, "BOOK", "OPEN_LIBRARY", size)
     except Exception:
-        logger.exception("sync_books: failed to read sync cursor")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "skipped_links": 0,
-            "offset": 0,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
+        logger.exception("sync_books: failed to read the refresh work list")
+        return _book_result(start, synced=0, errors=1, people_errors=0, refreshed=0)
 
-    try:
-        raw_list = await _ol_client.get_popular_books(limit=slice_size, offset=offset)
-    except Exception:
-        logger.exception("sync_books: failed to fetch from Open Library")
-        return {
-            "synced": 0,
-            "errors": 1,
-            "people_errors": 0,
-            "skipped_links": 0,
-            "offset": offset,
-            "duration_s": round(time.monotonic() - start, 1),
-        }
+    logger.info("sync_books: refreshing %d book(s) by oldest last_synced_at", len(work))
+    if not work:
+        logger.info("sync_books: nothing to do — the book catalog is empty")
+        return _book_result(start, synced=0, errors=0, people_errors=0, refreshed=0)
+
+    # Ids Open Library did not answer for: merged, deleted, or an edition OLID
+    # that never had a work record.  Logged and left alone — never evicted.  A
+    # row that disappears from the source still has user library entries,
+    # ratings and reviews pointing at it, and a nightly refresh is not the
+    # place to delete user data.
+    missing = 0
 
     with collect_link_skips() as link_skips:
         async with async_session_factory() as session:
             writer = BatchWriter(session, books_repo.BOOK_BULK_SPEC, "sync_books")
-            for raw in raw_list:
+            for chunk_start in range(0, len(work), OL_WORKS_BY_ID_CHUNK):
+                chunk = work[chunk_start : chunk_start + OL_WORKS_BY_ID_CHUNK]
                 try:
-                    work_key = raw.get("key", "")
-                    work_id = work_key.removeprefix("/works/") if work_key else None
-
-                    # ⚠️ This search_doc is rebuilt by hand instead of passing
-                    # ``raw`` straight through, so every field book_to_dict reads
-                    # must be copied here explicitly. Forgetting one silently
-                    # degrades the nightly job while the on-demand path keeps
-                    # working (that was Issue #17 with ``isbn``). Keep in sync
-                    # with ``_OL_SEARCH_FIELDS`` in the Open Library adapter.
-                    # ``edition_count`` is in that field set but deliberately not
-                    # copied: it is the feature-73 seed filter's discriminant,
-                    # requested only so a page can be audited, and book_to_dict
-                    # never reads it — copying it would add a dead key.
-                    search_doc: dict = {
-                        "title": raw.get("title", ""),
-                        "key": work_key,
-                        "first_publish_year": raw.get("first_publish_year"),
-                        "cover_i": raw.get("cover_i") or raw.get("cover_id"),
-                        "author_name": raw.get("author_name", []),
-                        "isbn": raw.get("isbn", []),
-                        "ddc": raw.get("ddc", []),
-                        "lcc": raw.get("lcc", []),
-                        "subject_facet": raw.get("subject_facet", []),
-                    }
-
-                    book_data = _ol_client.book_to_dict(search_doc, None)
-                    if not book_data.get("title"):
-                        continue
+                    raw_list = await _ol_client.get_works_by_ids(chunk)
                 except Exception:
-                    logger.exception("sync_books: error mapping work_key=%s", raw.get("key"))
+                    # One error for the request, not one per id: the chunk is
+                    # the unit of work that failed.  Those books keep their old
+                    # ``last_synced_at`` and come back at the head of the next
+                    # rotation.
+                    logger.exception(
+                        "sync_books: failed to fetch %d work(s) from Open Library — "
+                        "will retry next run",
+                        len(chunk),
+                    )
                     errors += 1
                     continue
 
-                people: list[BulkPerson] = []
-                if work_id:
+                returned: set[str] = set()
+                for raw in raw_list:
+                    work_key = str(raw.get("key", ""))
+                    work_id = work_key.removeprefix("/works/")
+                    if not work_id:
+                        continue
+                    returned.add(work_id)
+
                     try:
                         work_detail = await _ol_client.get_work_detail(work_id)
-                        if work_detail:
-                            people = await collect_book_authors(work_detail)
                     except Exception:
+                        # ``errors``, never ``people_errors``: nothing about
+                        # this book was written.  The work detail is what
+                        # carries the description, so a book whose detail could
+                        # not be read is skipped whole (see the docstring) —
+                        # its row keeps the old ``last_synced_at`` and comes
+                        # back at the head of the next rotation.  Counting it
+                        # as ``people_errors`` claimed the opposite ("item
+                        # written, authors missing") and made two Open Library
+                        # timeouts look like two books that lost their authors.
+                        # Same book-keeping as the chunk fetch above and as the
+                        # fetch failures of the other three jobs.
+                        logger.exception(
+                            "sync_books: failed to fetch the work detail for work_id=%s — "
+                            "not refreshed, will retry next run",
+                            work_id,
+                        )
+                        errors += 1
+                        continue
+                    if work_detail is None:
+                        logger.info(
+                            "sync_books: work_id=%s has no work detail at Open Library — "
+                            "not refreshed",
+                            work_id,
+                        )
+                        missing += 1
+                        continue
+
+                    people: list[BulkPerson] = []
+                    try:
+                        people = await collect_book_authors(work_detail)
+                    except Exception:
+                        # The item itself is intact, only its authors are
+                        # missing: write it and count the failure apart, same
+                        # rule the other jobs follow for credits.
                         logger.exception(
                             "sync_books: failed to fetch authors for work_id=%s", work_id
                         )
                         people_errors += 1
 
-                await writer.add(BulkItem(data=book_data, external_id=work_id, people=people))
-            await writer.flush()
+                    try:
+                        book_data = _ol_client.book_to_dict(raw, work_detail)
+                    except Exception:
+                        logger.exception("sync_books: error mapping work_key=%s", work_key)
+                        errors += 1
+                        continue
+                    if not book_data.get("title"):
+                        continue
 
-            await _persist_cursor(
-                session,
-                "BOOK",
-                _next_offset(offset, len(raw_list), slice_size, target),
-                "sync_books",
-            )
+                    await writer.add(BulkItem(data=book_data, external_id=work_id, people=people))
+
+                for work_id in chunk:
+                    if work_id not in returned:
+                        missing += 1
+                        logger.info(
+                            "sync_books: work_id=%s is gone from Open Library's index — "
+                            "kept in the catalog, not refreshed",
+                            work_id,
+                        )
+            await writer.flush()
 
     synced = writer.synced
     errors += writer.errors
     people_errors += writer.people_errors
     skipped_links = link_skips.count
+    skipped_identities = link_skips.identity_count
     logger.info(
-        "sync_books: done — %d items upserted, %d errors, %d people_errors, "
-        "%d skipped_links (offset %d)",
+        "sync_books: done — %d items refreshed, %d errors, %d people_errors, "
+        "%d skipped_links, %d skipped_identities, %d not answered for by Open Library",
         synced,
         errors,
         people_errors,
         skipped_links,
-        offset,
+        skipped_identities,
+        missing,
     )
-    return {
-        "synced": synced,
-        "errors": errors,
-        "people_errors": people_errors,
-        "skipped_links": skipped_links,
-        "offset": offset,
-        "duration_s": round(time.monotonic() - start, 1),
-    }
+    return _book_result(
+        start,
+        synced=synced,
+        errors=errors,
+        people_errors=people_errors,
+        refreshed=len(work),
+        skipped_links=skipped_links,
+        skipped_identities=skipped_identities,
+    )
 
 
 # ── IGDB job: target-driven hydration (feature 90) ───────────────────────────
@@ -1858,7 +1912,7 @@ async def sync_books(slice_size: int | None = None) -> dict:
 #    ``games``, which is the wraparound target and not a product decision.
 # 2. **An operational trap**: the backfill dispatch needed ``-f
 #    seed_top_n=10000`` and it had to *match* the Render variable, because both
-#    wrote the same ``sync_cursors`` row.  No other type had that.
+#    wrote the same cursor row.  No other type had that.
 # 3. **Four ways of seeding** where two are enough.
 #
 # The replacement is the mechanism of feature 86, unchanged in shape: the
@@ -1881,11 +1935,6 @@ async def sync_books(slice_size: int | None = None) -> dict:
 # reshaping the per-item fetch path that has been running in production since
 # feature 86 to serve a case it does not have — a bad trade against the one
 # rule that matters here: do not break what works.
-#
-# The ``sync_cursors`` row for GAME stops being read and written, exactly like
-# the MOVIE and SERIES rows did in feature 86.  It is left in the table rather
-# than deleted (see the ``SyncCursor`` model docstring): a stale row costs
-# nothing and deleting rows nobody reads is a migration with no upside.
 
 
 async def sync_games(slice_size: int | None = None) -> dict:
@@ -1904,8 +1953,8 @@ async def sync_games(slice_size: int | None = None) -> dict:
     below are a contract shared with ``_sync_tmdb_type``, ``SyncResponse`` and
     ``scripts/backfill_sync.py``, and a games-only counter has no place in it.
 
-    Returns a dict with ``synced``, ``errors``, ``skipped_links``, ``offset``
-    (always 0 — no cursor), ``duration_s``, ``pending`` (workable targets
+    Returns a dict with ``synced``, ``errors``, ``skipped_links``,
+    ``skipped_identities``, ``duration_s``, ``pending`` (workable targets
     left), ``stuck`` (targets retired as unreachable/unlinkable) and
     ``refreshed``.  ``people_errors`` is always 0 and present only because the
     key is part of the shared result contract: games carry no people credits,
@@ -1941,6 +1990,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
             errors=0,
             people_errors=0,
             skipped_links=0,
+            skipped_identities=0,
             progress=progress,
             refreshed=0,
         )
@@ -2061,12 +2111,15 @@ async def sync_games(slice_size: int | None = None) -> dict:
     synced = writer.synced
     errors += writer.errors
     skipped_links = link_skips.count
+    skipped_identities = link_skips.identity_count
     logger.info(
-        "sync_games: done — %d items upserted, %d errors, %d skipped_links, %d gone from "
+        "sync_games: done — %d items upserted, %d errors, %d skipped_links, "
+        "%d skipped_identities, %d gone from "
         "IGDB (%d targets still pending, %d stuck: %d gone, %d unlinkable)",
         synced,
         errors,
         skipped_links,
+        skipped_identities,
         len(gone),
         after.pending,
         after.stuck,
@@ -2094,6 +2147,7 @@ async def sync_games(slice_size: int | None = None) -> dict:
         errors=errors,
         people_errors=0,
         skipped_links=skipped_links,
+        skipped_identities=skipped_identities,
         progress=after,
         refreshed=len(refresh),
     )
@@ -2494,16 +2548,19 @@ async def sync_games_incremental() -> dict:
         "errors": errors,
         "people_errors": 0,
         "skipped_links": link_skips.count,
+        "skipped_identities": link_skips.identity_count,
         "duration_s": round(time.monotonic() - start, 1),
         "new_games": results["new_games"],
         "updated_games": results["updated_games"],
         "promotion": results["promotion"],
     }
     logger.info(
-        "incremental_games: done — %d game(s) written, %d error(s), %d skipped_links in %.1fs",
+        "incremental_games: done — %d game(s) written, %d error(s), %d skipped_links, "
+        "%d skipped_identities in %.1fs",
         synced,
         errors,
         link_skips.count,
+        link_skips.identity_count,
         summary["duration_s"],
     )
     return summary
@@ -2527,8 +2584,8 @@ async def sync_games_incremental() -> dict:
 #    only its credits are missing.  One HTTP call per item, and the write
 #    goes through ``bulk_load_credits`` (the credits half of the feature-84
 #    batch route), never through the item upsert.
-# 2. **No ``sync_cursors``.**  There is no ranking to resume: the stop
-#    condition is "gap list exhausted" or "time budget spent".
+# 2. **No cursor.**  There is no ranking to resume: the stop condition is
+#    "gap list exhausted" or "time budget spent".
 # 3. **``credits_synced_at`` is stamped after every *successful* fetch**,
 #    with or without credits, so items that legitimately have none are
 #    visited once instead of on every run.  A failed fetch stamps nothing
@@ -2685,13 +2742,16 @@ async def sync_missing_credits(
     Returns a summary dict with ``content_type``, ``considered``,
     ``processed``, ``with_credits``, ``sealed_without_credits``,
     ``credits_written``, ``people_errors``, ``skipped_links``,
-    ``skipped_no_external_id``, ``duration_s`` and ``stop_reason``
-    (``"exhausted"`` or ``"time_budget"``).
+    ``skipped_identities``, ``skipped_no_external_id``, ``duration_s`` and
+    ``stop_reason`` (``"exhausted"`` or ``"time_budget"``).
 
     ``skipped_links`` counts the *people* links this pass could not write
     because the TMDB/Open Library person id was already claimed by another
     ``people`` row — the credit still lands, but that person stays unresolvable
-    by external id.
+    by external id.  ``skipped_identities`` is its issue-#24 twin: the person
+    row already held a *different* external id of the same source, so the
+    newcomer takes the link and the old id is dropped (two homonyms merged into
+    one row).
     """
     item_type = _ITEM_TYPES_BY_CONTENT.get(content_type)
     if item_type is None or item_type not in CREDIT_GAP_SOURCES:
@@ -2792,6 +2852,7 @@ async def sync_missing_credits(
         "credits_written": credits_written,
         "people_errors": people_errors,
         "skipped_links": skipped_links,
+        "skipped_identities": link_skips.identity_count,
         "skipped_no_external_id": gap_set.skipped_no_external_id,
         "duration_s": round(time.monotonic() - start, 1),
         "stop_reason": stop_reason,

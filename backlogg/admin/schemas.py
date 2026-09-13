@@ -9,7 +9,6 @@ class SyncResponse(BaseModel):
     type: str
     synced: int
     errors: int
-    offset: int
     duration_s: float
     # Defaulted because a job may omit the key: games have no separate
     # people/credits persistence step to fail independently, so ``sync_games``
@@ -24,6 +23,14 @@ class SyncResponse(BaseModel):
     # re-links of the same item are not counted. Defaulted for the same reason
     # as ``people_errors``: a job that does not report it must not 500.
     skipped_links: int = 0
+    # The same loss on the other unique key (issue #24): ``uq_item_source``
+    # fits one external id per (item, source), so when two identities of the
+    # source resolve to the same row — two people whose names slugify the same
+    # — the newcomer takes the link and the other id becomes unresolvable. The
+    # item keeps *an* id, which is exactly why ``skipped_links`` cannot see it.
+    # Behaviour is unchanged (homonyms are still one row); this is the counter
+    # that stops it from being a silent loss. Defaulted like the two above.
+    skipped_identities: int = 0
 
 
 class ContentStats(BaseModel):

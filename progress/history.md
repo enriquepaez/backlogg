@@ -1320,3 +1320,178 @@ caducaron con la feature 90, no con este issue, pero eran dos líneas del mismo
 subsistema y se corrigieron aquí. También se arregló una afirmación nueva y
 falsa de `docs/operations.md` («las cuatro fuentes tienen la misma forma»):
 books no tiene barrido de promoción porque su incremental es un diff de dump.
+
+---
+
+## 2026-09-13 — Cierre del dominio de datos (`fix/ingestion_data_issues`)
+
+**Decisión de alcance del usuario**: el proyecto llevaba 147 de 158 features
+`done`, 120.032 ítems en catálogo y **cero usuarios**, y cada feature cerrada
+generaba más features e issues de los que cerraba. Se corta: el bloque de
+recomendaciones (features 75, 76, 77, 78, 79, 80, 82, 83) **queda congelado** —
+no se borra, no se toca— hasta que haya usuarios a quien recomendar. La feature
+75 `pgvector_item_embeddings` se había arrancado ese mismo día y se revirtió a
+`pending` sin escribir una línea de código.
+
+**Regla nueva**: en el dominio de datos no se abren features. Un issue solo se
+registra si pierde datos o rompe algo que el usuario ve. Lo demás se acepta por
+escrito una vez y se cierra.
+
+**Trabajo**: tres issues en un solo PR, a propósito, por vivir los tres en el
+código de ingesta.
+
+- **#24** — la pérdida de un `external_id` de persona por colisión de slug deja
+  de ser invisible: clase propia de salto `skipped_identities` recorriendo
+  job → `POST /v1/admin/sync/{type}` → `scripts/` → `::warning::` del workflow.
+  Se mantiene la decisión de que dos homónimos son una sola fila de `people`.
+  Verificado que no se solapa con el `skipped_links` del #22.
+- **#26** — `_RequestPacer` a 3 req/s delante de los cuatro `client.get()` del
+  adaptador de Open Library, la cuota que su política concede a un cliente
+  identificado. El User-Agent ya existía.
+- **#27** — `SEED_TOP_N_BOOKS` de 100 a 25.000, por encima de las 19.221 obras
+  reales. El reviewer detectó que `.github/workflows/backfill-sync.yml` conservaba
+  el `'10000'` viejo, que era el otro consumidor del tope.
+
+**Tres issues cerrados sin escribir código**, por ser falsos positivos del
+backlog:
+
+- **#18** estaba arreglado y mergeado desde el **PR #195 (2026-09-04)**. Seguía
+  `open` por un cierre olvidado. Importante: como el PR entró tres días antes de
+  la siembra del 2026-09-07, **el catálogo se sembró con el arreglo puesto** y no
+  hace falta ninguna reparación de credits. El leader lo diagnosticó primero como
+  pendiente sin comprobar la fecha de merge; corregido con `git log`.
+- **#19** obsoleto: el deadlock era sobre `catalog_search`, que retiró la feature
+  91.
+- **#26/#27** ver arriba.
+
+**Resultado**: de 10 issues abiertos a 5, y ninguno de los cinco es de datos
+(#20 solo espera una medición contra producción; #29, #30, #31 y #33 son trending
+y frontend, y tres de los cuatro solo se manifiestan con usuarios).
+
+**Paso manual pendiente del usuario**: subir `SEED_TOP_N_BOOKS` a 25.000 en
+Render (sigue en 10.000).
+
+### Borrado de `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES` (misma rama)
+
+A petición del usuario, y aplicando a movies y series el mismo criterio que la
+feature 90 aplicó a `SEED_TOP_N_GAMES`: un ajuste inerte no se conserva. El
+argumento que los mantenía —«borrar un nombre que un deployment declara se lee
+como un accidente»— no se sostenía, porque `Settings.model_config` tiene
+`extra="ignore"` y Render puede seguir exportándolos sin efecto.
+
+Lo revelador fue el reparto de las 19 referencias en 8 archivos: casi todas
+existían **solo para explicar que la variable no hacía nada**, incluidos **tres
+tests cuya única razón de ser era demostrar la inercia**. Al borrar el ajuste
+desaparecen los tests, las filas de tres documentos y el bloque de comentarios.
+`init.sh` pasa de 1.667 a 1.664 tests: los tres que sobran son justo esos.
+
+Criterio aplicado, por si vuelve a hacer falta: **al borrar la variable se borra
+el texto que la explicaba**, no se sustituye por una nota de «esto se eliminó en
+tal fecha» repetida en ocho sitios. La única nota superviviente está en
+`docs/operations.md` y dice que las env vars que sigan en Render son inocuas.
+
+Queda vivo `SEED_TOP_N_BOOKS`, y solo porque books es el último tipo que aún
+refresca paginando `search.json` por offset en vez de por `last_synced_at` desde
+el catálogo local, como hacen movies y series desde la feature 86 y games desde
+la 90. La variable existe porque existe el cursor.
+
+**Código posiblemente muerto detectado de paso y NO tocado** (decisión del
+usuario): `SYNC_SLICE_SIZE_BOOKS`/`_GAMES` existen en `Settings` y no están
+puestos en Render; `_TMDB_APPEND_TO_RESPONSE` pide `external_ids`, que según su
+propio comentario no lee ningún camino de código; y `tests/test_sync_seed_limits.py`
+se quedó con tres tests y un nombre que ya no lo describe.
+
+### Books deja el cursor: muere `SEED_TOP_N_BOOKS` y con ella el último paso manual
+
+Cerrado el issue #27 **dos veces**: primero por la vía (a) —subir el default de
+100 a 25.000, por encima de las 19.221 obras reales— y acto seguido por la vía
+(b), que es la que lo disuelve. `sync_books` era el último lane que paginaba un
+listado externo por offset (`get_popular_books` contra `search.json`) y por eso
+necesitaba un tope de vuelta. Ahora usa **la misma rotación de refresco que los
+otros tres tipos**: `get_stale_catalog_external_ids`, que coge del catálogo local
+lo de `last_synced_at` más antiguo. `repository.py` ya soportaba `"BOOK"`, así
+que la consulta no se tocó.
+
+Lo que se va con ella: `SEED_TOP_N_BOOKS` de `Settings`, el input `seed_top_n`
+del workflow de backfill (se quedó sin ningún consumidor), `get_popular_books`
+del adaptador y sus tests, y **el paso manual de subir la env var en Render**,
+que deja de existir en vez de quedar pendiente. `init.sh` baja de 1.664 a 1.623
+tests: los 41 que sobran son los del cursor y los del ajuste.
+
+**`sync_cursors` queda muerta**: ningún camino de código la lee ni la escribe ya.
+Las filas se conservan a propósito —borrarlas dejaría el `downgrade` de la
+migración `0035` apuntando a un estado que el código anterior no sabría
+reanudar— y retirar la tabla queda como decisión pendiente, documentada en
+`docs/schema.md`. Se anotó también que las altas de libros no dependían del
+cursor: siguen llegando por el diff del dump mensual (feature 88).
+
+Limpieza adicional de la misma tanda: `_TMDB_APPEND_TO_RESPONSE` deja de pedir
+`external_ids`, que según su propio comentario no leía ningún camino de código.
+Descartado en cambio tocar `SYNC_SLICE_SIZE_BOOKS`/`_GAMES`: **no son código
+muerto** —son `int | None = None` con camino de resolución y tests, y `None`
+significa «usa el global»—, solo config que no está puesta en Render.
+
+### Purga de `progress/`
+
+39 archivos y **11.908 líneas** fuera: los `impl_`/`review_`/`audit_`/`measure_`/
+`deploy_` de features cerradas, que el flujo de `AGENTS.md` §6 manda borrar al
+finalizar y nunca se borraban; `qa_89.md` y `qa_91.md`; e `issues.md`, que el
+propio `AGENTS.md` declara obsoleto frente a `issues_list.json`. Quedan tres
+archivos: `current.md`, `history.md` y `priority_order.md`.
+
+`priority_order.md` **no se tocó**: su apartado «Cómo desmontar esto» exige
+borrarlo *y* revertir el override de `AGENTS.md` §4 a la vez, y eso es decisión
+del usuario.
+
+### `priority_order.md` desmontado
+
+Borrado, junto con el override de `AGENTS.md` §4 que mandaba usar su orden en
+vez del criterio por defecto — eran dos cambios acoplados y su propio apartado
+«Cómo desmontar esto» exigía hacerlos a la vez. Se hizo antes de tiempo respecto
+a lo que ese apartado preveía (decía «cuando las features pendientes estén
+`done`»), porque la decisión del 2026-09-13 es que **no se van a hacer**: las
+ocho que quedaban son el bloque de recomendaciones y quedan congeladas.
+
+En su lugar, `AGENTS.md` §4 lleva ahora una nota corta que dice justo eso, para
+que la próxima sesión no elija una de las ocho por ser la de menor id. Las
+menciones a `priority_order.md` que quedan en este archivo son narrativa de
+entradas antiguas —cuentan qué se hizo entonces— y se conservan.
+
+### `sync_cursors` retirada + cierre de la rama
+
+Migración `0040_drop_sync_cursors`: `DROP TABLE IF EXISTS` con `downgrade` que
+recrea la tabla **vacía**. El razonamiento, verificado por el reviewer de forma
+independiente: el antiguo `get_sync_offset` devolvía 0 ante fila ausente, así que
+una tabla vacía y una poblada son indistinguibles para cualquier código que
+pudiera volver a leerlas. Round-trip probado tres veces (implementer, leader y
+reviewer), incluido el caso real del despliegue — drop a mano estando en `0039`
+y el `upgrade` sigue pasando gracias al `IF EXISTS`.
+
+El campo `offset` sale del contrato de `POST /v1/admin/sync/{type}`: era siempre
+0 desde que no hay cursor. `docs/api.md` sincronizado; `bruno/` no necesitaba
+cambios (ningún `.bru` de `Admin/` afirma nada del cuerpo). `packages/api-client`
+regenerado y `pnpm typecheck` de `apps/web` en verde.
+
+**Corrección del registro del issue #27**: se había cerrado por la vía (a) a
+media rama, y el propio PR la deshizo al aplicar la (b). El objeto de
+`issues_list.json` mandaba un «paso manual pendiente: subir la env var en Render»
+sobre una variable que este PR borra. Lo detectó el reviewer y lo reescribió el
+leader: no queda ningún paso manual.
+
+**Contador de refresco corregido** (encontrado en la QA del leader, con dos
+timeouts reales contra Open Library): un fallo de red al bajar la obra se sumaba
+a `people_errors`, contador que significa «el ítem sí se escribió, sus credits
+no», cuando en realidad no se escribía nada. Pasa a `errors` («el ítem no se
+escribió»), que es la semántica correcta y la que ya usaban los otros tres jobs.
+Se comprobó uno a uno que `errors` **no dispara degradación** en ninguno de los
+dos caminos por los que corre `sync_books`: `backfill_sync.py` solo aborta si el
+tramo entero no produjo nada, y `incremental_sync.py` —el que sí sale con código
+2— ni siquiera lo invoca, porque el carril de libros es el diff del dump. De
+paso se descubrió que un test existente **codificaba el bug**, afirmando
+`people_errors`. QA del leader: tres timeouts dan `errors=3, people_errors=0`.
+
+Propiedad del diseño nuevo que conviene no perder de vista: un refresco fallido
+**se autocura**. Al no actualizarse `last_synced_at`, el ítem sigue siendo el más
+rancio y vuelve a la cabeza de la rotación la noche siguiente. El cursor viejo no
+lo hacía: avanzaba por encima de los fallos y no volvía hasta dar la vuelta
+entera.

@@ -48,8 +48,8 @@ backlogg/
 │   ├── jobs.py            # sync_movies/series/books/games (por tramos)
 │   ├── discovery.py       # Enumeración de TMDB por /discover: troceo por año,
 │   │                      # guardia del tope de 500 páginas, fallback mensual
-│   └── repository.py      # Cursores de sync (sync_cursors) y lista objetivo
-│                          # de TMDB (seed_targets)
+│   └── repository.py      # Lista objetivo (seed_targets), rotación de
+│                          # refresco y marcas de los incrementales
 ├── shared/
 │   ├── models.py          # Person, Credit (transversales a todos los dominios)
 │   ├── bulk_load.py       # Ruta de escritura por lotes (COPY + upserts) para
@@ -136,8 +136,11 @@ El catálogo se puebla por dos caminos además del fallback on-demand:
 De dónde sale ese tramo depende del tipo, porque **la enumeración está separada
 de la hidratación** (feature 86):
 
-- **Books** sigue recorriendo el listado de su fuente por offset, con el cursor
-  persistido en `sync_cursors`. Es el último tipo en ese modelo (issue #27).
+- **Books** no enumera nada aquí: el catálogo se siembra desde los dumps
+  mensuales de Open Library (`scripts/seed_openlibrary_books.py`) y las altas
+  llegan por el diff del dump siguiente (`scripts/incremental_sync.py --source
+  book`). Su tramo nocturno es solo la rotación de refresco por
+  `last_synced_at` (issue #27, que retiró el último cursor).
 - **Games** se alimenta de `seed_targets` desde la feature 90: la lista objetivo
   la enumera `scripts/seed_igdb_targets.py` por keyset (`id > N`) bajo la
   allowlist de `game_type` y `rating > 0`, y desde el issue #34 la re-enumera

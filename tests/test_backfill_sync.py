@@ -5,13 +5,17 @@ Covers:
   settings-based behaviour, an explicit value takes precedence);
 - IGDB pagination beyond 500 items with throttling between pages;
 - the backfill loop in ``scripts/backfill_sync.py``: multiple iterations,
-  stop on cursor wraparound (book — the only cursor type left since feature
-  90), stop on an exhausted target list (movie/series/game, features 86 and
-  90) even when part of that list is permanently stuck, stop on time budget,
-  abort on an iteration with zero progress, and CLI exit codes;
+  stop on an exhausted target list (movie/series/game, features 86 and 90)
+  even when part of that list is permanently stuck, stop on time budget —
+  which is the *only* stop a ``book`` run has, its loop being the refresh
+  rotation since issue #27 — abort on an iteration with zero progress, and
+  CLI exit codes;
 - error propagation from a failing adapter fetch: ``sync_books`` reports
-  ``errors=1`` without touching the cursor, and the backfill guard turns
-  that into a ``BackfillError`` (red run) instead of a false wraparound.
+  ``errors=1``, and the backfill guard turns that into a ``BackfillError``
+  (red run) instead of a silent green one.
+
+⚠️ No cursor is read anywhere here any more: books were the last type with a
+persisted offset and left it in issue #27.
 
 Everything external (adapters, jobs, DB sessions) is mocked — no real
 network calls and no real database access.
@@ -20,7 +24,7 @@ network calls and no real database access.
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -50,16 +54,17 @@ def _mocked_session_factory():
 # ── slice_size override in the sync jobs ─────────────────────────────────────
 
 
-def _job_patches(cursor_offset: int):
-    """Common patches for job tests: no network, no DB, cursor mocked."""
-    return (
-        patch(
-            "backlogg.scheduler.jobs.get_sync_offset",
-            new_callable=AsyncMock,
-            return_value=cursor_offset,
-        ),
-        patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock),
-        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory()),
+def _job_factory_patch():
+    """Common patch for job tests: no DB."""
+    return patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory())
+
+
+def _book_work_list(external_ids: list[str]):
+    """Patch the book refresh rotation to hand the job exactly these ids."""
+    return patch(
+        "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
+        new_callable=AsyncMock,
+        return_value=external_ids,
     )
 
 
@@ -85,11 +90,10 @@ async def test_sync_movies_slice_size_overrides_setting(monkeypatch):
     exactly what the backfill script raises to process bigger slices.
     """
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    _get_cursor, _set_cursor, factory = _job_patches(cursor_offset=0)
 
     with (
         _seed_work_list_patch() as mock_work_list,
-        factory,
+        _job_factory_patch(),
     ):
         result = await sync_jobs.sync_movies(slice_size=7)
 
@@ -101,43 +105,36 @@ async def test_sync_movies_slice_size_none_uses_setting(monkeypatch):
     """slice_size=None preserves the settings-based behaviour."""
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_MOVIES", None)
-    _get_cursor, _set_cursor, factory = _job_patches(cursor_offset=0)
 
     with (
         _seed_work_list_patch() as mock_work_list,
-        factory,
+        _job_factory_patch(),
     ):
         await sync_jobs.sync_movies(slice_size=None)
 
     mock_work_list.assert_awaited_once_with("MOVIE", "TMDB", 3)
 
 
-async def test_sync_slice_size_is_capped_by_target(monkeypatch):
-    """The override never fetches beyond SEED_TOP_N_* - offset.
+async def test_sync_books_slice_size_override_sizes_the_refresh_rotation(monkeypatch):
+    """The override is what the script raises to refresh more books per iteration.
 
-    Written against ``sync_books`` since feature 90: the cap only exists on the
-    cursor path, and books are the only type still on it.  It used to be
-    written against ``sync_games``.
+    It used to be capped by ``SEED_TOP_N_BOOKS - offset``; that ceiling went
+    with the cursor (issue #27), so the override now travels straight to the
+    rotation query and nothing shrinks it.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 10)
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 3)
-    get_cursor, set_cursor, factory = _job_patches(cursor_offset=4)
 
     with (
-        patch.object(
-            sync_jobs._ol_client,
-            "get_popular_books",
+        patch(
+            "backlogg.scheduler.jobs.get_stale_catalog_external_ids",
             new_callable=AsyncMock,
-            return_value=[{"key": "", "title": ""}] * 6,
-        ) as mock_fetch,
-        patch.object(sync_jobs._ol_client, "book_to_dict", return_value={"title": ""}),
-        get_cursor,
-        set_cursor,
-        factory,
+            return_value=[],
+        ) as mock_work_list,
+        _job_factory_patch(),
     ):
         await sync_jobs.sync_books(slice_size=500)
 
-    mock_fetch.assert_awaited_once_with(limit=6, offset=4)
+    mock_work_list.assert_awaited_once_with(ANY, "BOOK", "OPEN_LIBRARY", 500)
 
 
 # ── Adapter fetch failure: errors reported, cursor untouched ─────────────────
@@ -149,53 +146,46 @@ def _http_error(status_code: int) -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError(f"HTTP {status_code}", request=MagicMock(), response=response)
 
 
-async def test_sync_books_fetch_error_reports_error_and_keeps_cursor(monkeypatch):
-    """An adapter exception yields errors=1 and never writes the cursor."""
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
+async def test_sync_books_fetch_error_reports_error_and_writes_nothing(monkeypatch):
+    """An adapter exception yields errors=1 and no item written.
+
+    The books of that chunk keep their old ``last_synced_at``, so the next run
+    finds them at the head of the rotation — which is what replaced "the cursor
+    is not advanced on error" as the retry guarantee.
+    """
     monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE", 100)
-    get_cursor, set_cursor, factory = _job_patches(cursor_offset=500)
 
     with (
+        _book_work_list(["OL1W", "OL2W"]),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
             side_effect=_http_error(500),
         ),
-        get_cursor,
-        set_cursor as mock_set,
-        factory,
+        _job_factory_patch(),
     ):
         result = await sync_jobs.sync_books()
 
     assert result["synced"] == 0
     assert result["errors"] == 1
-    assert result["offset"] == 500
-    mock_set.assert_not_awaited()  # the cursor must never wrap because of an error
 
 
 async def test_backfill_guard_aborts_on_fetch_error(monkeypatch):
     """End to end: adapter raises → real sync_books errors → BackfillError (exit 1).
 
     This is the regression for run 28799265814, where an OL 500 was masked
-    as an empty listing and produced a false-green wraparound stop.
+    as an empty listing and produced a false-green stop.
     """
-    monkeypatch.setattr(sync_jobs.settings, "SEED_TOP_N_BOOKS", 1000)
-    get_cursor, set_cursor, factory = _job_patches(cursor_offset=500)
-    script_cursor, script_factory = _backfill_patches(cursor_reads=[500])
-
     with (
+        _book_work_list(["OL1W"]),
         patch.object(
             sync_jobs._ol_client,
-            "get_popular_books",
+            "get_works_by_ids",
             new_callable=AsyncMock,
             side_effect=_http_error(500),
         ),
-        get_cursor,
-        set_cursor,
-        factory,
-        script_cursor,
-        script_factory,
+        _job_factory_patch(),
         pytest.raises(backfill_sync.BackfillError),
     ):
         await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
@@ -285,64 +275,58 @@ async def test_igdb_single_page_does_not_throttle():
 def _job_result(
     synced: int,
     errors: int = 0,
-    offset: int = 0,
     pending: int | None = None,
     stuck: int | None = None,
+    refreshed: int | None = None,
 ) -> dict:
-    result = {"synced": synced, "errors": errors, "offset": offset, "duration_s": 0.1}
+    result = {"synced": synced, "errors": errors, "duration_s": 0.1}
     if pending is not None:
         result["pending"] = pending
         result["stuck"] = stuck or 0
+    if refreshed is not None:
+        result["refreshed"] = refreshed
     return result
 
 
-def _backfill_patches(cursor_reads: list[int]):
-    """Patch the script's cursor reads: initial read + one read per iteration."""
-    return (
-        patch.object(
-            backfill_sync,
-            "get_sync_offset",
-            new_callable=AsyncMock,
-            side_effect=cursor_reads,
-        ),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
-    )
+async def test_backfill_book_loops_until_the_time_budget():
+    """The book loop is the refresh rotation: only the clock ends it.
 
-
-async def test_backfill_loops_until_wraparound():
-    """For a cursor-driven type the loop runs until the cursor wraps to 0."""
+    Every iteration finds something older to re-sync — there is no "done" to
+    converge on, unlike the target-driven types — so the loop must keep going
+    while the budget lasts and stop on ``time_budget``, not report a false
+    completion.
+    """
     results = [
-        _job_result(synced=500, offset=0),
-        _job_result(synced=500, offset=500),
-        _job_result(synced=200, errors=1, offset=1000),
+        _job_result(synced=500, refreshed=500),
+        _job_result(synced=500, refreshed=500),
+        _job_result(synced=200, errors=1, refreshed=500),
     ]
-    get_cursor, factory = _backfill_patches(cursor_reads=[0, 500, 1000, 0])
+    # Start, then one reading per iteration; the third crosses the budget.
+    clock = iter([0.0, 10.0, 20.0, 3601.0, 3601.0, 3601.0])
 
     with (
         patch(
             "backlogg.scheduler.jobs.sync_books", new_callable=AsyncMock, side_effect=results
         ) as mock_job,
-        get_cursor,
-        factory,
+        patch.object(backfill_sync.time, "monotonic", lambda: next(clock)),
     ):
         summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
 
     assert mock_job.await_count == 3
     for call in mock_job.await_args_list:
         assert call.kwargs == {"slice_size": 500}
-    assert summary["stop_reason"] == "wraparound"
+    assert summary["stop_reason"] == "time_budget"
     assert summary["iterations"] == 3
     assert summary["synced"] == 1200
     assert summary["errors"] == 1
-    assert summary["next_offset"] == 0
 
 
 async def test_backfill_loops_until_the_target_list_is_exhausted():
     """For a target-driven type (feature 86) the loop runs until pending hits 0.
 
-    ``sync_cursors`` is never consulted: the stop signal is the job's own
-    ``pending`` count, which is a live difference against the catalog rather
-    than a stored offset.
+    No cursor is ever consulted: the stop signal is the job's own ``pending``
+    count, which is a live difference against the catalog rather than a stored
+    offset.
     """
     results = [
         _job_result(synced=500, pending=700),
@@ -354,12 +338,10 @@ async def test_backfill_loops_until_the_target_list_is_exhausted():
         patch(
             "backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results
         ) as mock_job,
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock) as mock_cursor,
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
     ):
         summary = await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
 
-    mock_cursor.assert_not_awaited()
+    assert not hasattr(backfill_sync, "get_sync_offset")
     assert mock_job.await_count == 3
     assert summary["stop_reason"] == "exhausted"
     assert summary["synced"] == 1200
@@ -383,8 +365,6 @@ async def test_backfill_terminates_even_with_permanently_stuck_targets():
         patch(
             "backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results
         ) as mock_job,
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
     ):
         summary = await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
 
@@ -404,33 +384,23 @@ async def test_backfill_adds_up_the_skipped_links_of_every_iteration():
     errors" and the loss would only be findable by hand afterwards.
     """
     results = [
-        _job_result(synced=500, offset=0) | {"skipped_links": 3},
-        _job_result(synced=500, offset=500) | {"skipped_links": 0},
-        _job_result(synced=200, offset=1000) | {"skipped_links": 4},
+        _job_result(synced=500, pending=1000) | {"skipped_links": 3},
+        _job_result(synced=500, pending=500) | {"skipped_links": 0},
+        _job_result(synced=200, pending=0) | {"skipped_links": 4},
     ]
-    get_cursor, factory = _backfill_patches(cursor_reads=[0, 500, 1000, 0])
 
-    with (
-        patch("backlogg.scheduler.jobs.sync_books", new_callable=AsyncMock, side_effect=results),
-        get_cursor,
-        factory,
-    ):
-        summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
+    with patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results):
+        summary = await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
 
     assert summary["skipped_links"] == 7
 
 
 async def test_backfill_reports_zero_skipped_links_for_a_job_that_omits_the_key():
     """A job result without the key must not blow the aggregation up."""
-    results = [_job_result(synced=200, offset=0)]
-    get_cursor, factory = _backfill_patches(cursor_reads=[0, 0])
+    results = [_job_result(synced=200, pending=0)]
 
-    with (
-        patch("backlogg.scheduler.jobs.sync_books", new_callable=AsyncMock, side_effect=results),
-        get_cursor,
-        factory,
-    ):
-        summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
+    with patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results):
+        summary = await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
 
     assert summary["skipped_links"] == 0
 
@@ -446,15 +416,12 @@ async def test_backfill_does_not_treat_unknown_progress_as_done():
         "synced": 0,
         "errors": 1,
         "people_errors": 0,
-        "offset": 0,
         "duration_s": 0.1,
         "pending": None,
         "stuck": None,
     }
     with (
         patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, return_value=unknown),
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
         pytest.raises(backfill_sync.BackfillError),
     ):
         await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
@@ -468,8 +435,6 @@ async def test_backfill_target_driven_stops_on_time_budget():
             new_callable=AsyncMock,
             return_value=_job_result(synced=500, pending=9000),
         ) as mock_job,
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
     ):
         summary = await backfill_sync.run_backfill("series", slice_size=500, time_budget_s=0)
 
@@ -479,48 +444,36 @@ async def test_backfill_target_driven_stops_on_time_budget():
 
 
 async def test_backfill_stops_on_time_budget():
-    """An exhausted time budget stops the loop even if the cursor is mid-way."""
-    get_cursor, factory = _backfill_patches(cursor_reads=[0, 500])
-
-    with (
-        patch(
-            "backlogg.scheduler.jobs.sync_books",
-            new_callable=AsyncMock,
-            return_value=_job_result(synced=500, offset=0),
-        ) as mock_job,
-        get_cursor,
-        factory,
-    ):
+    """An exhausted time budget stops the loop with work still left."""
+    with patch(
+        "backlogg.scheduler.jobs.sync_books",
+        new_callable=AsyncMock,
+        return_value=_job_result(synced=500, refreshed=500),
+    ) as mock_job:
         summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=0)
 
     mock_job.assert_awaited_once_with(slice_size=500)
     assert summary["stop_reason"] == "time_budget"
     assert summary["iterations"] == 1
-    assert summary["next_offset"] == 500  # progress persisted — next run resumes here
 
 
-async def test_backfill_wraparound_on_first_iteration():
-    """A single slice covering the whole target stops immediately with exit reason.
+async def test_backfill_book_stops_when_there_is_nothing_to_refresh():
+    """An empty catalog is the one "done" a refresh rotation can report.
 
-    ``book`` since feature 90: ``game`` is target-driven now, so wraparound is
-    no longer one of its stop reasons (see the test below).
+    Without this the loop would spin on a job that does nothing until the time
+    budget expired — five hours of no-ops reported as a normal run.
     """
-    get_cursor, factory = _backfill_patches(cursor_reads=[0, 0])
-
-    with (
-        patch(
-            "backlogg.scheduler.jobs.sync_books",
-            new_callable=AsyncMock,
-            return_value=_job_result(synced=80, offset=0),
-        ),
-        get_cursor,
-        factory,
-    ):
+    with patch(
+        "backlogg.scheduler.jobs.sync_books",
+        new_callable=AsyncMock,
+        return_value=_job_result(synced=0, refreshed=0),
+    ) as mock_job:
         summary = await backfill_sync.run_backfill("book", slice_size=500, time_budget_s=3600)
 
-    assert summary["stop_reason"] == "wraparound"
+    mock_job.assert_awaited_once_with(slice_size=500)
+    assert summary["stop_reason"] == "exhausted"
     assert summary["iterations"] == 1
-    assert summary["synced"] == 80
+    assert summary["synced"] == 0
 
 
 async def test_backfill_game_stops_on_an_exhausted_target_list():
@@ -536,31 +489,24 @@ async def test_backfill_game_stops_on_an_exhausted_target_list():
             new_callable=AsyncMock,
             return_value=_job_result(synced=500, pending=0, stuck=3),
         ) as mock_job,
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock) as mock_cursor,
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
     ):
         summary = await backfill_sync.run_backfill("game", slice_size=500, time_budget_s=3600)
 
     mock_job.assert_awaited_once_with(slice_size=500)
-    mock_cursor.assert_not_awaited()
+    assert not hasattr(backfill_sync, "get_sync_offset")
     assert summary["stop_reason"] == "exhausted"
     assert summary["pending"] == 0
     assert summary["stuck"] == 3
-    assert summary["next_offset"] == 0
 
 
 async def test_backfill_aborts_when_iteration_makes_no_progress():
     """An iteration with errors and zero synced items raises BackfillError."""
-    get_cursor, factory = _backfill_patches(cursor_reads=[0])
-
     with (
         patch(
             "backlogg.scheduler.jobs.sync_series",
             new_callable=AsyncMock,
-            return_value=_job_result(synced=0, errors=1, offset=0),
+            return_value=_job_result(synced=0, errors=1),
         ),
-        get_cursor,
-        factory,
         pytest.raises(backfill_sync.BackfillError),
     ):
         await backfill_sync.run_backfill("series", slice_size=500, time_budget_s=3600)
@@ -577,13 +523,12 @@ def test_main_rejects_invalid_content_type():
 
 
 def test_main_returns_zero_on_normal_stop():
-    """A normal stop (wraparound/time budget) exits 0 and forwards the CLI args."""
+    """A normal stop (exhausted/time budget) exits 0 and forwards the CLI args."""
     summary = {
         "content_type": "movie",
         "iterations": 2,
         "synced": 1000,
         "errors": 0,
-        "next_offset": 0,
         "pending": 0,
         "stuck": 0,
         "elapsed_s": 12.3,

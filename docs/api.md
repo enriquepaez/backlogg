@@ -1096,11 +1096,11 @@ Usar `--max-time 600` en curl para evitar timeout de cliente.
 Cada ejecución procesa un **tramo** de hasta `SYNC_SLICE_SIZE` items. De dónde
 sale ese tramo depende del tipo (features 86 y 90):
 
-- **`book`** — del listado popular de Open Library, empezando en el offset
-  persistido en `sync_cursors` para el tipo. El cursor avanza al terminar y
-  vuelve a 0 al alcanzar `SEED_TOP_N_BOOKS` o cuando la API externa devuelve
-  menos items de los pedidos. Es el **único** tipo con cursor desde la
-  feature 90.
+- **`book`** — de los ítems del catálogo con `last_synced_at` más antiguo, y
+  de nada más: books no tiene `seed_targets` porque su alta viene del diff del
+  dump mensual (`scripts/incremental_sync.py --source book`), así que su tramo
+  nocturno es **solo rotación de refresco** (issue #27). Los ids se re-leen
+  contra `search.json` en lotes y cada obra se re-hidrata por su OLID.
 - **`movie`, `series` y `game`** — de la lista objetivo de `seed_targets`: los
   targets que aún no tienen fila en `external_ids` y, si no queda ninguno, los
   ítems del catálogo con `last_synced_at` más antiguo. **No hay cursor.** Los
@@ -1116,18 +1116,17 @@ Response:
   "errors": 6,
   "people_errors": 0,
   "skipped_links": 0,
-  "offset": 0,
+  "skipped_identities": 0,
   "duration_s": 87
 }
 ```
 
 - `synced` — número de items insertados/actualizados correctamente.
 - `errors` — número de items que fallaron (logged en servidor).
-- `offset` — offset (0-based) del tramo procesado en esta ejecución. **Siempre
-  `0` para `movie`, `series` y `game`**: no hay cursor detrás (feature 86 para
-  los dos primeros, feature 90 para games). El campo se mantiene porque el
-  contrato lo declara obligatorio; el progreso de esos tres tipos se lee en el
-  log del job (`N targets still pending`) o consultando `seed_targets` (ver
+- **No hay campo de offset**: ningún tipo tiene ya un cursor detrás (feature 86
+  para movies y series, feature 90 para games, issue #27 para books). El
+  progreso se lee en el log del job (`N targets still pending`, `N book(s) by
+  oldest last_synced_at`) o consultando `seed_targets` (ver
   `docs/operations.md`).
 - `duration_s` — segundos que tardó el sync.
 - `people_errors` — items cuyo detalle se guardó pero cuyos credits fallaron al
@@ -1147,6 +1146,18 @@ Response:
   Ambos caminos de escritura (por ítem y por lotes) lo alimentan, y cada salto
   deja además un `WARNING` en el log nombrando la terna, el ítem pretendiente y
   el que ya la tiene.
+- `skipped_identities` — la misma pérdida sobre la **otra** clave única
+  (issue #24). `uq_item_source` solo admite **un** `external_id` por
+  `(ítem, source)`, así que cuando dos identidades distintas de la fuente
+  resuelven a la **misma fila** —dos personas cuyos nombres slugifican igual,
+  que es el caso típico— la que llega después se queda el enlace y la otra deja
+  de ser resoluble para siempre. El ítem conserva *un* id, y por eso
+  `skipped_links` no puede verlo: allí el `item_id` es el mismo, que es
+  justamente su discriminante de idempotencia. El comportamiento **no cambia**
+  (dos homónimos siguen siendo una sola fila, decisión de producto del
+  2026-09-12); lo que cambia es que deja de ser una pérdida muda. Mismo
+  recorrido que `skipped_links`: mismo colector, misma respuesta, mismo
+  `::warning::` en el workflow nocturno.
 
 **Auth**: requiere el header `X-API-Key` con el valor de la env var
 `ADMIN_API_KEY`. Header ausente o incorrecto → `401`; `ADMIN_API_KEY` sin

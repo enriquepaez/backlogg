@@ -27,9 +27,7 @@ algo que necesite variables de entorno en local, cárgalas del `.env` existente
 
 | Env var | Valor actual | Notas |
 |---|---|---|
-| ~~`SEED_TOP_N_GAMES`~~ | — | **Retirada en la feature 90.** Games se enumera a `seed_targets` (`scripts/seed_igdb_targets.py`) y se hidrata por diferencia, así que no hay cursor ni objetivo de wraparound. Mientras existió topó el catálogo de juegos en 10.000 sobre los ~31.988 que pasan el filtro. Se puede **borrar de Render**: el código la ignora (`extra="ignore"`) |
-| `SEED_TOP_N_BOOKS` | 10000 | **Inerte para la siembra desde la feature 87** (`mode=dump` selecciona por los umbrales `BOOKS_SEED_MIN_*`, sin corte por número de ítems). Sigue viva para el camino por cursor: `sync_books` y `backfill_sync.py book`. ⚠️ Ahí 10.000 **se queda corto**: el filtro de la feature 73 entrega 18.874 obras, así que el cursor da la vuelta antes de recorrerlas todas. Si se usa ese camino, subirla a ≥ 18.874 (con `mode=dump` da igual) |
-| `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES` | 10000 | **Inertes desde la feature 86.** El catálogo de movies/series lo define `TMDB_SEED_MIN_VOTES_*`, no un número de ítems. Se dejan puestas para que la config de Render y la del workflow de backfill sigan siendo idénticas |
+| ~~`SEED_TOP_N_MOVIES`~~ / ~~`_SERIES`~~ / ~~`_GAMES`~~ / ~~`_BOOKS`~~ | — | **Ya no existen en el código.** Ningún tipo se hidrata por cursor: movies, series y games por diferencia contra `seed_targets`, books por rotación de `last_synced_at` (issue #27). **`SEED_TOP_N_BOOKS` se puede dejar puesta en Render sin hacer nada**: es inocua (`Settings` usa `extra="ignore"`, así que una variable sin campo se descarta) y se borra cuando se quiera. Ya no hay ningún número que cuadrar a mano entre Render y el workflow de backfill |
 | `TMDB_SEED_MIN_VOTES_MOVIES` / `_SERIES` | 25 | Umbral `vote_count` que **define** el catálogo de TMDB: 57.135 movies y 10.880 series |
 | `TMDB_SEED_START_YEAR` / `_END_YEAR` | 1874 / (vacío) | Rango de años que trocea la enumeración `/discover`. Vacío = año actual + 1 |
 | `TMDB_SEED_CONCURRENCY` | 8 | Peticiones TMDB en vuelo (`Semaphore`) en enumeración e hidratación; ≈32 req/s frente al límite de ~50 |
@@ -261,15 +259,18 @@ gh run list --workflow=nightly-sync.yml --limit 3
 
 Qué procesa cada run depende del tipo (feature 86):
 
-- **`book`**: avanza el cursor de su tipo en `SYNC_SLICE_SIZE` items (tabla
-  `sync_cursors`, compartida con el backfill). Es el **único** que queda por
-  cursor desde la feature 90.
 - **`movie`, `series` y `game`**: toman `SYNC_SLICE_SIZE_<TIPO>` targets
   pendientes de `seed_targets` (los que aún no tienen fila en `external_ids`)
   y, si no quedan, rellenan la rebanada con los ítems de `last_synced_at` más
-  antiguo. No hay cursor: el campo `offset` de la respuesta es siempre `0` para
-  estos tres tipos. `game` hidrata en bloques de hasta 500 ids por petición
+  antiguo. `game` hidrata en bloques de hasta 500 ids por petición
   (`where id = (...)`), frente a una petición por ítem en TMDB.
+- **`book`**: solo lo segundo. No tiene `seed_targets` —el catálogo lo siembra
+  el dump mensual y las altas llegan por su diff—, así que su rebanada son
+  siempre los `SYNC_SLICE_SIZE_BOOKS` libros con `last_synced_at` más antiguo,
+  releídos de `search.json` en lotes de 50 ids por petición y re-hidratados por
+  OLID (issue #27, que retiró el último cursor).
+
+Ningún tipo tiene ya cursor.
 
 **Desde la feature 88 el nocturno es también la red de seguridad.** La
 frescura del catálogo la lleva ahora el incremental de las 09:00 UTC (sección
@@ -427,12 +428,12 @@ catalog_search` sobre una vista que ya no existe.
 **No revienta el job.** La llamada está envuelta en su propio `try/except` que
 solo loguea, y es la **última** sentencia del bloque de sesión en los tres
 sitios (`sync_movies`/`sync_series`, `sync_books`, `sync_games`): lo que
-escribió la rebanada ya está commiteado antes —`session.commit()` en la ruta de
-`seed_targets`, y `_persist_cursor` commitea en las de books/games—, y después
+escribió la rebanada ya está commiteado antes (`session.commit()` en la ruta de
+`seed_targets`, el `BatchWriter` en el resto), y después
 del refresco solo se leen contadores en memoria. Lo mismo vale para el
 `backfill_sync.py` (reusa los mismos jobs) y para el fan-out de `/v1/search`.
 
-Consecuencia real: el job sincroniza y avanza su cursor con normalidad,
+Consecuencia real: el job sincroniza con normalidad,
 `POST /v1/admin/sync/{type}` devuelve 200 con sus contadores de siempre, la
 verificación de `GET /v1/admin/stats` del workflow (`last_synced_at` < 2 h)
 pasa, y en el log aparece una línea
@@ -475,8 +476,9 @@ conserva su enlace — ver `docs/schema.md`).
 ### Ítems sin enlace que la `0036` **no** repara
 
 La reparación de la migración se apoya en `seed_targets`, que es lo único que
-recuerda qué ids quería el catálogo. Un ítem que entró por otra vía —el cursor
-de `/popular`, el fan-out de búsqueda, `/similar`— **no tiene fila ahí**, así que
+recuerda qué ids quería el catálogo. Un ítem que entró por otra vía —el viejo
+recorrido por offset de `/popular`, el fan-out de búsqueda, `/similar`— **no
+tiene fila ahí**, así que
 si perdió su enlace por el defecto del issue #20 se queda como estaba: fila en
 `series`/`movies`/`books`, ninguna en `external_ids`.
 
@@ -659,7 +661,7 @@ descartó por eso, no por riesgo.
 
 `.github/workflows/backfill-sync.yml` ejecuta `scripts/backfill_sync.py`
 directamente contra Neon y las APIs externas (sin pasar por Render ni su
-timeout). Procesa tramos de 500 en bucle hasta wraparound del cursor o
+timeout). Procesa tramos de 500 en bucle hasta agotar la lista de trabajo o el
 presupuesto de tiempo (5 h por defecto; `timeout-minutes: 350` en el job).
 
 ```bash
@@ -672,8 +674,9 @@ gh workflow run backfill-sync.yml -f content_type=game  -f mode=enumerate
 gh workflow run backfill-sync.yml -f content_type=movie -f mode=hydrate
 gh workflow run backfill-sync.yml -f content_type=game  -f mode=hydrate
 
-# El único tipo con cursor (book): seed_top_n debe coincidir con Render
-gh workflow run backfill-sync.yml -f content_type=book -f mode=hydrate -f seed_top_n=10000
+# book: `hydrate` NO siembra nada (para eso está `mode=dump`), es una pasada de
+# refresco sobre el catálogo que ya existe, acotada por el presupuesto de tiempo
+gh workflow run backfill-sync.yml -f content_type=book -f mode=hydrate
 
 # Ver los últimos runs y su estado
 gh run list --workflow=backfill-sync.yml --limit 3
@@ -685,18 +688,15 @@ gh run watch
 gh run view <run-id> --log | grep backfill
 ```
 
-- `seed_top_n` **debe coincidir** con `SEED_TOP_N_BOOKS` en Render — si
-  difiere, el cursor compartido haría wraparound antes de tiempo. Aplica **solo
-  a `book`**: `SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la feature 86 y
-  `SEED_TOP_N_GAMES` **ya no existe** desde la 90, así que pasarlo con
-  `content_type=game` no hace nada (y ya no hay nada que descuadrar).
-- El log termina con `stop_reason`: `wraparound` = objetivo alcanzado o API
-  agotada (solo `book`); `exhausted` = el catálogo ya tiene todos los targets
-  enumerados **trabajables** (movie/series/game; los retirados se reportan
-  aparte en `stuck`); `time_budget` = relanzar el dispatch (reanuda desde el
-  cursor o recalculando la diferencia contra el catálogo).
+- El log termina con `stop_reason`: `exhausted` = el catálogo ya tiene todos
+  los targets enumerados **trabajables** (movie/series/game; los retirados se
+  reportan aparte en `stuck`) o no hay nada que refrescar (`book` con el
+  catálogo vacío); `time_budget` = relanzar el dispatch, que recalcula su lista
+  de trabajo desde cero. Para `book` ese es el final normal: una rotación de
+  refresco no converge, siempre hay algo más antiguo que revisitar.
 - Un error de API externa que persiste tras los reintentos deja el **run en
-  rojo** (exit 1) con el cursor intacto — relanzar cuando la API se recupere.
+  rojo** (exit 1) sin haber escrito nada de esa rebanada — relanzar cuando la
+  API se recupere.
 - Los backfills de tipos distintos pueden correr **en paralelo**: tablas y
   APIs independientes, y desde la feature 91 tampoco hay ningún refresco de
   vista que serializar.
@@ -911,9 +911,10 @@ dumps — para eso está `-f force_phase=true`, que rehace la fase pedida.
   media descarga **no** se reintenta, porque gzip no tiene punto de rebobinado y
   releer duplicaría el dump. Ese caso se arregla relanzando con `-f resume=true`:
   vuelve a hacer solo la fase que se cayó.
-- Esto **no** sustituye al sync nocturno de libros: `sync_books` sigue sobre
-  `search.json` con su cursor, igual que antes. Esta feature cambia la
-  **siembra**, no el camino de la petición.
+- Esto **no** sustituye al sync nocturno de libros: `sync_books` refresca lo que
+  ya está en el catálogo (los `last_synced_at` más antiguos). Esta feature es la
+  **siembra**, y desde el issue #27 es la única vía por la que entra un libro
+  nuevo, junto con el diff del dump siguiente.
 
 ### Los cuatro modos: `enumerate`, `dump`, `hydrate` y `credits`
 
@@ -922,11 +923,11 @@ sustituyen entre sí:
 
 | | `enumerate` (movie/series/game) | `dump` (book) | `hydrate` (por defecto) | `credits` (`--only-missing-credits`) |
 |---|---|---|---|---|
-| Lista de trabajo | movie/series: `/discover` por año bajo `vote_count.gte`; game: keyset de IGDB bajo la allowlist de `game_type` + `rating > 0` | los dumps mensuales enteros, filtrados por los umbrales `BOOKS_SEED_MIN_*` | movie/series/game: targets de `seed_targets` sin fila en `external_ids`; book: listado de populares por offset | query local: ítems del catálogo **sin ninguna fila en `credits` ni en `item_cast`** (feature 89: «tiene personas» vive en dos tablas), unida a `external_ids` |
-| Estado entre runs | la propia tabla `seed_targets` | un artefacto por fase en `--work-dir` (en Actions, la caché del repo) | movie/series/game: ninguno (diferencia en vivo); book: cursor en `sync_cursors` | ninguno; recalcula el hueco en cada run |
-| Llamadas HTTP por ítem | 0 (20 ítems por petición en TMDB, 500 en IGDB) | **0**: cuatro descargas para todo el catálogo | **una** en TMDB (`/{tipo}/{id}?append_to_response=credits,external_ids`); **1/500** en IGDB (`where id = (...)`) | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
+| Lista de trabajo | movie/series: `/discover` por año bajo `vote_count.gte`; game: keyset de IGDB bajo la allowlist de `game_type` + `rating > 0` | los dumps mensuales enteros, filtrados por los umbrales `BOOKS_SEED_MIN_*` | movie/series/game: targets de `seed_targets` sin fila en `external_ids`; book: los `last_synced_at` más antiguos del catálogo | query local: ítems del catálogo **sin ninguna fila en `credits` ni en `item_cast`** (feature 89: «tiene personas» vive en dos tablas), unida a `external_ids` |
+| Estado entre runs | la propia tabla `seed_targets` | un artefacto por fase en `--work-dir` (en Actions, la caché del repo) | ninguno: diferencia en vivo (movie/series/game) o `last_synced_at` (book) | ninguno; recalcula el hueco en cada run |
+| Llamadas HTTP por ítem | 0 (20 ítems por petición en TMDB, 500 en IGDB) | **0**: cuatro descargas para todo el catálogo | **una** en TMDB (`/{tipo}/{id}?append_to_response=credits`); **1/500** en IGDB (`where id = (...)`) | **una**: `/movie/{id}/credits`, `/tv/{id}?append_to_response=credits` o el work detail de Open Library |
 | Escribe la fila del ítem | **no**: solo la lista objetivo | sí (upsert completo, con géneros y credits de autoría) | sí (upsert completo) | **no**: la fila ya existe, solo faltan sus credits |
-| Condición de parada | ventanas agotadas (TMDB) / filtro agotado (IGDB) | las cuatro pasadas terminan | `pending == 0` (movie/series/game; los targets retirados no cuentan), wraparound del cursor (book) o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
+| Condición de parada | ventanas agotadas (TMDB) / filtro agotado (IGDB) | las cuatro pasadas terminan | `pending == 0` (movie/series/game; los targets retirados no cuentan), catálogo vacío (book) o `--time-budget-minutes` | lista de huecos agotada o `--time-budget-minutes` |
 | Para qué sirve | decidir **qué** quiere el catálogo | sembrar el catálogo de libros entero | bajar lo que falta | cerrar agujeros de credits (issue #15) |
 | Tipos que acepta | `movie`, `series`, `game` | **solo `book`** | los cuatro | todos menos `game` |
 
@@ -939,8 +940,8 @@ que ya existe.
 **Cuándo usar cada uno.** Si el catálogo de movies/series/games está vacío o el
 filtro ha cambiado, `enumerate` primero y `hydrate` después. Si el que está
 vacío es el de **libros**, `dump`: siembra el catálogo entero de una vez y sin
-tocar `search.json` (`hydrate` sobre `book` sigue existiendo, pero es el camino
-lento por cursor y su tope es `SEED_TOP_N_BOOKS`). Si faltan
+tocar `search.json` (`hydrate` sobre `book` no siembra nada — refresca lo que ya
+hay, y sobre un catálogo vacío termina en la primera iteración). Si faltan
 *ítems*, `hydrate`. Si los ítems están pero les faltan *credits*, `credits`:
 `hydrate` no cierra ese hueco (issue #15) — con la lista objetivo ya
 hidratada, `pending` es 0 y el run termina de inmediato sin tocar los ítems
@@ -1116,7 +1117,14 @@ Secrets que consume el workflow: `DATABASE_URL`, `TMDB_API_KEY`,
    si sale, TMDB creció 6,8× o el tope cambió.
 5. **`skipped_links`** (issue #22): filas escritas cuya terna
    `(item_type, source, external_id)` ya pertenecía a otro ítem — invisibles
-   para toda búsqueda por id a partir de ahí.
+   para toda búsqueda por id a partir de ahí. Su gemelo es
+   **`skipped_identities`** (issue #24): la fila sí se enlazó, pero con **uno
+   de los dos** ids que la reclamaban, porque `uq_item_source` solo admite un
+   `external_id` por `(ítem, source)`. Son casi siempre dos personas homónimas
+   fundidas en una fila (comportamiento deliberado); lo que hay que vigilar es
+   que el número pegue un salto. Los `WARNING` de
+   `backlogg.shared.external_ids` (`identity skipped`) dicen qué id se queda y
+   cuál se cae.
 6. **`saturated: true`** en un carril de IGDB: tocó el techo de
    `IGDB_INCREMENTAL_MAX_ITEMS`. No se perdió nada, pero si sale varios días
    seguidos hay un atraso real que conviene subir de techo.
@@ -1203,31 +1211,6 @@ curl "$RENDER_API_URL/admin/stats" -H "X-API-Key: $ADMIN_API_KEY"
 
 Header ausente/incorrecto → `401`; `ADMIN_API_KEY` sin configurar en el
 servicio → `503`.
-
-## Estado de los cursores de sync
-
-Los cursores viven en la tabla `sync_cursors` (ver `docs/schema.md`). Desde la
-feature 86 **solo `BOOK` y `GAME` los usan**: las filas `MOVIE`/`SERIES` que
-haya quedado son vestigiales y no las lee ni las escribe nadie (el progreso de
-esos dos tipos se mide con la consulta de `seed_targets` de la sección «Sync
-nocturno»). Consulta rápida contra Neon desde el repo:
-
-```bash
-bash -c 'set -a; source .env; set +a; uv run python -c "
-import asyncio
-from sqlalchemy import text
-from backlogg.core.database import async_session_factory, engine
-async def m():
-    async with async_session_factory() as s:
-        for r in (await s.execute(text(\"SELECT item_type, next_offset, updated_at FROM sync_cursors ORDER BY item_type\"))).all():
-            print(r)
-    await engine.dispose()
-asyncio.run(m())"'
-```
-
-Las **marcas de agua** del incremental (feature 88) son otra tabla y otra
-pregunta: `sync_watermarks` guarda un *corte temporal* por mecanismo, no un
-offset. Su consulta está en la sección *Incremental del catálogo*.
 
 ## Métricas (Prometheus)
 

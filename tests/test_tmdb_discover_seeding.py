@@ -7,7 +7,7 @@ Four things are under test, matching the feature's acceptance list:
 2. **The 500-page guard** — a year over the cap is split into its twelve
    months, and a month that is *still* over the cap is truncated and reported
    instead of aborting the run.
-3. **Single-request hydration** — ``append_to_response=credits,external_ids``
+3. **Single-request hydration** — ``append_to_response=credits``
    means the separate ``/{id}/credits`` call is never issued, verified by
    counting the HTTP requests a whole slice makes.
 4. **The persisted target list** — the work list is the difference against
@@ -339,7 +339,7 @@ async def test_movie_hydration_issues_one_request_with_append_to_response():
 
     async def fake_get(self, url, **kwargs):  # noqa: ARG001
         requested.append(url)
-        assert kwargs["params"] == {"append_to_response": "credits,external_ids"}
+        assert kwargs["params"] == {"append_to_response": "credits"}
         return _json_response(_movie_detail(550))
 
     with patch("httpx.AsyncClient.get", new=fake_get):
@@ -380,7 +380,7 @@ async def test_series_hydration_issues_one_request_with_cast_and_creators():
 
     async def fake_get(self, url, **kwargs):  # noqa: ARG001
         requested.append(url)
-        assert kwargs["params"] == {"append_to_response": "credits,external_ids"}
+        assert kwargs["params"] == {"append_to_response": "credits"}
         return _json_response(detail)
 
     with patch("httpx.AsyncClient.get", new=fake_get):
@@ -583,23 +583,24 @@ async def test_sync_movies_fills_the_slice_with_pending_then_rotation(db):
     assert requested == [866003, 866001]
     assert result["refreshed"] == 1
     assert result["pending"] == 0
-    assert result["offset"] == 0
+    assert "offset" not in result
 
 
-async def test_sync_movies_reads_no_sync_cursor(db):
-    """sync_cursors is out of the movie path entirely (no offset to resume from)."""
-    with (
-        patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock) as get_cursor,
-        patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock) as set_cursor,
-        patch(
-            "backlogg.scheduler.jobs.async_session_factory",
-            new=_mocked_session_factory(db),
-        ),
+async def test_sync_movies_has_no_cursor(db):
+    """There is no offset to resume from anywhere in the movie path.
+
+    Asserted on the module: the two repository functions no longer exist and
+    ``scheduler.jobs`` does not import them, so there is nothing left to patch.
+    """
+    assert not hasattr(sync_jobs, "get_sync_offset")
+    assert not hasattr(sync_jobs, "set_sync_offset")
+
+    with patch(
+        "backlogg.scheduler.jobs.async_session_factory",
+        new=_mocked_session_factory(db),
     ):
         result = await sync_jobs.sync_movies(slice_size=5)
 
-    get_cursor.assert_not_awaited()
-    set_cursor.assert_not_awaited()
     assert result["synced"] == 0
     assert result["errors"] == 0
 
@@ -717,7 +718,7 @@ async def test_sync_series_is_target_driven_too(db):
     ):
         result = await sync_jobs.sync_series(slice_size=5)
 
-    mock_detail.assert_awaited_once_with(869001, append_to_response="credits,external_ids")
+    mock_detail.assert_awaited_once_with(869001, append_to_response="credits")
     assert result["synced"] == 1
     assert result["pending"] == 0
 

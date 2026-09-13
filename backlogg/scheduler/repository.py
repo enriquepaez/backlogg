@@ -1,10 +1,10 @@
 """Scheduler repository — persistence for the sync/backfill data access.
 
-Only this module touches SQLAlchemy for the ``sync_cursors`` table, for the
-credits-gap query that drives the targeted backfill (feature 85), for the
-``seed_targets`` work list that drives the TMDB seeding (feature 86) and the
-IGDB one (feature 90), and for the ``sync_watermarks`` table and the known-id
-lookups that drive the incremental updates (feature 88).
+Only this module touches SQLAlchemy for the credits-gap query that drives the
+targeted backfill (feature 85), for the ``seed_targets`` work list that drives
+the TMDB seeding (feature 86) and the IGDB one (feature 90), and for the
+``sync_watermarks`` table and the known-id lookups that drive the incremental
+updates (feature 88).
 """
 
 from collections.abc import Sequence
@@ -21,7 +21,7 @@ from backlogg.games.models import Game
 from backlogg.movies.models import Movie
 from backlogg.series.models import Series
 from backlogg.shared.external_ids import ExternalId
-from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncCursor, SyncWatermark
+from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncWatermark
 
 __all__ = [
     "CREDIT_GAP_SOURCES",
@@ -38,12 +38,10 @@ __all__ = [
     "get_known_source_ids",
     "get_pending_seed_targets",
     "get_stale_catalog_external_ids",
-    "get_sync_offset",
     "get_sync_watermark",
     "mark_credits_synced",
     "mark_seed_targets_attempted",
     "mark_seed_targets_unreachable",
-    "set_sync_offset",
     "set_sync_watermark",
     "upsert_seed_targets",
 ]
@@ -101,29 +99,6 @@ class CreditGaps:
     @property
     def considered(self) -> int:
         return len(self.gaps) + self.skipped_no_external_id
-
-
-async def get_sync_offset(db: AsyncSession, item_type: str) -> int:
-    """Return the persisted next offset for ``item_type``, or 0 if absent."""
-    result = await db.execute(
-        select(SyncCursor.next_offset).where(SyncCursor.item_type == item_type)
-    )
-    offset = result.scalar_one_or_none()
-    return offset if offset is not None else 0
-
-
-async def set_sync_offset(db: AsyncSession, item_type: str, next_offset: int) -> None:
-    """Upsert the next offset for ``item_type`` (idempotent)."""
-    stmt = (
-        insert(SyncCursor)
-        .values(item_type=item_type, next_offset=next_offset)
-        .on_conflict_do_update(
-            index_elements=[SyncCursor.item_type],
-            set_={"next_offset": next_offset, "updated_at": func.now()},
-        )
-    )
-    await db.execute(stmt)
-    await db.flush()
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,9 +171,9 @@ async def set_sync_watermark(
 ) -> None:
     """Upsert the watermark of one mechanism (idempotent).
 
-    Same ``INSERT ... ON CONFLICT DO UPDATE`` shape as ``set_sync_offset``:
-    the mechanism does not have to know whether it has ever run before, and a
-    retry of the same pass writes the same row instead of a second one.  The
+    An ``INSERT ... ON CONFLICT DO UPDATE``, so the mechanism does not have to
+    know whether it has ever run before and a retry of the same pass writes
+    the same row instead of a second one.  The
     conflict target is the whole ``(source, kind, item_type)`` primary key,
     which is exactly why none of its three columns may be nullable — a NULL
     there is distinct from itself in a unique index and the ``ON CONFLICT``
@@ -333,16 +308,15 @@ async def mark_credits_synced(
 
 # ── Seed targets (feature 86) ────────────────────────────────────────────────
 #
-# Item types whose catalog is defined by an enumerated target list instead of
-# by an offset into a popularity ranking, with the external source the ids
-# belong to.  GAME joined in feature 90 (enumerated by keyset from IGDB under
-# the ``game_type`` allowlist plus ``rating > 0``).
+# Item types whose catalog is defined by an enumerated target list, with the
+# external source the ids belong to.  GAME joined in feature 90 (enumerated by
+# keyset from IGDB under the ``game_type`` allowlist plus ``rating > 0``).
 #
 # BOOK is the only one left out, and not by oversight: since feature 87 its
 # catalog is selected from the Open Library *monthly dumps*, which carry every
 # field, so there is no "enumerate now, hydrate later" split to make — the
-# selection and the write are the same pass.  Its nightly job still walks
-# ``search.json`` by offset with the cursor in ``sync_cursors`` (issue #27).
+# selection and the write are the same pass.  Its nightly job is therefore the
+# refresh rotation alone (issue #27).
 SEED_TARGET_SOURCES: dict[str, str] = {
     "MOVIE": "TMDB",
     "SERIES": "TMDB",

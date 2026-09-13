@@ -140,11 +140,15 @@ GET /tv/changes?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=N
 
 ### `append_to_response` (feature 86)
 
-`GET /movie/{id}?append_to_response=credits,external_ids` devuelve el detalle,
-el cuerpo de `/movie/{id}/credits` bajo la clave `credits` y el de
-`/movie/{id}/external_ids` bajo `external_ids`, **al precio de una sola
+`GET /movie/{id}?append_to_response=credits` devuelve el detalle y el cuerpo de
+`/movie/{id}/credits` bajo la clave `credits`, **al precio de una sola
 petición**. La hidratación pasó de 2 peticiones por ítem a 1: sobre 57.135
 movies son 57.135 peticiones ahorradas.
+
+Se pidió durante un tiempo `credits,external_ids`, con el argumento de que el
+segundo viajaba gratis. No viaja gratis: engorda cada respuesta de cada ítem de
+cada rebanada, y **ningún camino del código leía esa clave** — se comprobó y se
+retiró. Si algún día hace falta el `imdb_id`, se vuelve a añadir ahí y se lee.
 
 Consecuencia operativa: en el job nocturno de movies/series ya no existe un
 fallo *independiente* de credits. Si la petición falla, falla el ítem entero y
@@ -203,6 +207,32 @@ por ítem), no de red.
   > mensuales, con **cero** peticiones por ítem. Poner el `User-Agent`
   > identificativo y limitar el ritmo del adaptador on-demand es otro camino y
   > va como **issue #26**, deliberadamente fuera de la feature 87.
+- **Cómo se cumplen esos 3 req/s (issue #26, cerrado 2026-09-12)**: dos piezas
+  en `backlogg/books/adapters/open_library.py`, y hacen falta las dos — el
+  ritmo alto solo se concede a quien se identifica.
+  1. `_OL_HEADERS` lleva el `User-Agent` identificativo (nombre de la app, URL
+     del repo y dirección de contacto) en **todos** los clientes `httpx` del
+     módulo. Ya estaba.
+  2. `_ol_pacer` (`_RequestPacer`, `_OL_MAX_RPS = 3.0`) espacia las salidas a
+     una cada 1/3 s. Es un singleton de módulo, no un atributo de instancia:
+     `OpenLibraryClient` se instancia por sitio de llamada (servicio de libros,
+     fan-out de búsqueda, job nocturno) y tres instancias con su propio
+     limitador sumarían 9 req/s. Lo atraviesan los cuatro métodos que hacen
+     petición: `search_book`, `get_works_by_ids`, `get_work_detail` y
+     `get_author` (también en cada reintento, que para la fuente es otra
+     petición).
+  - Es un **pacer**, no un semáforo: el camino on-demand es un fan-out
+    concurrente (`GET /books/{slug}` resuelve el work y luego pide un autor por
+    `gather`), así que limitar la concurrencia no limitaría el ritmo. Cada
+    llamada **reserva** su hueco antes de dormir, sin `await` entre leer y
+    escribir el siguiente instante libre: eso lo hace atómico bajo asyncio sin
+    necesidad de `Lock` — y sin `Lock` no hay objeto atado a un event loop, que
+    es lo que rompería a un singleton de módulo entre tests.
+  - En los tests el pacer está **desactivado** por un fixture `autouse`
+    (`tests/conftest.py::_disable_open_library_pacing`): todas las peticiones
+    del suite son mocks y dormir 1/3 s por cada una no aporta señal. El ritmo
+    se comprueba aparte, con reloj inyectado, en
+    `tests/books/test_open_library_rate_limit.py`.
 - **Key endpoints used**:
   - `GET /search.json?q=<filtered>&sort=readinglog&offset=&limit=` — nightly sync de libros populares (dos streams filtrados, EN y ES; ver *Popular-books strategy*)
   - `GET /search.json?title=&limit=` — on-demand fallback search
@@ -409,8 +439,8 @@ por ítem), no de red.
     &sort=readinglog
   ```
 
-  Pool total 18.817 obras, ~190× el `SEED_TOP_N_BOOKS` por defecto. La primera
-  página EN es *Atomic Habits*, *The 48 Laws of Power*, *It Ends With Us*,
+  Pool total 18.817 obras — que **es** el catálogo de libros: no hay ningún
+  corte por número de ítems detrás. La primera página EN es *Atomic Habits*, *The 48 Laws of Power*, *It Ends With Us*,
   *Harry Potter 1*, *A Game of Thrones*, *It*.
 
   **Justificación de cada pieza:**
@@ -462,18 +492,6 @@ por ítem), no de red.
   1/2). El caso que motivó la idea (*Metal Gear Solid vol. 1* / *Metal Gear
   Solid Volume 1*) no sobrevive a los umbrales numéricos.
 
-  **Único filtro en código: `doc["key"].endswith("W")`.** `search.json`
-  devuelve de vez en cuando una key de *edición* (`/works/OL9394106M`, sufijo
-  `M`) como si fuera una obra: son ediciones sin work padre. ~1 de cada 1.000
-  docs sin `edition_count`, **0** con `ed≥10`. Se descarta **dentro del bucle
-  de paginación de `_fetch_seed_stream`**, no en `get_popular_books`: ahí el
-  hueco se rellena con el siguiente doc del stream, mientras que descartar
-  después de repartir los slots devolvería una página corta sin que ningún
-  stream esté agotado — y una página corta es justo lo que `_next_offset`
-  interpreta como fin de listado para envolver el cursor a 0. El fin de
-  resultados se sigue decidiendo sobre la página **cruda**
-  (`len(docs) < per_page`), que es la única señal que da OL.
-
   **Costes aceptados.**
   - Se pierde *Monstress, Vol. 1* (ed=4): obra reciente y de nicho. Es el
     precio directo de usar la notoriedad como criterio.
@@ -494,62 +512,14 @@ por ítem), no de red.
   correcta es una **denylist explícita de `work key`**, no endurecer los
   umbrales.
 
-  **Intercalado EN/ES.** Las dos queries son disjuntas por construcción, así
-  que se paginan por separado y se unen sin deduplicar. Como una sola query
-  ordenada por `readinglog` global daría cero castellano en el top 100, el
-  adaptador intercala **una obra en castellano cada `BOOKS_SEED_ES_EVERY_N`
-  huecos** del índice global `i`:
-
-  ```
-  is_es(i)     = (i % N) == N - 1
-  es_offset(i) = i // N
-  en_offset(i) = i - (i // N)
-  ```
-
-  Es función pura del índice global, así que el cursor de
-  `backlogg/scheduler/jobs.py` sigue siendo **un solo entero**. Si un stream
-  se agota, sus huecos se rellenan con el otro (continuando su propio offset)
-  para no devolver una página corta: `_next_offset` interpretaría esa página
-  corta como fin de listado y envolvería el cursor a 0.
-
-  `BOOKS_SEED_ES_EVERY_N=0` desactiva el stream español **de verdad**: no se
-  emite su query ni siquiera como relleno. Es la palanca para el caso "Open
-  Library rompe la query ES", donde emitirla igualmente agotaría el
-  presupuesto de reintentos y tumbaría el slice entero. La asimetría es
-  deliberada: `every_n=1` es un ajuste de cuota, no un kill switch del inglés,
-  y guardar esa rama devolvería páginas cortas.
-
-  ⚠️ **El relleno solapa slices consecutivos** (aceptado, por diseño). El
-  backfill consume docs del otro stream *por delante* de su propio cursor,
-  pero el slice siguiente recalcula su offset con la fórmula pura
-  (`en_offset(offset + limit)`), que es menor. Con el stream ES agotado
-  —a partir de un offset global de ~18.580 con los defaults— cada slice
-  repetiría `es_count` docs ingleses del slice anterior. **No estanca el
-  catálogo** (el offset propio de cada stream avanza `en_count` por slice) y
-  los upserts son idempotentes, así que el efecto se limita a reingestar unos
-  pocos libros ya conocidos. Es el precio deliberado de no devolver nunca una
-  página corta, que sí envolvería el cursor a 0.
-
-  **No confundirlo con un duplicado dentro de una misma página**, que sí era
-  un bug y está corregido. El backfill arranca desde el **offset crudo** donde
-  el stream dejó de leer, que `_fetch_seed_stream` devuelve como tercer
-  elemento de su tupla. Reconstruirlo como `en_offset + len(en_docs)` es
-  incorrecto desde que existe el descarte de keys huérfanas: `len(en_docs)`
-  está en espacio **filtrado**, así que por cada key descartada el backfill
-  repedía el último documento que acababa de devolver y la página salía con
-  un duplicado (10 ítems, 9 distintos). Como `sync_books` hace upsert por
-  ítem, el fallo era silencioso: inflaba `synced` y sembraba un libro distinto
-  menos. Regla: **toda aritmética de offset va en espacio crudo de la API**;
-  el único contador en espacio filtrado es cuántos docs útiles llevamos.
-
-  **Guarda de `numFound`.** El adaptador lee el `numFound` de ambos streams y
-  emite un `warning` si `numFound_en + numFound_es < SEED_TOP_N_BOOKS`. Sin
-  ella, unos umbrales demasiado duros dejarían el catálogo estancado **en
-  silencio** (mismo modo de fallo que `/trending/weekly.json` en la feature 25).
-  La comparación es contra el pool **total**, así que un stream ES minúsculo
-  junto a un EN enorme **no** dispara aviso aunque el ES se agote en cada
-  slice (y active el solapamiento de arriba). Vigilar por stream sería la
-  mejora natural si algún día el pool ES se estrecha.
+  **Intercalado EN/ES: retirado con la siembra por `search.json`.** Las dos
+  queries se paginaban por separado y se intercalaban (una obra en castellano
+  cada N huecos) para que el castellano apareciera desde la primera rebanada.
+  Eso vivía en el recorrido por offset del job nocturno, que ya no existe
+  (issue #27): la siembra sale de los dumps, donde los dos streams se
+  seleccionan enteros y a la vez
+  (`openlibrary_dump.select_language`), así que no hay cuota que repartir ni
+  página que pueda salir corta.
 
   **Sintaxis Solr — reglas obligatorias** (cada una medida; incumplirlas da 0
   resultados o ignora el filtro sin avisar):
@@ -572,10 +542,12 @@ por ítem), no de red.
   **Dónde vive cada cosa:** los códigos de idioma son constantes
   (`backlogg/books/constants.py`) porque no son umbrales y una query cruda en
   una env var es frágil; los umbrales numéricos son env vars (`BOOKS_SEED_*`,
-  tabla de más abajo). El filtro se aplica **solo** al camino de siembra
-  (`get_popular_books`): `search_book` —fallback on-demand y fan-out de
-  búsqueda— no se filtra, o buscar por título un ensayo reciente o una novela
-  gráfica de nicho dejaría de encontrar nada.
+  tabla de más abajo). El filtro se aplica **solo** a la selección de la siembra
+  (`openlibrary_dump.select_language`). Los dos caminos que sí pegan contra
+  `search.json` —`search_book` (fallback on-demand y fan-out de búsqueda) y
+  `get_works_by_ids` (el refresco nocturno, que pide obras por su OLID)— **no**
+  se filtran: al primero le haría dejar de encontrar un ensayo reciente o una
+  novela gráfica de nicho, y el segundo pide ids que el catálogo ya tiene.
 
 - **Alternativas evaluadas y descartadas (2026-08-29)**: Open Library sigue
   siendo la fuente correcta, y es además la única de las cuatro verticales sin
@@ -988,10 +960,7 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
 | `TMDB_API_KEY`         | TMDB client   | Bearer token for TMDB API                        |
 | `TWITCH_CLIENT_ID`     | IGDB client   | Twitch app client ID                             |
 | `TWITCH_CLIENT_SECRET` | IGDB client   | Twitch app client secret                         |
-| `SEED_TOP_N_MOVIES`    | — | **INERTE desde la feature 86.** El catálogo de movies lo define `TMDB_SEED_MIN_VOTES_MOVIES`, no un número de ítems. Se conserva porque Render y el workflow de backfill la exportan (default: 100) |
-| `SEED_TOP_N_SERIES`    | — | **INERTE desde la feature 86**, ídem (default: 100) |
-| `SEED_TOP_N_BOOKS`     | Sync job      | How many books to seed on the cursor path (default: 100) |
-| ~~`SEED_TOP_N_GAMES`~~ | — | **RETIRADA en la feature 90.** El catálogo de games lo define la allowlist de `game_type` + `rating > 0`, enumerado a `seed_targets` por `scripts/seed_igdb_targets.py`; no hay cursor ni objetivo de wraparound. Mientras existió topaba el catálogo en 10.000 sobre ~31.988 |
+| ~~`SEED_TOP_N_*`~~ | — | **Retiradas las cuatro.** Ningún tipo pagina ya un listado externo por offset, así que no hay cursor al que ponerle techo: el refresco nocturno coge del catálogo local lo de `last_synced_at` más antiguo. Movies/series salieron en la feature 86, games en la 90 y books el 2026-09-12 (issue #27). Las que sigan puestas en Render son inocuas (`extra="ignore"`). Detalle en `docs/seeding-plan.md` §«`SEED_TOP_N_*` — ya no existe ninguna» |
 | `TMDB_SEED_MIN_VOTES_MOVIES` | Enumeración TMDB | Umbral `vote_count.gte` que define el catálogo de películas (default: 25 → 57.135 movies) |
 | `TMDB_SEED_MIN_VOTES_SERIES` | Enumeración TMDB | Ídem para series (default: 25 → 10.880 series) |
 | `TMDB_SEED_START_YEAR` | Enumeración TMDB | Primer año de estreno a enumerar (default: 1874, el más antiguo de TMDB) |
@@ -1009,7 +978,6 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
 | `BOOKS_SEED_MIN_PAGES`         | Open Library seed | Mínimo `number_of_pages_median`; descarta folletos (default: 100) |
 | `BOOKS_SEED_MIN_EDITIONS`      | Open Library seed | Mínimo `edition_count` del stream inglés: el filtro de notoriedad que separa la entrega suelta de la obra canónica (default: 10) |
 | `BOOKS_SEED_MIN_EDITIONS_ES`   | Open Library seed | Ídem para el stream en castellano. **No subir a 3**: *Reina roja* tiene exactamente 2 ediciones (default: 2) |
-| `BOOKS_SEED_ES_EVERY_N`        | Open Library seed | Una obra en castellano cada N huecos sembrados; 0 desactiva el stream ES (default: 10) |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
 | `SYNC_SLICE_SIZE_MOVIES` / `_SERIES` / `_BOOKS` / `_GAMES` | Sync job | Override por tipo del anterior. Movies necesita ~350/noche y series ~61 para la ventana de 6 meses de TMDB (default: sin valor → cae al global) |
 

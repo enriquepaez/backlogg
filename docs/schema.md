@@ -29,7 +29,7 @@ Lo que el slug **no** garantiza: que dos ítems distintos sean dos filas cuando
 sus folds coinciden. Pasa con dos títulos latinos iguales del mismo año y pasa
 también con los mezclados, donde el fallback no llega a entrar
 (`初次尝鲜 Season 2` → `season-2-2025`). Esas fusiones se cuentan en
-`seed_targets.unreachable_at` (ver «Sync cursors»).
+`seed_targets.unreachable_at` (ver «Seed targets»).
 
 ### `movies`
 
@@ -693,33 +693,6 @@ CREATE TRIGGER set_updated_at_movies BEFORE UPDATE ON movies
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 ```
 
-## Sync cursors
-
-Persisted per-type offset for slice-based nightly sync. Each sync run
-processes up to `SYNC_SLICE_SIZE` items starting at `next_offset` and then
-advances the cursor, wrapping back to 0 when `SEED_TOP_N_*` is reached or
-the external API returns fewer items than requested.
-
-```sql
-CREATE TABLE sync_cursors (
-    item_type   TEXT PRIMARY KEY,           -- MOVIE | SERIES | BOOK | GAME
-    next_offset INTEGER NOT NULL DEFAULT 0, -- where the next run starts fetching
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-`updated_at` is refreshed by the application on every cursor upsert
-(no trigger — the row is only written by the sync jobs).
-
-> ⚠️ **Desde la feature 90 solo `BOOK` usa esta tabla.** Movies y series
-> salieron en la feature 86 y games en la 90: los tres pasaron a la lista
-> objetivo de `seed_targets` (abajo), donde no hay offset que avanzar porque no
-> hay ranking que recorrer. Las filas `MOVIE`/`SERIES`/`GAME` que ya existan
-> **se conservan** y simplemente dejan de leerse y escribirse — borrarlas
-> dejaría un `downgrade` de la migración 0035 apuntando a un catálogo que el
-> código anterior no sabría reanudar. Que exista una fila `GAME` no significa
-> nada salvo que existía antes de la feature 90.
-
 ## Seed targets (features 86 y 90)
 
 La lista objetivo: **qué ítems quiere el catálogo**, enumerada antes de
@@ -799,6 +772,15 @@ enlazarse, por dos motivos sin relación entre sí:
   conserva su enlace (`uq_item_source` admite un id por ítem y fuente). Lo
   mismo pasa si el payload se rechaza por validación.
 
+  Esa pérdida ya **se cuenta**: desde el issue #24 los dos caminos de escritura
+  la registran como `skipped_identities` (log `identity skipped` de
+  `backlogg.shared.external_ids`, campo del mismo nombre en la respuesta de
+  `POST /v1/admin/sync/{type}`). El caso más frecuente no es un ítem sino dos
+  **personas homónimas**: `_resolve_people` las funde en una fila por
+  `uq_people_slug` —decisión de producto, se mantiene— y entonces solo uno de
+  los dos ids de la fuente cabe en `external_ids`. `skipped_links` no puede
+  verlo, porque allí el `item_id` es el mismo.
+
   Antes de la migración `0036` había una tercera causa, y era la masiva: la
   restricción no incluía `item_type`, así que una fila `PERSON` con el id de
   TMDB de una serie la dejaba sin enlazar para siempre (issue #20). Esa ya no
@@ -845,10 +827,9 @@ mantiene el catálogo dentro de la ventana de caché de 6 meses de TMDB.
 Dónde se quedó **cada mecanismo incremental**. La feature 88 deja de mantener
 el catálogo re-recorriendo listados completos y pasa a preguntarle a cada
 fuente *qué ha cambiado desde la última vez*; esa pregunta necesita una
-respuesta persistida a «la última vez», y ninguna de las dos tablas anteriores
-puede darla: `sync_cursors` guarda un **offset** dentro de un listado (no un
-instante) y `seed_targets` es una **lista de trabajo por diferencia**, que
-converge precisamente porque no tiene estado temporal.
+respuesta persistida a «la última vez», y la otra tabla de estado no puede
+darla: `seed_targets` es una **lista de trabajo por diferencia**, que converge
+precisamente porque no tiene estado temporal.
 
 ```sql
 CREATE TABLE sync_watermarks (

@@ -24,7 +24,6 @@ __all__ = [
     "Person",
     "Credit",
     "ItemCast",
-    "SyncCursor",
     "SeedTarget",
     "SyncWatermark",
 ]
@@ -135,31 +134,6 @@ class ItemCast(Base):
     payload: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
 
-class SyncCursor(Base):
-    """Persisted per-type offset for slice-based nightly sync.
-
-    ``item_type`` matches the polymorphic values used across the app
-    (MOVIE, SERIES, BOOK, GAME).  ``next_offset`` is where the next sync
-    run should start fetching from the external API's popular listing.
-
-    ⚠️ Since feature 90 only BOOK uses this table.  Movies and series left in
-    feature 86 and games in feature 90: all three are driven by
-    ``seed_targets`` (below) plus a ``last_synced_at`` rotation, with no offset
-    in the picture.  Their rows are left in place but never read or written
-    again — same treatment for all three, so "there is a GAME row in
-    ``sync_cursors``" means nothing more than "there was one before feature
-    90".  See ``docs/schema.md``.
-    """
-
-    __tablename__ = "sync_cursors"
-
-    item_type: Mapped[str] = mapped_column(Text, primary_key=True)
-    next_offset: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-
 class SeedTarget(Base):
     """One external item the catalog *wants*, enumerated ahead of hydration.
 
@@ -239,19 +213,11 @@ class SyncWatermark(Base):
 
     Feature 88 stops maintaining the catalog by re-walking full listings and
     starts asking every source *what changed since last time*.  That question
-    needs a persisted answer to "last time", and neither of the two existing
-    state tables can give it:
-
-    - ``sync_cursors`` holds a **numeric offset** into a listing
-      (``next_offset``).  It answers "how far down the page am I", not "up to
-      which instant have I already seen the world".  Its ``updated_at`` is a
-      row-touch timestamp, not a cut-off: it moves when the row is written,
-      which is *after* the window was queried, so resuming from it would
-      silently drop everything that happened while the run was running.
-    - ``seed_targets`` is a **work list by difference** against the catalog.
-      It converges without any cursor precisely because it is stateless in
-      time — which is its strength for hydration and exactly why it cannot
-      express "ask TMDB for the changes of the last N days".
+    needs a persisted answer to "last time", and the other state table cannot
+    give it: ``seed_targets`` is a **work list by difference** against the
+    catalog.  It converges without any cursor precisely because it is stateless
+    in time — which is its strength for hydration and exactly why it cannot
+    express "ask TMDB for the changes of the last N days".
 
     Shape of the key: ``(source, kind, item_type)``
     ----------------------------------------------
