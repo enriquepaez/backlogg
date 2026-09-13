@@ -684,8 +684,10 @@ def _clears(
 def select_language(readinglog_count: int, aggregate: EditionAggregate) -> str | None:
     """Which seed stream a work belongs to, or ``None`` if it belongs to neither.
 
-    This is ``build_seed_query`` (``backlogg/books/adapters/open_library.py``)
-    expressed over locally computed aggregates instead of over Solr:
+    This **is** the book catalog filter of feature 73 — the definition of which
+    works belong in the catalog, expressed over locally computed aggregates.
+    It used to have a Solr twin in the adapter for the nightly search walk;
+    that walk is gone (issue #27) and this is the only copy left:
 
     * English — ``language:eng AND readinglog_count:[20 TO *] AND
       edition_count:[10 TO *] AND number_of_pages_median:[100 TO *]``

@@ -49,8 +49,8 @@ def pipeline():
 def _solr_verdict(doc: dict) -> str | None:
     """The feature-73 filter expressed over a ``search.json`` doc.
 
-    Literally ``build_seed_query`` read as a predicate: the same thresholds,
-    the same ``NOT language:eng`` on the Spanish stream.  Used as the oracle
+    The feature-73 thresholds read as a predicate over a search doc, with the
+    same ``NOT language:eng`` rule on the Spanish stream.  Used as the oracle
     the dump-side selection is compared against.
     """
     languages = doc.get("language") or []

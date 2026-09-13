@@ -2788,8 +2788,6 @@ export interface components {
             synced: number;
             /** Errors */
             errors: number;
-            /** Offset */
-            offset: number;
             /** Duration S */
             duration_s: number;
             /**
@@ -2802,6 +2800,11 @@ export interface components {
              * @default 0
              */
             skipped_links: number;
+            /**
+             * Skipped Identities
+             * @default 0
+             */
+            skipped_identities: number;
         };
         /**
          * TokenPairOut

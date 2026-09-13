@@ -27,7 +27,7 @@ TRUNCATE TABLE
     -- Personas, compañías y créditos
     people, companies, credits, company_credits,
     -- Identidad externa y estado de siembra/sync
-    external_ids, seed_targets, sync_cursors,
+    external_ids, seed_targets,
     -- Cuentas y todo lo que cuelga de ellas
     users, account_tokens, refresh_tokens,
     user_ratings, review_likes, review_reports,

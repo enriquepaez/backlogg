@@ -96,14 +96,14 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Table, select, text, tuple_
+from sqlalchemy import Table, or_, select, text, tuple_
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import sqltypes
 from sqlalchemy.types import TypeDecorator
 
 from backlogg.shared.credits import CAST_ROLE, build_cast_payload, upsert_item_cast
-from backlogg.shared.external_ids import ExternalId, record_link_skip
+from backlogg.shared.external_ids import ExternalId, record_identity_skip, record_link_skip
 from backlogg.shared.identity import align_slugs_to_external_ids
 from backlogg.shared.models import Credit, Person
 
@@ -649,6 +649,19 @@ async def _upsert_external_ids(
     ``SELECT`` below also reads ``item_id``: it is the same query with one more
     column, not an extra round trip — the batch route's whole point is its
     round-trip budget (see the module docstring).
+
+    The ``by_item`` de-duplication loses something too, and issue #24 is that
+    it lost it *silently*: the row it drops has the same ``item_id`` as the
+    winner, so ``record_link_skip``'s discriminant reads it as idempotency and
+    says nothing — even though two **different** external ids went in and only
+    one came out.  That is the ``uq_item_source`` side of the same coin (one
+    row, one id per source) and it is the shape two homonymous people take
+    after ``_resolve_people`` merges them.  It is now recorded as its own class
+    through ``record_identity_skip``, in both places it can happen: inside the
+    batch, and against the row already in the database — which the pre-check
+    ``SELECT`` sees because it carries a second ``IN`` on
+    ``(item_type, item_id, source)``.  Still one query: another ``OR`` branch,
+    not another round trip.
     """
     if not rows:
         return
@@ -665,27 +678,50 @@ async def _upsert_external_ids(
             record_link_skip(row[0], row[2], row[3], row[1], incumbent[1])
     by_item: dict[tuple[str, int, str], tuple[str, int, str, str]] = {}
     for row in by_pair.values():
-        by_item[(row[0], row[1], row[2])] = row
+        key = (row[0], row[1], row[2])
+        incumbent = by_item.get(key)
+        if incumbent is not None and incumbent[3] != row[3]:
+            # Two external ids of the same source for one item (issue #24):
+            # last wins, as the sequential route would do, and the one that
+            # loses is now named instead of vanishing.
+            record_identity_skip(row[0], row[2], row[1], row[3], incumbent[3])
+        by_item[key] = row
 
     candidates = list(by_item.values())
     keys = [(row[0], row[2], row[3]) for row in candidates]
+    item_keys = [(row[0], row[1], row[2]) for row in candidates]
     existing = await session.execute(
         select(
             ExternalId.item_type,
             ExternalId.source,
             ExternalId.external_id,
             ExternalId.item_id,
-        ).where(tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys))
+        ).where(
+            or_(
+                tuple_(ExternalId.item_type, ExternalId.source, ExternalId.external_id).in_(keys),
+                tuple_(ExternalId.item_type, ExternalId.item_id, ExternalId.source).in_(item_keys),
+            )
+        )
     )
+    rows_found = existing.all()
     claimed: dict[tuple[str, str, str], int] = {
         (item_type, source, external_id): item_id
-        for item_type, source, external_id, item_id in existing.all()
+        for item_type, source, external_id, item_id in rows_found
+    }
+    # What each item already holds for this source — the ``uq_item_source`` side
+    # the ON CONFLICT below would overwrite without saying so.
+    held: dict[tuple[str, int, str], str] = {
+        (item_type, item_id, source): external_id
+        for item_type, source, external_id, item_id in rows_found
     }
     fresh: list[tuple[str, int, str, str]] = []
     for row in candidates:
         holder = claimed.get((row[0], row[2], row[3]))
         if holder is None:
             fresh.append(row)
+            stored = held.get((row[0], row[1], row[2]))
+            if stored is not None and stored != row[3]:
+                record_identity_skip(row[0], row[2], row[1], row[3], stored)
         elif holder != row[1]:
             record_link_skip(row[0], row[2], row[3], row[1], holder)
     if not fresh:

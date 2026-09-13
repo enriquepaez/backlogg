@@ -191,11 +191,6 @@ gh run watch
 gh run view <run-id> --log | grep backfill
 ```
 
-`seed_top_n` **debe coincidir** con `SEED_TOP_N_BOOKS` en Render, o el cursor
-compartido da la vuelta antes de tiempo. Aplica **solo a `book`**:
-`SEED_TOP_N_MOVIES`/`_SERIES` son inertes desde la feature 86 y
-`SEED_TOP_N_GAMES` no existe desde la 90.
-
 **Qué mirar mientras corre.** El contador que importa es `skipped_links`: cada
 unidad es una fila del catálogo que se guardó **sin enlace en `external_ids`**,
 así que no se encontrará por id externo ni se refrescará nunca. Si crece tramo
@@ -204,8 +199,9 @@ dos son `errors` (el ítem no se escribió) y `people_errors` (el ítem sí, sus
 credits no; se recupera después con `mode=credits`).
 
 Volumen esperado: movies 57.135 · series 10.880 · books ~19.221 · games 31.988
-(medido contra IGDB el 2026-09-08; ya **no** topado en 10.000 — la feature 90
-retiró el cursor y su `seed_top_n`).
+(medido contra IGDB el 2026-09-08). Ningún tipo está topado por un número de
+ítems: `seed_top_n` y los `SEED_TOP_N_*` desaparecieron con el último cursor
+(feature 90 para games, issue #27 para books).
 
 ## Documentación
 

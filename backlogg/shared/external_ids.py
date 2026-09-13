@@ -28,6 +28,32 @@ Outside an active ``collect_link_skips()`` block recording a skip is a **no-op**
 for the counter: the on-demand paths (search fan-out, ``GET /movies/{slug}``,
 ``/similar``) pay nothing and cannot fail on it.  The ``logger.warning`` is
 emitted either way — a lost link deserves a log line whoever triggered it.
+
+**Issue #24 — the other loss, on the other key.**  ``skipped_links`` is about
+``uq_external_id``: two items fighting over one external id.  Its mirror image
+is ``uq_item_source``: one *row* holding two external ids of the same source,
+which the constraint does not allow either.  It happens when two distinct
+source identities collapse onto a single catalog row — two people whose names
+slugify the same, so ``_resolve_people`` returns the same ``people.id`` for two
+different TMDB ids — and also when the source re-points an item at a new id.
+Whichever external id arrives second wins the row and the other one is dropped:
+the item stays linked, but one of the two ids can never be resolved again.
+
+That loss was invisible by construction, and specifically invisible to
+``skipped_links``, which discards the ``by_item`` collision by design (there
+the ``item_id`` is the *same*, which is the discriminant it uses for
+idempotency).  It is now its own class of skip — ``record_identity_skip``,
+counted in ``LinkSkipCollector.identity_count`` and reported as
+``skipped_identities`` — travelling the exact same road as ``skipped_links``:
+collector -> job result dict -> ``POST /admin/sync/{type}`` ->
+``scripts/backfill_sync.py`` -> a ``::warning::`` in the nightly workflow.  Two
+counters and not one because the remedies differ: a skipped *link* means an
+item with no id at all, a skipped *identity* means an item whose id is one of
+two.  Merging them would blur the only number that could tell an operator
+which of the two is happening.
+
+The *behaviour* is deliberately unchanged: two homonyms are still one row
+(2026-09-12 product decision).  What changes is that the catalog now says so.
 """
 
 import logging
@@ -37,7 +63,16 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, String, UniqueConstraint, func, select
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Index,
+    String,
+    UniqueConstraint,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -49,10 +84,12 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "MAX_TRACKED_LINK_SKIPS",
     "ExternalId",
+    "IdentitySkip",
     "LinkSkip",
     "LinkSkipCollector",
     "collect_link_skips",
     "get_external_id",
+    "record_identity_skip",
     "record_link_skip",
     "set_external_id",
     "upsert_external_id",
@@ -80,17 +117,51 @@ class LinkSkip:
     claimed_by_item_id: int
 
 
+@dataclass(frozen=True, slots=True)
+class IdentitySkip:
+    """One external id a row could not keep, because it already holds another.
+
+    ``uq_item_source`` allows a single external id per ``(item_type, item_id,
+    source)``.  When two source identities resolve to the same catalog row —
+    two homonymous people, most often — the second one to arrive takes the
+    link and ``dropped_external_id`` becomes unresolvable.
+
+    ``kept_external_id`` is the winner (the row is linked to it),
+    ``dropped_external_id`` the id nothing points at any more.
+    """
+
+    item_type: str
+    source: str
+    item_id: int
+    kept_external_id: str
+    dropped_external_id: str
+
+
 @dataclass(slots=True)
 class LinkSkipCollector:
-    """Accumulator for the skips happening inside one ``collect_link_skips``."""
+    """Accumulator for the skips happening inside one ``collect_link_skips``.
+
+    Holds both classes (issues #22 and #24).  One collector and not two because
+    they are recorded by the same two write paths, inside the same block, and a
+    second ``ContextVar`` would double the setup for nothing — but the counters
+    stay separate, because the two losses are different and are reported under
+    different names.
+    """
 
     count: int = 0
     skips: list[LinkSkip] = field(default_factory=list)
+    identity_count: int = 0
+    identity_skips: list[IdentitySkip] = field(default_factory=list)
 
     def add(self, skip: LinkSkip) -> None:
         self.count += 1
         if len(self.skips) < MAX_TRACKED_LINK_SKIPS:
             self.skips.append(skip)
+
+    def add_identity(self, skip: IdentitySkip) -> None:
+        self.identity_count += 1
+        if len(self.identity_skips) < MAX_TRACKED_LINK_SKIPS:
+            self.identity_skips.append(skip)
 
 
 _link_skips: ContextVar[LinkSkipCollector | None] = ContextVar("backlogg_link_skips", default=None)
@@ -144,6 +215,45 @@ def record_link_skip(
             external_id=external_id,
             attempted_item_id=attempted_item_id,
             claimed_by_item_id=claimed_by_item_id,
+        )
+    )
+
+
+def record_identity_skip(
+    item_type: str,
+    source: str,
+    item_id: int,
+    kept_external_id: str,
+    dropped_external_id: str,
+) -> None:
+    """Log an external id a row could not keep, and count it if a collector is active.
+
+    The ``uq_item_source`` half of the instrumentation (issue #24).  Same
+    contract as ``record_link_skip``: never raises, never requires a collector,
+    always logs.  Only called when the two ids actually differ — re-offering
+    the id a row already holds is idempotency and stays silent, exactly like
+    the link case.
+    """
+    logger.warning(
+        "external_ids: identity skipped — %s item_id=%s (%s) keeps external_id=%s, so %s "
+        "is dropped; two source identities resolved to one catalog row and "
+        "uq_item_source only fits one of them (issue #24)",
+        item_type,
+        item_id,
+        source,
+        kept_external_id,
+        dropped_external_id,
+    )
+    collector = _link_skips.get()
+    if collector is None:
+        return
+    collector.add_identity(
+        IdentitySkip(
+            item_type=item_type,
+            source=source,
+            item_id=item_id,
+            kept_external_id=kept_external_id,
+            dropped_external_id=dropped_external_id,
         )
     )
 
@@ -213,14 +323,33 @@ async def upsert_external_id(
     # instead of raising (issue #20). Two items of *different* types may now
     # share a number; two items of the *same* type still may not, and for that
     # case the pre-check keeps its original semantics — first claim wins.
+    #
+    # The ``or_`` branch reads the *other* unique key of the table in the same
+    # round trip (issue #24): the row this item already holds for this source,
+    # if any. Nothing below changes because of it — the write is the same
+    # ``ON CONFLICT ON CONSTRAINT uq_item_source DO UPDATE`` it always was — but
+    # that update silently replaces an existing external id, and without this
+    # read there is no way to say which id was dropped. One query with two
+    # indexable branches (Postgres bitmap-ORs ``uq_external_id`` and
+    # ``idx_external_ids_item``), not a second round trip.
     existing_check = await db.execute(
         select(ExternalId).where(
             ExternalId.item_type == item_type,
             ExternalId.source == source,
-            ExternalId.external_id == external_id,
+            or_(ExternalId.external_id == external_id, ExternalId.item_id == item_id),
         )
     )
-    existing_row = existing_check.scalar_one_or_none()
+    candidates = existing_check.scalars().all()
+    existing_row = next((row for row in candidates if row.external_id == external_id), None)
+    if existing_row is None:
+        # No row holds this id, so the insert below will go through — but if
+        # this item already carries a *different* id of the same source, the
+        # ON CONFLICT update overwrites it and that id stops being resolvable.
+        # Behaviour unchanged on purpose (the newcomer still wins); the loss is
+        # now counted instead of silent.
+        held = next((row for row in candidates if row.item_id == item_id), None)
+        if held is not None:
+            record_identity_skip(item_type, source, item_id, external_id, held.external_id)
     if existing_row is not None:
         # Already linked to an item of this type. Two very different cases hide
         # behind this single branch and issue #22 is about telling them apart:

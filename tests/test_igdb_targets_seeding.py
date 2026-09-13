@@ -19,8 +19,9 @@ conversion, matching the feature's acceptance list:
    ``seed_targets`` by difference against ``external_ids``, tops the slice up
    with the ``last_synced_at`` rotation, retires ids IGDB no longer serves,
    and its ``pending``/``stuck`` counters work exactly as they do for movies.
-6. **The cursor is gone** — ``sync_games`` neither reads nor writes
-   ``sync_cursors``, and ``SEED_TOP_N_GAMES`` no longer exists at all.
+6. **The cursor is gone** — ``sync_games`` carries no offset at all,
+   ``SYNC_SLICE_SIZE_GAMES`` is what sizes the slice, and ``SEED_TOP_N_GAMES``
+   no longer exists at all.
 
 The database-backed tests run against the real test database; IGDB is always
 mocked, so no test touches the network.
@@ -47,6 +48,7 @@ from backlogg.scheduler import igdb_catalog
 from backlogg.scheduler import jobs as sync_jobs
 from backlogg.scheduler.repository import (
     SEED_TARGET_SOURCES,
+    SeedTargetProgress,
     SeedTargetRow,
     count_seed_target_progress,
     get_pending_seed_targets,
@@ -396,35 +398,71 @@ async def test_sync_games_fills_the_slice_with_pending_then_rotation(db):
     assert result["refreshed"] == 1
     assert result["pending"] == 0
     assert result["stuck"] == 0
-    assert result["offset"] == 0
+    assert "offset" not in result
     assert result["people_errors"] == 0
 
 
-async def test_sync_games_reads_no_sync_cursor(db):
-    """``sync_cursors`` is out of the game path entirely (feature 90)."""
-    with (
-        patch("backlogg.scheduler.jobs.get_sync_offset", new_callable=AsyncMock) as get_cursor,
-        patch("backlogg.scheduler.jobs.set_sync_offset", new_callable=AsyncMock) as set_cursor,
-        patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
-    ):
+async def test_sync_games_has_no_cursor(db):
+    """There is no offset left in the game path (feature 90).
+
+    Asserted on the module rather than by patching the two repository
+    functions: they no longer exist and ``scheduler.jobs`` does not import
+    them, so there is nothing left in the job module to patch — which is a
+    stronger statement than "it was not awaited".
+    """
+    assert not hasattr(sync_jobs, "get_sync_offset")
+    assert not hasattr(sync_jobs, "set_sync_offset")
+
+    with patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)):
         result = await sync_jobs.sync_games(slice_size=5)
 
-    get_cursor.assert_not_awaited()
-    set_cursor.assert_not_awaited()
-    assert result["offset"] == 0
+    assert "offset" not in result
     assert result["errors"] == 0
 
 
-def test_seed_top_n_games_no_longer_exists():
-    """The setting is *removed*, not left inert (unlike SEED_TOP_N_MOVIES).
+async def test_sync_games_slice_size_comes_from_the_per_type_setting(monkeypatch):
+    """Feature 90: SEED_TOP_N_GAMES is gone; SYNC_SLICE_SIZE_GAMES sizes the slice.
 
-    While it existed it was the wraparound target of a cursor shared with the
-    backfill workflow, so it capped the game catalog at 10.000 of the ~31.988
-    that pass the filter.  A name that used to do that is worth removing
-    outright rather than leaving around to be re-wired by mistake.
+    This replaces ``test_sync_games_limit_comes_from_settings``, which asserted
+    that the adapter received ``SEED_TOP_N_GAMES`` as its fetch limit.  That
+    invariant is exactly what the feature removed — the number was the
+    wraparound target of a cursor and it capped the catalog at 10.000 — so the
+    test asserts the invariant that replaced it instead of being deleted.
+    Moved here from ``tests/test_sync_seed_limits.py``, which was deleted with
+    the last ``SEED_TOP_N_*`` setting (issue #27).
+    """
+    custom_limit = 7
+    monkeypatch.setattr(sync_jobs.settings, "SYNC_SLICE_SIZE_GAMES", custom_limit)
+
+    with (
+        patch(
+            "backlogg.scheduler.jobs._read_seed_work_list",
+            new_callable=AsyncMock,
+            return_value=([], [], SeedTargetProgress(total=0, pending=0, gone=0, unlinkable=0)),
+        ) as mock_work_list,
+        patch(
+            "backlogg.scheduler.jobs.async_session_factory",
+            new=_mocked_session_factory(AsyncMock()),
+        ),
+    ):
+        result = await sync_jobs.sync_games()
+
+    mock_work_list.assert_awaited_once_with("GAME", "IGDB", custom_limit)
+    assert result["errors"] == 0
+
+
+def test_seed_top_n_settings_no_longer_exist():
+    """The settings are *removed*, not left inert.
+
+    While ``SEED_TOP_N_GAMES`` existed it was the wraparound target of a cursor
+    shared with the backfill workflow, so it capped the game catalog at 10.000
+    of the ~31.988 that pass the filter.  ``SEED_TOP_N_BOOKS`` was the same
+    trap for books and went the same way with the book cursor (issue #27).  A
+    name that used to do that is worth removing outright rather than leaving
+    around to be re-wired by mistake.
     """
     assert not hasattr(settings, "SEED_TOP_N_GAMES")
-    assert hasattr(settings, "SEED_TOP_N_BOOKS")  # still live for the book cursor
+    assert not hasattr(settings, "SEED_TOP_N_BOOKS")
 
 
 async def test_sync_games_retires_an_id_igdb_no_longer_serves(db):

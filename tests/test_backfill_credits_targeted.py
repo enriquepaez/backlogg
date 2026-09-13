@@ -10,8 +10,8 @@ What is under test:
 - ``scheduler.jobs.sync_missing_credits`` fetches one endpoint per item (no
   item detail re-fetch, no item re-write), stamps ``credits_synced_at``
   after a successful fetch **with or without credits**, leaves it NULL and
-  counts ``people_errors`` after a failed one, never touches
-  ``sync_cursors``, and persists series creators from ``created_by``;
+  counts ``people_errors`` after a failed one, keeps no cursor, and persists
+  series creators from ``created_by``;
 - ``scripts/backfill_sync.py`` exposes the mode, rejects ``game``, and
   propagates ``people_errors`` to the summary of ``run_backfill`` — the
   observability bug that made a run with 100% credit failures report
@@ -245,7 +245,6 @@ async def test_targeted_mode_fetches_only_credits_and_writes_them(db):
             return_value=credits_payload,
         ) as mock_credits,
         patch.object(movies_service._tmdb, "get_movie_detail", new_callable=AsyncMock) as detail,
-        patch.object(sync_jobs, "set_sync_offset", new_callable=AsyncMock) as mock_cursor,
     ):
         summary = await sync_jobs.sync_missing_credits("movie")
 
@@ -253,7 +252,10 @@ async def test_targeted_mode_fetches_only_credits_and_writes_them(db):
     # gap query, not guessed from a popularity ranking.
     mock_credits.assert_awaited_once_with(770001)
     detail.assert_not_awaited()  # the row already exists — never re-fetched
-    mock_cursor.assert_not_awaited()  # targeted mode does not touch sync_cursors
+    # No cursor is written anywhere any more (issue #27): the job module does
+    # not even import a setter, which is what makes "targeted mode does not
+    # touch a cursor" structural instead of asserted.
+    assert not hasattr(sync_jobs, "set_sync_offset")
 
     roles = (
         (
@@ -427,14 +429,6 @@ async def test_targeted_mode_stops_on_time_budget(db):
 # ── people_errors propagation (the observability bug) ────────────────────────
 
 
-def _mocked_session_factory():
-    mock_session = AsyncMock()
-    mock_cm = MagicMock()
-    mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_cm.__aexit__ = AsyncMock(return_value=False)
-    return MagicMock(return_value=mock_cm)
-
-
 def _job_result(
     synced: int, people_errors: int, offset: int = 0, pending: int | None = None
 ) -> dict:
@@ -461,11 +455,7 @@ async def test_run_backfill_summary_reports_people_errors():
         _job_result(synced=500, people_errors=7, pending=300),
         _job_result(synced=300, people_errors=5, pending=0),
     ]
-    with (
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
-        patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results),
-    ):
+    with patch("backlogg.scheduler.jobs.sync_movies", new_callable=AsyncMock, side_effect=results):
         summary = await backfill_sync.run_backfill("movie", slice_size=500, time_budget_s=3600)
 
     assert summary["people_errors"] == 12
@@ -484,8 +474,6 @@ async def test_run_backfill_tolerates_jobs_without_people_errors():
     a job that does not report it from raising a ``KeyError``.
     """
     with (
-        patch.object(backfill_sync, "get_sync_offset", new_callable=AsyncMock),
-        patch.object(backfill_sync, "async_session_factory", new=_mocked_session_factory()),
         patch(
             "backlogg.scheduler.jobs.sync_games",
             new_callable=AsyncMock,

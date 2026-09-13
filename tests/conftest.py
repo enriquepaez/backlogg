@@ -83,6 +83,30 @@ def _reset_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
+def _disable_open_library_pacing():
+    """Switch off the Open Library 3 req/s pacer for every test (issue #26).
+
+    The pacer is a process-wide singleton that sleeps for real, so leaving it
+    on would add ~0.33 s per mocked Open Library request across the whole
+    suite for no signal at all — every one of those requests is a mock. The
+    pacing itself is covered explicitly in
+    ``tests/books/test_open_library_rate_limit.py``, which builds its own
+    pacer with an injected clock, and by the tests in that module that
+    re-enable this one on purpose. Imported locally to respect the
+    DB-isolation guard's import ordering above.
+    """
+    from backlogg.books.adapters import open_library
+
+    pacer = open_library._ol_pacer
+    previous = pacer.min_interval
+    pacer.min_interval = 0.0
+    pacer.reset()
+    yield
+    pacer.min_interval = previous
+    pacer.reset()
+
+
+@pytest.fixture(autouse=True)
 def _reset_response_cache():
     """Clear the in-process response cache before every test.
 

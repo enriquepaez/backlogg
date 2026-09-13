@@ -40,15 +40,16 @@ endpoints y límites de cada proveedor vive en `docs/external-apis.md`.
 **TMDB corta la paginación en la página 500**, y devuelve 20 ítems por página:
 10.000 ítems y ni uno más (ya anotado en `backlogg/movies/adapters/tmdb.py:144`).
 
-`SEED_TOP_N_*` está hoy en 10000 (`docs/operations.md`). Eso no es una elección
-de producto: **es exactamente el techo del método**.
+Mientras existieron, los `SEED_TOP_N_*` estuvieron en 10000. Eso no era una
+elección de producto: **era exactamente el techo del método**. Los cuatro están
+retirados (ver §«`SEED_TOP_N_*` — ya no existe ninguna»).
 
 ### El recorrido por offset no es estable
 
 `/movie/popular` se reordena continuamente. Un ítem que estaba en la página 30
 cuando el cursor iba por la 12 puede estar en la 28 cuando el cursor llega, y
-entonces no se visita nunca. El cursor de `sync_cursors` avanza sobre un conjunto
-que se mueve bajo sus pies, así que **ni siquiera garantiza cubrir los 10.000**.
+entonces no se visita nunca. El cursor avanza sobre un conjunto que se mueve
+bajo sus pies, así que **ni siquiera garantiza cubrir los 10.000**.
 
 ### `popularity` no es una señal de calidad
 
@@ -124,9 +125,7 @@ es el que esos filtros entregan:
   `numFound` real: **17.015 en inglés + 1.859 en castellano = 18.874**.
   Ese **es** el tamaño del catálogo de libros: desde la feature 87 la siembra
   aplica esos mismos umbrales sobre los dumps mensuales, sin corte por número
-  de ítems. El comentario de `backlogg/core/config.py` («comfortably above
-  `SEED_TOP_N_BOOKS`») era falso salvo contra el default de 100 y ya está
-  corregido.
+  de ítems.
 - **Games** (feature 65): allowlist de `game_type` **y `rating > 0`**.
   `/games/count` real: 374.223 juegos en total, 336.653 pasan la allowlist, pero
   solo **31.958** tienen valoración (**31.988** remedido el 2026-09-08 — el
@@ -363,29 +362,32 @@ cobertura de la ventana de caché de 6 meses de TMDB (§2.3). La rotación
 explícita es la misma garantía, dicha directamente en vez de emerger de un
 ranking.
 
-#### `SEED_TOP_N_MOVIES` / `SEED_TOP_N_SERIES`
+#### `SEED_TOP_N_*` — ya no existe ninguna
 
-Dejan de ser el criterio de corte y quedan **inertes**. El catálogo lo define
-`TMDB_SEED_MIN_VOTES_*`; el tamaño de la rebanada nocturna,
-`SYNC_SLICE_SIZE_*`. Se conservan (en vez de borrarse) porque Render y
-`.github/workflows/backfill-sync.yml` siguen exportándolas, y quitar un nombre
-que los despliegues declaran se leería como un descuido.
+El catálogo de movies y series lo define `TMDB_SEED_MIN_VOTES_*`, el de books
+los umbrales `BOOKS_SEED_MIN_*` y el de games la allowlist de `game_type` más
+`rating > 0`. El tamaño de la rebanada nocturna lo fija `SYNC_SLICE_SIZE_*`.
+**Ningún tipo tiene ya un `SEED_TOP_N`**, y con ellos desapareció la última
+cifra que había que cuadrar a mano entre Render y el workflow de backfill.
 
-`SEED_TOP_N_BOOKS` está en una situación intermedia desde la feature 87:
-**inerte para la siembra** (`scripts/seed_openlibrary_books.py` selecciona por
-los umbrales `BOOKS_SEED_MIN_*`, sin corte por número de ítems) y **viva para
-el camino por cursor** (`sync_books` y `scripts/backfill_sync.py book` siguen
-paginando `search.json` y haciendo wraparound sobre ella). Es el issue #27 y
-**sigue abierto**: la feature 90 no lo toca.
+Las cuatro se retiraron en tres tandas, y la razón fue siempre la misma: eran
+el objetivo de vuelta de un cursor que paginaba el listado externo por offset,
+y al sustituirse ese paseo por la **rotación de refresco** —coger del catálogo
+local lo de `last_synced_at` más antiguo, `get_stale_catalog_external_ids`— el
+tope se quedó sin nada que topar.
 
-`SEED_TOP_N_GAMES` **está retirada** desde la feature 90 — borrada del código,
-del workflow de backfill y del `.env.example`, no dejada inerte. La diferencia
-con movies/series es deliberada: aquellas quedaron inertes y no hacían daño,
-mientras que ésta era el objetivo de wraparound de un cursor **compartido** con
-el workflow, de modo que la siembra del 2026-09-07 paró en exactamente 10.000
-juegos de los ~31.988 que pasan el filtro, y el dispatch necesitaba un
-`-f seed_top_n` que debía coincidir con Render a mano. Un nombre que capaba el
-catálogo se retira; uno que no hace nada se puede dejar.
+| Ajuste | Retirada | Nota |
+|---|---|---|
+| `SEED_TOP_N_MOVIES` / `_SERIES` | feature 86 (inertes) y **2026-09-12** (borradas) | Quedaron inertes al pasar a `seed_targets`, y se conservaron un tiempo «para que Render y el workflow coincidieran». No compensaba: `Settings` usa `extra="ignore"`, así que Render puede seguir exportándolas sin efecto |
+| `SEED_TOP_N_GAMES` | feature 90 | La única que llegó a **hacer daño**: era el objetivo de vuelta de un cursor *compartido* con el workflow, así que la siembra del 2026-09-07 paró en exactamente 10.000 juegos de los ~31.988 que pasan el filtro |
+| `SEED_TOP_N_BOOKS` | **2026-09-12** (issue #27) | La última. Books fue el único tipo que siguió paginando `search.json` por offset después de la feature 87 |
+
+El issue #27 se cerró primero por la **vía (a)** —subir el default de 100 a
+25.000, por encima de las 19.221 obras reales— y acto seguido por la **vía (b)**,
+que es la que lo disuelve: `sync_books` pasó a la rotación de refresco como los
+otros tres tipos, el ajuste se borró y el paso manual en Render dejó de existir.
+Las altas de libros no dependían del cursor y no cambian: siguen llegando por el
+diff del dump mensual (feature 88).
 
 ### TMDB — los ficheros diarios de IDs son para el incremental
 
@@ -483,8 +485,8 @@ desde dumps es la feature 88 (§6), que reutiliza estas mismas cinco fases con
 > `get_games_by_ids`). Antes, esta sección decía «nada que cambiar»: era
 > verdad sobre el **coste** y falsa sobre el **método**. El coste siempre fue
 > trivial —500 juegos por request, 4 req/s—, pero lo que recorría era el
-> ranking `sort rating_count desc` por offset, con el cursor de `sync_cursors`
-> y `SEED_TOP_N_GAMES` como tope. Eso es exactamente el patrón del §1.
+> ranking `sort rating_count desc` por offset, con un cursor persistido y
+> `SEED_TOP_N_GAMES` como tope. Eso es exactamente el patrón del §1.
 
 **Enumeración** (64 requests para los ~32.000; **52 s medidos** el 2026-09-09,
 sobre un suelo teórico de 16 s a 4 req/s):
@@ -621,8 +623,8 @@ tumba la siembra de movies.
 
 Una siembra dura horas. Los contadores que devuelve cada tramo son la única
 forma de saber si se está perdiendo catálogo **antes** de que la carga termine;
-cuando acaba, ya está horneada. Los tres que hay que leer en cada iteración del
-log de `scripts/backfill_sync.py` (y en la respuesta de
+cuando acaba, ya está horneada. Los cuatro que hay que leer en cada iteración
+del log de `scripts/backfill_sync.py` (y en la respuesta de
 `POST /v1/admin/sync/{type}`):
 
 | Contador | Qué significa | Qué hacer si sube |
@@ -630,11 +632,19 @@ log de `scripts/backfill_sync.py` (y en la respuesta de
 | `errors` | Ítems que fallaron y no se escribieron | Si `synced == 0` y `errors > 0` el backfill aborta solo. Si convive con `synced` alto, mirar el log del ítem concreto |
 | `people_errors` | El ítem se guardó pero sus credits no | No aborta el tramo (un credit ausente no puede tumbar la slice). Se recupera después con `backfill_sync.py --only-missing-credits`. Hasta el issue #18 subía sistemáticamente por los nombres en alfabeto no latino (slug vacío → credit descartado); eso ya no lo dispara, así que durante la siembra cualquier subida es una anomalía real que merece mirar el log |
 | `skipped_links` | El ítem se guardó **sin enlace en `external_ids`**: la terna `(item_type, source, external_id)` ya la tenía otro ítem del mismo tipo (issue #22) | **Es el que importa durante la siembra.** Cada unidad es una fila del catálogo que ya no se encontrará por id externo, no se refrescará nunca y puede duplicarse. Si crece tramo a tramo hay un fallo sistemático: parar y mirar los `WARNING` de `backlogg.shared.external_ids`, que nombran la terna, el ítem pretendiente y el que ya la tiene |
+| `skipped_identities` | La fila se guardó **con el enlace equivocado**: dos identidades de la fuente resolvieron al mismo ítem y `uq_item_source` solo admite un `external_id` por `(ítem, source)`, así que uno de los dos se cae (issue #24) | Casi siempre son **dos personas homónimas fundidas en una fila** — el comportamiento es deliberado, no un bug que arreglar tramo a tramo. Lo que no puede es crecer de golpe: si lo hace, mirar los `WARNING` de `backlogg.shared.external_ids` (`identity skipped`), que nombran la fila, el id que se queda y el que se cae. `skipped_links` **no** lo ve por diseño: allí el `item_id` es el mismo |
 
 `skipped_links` **no** cuenta las re-escrituras idempotentes del mismo enlace al
 mismo ítem (la misma persona en cast y crew, un tramo re-ejecutado): esas son
 normales y contarlas convertiría el número en ruido. Solo cuenta el robo de
-enlace entre dos ítems distintos.
+enlace entre dos ítems distintos. `skipped_identities` aplica la misma regla:
+re-ofrecer el id que la fila ya tiene es idempotencia y no cuenta; solo cuenta
+cuando el id que entra **desplaza** a otro distinto.
+
+Son dos contadores y no uno porque el remedio difiere: un enlace saltado deja
+un ítem **sin ningún** id externo (no se refresca, se duplica), mientras que una
+identidad saltada deja un ítem con **uno de los dos**. Fundirlos borraría el
+único número capaz de decirle al operador cuál de las dos cosas está pasando.
 
 Por qué está aquí y no en un panel aparte: el mismo mecanismo ciego produjo los
 issues #7, #15 y #20, y en los tres casos los datos se perdieron durante meses

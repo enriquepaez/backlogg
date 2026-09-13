@@ -274,6 +274,7 @@ async def run_book_incremental(work_dir: Path, force: bool = False) -> dict:
         "errors": load.get("errors", 0),
         "people_errors": load.get("people_errors", 0),
         "skipped_links": load.get("skipped_links", 0),
+        "skipped_identities": load.get("skipped_identities", 0),
         "elapsed_s": round(time.monotonic() - start, 1),
     }
 

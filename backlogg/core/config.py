@@ -11,35 +11,6 @@ class Settings(BaseSettings):
     TWITCH_CLIENT_ID: str = ""
     TWITCH_CLIENT_SECRET: str = ""
 
-    # Ranking-walk target per type: how many items of the external API's
-    # popular listing one full cursor cycle covers before wrapping to 0.
-    #
-    # ⚠️ Only SEED_TOP_N_BOOKS still does anything, and only on the cursor
-    # path (sync_books and scripts/backfill_sync.py book, which page
-    # search.json by offset and wrap on it). For the *seeding* of books it has
-    # been inert since feature 87: scripts/seed_openlibrary_books.py selects
-    # from the monthly Open Library dumps by the BOOKS_SEED_MIN_* thresholds
-    # below, with no item-count cutoff.
-    #
-    # ⚠️ SEED_TOP_N_MOVIES and SEED_TOP_N_SERIES are INERT since feature 86,
-    # and they are kept (rather than deleted) because deployments still export
-    # them and removing a name a deployment declares reads as an accident.
-    #
-    # ⚠️ SEED_TOP_N_GAMES is **gone** since feature 90, and that is a different
-    # decision from the two above on purpose. Games moved to seed_targets like
-    # movies and series, so the setting became inert — but unlike them it was
-    # actively harmful while it existed: it was the wraparound target of a
-    # cursor *shared* with the backfill workflow, so the seeding of 2026-09-07
-    # stopped at exactly 10.000 of the ~31.988 games that pass the filter, and
-    # the dispatch needed a -f seed_top_n that had to match Render by hand. A
-    # name that used to cap the catalog is worth removing outright rather than
-    # leaving around to be re-wired by mistake. Deployments that still export
-    # it are ignored (model_config has extra="ignore").
-    # See docs/seeding-plan.md §3 and docs/operations.md.
-    SEED_TOP_N_MOVIES: int = 100
-    SEED_TOP_N_SERIES: int = 100
-    SEED_TOP_N_BOOKS: int = 100
-
     # TMDB catalog definition (feature 86, docs/seeding-plan.md §1 and §3).
     # The catalog is defined by a vote_count threshold, not by a number of
     # items: popularity rank is a measure of *recent interest*, and 30% of the
@@ -155,23 +126,10 @@ class Settings(BaseSettings):
     # tunable numbers are env vars. Defaults are the calibrated values
     # documented in docs/external-apis.md: they select 17.015 English +
     # 1.859 Spanish works = 18.874, which IS the size of the book catalog.
-    #
-    # ⚠️ That is 189x the default SEED_TOP_N_BOOKS of 100 but *below* any
-    # realistic target, so the old wording here ("comfortably above
-    # SEED_TOP_N_BOOKS") was only ever true against the default and is gone.
-    # Since feature 87 SEED_TOP_N_BOOKS is INERT for the seeding path: books
-    # are seeded from the monthly dumps by scripts/seed_openlibrary_books.py,
-    # which selects by these thresholds and has no item-count cutoff and no
-    # cursor to wrap — exactly what happened to SEED_TOP_N_MOVIES/_SERIES in
-    # feature 86. It is still LIVE for the cursor path: sync_books (the
-    # nightly job) and scripts/backfill_sync.py book still walk search.json
-    # by offset and use it as their wraparound target.
-    #
-    # These same thresholds drive both paths, so the two agree on which works
-    # belong in the catalog; only the transport differs. One caveat for the
-    # cursor path: production sets SEED_TOP_N_BOOKS to 10.000, which is *below*
-    # the 18.874 the filter actually yields, so the cursor wraps before covering
-    # the catalog. Irrelevant to the dump path, flagged in docs/operations.md.
+    # There is no item-count cutoff anywhere on the book path: the thresholds
+    # below are the whole definition of which works belong in the catalog, and
+    # scripts/seed_openlibrary_books.py applies them to the monthly dumps
+    # (backlogg/books/adapters/openlibrary_dump.py::select_language).
     #
     # BOOKS_SEED_MIN_READINGLOG applies to the English stream and
     # BOOKS_SEED_MIN_READINGLOG_ES to the Spanish one: the shelving signal is
@@ -182,23 +140,18 @@ class Settings(BaseSettings):
     # canonical graphic novel (Bone 11, Death Note 12, Watchmen 43) — no
     # classification clause can, and none is queryable in Solr anyway. The
     # Spanish floor is 2 and not 3 on purpose: Reina roja has exactly 2.
-    # BOOKS_SEED_ES_EVERY_N interleaves one Spanish work every N slots of the
-    # global cursor (10 ≈ the 1.858/18.817 share of the pool), so Spanish
-    # titles show up from the very first slice instead of after the English
-    # stream runs out.
     BOOKS_SEED_MIN_READINGLOG: int = 20
     BOOKS_SEED_MIN_READINGLOG_ES: int = 5
     BOOKS_SEED_MIN_PAGES: int = 100
     BOOKS_SEED_MIN_EDITIONS: int = 10
     BOOKS_SEED_MIN_EDITIONS_ES: int = 2
-    BOOKS_SEED_ES_EVERY_N: int = 10
 
     # Nightly slice size. SYNC_SLICE_SIZE is the global fallback; the four
     # per-type overrides exist because the types have genuinely different
     # needs (feature 84, docs/seeding-plan.md §2.3): TMDB forbids caching its
     # data for more than 6 months, so 57.135 movies have to be re-synced every
     # 180 days = ~318/night, while series only need ~61. Resolution order in
-    # _read_slice is: explicit argument -> per-type setting -> global.
+    # _resolve_slice_size is: explicit argument -> per-type setting -> global.
     # All four default to None so this release changes nothing in production;
     # raising them is a configuration decision for the seeding features.
     SYNC_SLICE_SIZE: int = 200

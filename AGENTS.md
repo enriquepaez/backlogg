@@ -65,12 +65,12 @@
 6. Anota en progress/current.md: feature, hora de inicio, plan breve
 ```
 
-> **Override activo (2026-09-02)**: mientras exista
-> `progress/priority_order.md` con entradas pendientes, **el paso 4 se sustituye
-> por el orden de ese archivo**. El criterio de menor id daría hoy una respuesta
-> equivocada: elegiría la feature 74, que está bloqueada de facto por el issue
-> #15. Cuando la lista se agote, borra el archivo y este bloque — instrucciones
-> en su apartado «Cómo desmontar esto».
+> **El bloque de recomendaciones está congelado (2026-09-13).** Las features
+> 75, 76, 77, 78, 79, 80, 82 y 83 son las únicas `pending` del backend y **no se
+> eligen**: construyen el sistema de recomendación cross-type, que con cero
+> usuarios no se puede evaluar. Se descongelan cuando haya gente usando la app.
+> Mientras tanto, en el dominio de datos **no se abren features**, y un issue
+> solo se registra si pierde datos o rompe algo que el usuario ve.
 
 ## 5. Flujo por feature (workflow completo)
 
