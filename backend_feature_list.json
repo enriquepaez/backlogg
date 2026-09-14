@@ -1577,7 +1577,7 @@
         "Tests con respuestas SPARQL mockeadas, incluido el caso de ítem no presente en el catálogo",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 80,

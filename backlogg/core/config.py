@@ -121,6 +121,14 @@ class Settings(BaseSettings):
     # starts exactly where this one stopped.
     IGDB_INCREMENTAL_MAX_ITEMS: int = 2000
 
+    # Wikidata SPARQL volcado (feature 79). Wall-clock ceiling per pass, in
+    # minutes. The endpoint is free and CC0 but slow and politely rate-limited
+    # (1 req/s here), so a cold anchor pass over the whole catalog is hours of
+    # wall clock. The job stops itself on its own terms instead of being killed
+    # by the Actions timeout: the cursor, the counters and the coverage report
+    # survive, and the next dispatch continues where it stopped. 0 disables it.
+    WIKIDATA_SYNC_TIME_BUDGET_MINUTES: float = 300.0
+
     # Quality thresholds for the Open Library book catalog (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the
     # tunable numbers are env vars. Defaults are the calibrated values

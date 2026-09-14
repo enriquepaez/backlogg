@@ -1836,3 +1836,66 @@ Ninguna feature es elegible mientras el bloque de recomendaciones siga
 congelado (`AGENTS.md` §4), así que el siguiente movimiento es una decisión del
 usuario: descongelarlo, o abrir trabajo nuevo. La siembra real de producción
 quedó desbloqueada esta misma sesión al cerrar el #20.
+
+---
+
+## 2026-09-14 (tarde) — Feature 79 `wikidata_adaptations`
+
+**Primer descongelamiento parcial del bloque de recomendaciones.** Decisión del
+usuario tras el análisis de la sesión anterior: se elige la 79 y se deja el
+resto congelado, con 82 y 83 explícitamente fuera (siguen necesitando usuarios).
+`AGENTS.md` §4 recoge el criterio.
+
+**Qué se construyó.** Job mensual en dos pasadas que corre en el runner de
+GitHub Actions contra Neon, sin superficie HTTP nueva (`bruno/` y `docs/api.md`
+intactos). Pasada A: ancla el QID de Wikidata en `external_ids` con
+`source='WIKIDATA'` vía `upsert_external_id`, heredando la instrumentación de
+los issues #22/#24. Pasada B: lee P144/P4969 y escribe en `item_relations` solo
+las aristas cuyos dos extremos resuelven contra ese ancla; el extremo ausente se
+descarta y se cuenta. Tabla nueva `item_relations` (migración `0041`), diseñada
+para que la feature 83 la herede sin migrarla: `source` y `relation` dentro de
+`uq_item_relation`, `score` desde el día uno, un solo índice secundario (lado
+`to`), sin FK, sin arista espejo.
+
+**Decisiones de diseño.** El leader fijó que el job corre en el runner y no vía
+Render (el ancla exige volcar ~68k ítems; Render free duerme, 512 MB, ~15 min
+por request) — patrón de `backfill-sync.yml`, no de `nightly-sync.yml`, que
+aporta solo el scheduling. El implementer invirtió la consulta SPARQL: en vez de
+paginar el volcado de la propiedad (`P4947` = 284.627 sentencias, ~33 s por
+página contra el techo de 60 s de WDQS), pregunta desde el catálogo con bloques
+`VALUES` de nuestros ids, dejando el cursor sobre `external_ids.id` — estable
+por construcción, porque `upsert_external_id` actualiza en sitio y las filas
+nuevas caen fuera del propio filtro de la pasada. Los juegos se anclan con
+`P9043` (id numérico, 1.033 valores) y no con `P5794` (148.333), porque `P5794`
+guarda el slug y emparejar por ahí sería emparejar por nombre: cobertura fina
+asumida y reportada.
+
+**Review en dos rondas.** La primera devolvió `CHANGES_REQUESTED` por dos
+agujeros de test, no de diseño: el presupuesto de reloj tenía la costura puesta
+(`clock=`) y ningún test la usaba —`expired() -> return False` pasaba la suite
+entera— y quedaba código muerto (`chunked`, resto del diseño abandonado, y
+`RELATIONS`). El leader añadió un tercero: `resolved` contaba intentos y no
+enlaces, la clase de discrepancia silenciosa que encadenó los issues #7/#15/#20.
+El implementer corrigió el encuadre del leader: #22 y #24 no son simétricos —en
+el #22 el ítem se queda sin ancla, en el #24 sí queda enlazado y lo que se
+pierde es el QID viejo— y añadió un cuarto contador para que los cuatro
+particionen `considered` sin hueco. `RELATIONS` pasó a ser validación real en
+`upsert_item_relations` (precedente: `codes.py`), no a borrarse.
+
+**El reviewer se desdijo de su propia especificación.** Había pedido un reloj
+falso por contador de llamadas; el implementer lo hizo por progreso observado.
+Al re-revisar lo comprobó empíricamente en vez de razonarlo: el contador literal
+fallaba contra el código correcto, porque `_Budget.__init__` ya consume la
+primera lectura. Y midió que el reloj por progreso atrapa **más** mutaciones —
+mata «mover el `expired()` después de `resolve_qids`», que es parar tirando
+trabajo ya pagado. `APPROVED` en la segunda ronda.
+
+**QA del leader** (contra `query.wikidata.org` real, DB de dev): ancla de BOOK
+23,08 % (90/390) y SERIES 87,97 % (1002/1139), 7 ids ambiguos dejados sin anclar
+antes que adivinados; 18 aristas, con cross-type real (SERIES→BOOK ADAPTATION,
+BOOK→SERIES DERIVATIVE). Segunda ejecución `0 new / 18 refreshed`. Migración
+down/up limpia y las 18 aristas se reconstruyen idénticas. Y la comprobación que
+protege a la 83: una fila `INTERNAL/COOCCURRENCE` con `score=0.42` sembrada a
+mano sobre el mismo par **sobrevive intacta** a una pasada completa de Wikidata.
+
+`bash init.sh` verde: **1688 tests** (partida: 1649). Cero issues abiertos.

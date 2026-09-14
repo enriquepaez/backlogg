@@ -230,7 +230,7 @@ CREATE TABLE external_ids (
     id              BIGSERIAL PRIMARY KEY,
     item_type       VARCHAR(20) NOT NULL,            -- MOVIE, SERIES, BOOK, GAME, PERSON, COMPANY
     item_id         BIGINT NOT NULL,
-    source          VARCHAR(20) NOT NULL,            -- TMDB, IGDB, OPEN_LIBRARY, IMDB, ...
+    source          VARCHAR(20) NOT NULL,            -- TMDB, IGDB, OPEN_LIBRARY, WIKIDATA, IMDB, ...
     external_id     VARCHAR(100) NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -256,6 +256,43 @@ que filtrar también por `item_type`; si no, puede devolver la fila de otro tipo
 Lo que **sigue** prohibido es que dos ítems del **mismo** tipo compartan
 `(source, external_id)`: eso es un id duplicado de verdad y el pre-check
 conserva ahí su semántica de "gana el primero que lo reclamó".
+
+
+### `source = 'WIKIDATA'` — el ancla de QID (feature 79)
+
+Cada ítem del catálogo puede llevar, **además** del id de su proveedor, el QID
+de la entidad de Wikidata que le corresponde (`Q186341` para *El resplandor*).
+No hace falta esquema nuevo: `uq_item_source` es `(item_type, item_id, source)`,
+así que un ítem ya podía tener varias fuentes, y esta es una más.
+
+Sirve para dos cosas distintas:
+
+1. **Póliza de migración.** Es la razón por la que se pudo aplazar la migración
+   de APIs sin riesgo. Un ítem cuya única identidad es un número de TMDB queda
+   huérfano el día que se cambie de proveedor — y con él, el historial de
+   biblioteca de todos los usuarios que lo tengan. Un ítem que además lleva QID
+   se remapea mecánicamente, porque Wikidata guarda también el id del proveedor
+   nuevo para la misma entidad.
+2. **Resolver las adaptaciones por id.** Es la única forma de convertir el
+   extremo lejano de una sentencia `P144` (un QID) en una fila del catálogo.
+   Por eso la pasada de anclaje va **antes** que la de relaciones.
+
+Lo escribe `scripts/sync_wikidata.py` vía `upsert_external_id`, así que hereda
+la instrumentación de los issues #22 y #24 sin nada nuevo. Un id externo que
+Wikidata no conoce, o que reclaman **dos** entidades a la vez, se deja sin
+anclar y se cuenta: un ancla equivocada es peor que ninguna, porque es
+exactamente lo que una migración futura se creería.
+
+Cobertura esperada por tipo, y por qué no es uniforme: `P4947` (TMDB movie),
+`P4983` (TMDB TV) y `P648` (Open Library) guardan el mismo identificador que
+almacenamos nosotros, pero los juegos usan `P9043` (id **numérico** de IGDB),
+que el 2026-09-14 solo tenía 1.033 valores en toda Wikidata. La propiedad
+poblada de verdad es `P5794` (148.333 valores) y **no se usa a propósito**: su
+valor es el *slug* de IGDB, y la identidad de un juego aquí es el id numérico;
+lo único que guarda el slug localmente es `games.slug`, que es un slug de
+presentación y se realinea cuando la fuente renombra el ítem
+(`docs/conventions.md`). Emparejar por ahí sería emparejar por nombre. El
+número de cobertura se **informa** por tipo tras cada pasada; no es un umbral.
 
 ## Genres
 
@@ -843,10 +880,10 @@ CREATE TABLE sync_watermarks (
 );
 ```
 
-Sin índice secundario, y es deliberado: la tabla tiene siete filas y todas las
-lecturas son búsqueda por clave primaria.
+Sin índice secundario, y es deliberado: la tabla tiene una decena escasa de
+filas y todas las lecturas son búsqueda por clave primaria.
 
-### Las siete filas y qué guarda cada `cursor_value`
+### Las filas y qué guarda cada `cursor_value`
 
 | source | kind | item_type | `cursor_value` |
 |---|---|---|---|
@@ -857,6 +894,8 @@ lecturas son búsqueda por clave primaria.
 | `IGDB` | `CREATED_AT` | `GAME` | instante ISO-8601 del `created_at` más nuevo visto |
 | `IGDB` | `UPDATED_AT` | `GAME` | ídem con `updated_at` |
 | `OPEN_LIBRARY` | `MONTHLY_DUMP` | `BOOK` | edición del dump ya diffeada (`2026-08-31`) |
+| `WIKIDATA` | `SPARQL_ANCHOR` | `MOVIE`/`SERIES`/`BOOK`/`GAME` | último `external_ids.id` de ese tipo ya resuelto (feature 79) |
+| `WIKIDATA` | `SPARQL_RELATIONS` | `ALL` | último `external_ids.id` anclado ya leído (feature 79) |
 
 **Las tres columnas de la clave cargan peso.** Solo `source` colapsaría los dos
 mecanismos de TMDB, que avanzan por separado: `/changes` puede ir cinco días
@@ -865,6 +904,12 @@ del otro pierde trabajo o lo repite. `(source, kind)` colapsaría movies y
 series, que son dos pasadas contra dos endpoints y pueden terminar la noche en
 puntos distintos. IGDB se modela con **dos kinds** por la misma razón: son dos
 queries independientes que pueden fallar por separado.
+
+`WIKIDATA`/`SPARQL_RELATIONS` usa `item_type='ALL'`, y es el único sitio donde
+se estira el vocabulario. Es deliberado: el recorrido de relaciones es **un
+solo cursor sobre todos los tipos a la vez**, porque una arista de adaptación
+cruza tipos por definición y partirlo por tipo necesitaría cuatro cursores para
+describir un único recorrido.
 
 **`item_type` es NOT NULL incluso para mecanismos de un solo tipo** (Open
 Library escribe `BOOK` explícitamente). No es pulcritud: Postgres trata los
@@ -908,6 +953,76 @@ re-baselinear.
 
 Inspección operativa (query y lectura) en `docs/operations.md`, sección
 «Incremental del catálogo».
+
+## Item relations (features 79 y 83)
+
+El grafo de aristas **entre ítems del catálogo**, de cualquier tipo contra
+cualquier tipo. Sale de `docs/recommendations-plan.md` («Capa 2 —
+Conocimiento») y la comparten dos features: la **79** la llena con las
+sentencias explícitas de Wikidata (`P144`/`P4969`) y la **83** la llenará con
+la co-ocurrencia sobre bibliotecas.
+
+```sql
+CREATE TABLE item_relations (
+    id          BIGSERIAL PRIMARY KEY,
+    from_type   VARCHAR(20) NOT NULL,      -- MOVIE | SERIES | BOOK | GAME
+    from_id     BIGINT NOT NULL,
+    to_type     VARCHAR(20) NOT NULL,
+    to_id       BIGINT NOT NULL,
+    relation    VARCHAR(20) NOT NULL,      -- ADAPTATION | DERIVATIVE | COOCCURRENCE
+    score       DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    source      VARCHAR(20) NOT NULL,      -- WIKIDATA | INTERNAL
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_item_relation UNIQUE (from_type, from_id, to_type, to_id, relation, source),
+    CONSTRAINT ck_item_relation_not_self CHECK (NOT (from_type = to_type AND from_id = to_id))
+);
+
+CREATE INDEX idx_item_relations_to ON item_relations (to_type, to_id, relation);
+```
+
+Sin FK reales: referencia polimórfica, igual que `external_ids` y `credits`.
+
+### Qué significa la dirección
+
+| `relation` | Significado de `(from, to)` | Origen |
+|---|---|---|
+| `ADAPTATION` | *from* está basado en *to* — la película → la novela que adapta | Wikidata `P144` |
+| `DERIVATIVE` | *to* deriva de *from* — la novela → el juego que salió de ella | Wikidata `P4969` |
+| `COOCCURRENCE` | simétrica por construcción; aun así una fila por par ordenado | feature 83 (`INTERNAL`) |
+
+**La arista espejo no se guarda.** Duplicaría las filas, y `P144` y `P4969`
+están declaradas inversas en Wikidata, así que un par bien curado *llega* ya en
+las dos direcciones. Quien quiera «todo lo relacionado con X» consulta los dos
+lados — que es lo que hace `get_relations_for_item`, y para eso está
+`idx_item_relations_to`. El lado `from` no lleva índice propio porque ya lo
+cubren las columnas de cabecera de `uq_item_relation`.
+
+### Por qué `source` está dentro de la clave única
+
+Sin él, la capa de conocimiento y la de comportamiento se pelearían por la
+misma fila: un par que es a la vez adaptación en Wikidata y co-ocurrencia
+fuerte tendría uno de los dos `score` machacado por el job que corriese último,
+y el ranker no podría distinguir «dos capas independientes coinciden» de «una
+capa corrió dos veces». `relation` está por lo mismo a menor escala.
+
+### Regla dura: ningún `DELETE` ancho
+
+Como la tabla es compartida, un `DELETE FROM item_relations` para «recalcular
+desde cero» se llevaría por delante la otra capa — y reconstruir la mitad de
+Wikidata cuesta una pasada SPARQL completa, mientras que la de co-ocurrencia
+cuesta un batch sobre todas las bibliotecas. Toda escritura es **upsert**, y el
+único borrado que existe está acotado por `source`
+(`backlogg/shared/item_relations.py::delete_relations_by_source`), precisamente
+para que el predicado no se pueda olvidar en un call site.
+
+`score` existe desde el principio aunque Wikidata siempre escriba `1.0` (una
+sentencia `P144` es una afirmación, no una estimación): la feature 83 escribirá
+ahí un coseno real, y añadir la columna después sería migrar una tabla ya
+poblada. `updated_at` tiene trigger (`set_updated_at_item_relations`,
+reutilizando `trigger_set_updated_at()` de la 0001). Creada en la migración
+`0041`, con `downgrade()` implementado.
 
 ## Users
 
@@ -1412,7 +1527,8 @@ name and the target being acted on.
 ## Notes on polymorphic references
 
 `external_ids`, `credits`, `item_cast`, `company_credits`, `user_ratings`,
-`library_entries`, `activity_events`, `notifications` (target_type/target_id),
+`library_entries`, `activity_events`, `item_relations` (from_type/from_id **y**
+to_type/to_id), `notifications` (target_type/target_id),
 `admin_actions` (target_type/target_id) use polymorphic references
 (`item_type`/`target_type` + `item_id`/`target_id`) with no real FK.
 Referential integrity is enforced at the application layer, typically in the

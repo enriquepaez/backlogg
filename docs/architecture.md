@@ -56,6 +56,11 @@ backlogg/
 │   │                      # ingesta masiva; el descriptor por tipo vive en
 │   │                      # cada <domain>/repository.py
 │   ├── external_ids.py    # Utilidades polimórficas de external_ids
+│   ├── item_relations.py  # Tabla de aristas ítem-ítem (adaptaciones de
+│   │                      # Wikidata hoy, co-ocurrencia mañana) + su upsert;
+│   │                      # ningún writer puede hacer un DELETE ancho
+│   ├── pacing.py          # RequestPacer: el límite de req/s por fuente,
+│   │                      # compartido por Open Library y Wikidata
 │   ├── identity.py        # Resolución del ítem por external_id antes que por
 │   │                      # slug, y realineado del slug al renombrar (#23);
 │   │                      # la usan bulk_load y los cuatro upsert_* on-demand
@@ -70,6 +75,9 @@ scripts/
 ├── seed_tmdb_targets.py   # Enumeración de la lista objetivo de TMDB (/discover)
 ├── seed_openlibrary_books.py  # Siembra del catálogo de libros desde los dumps
 │                          # mensuales de Open Library (feature 87)
+├── sync_wikidata.py       # Volcado SPARQL mensual: ancla de QID en
+│                          # external_ids + adaptaciones en item_relations
+│                          # (feature 79)
 └── bench_bulk_load.py     # Benchmark ruta por ítem vs. ruta por lotes
 ```
 
@@ -153,6 +161,12 @@ de la hidratación** (feature 86):
   la llenan los ítems con `last_synced_at` más antiguo. Ver
   `docs/seeding-plan.md`.
 
+Hay un tercer job que **no toca el catálogo y sí sus enlaces**: el volcado
+mensual de Wikidata (GitHub Actions → `scripts/sync_wikidata.py`, feature 79),
+que escribe el QID de cada ítem en `external_ids` y las adaptaciones en
+`item_relations`. Corre en el runner contra Neon, por el mismo motivo que el
+backfill, y no añade superficie HTTP.
+
 ## APIs externas
 
 | Tipo de contenido | Fuente       | Auth                      |
@@ -160,6 +174,7 @@ de la hidratación** (feature 86):
 | Películas/Series  | TMDB         | API key                   |
 | Libros            | Open Library | Sin auth                  |
 | Juegos            | IGDB         | Twitch client credentials |
+| Transversal (QID + adaptaciones) | Wikidata (SPARQL) | Sin auth, datos CC0 |
 
 Ver `docs/external-apis.md` para endpoints y variables de entorno requeridas.
 

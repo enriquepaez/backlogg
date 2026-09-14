@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-import time
 from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -9,6 +8,7 @@ from datetime import UTC, date, datetime
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from backlogg.shared.pacing import RequestPacer
 from backlogg.shared.slugs import titled_slug
 
 _OL_BASE = "https://openlibrary.org"
@@ -57,56 +57,10 @@ OL_WORKS_BY_ID_CHUNK = 50
 logger = logging.getLogger(__name__)
 
 
-class _RequestPacer:
-    """Spaces outbound requests so no more than ``rps`` of them *start* per second.
-
-    Why a pacer and not a semaphore: the on-demand path is a fan-out, not a
-    page loop.  ``GET /books/{slug}`` resolves a work and then gathers one
-    ``/authors/{olid}.json`` per author with ``asyncio.gather``, and the search
-    fan-out queries every source at once — so the burst is concurrent and
-    limiting *concurrency* would not limit the **rate**.  The seeding path does
-    not need this at all any more (feature 87 moved it to the monthly dumps,
-    which is exactly what Open Library asks bulk consumers to do), but it goes
-    through the same gate: one client, one budget, and a single place that
-    knows what the source allows — the same shape as
-    ``igdb.IGDB_PAGE_THROTTLE_S``.
-
-    Lock-free on purpose.  ``wait`` reserves its slot and only *then* awaits,
-    with no ``await`` between reading and writing ``_next_at``; under asyncio's
-    single-threaded scheduling that is atomic, so concurrent callers each get a
-    distinct slot without a lock — and without a lock there is no object bound
-    to an event loop, which a module-level singleton must avoid (a
-    ``asyncio.Lock`` created under one loop raises when awaited under another,
-    as every test that builds its own loop would).
-
-    ``sleep`` and ``clock`` are injected so tests can assert the spacing
-    without real time, and ``asyncio.sleep`` is captured **at construction**:
-    several adapter tests patch ``asyncio.sleep`` globally to count tenacity
-    backoffs, and the pacer must not show up in those counts.
-    """
-
-    __slots__ = ("_clock", "_next_at", "_sleep", "min_interval")
-
-    def __init__(self, rps: float, *, clock=time.monotonic, sleep=asyncio.sleep) -> None:
-        self.min_interval = 1.0 / rps if rps > 0 else 0.0
-        self._clock = clock
-        self._sleep = sleep
-        self._next_at = 0.0
-
-    async def wait(self) -> None:
-        """Block until this caller's slot in the rate budget comes up."""
-        if self.min_interval <= 0:
-            return
-        now = self._clock()
-        start = max(now, self._next_at)
-        self._next_at = start + self.min_interval
-        delay = start - now
-        if delay > 0:
-            await self._sleep(delay)
-
-    def reset(self) -> None:
-        """Forget the reserved slots (tests only — the process has one pacer)."""
-        self._next_at = 0.0
+# The pacer itself moved to ``backlogg/shared/pacing.py`` when feature 79 added
+# a second paced source (the Wikidata SPARQL endpoint).  Re-exported under its
+# original private name so nothing that imports it from here has to change.
+_RequestPacer = RequestPacer
 
 
 # Process-wide: the budget belongs to the *source*, not to a client instance.

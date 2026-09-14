@@ -26,6 +26,10 @@ from backlogg.shared.models import Credit, ItemCast, SeedTarget, SyncWatermark
 __all__ = [
     "CREDIT_GAP_SOURCES",
     "SEED_TARGET_SOURCES",
+    "WIKIDATA_SOURCE",
+    "AnchorCoverage",
+    "AnchoredItem",
+    "CatalogExternalId",
     "CreditGap",
     "CreditGaps",
     "SeedTargetProgress",
@@ -34,6 +38,9 @@ __all__ = [
     "count_seed_target_progress",
     "count_seed_targets",
     "filter_catalogued_external_ids",
+    "get_anchor_coverage",
+    "get_anchored_batch",
+    "get_catalog_external_id_batch",
     "get_credit_gaps",
     "get_known_source_ids",
     "get_pending_seed_targets",
@@ -42,9 +49,15 @@ __all__ = [
     "mark_credits_synced",
     "mark_seed_targets_attempted",
     "mark_seed_targets_unreachable",
+    "resolve_qids_to_items",
     "set_sync_watermark",
     "upsert_seed_targets",
 ]
+
+# The ``external_ids.source`` the Wikidata QID anchor is written under
+# (feature 79).  Lives here because it is the join key of every query in the
+# "Wikidata anchor and relations" section at the bottom of this module.
+WIKIDATA_SOURCE = "WIKIDATA"
 
 # Item types that can have people credits backfilled, with the external
 # source their id has to be resolved against.  GAME is deliberately absent:
@@ -738,3 +751,170 @@ async def filter_catalogued_external_ids(
         ).scalars()
         found.update(rows)
     return found
+
+
+# ── Wikidata anchor and relations (feature 79) ───────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogExternalId:
+    """One catalog item, as seen from its ``external_ids`` row.
+
+    ``row_id`` is the ``external_ids`` primary key and is the **cursor** of the
+    Wikidata anchor pass: it is monotonic, totally ordered and belongs to this
+    database, so a run that dies mid-pass resumes at a position nothing outside
+    can reshuffle.  Paginating the *source* instead (a sorted SPARQL scan over
+    the ~285.000 TMDB statements in Wikidata) would depend on an ordering that
+    an edit in Wikidata can change between two pages.
+    """
+
+    row_id: int
+    item_id: int
+    external_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnchoredItem:
+    """One catalog item that already carries a Wikidata QID."""
+
+    row_id: int
+    item_type: str
+    item_id: int
+    qid: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnchorCoverage:
+    """Anchor coverage for one content type (the feature-79 report).
+
+    ``linked`` is the denominator that matters and ``catalog_items`` is not:
+    an item with no id in its own source could never be resolved against
+    Wikidata by id in the first place, so dividing by the whole catalog would
+    blame this pass for a gap that belongs to the ingestion.  Both numbers are
+    reported so the difference between them stays visible.
+    """
+
+    item_type: str
+    source: str
+    catalog_items: int
+    linked: int
+    anchored: int
+
+    @property
+    def coverage(self) -> float:
+        return (self.anchored / self.linked) if self.linked else 0.0
+
+
+async def get_catalog_external_id_batch(
+    db: AsyncSession, item_type: str, source: str, after_row_id: int, limit: int
+) -> list[CatalogExternalId]:
+    """The next ``limit`` items of ``(item_type, source)`` after ``after_row_id``."""
+    if limit <= 0:
+        return []
+    stmt = (
+        select(ExternalId.id, ExternalId.item_id, ExternalId.external_id)
+        .where(
+            ExternalId.item_type == item_type,
+            ExternalId.source == source,
+            ExternalId.id > after_row_id,
+        )
+        .order_by(ExternalId.id.asc())
+        .limit(limit)
+    )
+    return [
+        CatalogExternalId(row_id=row.id, item_id=row.item_id, external_id=row.external_id)
+        for row in (await db.execute(stmt)).all()
+    ]
+
+
+async def get_anchored_batch(db: AsyncSession, after_row_id: int, limit: int) -> list[AnchoredItem]:
+    """The next ``limit`` Wikidata-anchored items, in ``external_ids.id`` order.
+
+    All content types in one walk: the relations pass does not care what type
+    an item is — a ``P144`` edge crosses types by definition, which is the
+    whole point of the layer.
+    """
+    if limit <= 0:
+        return []
+    stmt = (
+        select(ExternalId.id, ExternalId.item_type, ExternalId.item_id, ExternalId.external_id)
+        .where(ExternalId.source == WIKIDATA_SOURCE, ExternalId.id > after_row_id)
+        .order_by(ExternalId.id.asc())
+        .limit(limit)
+    )
+    return [
+        AnchoredItem(
+            row_id=row.id,
+            item_type=row.item_type,
+            item_id=row.item_id,
+            qid=row.external_id,
+        )
+        for row in (await db.execute(stmt)).all()
+    ]
+
+
+async def resolve_qids_to_items(
+    db: AsyncSession, qids: Sequence[str]
+) -> dict[str, list[tuple[str, int]]]:
+    """Map each QID to the catalog items anchored to it.
+
+    This is the **only** way the relations pass resolves the far end of an
+    edge, and it is why the anchor pass has to run first: a QID Wikidata points
+    at is either already persisted in ``external_ids`` — in which case the item
+    is ours, by id — or it is not in the catalog and the edge is dropped and
+    counted.  There is no title fallback, by design.
+
+    A list per QID because ``uq_external_id`` is scoped per ``item_type``, so
+    the same QID could in principle anchor items of two types.  That would be a
+    data error, but returning the first arbitrarily would hide it.
+    """
+    if not qids:
+        return {}
+    unique = list(dict.fromkeys(qids))
+    resolved: dict[str, list[tuple[str, int]]] = {}
+    for start in range(0, len(unique), _ID_LOOKUP_CHUNK):
+        chunk = unique[start : start + _ID_LOOKUP_CHUNK]
+        rows = (
+            await db.execute(
+                select(ExternalId.external_id, ExternalId.item_type, ExternalId.item_id).where(
+                    ExternalId.source == WIKIDATA_SOURCE,
+                    ExternalId.external_id.in_(chunk),
+                )
+            )
+        ).all()
+        for row in rows:
+            resolved.setdefault(row.external_id, []).append((row.item_type, row.item_id))
+    return resolved
+
+
+async def get_anchor_coverage(db: AsyncSession, item_type: str, source: str) -> AnchorCoverage:
+    """Count catalog rows, source-linked rows and Wikidata-anchored rows."""
+    model = _ITEM_MODELS.get(item_type)
+    if model is None:
+        raise ValueError(f"get_anchor_coverage: unsupported item_type {item_type!r}")
+    catalog_items = int((await db.execute(select(func.count()).select_from(model))).scalar_one())
+    linked = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(ExternalId)
+                .where(ExternalId.item_type == item_type, ExternalId.source == source)
+            )
+        ).scalar_one()
+    )
+    anchored = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(ExternalId)
+                .where(ExternalId.item_type == item_type, ExternalId.source == WIKIDATA_SOURCE)
+            )
+        ).scalar_one()
+    )
+    return AnchorCoverage(
+        item_type=item_type,
+        source=source,
+        catalog_items=catalog_items,
+        linked=linked,
+        anchored=anchored,
+    )

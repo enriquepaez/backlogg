@@ -208,6 +208,16 @@ item_relations (
 
 La misma tabla la reutiliza la capa 3.
 
+> **Implementada en la feature 79** (2026-09-14). El volcado es
+> `scripts/sync_wikidata.py`, programado mensualmente por
+> `.github/workflows/wikidata-sync.yml`; el esquema real de `item_relations`
+> está en `docs/schema.md` §«Item relations» y el trato con el endpoint SPARQL
+> en `docs/external-apis.md` §Wikidata. Dos matices frente a lo planeado aquí:
+> el mapeo se consulta **desde el catálogo hacia Wikidata** (un `VALUES` con
+> nuestros ids) y no volcando la propiedad entera, y los juegos se anclan con
+> `P9043` (id numérico de IGDB, poco poblado) y no con `P5794` (el slug), para
+> no acabar emparejando por nombre.
+
 ---
 
 ### Capa 3 — Comportamiento: co-ocurrencia en bibliotecas
