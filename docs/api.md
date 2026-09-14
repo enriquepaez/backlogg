@@ -1049,6 +1049,14 @@ evento.created_at` (o fila sin evento). Justificación completa en
 Una review **oculta por moderación** (`user_ratings.is_hidden`) no cuenta, ni
 por su evento ni por su fila.
 
+La actividad de un **usuario baneado** (`users.is_banned`) tampoco cuenta, y no
+solo sus ratings: se excluye en las **tres** contribuciones (sus eventos, su
+intención de backlog y sus ediciones de rating), así que un baneo retira toda
+su influencia sobre la portada y no suma para ninguno de los dos umbrales. Es
+la misma regla que `visible_review_filters()` aplica en el listado público de
+reviews, en el de un usuario, en el feed y en el recálculo de agregados
+(issue #29).
+
 **Un gesto por usuario, ítem y tipo de gesto** (issue #30). El toggle
 `completed → dropped → completed` se escapaba de los recortes anteriores por
 dos sitios distintos, y hacen falta los dos arreglos:
@@ -1091,10 +1099,30 @@ publicación original), la ventana se **relaja** y se sirve el orden canónico
 sobre todo el catálogo, en vez de devolver un hueco. Solo se relaja con
 resultado **totalmente** vacío: un resultado parcial sigue respetando `period`.
 
-**Umbral.** Un tipo usa la señal local cuando tiene al menos
-`TRENDING_MIN_ACTIVITY` gestos dentro de la ventana —gestos ya deduplicados, no
-filas crudas—; por debajo, cae al fallback. Se evalúa **por tipo**, no
-globalmente, y es configurable por env (default 5, ver `.env.example`).
+**Umbral.** Un tipo usa la señal local cuando cumple **las dos** condiciones
+dentro de la ventana; si falla cualquiera de ellas, cae al fallback:
+
+| Condición | Setting | Default | Qué mide |
+|---|---|---|---|
+| Gestos mínimos | `TRENDING_MIN_ACTIVITY` | 5 | cuánta actividad hubo |
+| Personas distintas mínimas | `TRENDING_MIN_USERS` | 3 | cuánta gente la produjo |
+
+Las dos se calculan sobre **los mismos gestos ya deduplicados y filtrados por
+moderación** que alimentan el score, nunca sobre las filas crudas, y las dos se
+evalúan **por tipo**, no globalmente. Son independientes: una ráfaga de una
+sola cuenta pasa la primera y falla la segunda, y un puñado de personas con un
+gesto cada una hace lo contrario.
+
+La segunda condición existe porque el conteo de gestos, por sí solo, mide mal
+con comunidad pequeña (issue #35): un único usuario que valore o complete cinco
+ítems **distintos** cruza el mínimo de gestos él solo, con cinco gestos
+legítimos, y se queda con el listado entero de su tipo. La portada diría «esto
+es lo que la comunidad está mirando» mostrando el backlog de una persona.
+
+**Efecto práctico hoy:** con la comunidad actual (prácticamente cero usuarios)
+`/v1/trending` sirve el fallback del catálogo casi siempre. Eso es lo correcto,
+no una regresión: el fallback es la respuesta honesta hasta que haya gente
+suficiente usando la app.
 
 **Efecto de `period`** (valores admitidos: `day` y `week`, sin cambios):
 

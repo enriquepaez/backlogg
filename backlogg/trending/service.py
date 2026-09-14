@@ -11,9 +11,11 @@ Two sources, chosen **per item type**:
 
 1. **Local activity** — ``activity_events`` + ``library_entries`` +
    ``user_ratings`` inside the period's window, decayed by age. Served when the
-   type has at least ``settings.TRENDING_MIN_ACTIVITY`` gestures in that
-   window. The de-duplicated decomposition of those three tables (they overlap
-   by construction) is documented in ``backlogg/trending/repository.py``.
+   type has at least ``settings.TRENDING_MIN_ACTIVITY`` gestures in that window
+   **and** at least ``settings.TRENDING_MIN_USERS`` distinct people behind
+   them. The de-duplicated decomposition of those three tables (they overlap by
+   construction), and the moderation filters that keep a banned author out of
+   all three, are documented in ``backlogg/trending/repository.py``.
 2. **Fallback** — the catalog's canonical order (feature 66:
    ``rating_internal DESC NULLS LAST``, ``rating_external DESC NULLS LAST`` as
    tie-break) restricted to recent releases. The period lives in the ``WHERE``
@@ -23,6 +25,11 @@ Two sources, chosen **per item type**:
 
 The threshold is evaluated per type, not globally: books can rank from real
 activity while games still fall back, inside the same response.
+
+With a community this size the honest answer to "what is everyone looking at"
+is usually the catalog, and that is what the two minimums together make the
+default: the fallback is not a degraded mode, it is the truthful one until
+enough different people are using the app.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -167,23 +174,54 @@ async def _list_recent_catalog(
     both the sort (``rating_desc``) and the date window (``filters.date_from``,
     already bound to each type's own date column) are part of those functions'
     existing contract. ``date_from=None`` means "no window".
+
+    ``with_total=False`` because trending does not paginate: the pagination
+    total those functions compute is thrown away here, and computing it costs a
+    full ``COUNT(*)`` over the filtered catalog — four per mix, eight when a
+    type has to relax an empty release window (issue #31). The flag lives in
+    the four repositories rather than in a fifth copy of the ``ORDER BY``,
+    which is the whole reason this function delegates.
     """
     filters = CatalogSearchFilters(date_from=date_from)
     if item_type == "MOVIE":
         items, _ = await movies_repo.list_movies(
-            db, genre=None, sort=MovieSortEnum.rating_desc, page=1, limit=limit, filters=filters
+            db,
+            genre=None,
+            sort=MovieSortEnum.rating_desc,
+            page=1,
+            limit=limit,
+            filters=filters,
+            with_total=False,
         )
     elif item_type == "SERIES":
         items, _ = await series_repo.list_series(
-            db, genre=None, sort=SeriesSortEnum.rating_desc, page=1, limit=limit, filters=filters
+            db,
+            genre=None,
+            sort=SeriesSortEnum.rating_desc,
+            page=1,
+            limit=limit,
+            filters=filters,
+            with_total=False,
         )
     elif item_type == "BOOK":
         items, _ = await books_repo.list_books(
-            db, genre=None, sort=BookSortEnum.rating_desc, page=1, limit=limit, filters=filters
+            db,
+            genre=None,
+            sort=BookSortEnum.rating_desc,
+            page=1,
+            limit=limit,
+            filters=filters,
+            with_total=False,
         )
     else:
         items, _ = await games_repo.list_games(
-            db, genre=None, sort=GameSortEnum.rating_desc, page=1, limit=limit, filters=filters
+            db,
+            genre=None,
+            sort=GameSortEnum.rating_desc,
+            page=1,
+            limit=limit,
+            filters=filters,
+            with_total=False,
         )
     to_item = _TO_TRENDING_ITEM[item_type]
     return [to_item(item) for item in items]
@@ -218,9 +256,21 @@ async def _local_activity(
 ) -> list[TrendingItemOut] | None:
     """Top ``limit`` items of this type by decayed local activity.
 
-    Returns ``None`` when the type has fewer than ``TRENDING_MIN_ACTIVITY``
-    gestures inside the window — the signal is too thin to rank on, so the
-    caller falls back. That decision is taken per type.
+    Returns ``None`` when the window's signal is too thin to rank on, so the
+    caller falls back. "Too thin" is two independent conditions, both taken per
+    type and both over the same de-duplicated, moderation-filtered gestures
+    that feed the score:
+
+    - fewer than ``TRENDING_MIN_ACTIVITY`` **gestures** — not enough happened;
+    - fewer than ``TRENDING_MIN_USERS`` **distinct people** — enough happened,
+      but one account did it (issue #35). A single user rating or shelving five
+      different items clears the gesture count on their own, with five
+      perfectly legitimate gestures, and the page would then say "what the
+      community is watching" while showing one person's backlog.
+
+    The second one is not a stricter version of the first: a burst from one
+    account passes the first and fails the second, and a handful of people with
+    one gesture each does the opposite.
 
     Two queries total, never one per item: one aggregate over the activity
     tables, one batch resolution of the winning ids against the catalog table.
@@ -231,7 +281,7 @@ async def _local_activity(
     since = now - ACTIVITY_WINDOWS[period]
     half_life_seconds = DECAY_HALF_LIVES[period].total_seconds()
 
-    total_gestures, scored = await repo.activity_scores(
+    signal = await repo.activity_scores(
         db,
         item_type=item_type,
         since=since,
@@ -239,18 +289,24 @@ async def _local_activity(
         half_life_seconds=half_life_seconds,
         limit=limit,
     )
-    if total_gestures < settings.TRENDING_MIN_ACTIVITY:
+    if (
+        signal.total_gestures < settings.TRENDING_MIN_ACTIVITY
+        or signal.distinct_users < settings.TRENDING_MIN_USERS
+    ):
         return None
 
-    rows = await repo.get_items_by_ids(db, item_type, [item_id for item_id, _ in scored])
+    rows = await repo.get_items_by_ids(db, item_type, [item_id for item_id, _ in signal.scored])
     to_item = _TO_TRENDING_ITEM[item_type]
-    return [to_item(rows[item_id]) for item_id, _ in scored if item_id in rows]
+    return [to_item(rows[item_id]) for item_id, _ in signal.scored if item_id in rows]
 
 
 async def _collect(
     db: AsyncSession, item_type: str, period: str, limit: int
 ) -> list[TrendingItemOut]:
-    """Local activity for this type if there is enough of it, catalog otherwise."""
+    """Local activity for this type if there is enough of it, catalog otherwise.
+
+    "Enough" means enough gestures *and* enough different people behind them.
+    """
     items = await _local_activity(db, item_type, period, limit)
     if items:
         return items

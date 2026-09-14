@@ -69,9 +69,29 @@ timestamp rather than the row's is what separates "I gave this rating content
 just now" from "I came back later and changed it". Both cases are pinned by
 ``TestNoDoubleCounting`` in ``tests/test_trending.py``.
 
-Exclusions: a review hidden by moderation (``user_ratings.is_hidden``) never
-contributes — neither through its ``rating_created`` event nor through a
-re-rating — because a hidden review must not push anything into trending.
+Moderation (issue #29)
+----------------------
+Two exclusions, applied to the partition above before anything is summed.
+
+A review hidden by moderation (``user_ratings.is_hidden``) never contributes —
+neither through its ``rating_created`` event nor through a re-rating — because
+a hidden review must not push anything into trending.
+
+A **banned author** contributes through none of the three contributions. Not
+just their ratings: banning retires a user's influence over what the front page
+shows, so their events, their backlog intent and their rating edits all leave
+with them, and none of the three counts towards the thresholds either. Each
+contribution joins ``users`` on its own table's author column —
+``ActivityEvent.user_id``, ``LibraryEntry.user_id``, ``UserRating.user_id`` —
+because those are three different columns that merely happen to hold the same
+person. Contribution 3, the one that aggregates ``user_ratings`` as such,
+reuses ``ratings.repository.visible_review_filters()`` verbatim, which is the
+canonical statement of this rule and is shared with the public ratings list,
+the per-user list, the feed and ``recalculate_item_aggregates``. The other two
+apply the ``is_banned`` half directly: contribution 1 because its ``is_hidden``
+half has to be disjoined with ``rating_id IS NULL`` (a ``status_completed``
+event has no rating, and its author is the event's, not the rating's), and
+contribution 2 because ``library_entries`` has no review to hide.
 
 One gesture per user (issue #30)
 --------------------------------
@@ -132,6 +152,18 @@ edge speak for a gesture made minutes ago, and understate live activity.
 counting raw rows there would leave the manipulation vector wide open and make
 the fix cosmetic.
 
+Enough gestures is not enough people (issue #35)
+------------------------------------------------
+De-duplicating the gestures caps what one account can extract from a single
+item, but not what it can extract from many: one gesture each on
+``TRENDING_MIN_ACTIVITY`` different items is legitimate activity that clears
+the gesture threshold alone. So the aggregate also returns
+``distinct_users`` — ``count(DISTINCT user_id)`` over the very same collapsed
+and moderation-filtered rows, never the raw ones — and the service requires
+both minimums before it serves the local ranking. Every contribution therefore
+carries its own ``user_id`` into the union; without it the second counter would
+have nothing to count.
+
 Decay
 -----
 Every contribution is weighted by an explicit exponential decay,
@@ -140,6 +172,7 @@ of a gesture made right now. The half-lives per period live in
 ``backlogg/trending/service.py`` next to the windows they belong to.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, case, cast, func, literal, select, union_all
@@ -149,15 +182,39 @@ from sqlalchemy.orm import DeclarativeBase, aliased
 from backlogg.feed.models import ActivityEvent
 from backlogg.library.models import LibraryEntry
 from backlogg.ratings.models import UserRating
-from backlogg.ratings.repository import ITEM_MODELS
+from backlogg.ratings.repository import ITEM_MODELS, visible_review_filters
+from backlogg.users.models import User
 
 __all__ = [
     "EVENT_WEIGHTS",
     "INTENT_WEIGHTS",
     "RATING_EDIT_WEIGHT",
+    "ActivitySignal",
     "activity_scores",
     "get_items_by_ids",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ActivitySignal:
+    """What one item type's activity window amounts to.
+
+    Three values, not a tuple, because two of them are counters that read the
+    same at the call site and would be trivial to swap by accident:
+
+    - ``total_gestures``: de-duplicated gestures in the window, for the whole
+      type (never truncated to the top ``limit``).
+    - ``distinct_users``: how many different people produced them — the second
+      half of the threshold (issue #35). A high gesture count from a single
+      account is not a community signal, and with a near-empty platform that is
+      the normal case, not the edge.
+    - ``scored``: ``[(item_id, decayed_score), ...]``, best first.
+    """
+
+    total_gestures: int
+    distinct_users: int
+    scored: list[tuple[int, float]]
+
 
 # Relative weight of each distinct user gesture. Ratings weigh most (the user
 # formed an opinion), completions next (the user finished the item), backlog
@@ -220,18 +277,24 @@ async def activity_scores(
     now: datetime,
     half_life_seconds: float,
     limit: int,
-) -> tuple[int, list[tuple[int, float]]]:
-    """Return ``(total_gestures, [(item_id, score), ...])`` for one item type.
+) -> ActivitySignal:
+    """Return the window's :class:`ActivitySignal` for one item type.
 
-    ``total_gestures`` is the number of distinct gestures for the whole type
-    inside the window — the service compares it against
-    ``TRENDING_MIN_ACTIVITY`` to decide whether the local signal is worth
-    serving. It counts the same de-duplicated rows that feed the score (see the
-    module docstring: one gesture per ``(user, item, event_type)``), never the
-    raw ``activity_events`` rows. It is computed with a window function over
-    the aggregate (``sum(count(*)) OVER ()``) so the truncation to the top
-    ``limit`` items cannot distort it, and so the whole thing stays a single
-    round trip.
+    ``total_gestures`` and ``distinct_users`` both describe the **whole type**
+    inside the window, never just the top ``limit`` items, and both are
+    computed over the same de-duplicated, moderation-filtered rows that feed
+    the score (see the module docstring: one gesture per ``(user, item,
+    event_type)``, nothing from a hidden review or a banned author). Counting
+    raw ``activity_events`` rows there instead would leave the threshold open
+    to the very manipulation the de-duplication exists to stop.
+
+    ``total_gestures`` uses a window function over the aggregate
+    (``sum(count(*)) OVER ()``) so the truncation to ``limit`` cannot distort
+    it. ``distinct_users`` cannot: Postgres has no ``count(DISTINCT ...)`` as a
+    window function. It is an uncorrelated scalar subquery over the same CTE
+    instead — which is why the gestures are a CTE and not an inline subquery:
+    the union is evaluated once and read twice, and the whole thing stays a
+    single round trip.
 
     The rows are ordered by decayed score descending; ``item_id`` breaks ties
     so the ordering is deterministic.
@@ -239,6 +302,18 @@ async def activity_scores(
     # ── Contribution 1: the two feed-worthy creation events ──────────────────
     # LEFT JOIN to the rating so a hidden review's event drops out.
     # status_completed rows have rating_id NULL and are unaffected.
+    #
+    # The INNER JOIN to ``users`` is on ``ActivityEvent.user_id`` — the author
+    # of the **event**, not of the rating it may point at. The two are the same
+    # person in practice (``rate_item`` writes both), but only one of them is
+    # true by construction, and the other one would also break the LEFT JOIN
+    # this contribution depends on: a ``status_completed`` row has
+    # ``rating_id NULL``, so an author reached through ``user_ratings`` would be
+    # NULL for it and the row would vanish. ``visible_review_filters()`` is not
+    # reused verbatim here for the same reason — its ``is_hidden`` half is
+    # unconditional, while this contribution needs it disjoined with
+    # ``rating_id IS NULL``, and its ``is_banned`` half assumes the JOIN is on
+    # ``UserRating.user_id``.
     #
     # GROUP BY collapses the completed → dropped → completed toggle (issue #30)
     # to a single gesture per user and item: ``activity_events`` is the only
@@ -250,13 +325,16 @@ async def activity_scores(
     events = (
         select(
             ActivityEvent.item_id.label("item_id"),
+            ActivityEvent.user_id.label("user_id"),
             _weight_case(ActivityEvent.event_type, EVENT_WEIGHTS).label("weight"),
             func.max(ActivityEvent.created_at).label("ts"),
         )
         .outerjoin(UserRating, ActivityEvent.rating_id == UserRating.id)
+        .join(User, ActivityEvent.user_id == User.id)
         .where(
             ActivityEvent.item_type == item_type,
             ActivityEvent.created_at >= since,
+            User.is_banned.is_(False),
             (ActivityEvent.rating_id.is_(None)) | (UserRating.is_hidden.is_(False)),
         )
         .group_by(
@@ -281,6 +359,14 @@ async def activity_scores(
     # restricted to ``status_completed``: a ``rating_created`` event must not
     # erase backlog intent, which is a different, legitimate gesture counted on
     # its own.
+    #
+    # The banned-author exclusion (issue #29) is an INNER JOIN on
+    # ``LibraryEntry.user_id``: ``library_entries`` has no moderation flag of
+    # its own, so its owner is the only thing that can retire the row. The
+    # ``NOT EXISTS`` deliberately does **not** repeat that filter. It is
+    # correlated to the *same* user, so the only rows it can suppress belong to
+    # a user whose library rows are already gone when they are banned; adding
+    # ``is_banned`` inside it would be unreachable code that reads like a rule.
     completed_by_the_same_user = (
         select(literal(1))
         .select_from(ActivityEvent)
@@ -294,15 +380,21 @@ async def activity_scores(
         .correlate(LibraryEntry)
         .exists()
     )
-    intent = select(
-        LibraryEntry.item_id.label("item_id"),
-        _weight_case(LibraryEntry.status, INTENT_WEIGHTS).label("weight"),
-        LibraryEntry.updated_at.label("ts"),
-    ).where(
-        LibraryEntry.item_type == item_type,
-        LibraryEntry.status.in_(INTENT_WEIGHTS),
-        LibraryEntry.updated_at >= since,
-        ~completed_by_the_same_user,
+    intent = (
+        select(
+            LibraryEntry.item_id.label("item_id"),
+            LibraryEntry.user_id.label("user_id"),
+            _weight_case(LibraryEntry.status, INTENT_WEIGHTS).label("weight"),
+            LibraryEntry.updated_at.label("ts"),
+        )
+        .join(User, LibraryEntry.user_id == User.id)
+        .where(
+            LibraryEntry.item_type == item_type,
+            LibraryEntry.status.in_(INTENT_WEIGHTS),
+            LibraryEntry.updated_at >= since,
+            User.is_banned.is_(False),
+            ~completed_by_the_same_user,
+        )
     )
 
     # ── Contribution 3: an edit that happened after the row's own event ──────
@@ -321,24 +413,55 @@ async def activity_scores(
     #   rating has content, so ``PUT {}`` then ``PUT {"score": 4}`` produces a
     #   row whose event was born in the second call: that call is already
     #   counted by contribution 1 and must not be counted again here.
+    #
+    # This is the contribution that aggregates ``user_ratings`` as such, so it
+    # is the one that reuses ``visible_review_filters()`` verbatim (issue #29)
+    # instead of restating half of it: hidden review **and** banned author, the
+    # same rule the public ratings list, the per-user list, the feed and
+    # ``recalculate_item_aggregates`` apply. The helper requires a JOIN to
+    # ``users`` on ``UserRating.user_id``, which is the INNER JOIN below.
     event_of_rating = aliased(ActivityEvent)
     rerating = (
         select(
             UserRating.item_id.label("item_id"),
+            UserRating.user_id.label("user_id"),
             literal(RATING_EDIT_WEIGHT, Float).label("weight"),
             UserRating.updated_at.label("ts"),
         )
         .outerjoin(event_of_rating, event_of_rating.rating_id == UserRating.id)
+        .join(User, UserRating.user_id == User.id)
         .where(
             UserRating.item_type == item_type,
-            UserRating.is_hidden.is_(False),
+            *visible_review_filters(),
             UserRating.updated_at >= since,
             UserRating.updated_at > UserRating.created_at,
             (event_of_rating.id.is_(None)) | (UserRating.updated_at > event_of_rating.created_at),
         )
     )
 
-    gestures = union_all(events, intent, rerating).subquery()
+    # A CTE rather than an inline subquery: the union is read twice below (the
+    # per-item aggregate and the distinct-user count) and Postgres evaluates a
+    # multiply-referenced CTE once.
+    gestures = union_all(events, intent, rerating).cte("gestures")
+
+    # How many different people are behind the window's gestures (issue #35).
+    # ``count(DISTINCT ...)`` is not available as a window function in
+    # Postgres, so this is an uncorrelated scalar subquery over the same CTE.
+    #
+    # What keeps it uncorrelated is the explicit ``select_from(gestures)``: it
+    # is the subquery's only FROM, and SQLAlchemy only auto-correlates a table
+    # it can *drop* from the FROM because the enclosing query already provides
+    # it — dropping the single FROM here would leave the subquery with none, so
+    # it never happens. ``correlate(None)`` is therefore **not** load-bearing:
+    # removing it compiles to byte-identical SQL. It is kept as a statement of
+    # intent, so that a later edit which stops passing ``select_from`` (or adds
+    # a second table here) cannot silently turn this into a per-group count.
+    distinct_users = (
+        select(func.count(func.distinct(gestures.c.user_id)))
+        .select_from(gestures)
+        .correlate(None)
+        .scalar_subquery()
+    )
 
     score = func.sum(gestures.c.weight * _decay(gestures.c.ts, now, half_life_seconds))
     stmt = (
@@ -346,6 +469,7 @@ async def activity_scores(
             gestures.c.item_id,
             score.label("score"),
             func.sum(func.count()).over().label("total_gestures"),
+            distinct_users.label("distinct_users"),
         )
         .group_by(gestures.c.item_id)
         .order_by(score.desc(), gestures.c.item_id.asc())
@@ -354,9 +478,12 @@ async def activity_scores(
 
     rows = (await db.execute(stmt)).all()
     if not rows:
-        return 0, []
-    total_gestures = int(rows[0].total_gestures)
-    return total_gestures, [(int(row.item_id), float(row.score)) for row in rows]
+        return ActivitySignal(total_gestures=0, distinct_users=0, scored=[])
+    return ActivitySignal(
+        total_gestures=int(rows[0].total_gestures),
+        distinct_users=int(rows[0].distinct_users),
+        scored=[(int(row.item_id), float(row.score)) for row in rows],
+    )
 
 
 async def get_items_by_ids(
