@@ -1,0 +1,38 @@
+meta {
+  name: Get game adaptations
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/v1/games/baldurs-gate-iii/adaptations
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("results field is an array", function() {
+    expect(res.body.results).to.be.an("array");
+  });
+
+  test("every entry carries item_type, slug and direction", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.item_type).to.be.oneOf(["MOVIE", "SERIES", "BOOK", "GAME"]);
+      expect(entry.slug).to.be.a("string");
+      expect(entry.direction).to.be.oneOf(["SOURCE", "DERIVED"]);
+    });
+  });
+}
+
+docs {
+  Cross-media adaptations from Wikidata (feature 92). Only source='WIKIDATA'
+  edges are served: feature 83 will write its co-occurrence layer into the same
+  table and it deliberately does not surface here.
+
+  An empty results array is the normal answer for most of the catalog and is NOT
+  an error; 404 is only for a slug that names no game.
+}

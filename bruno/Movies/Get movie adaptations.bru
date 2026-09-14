@@ -1,0 +1,38 @@
+meta {
+  name: Get movie adaptations
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/v1/movies/dune-2021/adaptations
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("results field is an array", function() {
+    expect(res.body.results).to.be.an("array");
+  });
+
+  test("every entry carries item_type, slug and direction", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.item_type).to.be.oneOf(["MOVIE", "SERIES", "BOOK", "GAME"]);
+      expect(entry.slug).to.be.a("string");
+      expect(entry.direction).to.be.oneOf(["SOURCE", "DERIVED"]);
+    });
+  });
+}
+
+docs {
+  Cross-media adaptations from Wikidata (feature 92). An empty results array is
+  the normal answer for most of the catalog — coverage is sparse by design — and
+  is NOT an error; 404 is only for a slug that names no movie.
+
+  direction is read from the movie's point of view: SOURCE means this movie is
+  based on the related item, DERIVED means the related item came out of it.
+}

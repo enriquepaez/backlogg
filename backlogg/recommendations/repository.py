@@ -9,6 +9,8 @@ style as ``backlogg/feed/repository.py`` and ``backlogg/library/repository.py``.
 Nothing here writes; recommendations are computed, never persisted.
 """
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import String, and_, case, func, literal, select, union_all
@@ -332,3 +334,58 @@ async def get_authorship_works(
         stmt = stmt.limit(limit)
     result = await db.execute(stmt)
     return list(result.all())
+
+
+@dataclass(frozen=True, slots=True)
+class ItemRef:
+    """The minimum needed to link to a catalog item from another item's page.
+
+    ``item_type`` is part of the value and not of the caller's context on
+    purpose — see ``AdaptationOut`` in ``schemas.py`` for why.
+    """
+
+    item_type: str
+    item_id: int
+    slug: str
+    title: str
+    poster_url: str | None
+
+
+async def get_item_refs(
+    db: AsyncSession, keys: Iterable[tuple[str, int]]
+) -> dict[tuple[str, int], ItemRef]:
+    """Resolve ``(item_type, item_id)`` pairs to their linkable catalog row.
+
+    One query per distinct ``item_type`` present (at most four), not one per
+    key: the far ends of an item's adaptation edges are a handful of rows
+    spread over two or three tables.
+
+    A key with no row is simply **absent** from the result. ``item_relations``
+    has no foreign keys — the reference is polymorphic, like ``external_ids``
+    and ``credits``, and integrity is the application's job
+    (``docs/conventions.md``) — so an edge can outlive the item at its far end.
+    The caller drops those edges; the alternative would be an entry whose link
+    is guaranteed to 404.
+    """
+    ids_by_type: dict[str, set[int]] = {}
+    for item_type, item_id in keys:
+        if item_type in _TYPE_CONFIG:
+            ids_by_type.setdefault(item_type, set()).add(item_id)
+
+    refs: dict[tuple[str, int], ItemRef] = {}
+    for item_type, item_ids in ids_by_type.items():
+        model, _join, _item_col, _release_attr = _TYPE_CONFIG[item_type]
+        result = await db.execute(
+            select(model.id, model.slug, model.title, model.poster_url).where(
+                model.id.in_(item_ids)
+            )
+        )
+        for row in result.all():
+            refs[(item_type, row.id)] = ItemRef(
+                item_type=item_type,
+                item_id=row.id,
+                slug=row.slug,
+                title=row.title,
+                poster_url=row.poster_url,
+            )
+    return refs

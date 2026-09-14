@@ -231,6 +231,66 @@ TMDB (no reordenado por rating — a diferencia de `/v1/series/{slug}/similar`
 y `/v1/games/{slug}/similar`, este endpoint queda fuera del alcance explícito
 de la feature 66).
 
+```
+GET /v1/movies/{slug}/adaptations
+→ 200  Adaptaciones y obras derivadas de esta película (lista, posiblemente vacía)
+→ 404  Slug no encontrado
+```
+
+**Contrato compartido por los cuatro tipos** (feature 92). Se describe una
+sola vez aquí; en series, books y games es idéntico salvo el prefijo.
+
+Response: `{"results": [...]}` — cada entrada describe el **ítem relacionado**,
+no el de la URL:
+
+| Campo        | Qué es                                                        |
+|--------------|---------------------------------------------------------------|
+| `item_type`  | `MOVIE` / `SERIES` / `BOOK` / `GAME` del ítem relacionado      |
+| `slug`       | Slug del ítem relacionado (con `item_type` compone el enlace)  |
+| `title`      | Título del ítem relacionado                                    |
+| `poster_url` | Póster del ítem relacionado, o `null`                          |
+| `direction`  | `SOURCE` o `DERIVED` (ver abajo)                               |
+
+`item_type` es obligatorio y **no se puede inferir de la página en la que está
+el cliente**: el ítem relacionado puede ser de cualquiera de los cuatro tipos.
+Los issues #32, #33 y #36 fueron todos la misma forma — un `item_type` adivinado
+que produce un enlace roto en silencio.
+
+**El ítem relacionado puede ser del mismo tipo que el de la URL** (un remake,
+una serie derivada de otra serie); **la respuesta no lo filtra.** `P144`
+(«based on») afirma una derivación, no un cambio de medio, así que
+`SERIES → SERIES` es una arista legítima — y hoy es el caso **mayoritario**: 16
+de las 18 aristas del catálogo de desarrollo lo son. Filtrarlas aquí destruiría
+información que el cliente no puede recuperar; la distinción la hace quien
+pinta, con el `item_type` que viaja siempre. Esto es justo lo que hace que el
+campo cargue peso en vez de sobrar: la página donde más tentador sería dar el
+tipo por sabido es exactamente la página donde esa suposición acierta casi
+siempre y falla en silencio el resto de las veces.
+
+`direction` se lee desde el punto de vista del ítem de la URL:
+
+- **`SOURCE`** — el ítem de la URL *está basado en* el relacionado
+  («esta película viene de este libro»).
+- **`DERIVED`** — el relacionado *sale del* ítem de la URL
+  («de este libro salió esta serie»).
+
+Las dos direcciones se distinguen **en el dato**, nunca por el orden: la
+relación es bidireccional, `item_relations` no guarda arista espejo (feature
+79) y la misma arista almacenada se lee al revés según el extremo en el que
+estés, de modo que la dirección llega resuelta y el cliente no la recalcula.
+
+Origen del dato: `item_relations`, poblada por el volcado mensual de Wikidata
+(`scripts/sync_wikidata.py`, `P144` *based on* y `P4969` *derivative work*).
+**Solo se devuelven aristas con `source='WIKIDATA'`**: la feature 83 escribirá
+su capa de co-ocurrencia (`INTERNAL`/`COOCCURRENCE`) en la misma tabla y no se
+filtra aquí — una adaptación es un hecho declarado y una co-ocurrencia es una
+inferencia.
+
+Un ítem **sin** adaptaciones devuelve `200` con `results: []`. Es el caso
+normal, no un error: la cobertura es precisa y baja por diseño, así que la
+mayoría del catálogo responderá lista vacía. El `404` queda reservado para el
+slug que no nombra ningún ítem. Sin auth; sin llamadas a APIs externas.
+
 ### Series
 
 ```
@@ -253,6 +313,13 @@ GET /v1/series/{slug}/similar
 Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
 NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
 no por el orden de relevancia que devuelve TMDB.
+
+```
+GET /v1/series/{slug}/adaptations
+→ 200  Adaptaciones y obras derivadas de esta serie (mismo contrato que
+       /v1/movies/{slug}/adaptations)
+→ 404  Slug no encontrado
+```
 
 ### Books
 
@@ -293,6 +360,16 @@ hace ninguna llamada a Open Library ni se crean `external_ids` nuevos — el
 ranking se calcula enteramente desde datos ya persistidos localmente (ver
 investigación en `backend_feature_list.json`, feature 46).
 
+```
+GET /v1/books/{slug}/adaptations
+→ 200  Adaptaciones y obras derivadas de este libro (mismo contrato que
+       /v1/movies/{slug}/adaptations)
+→ 404  Slug no encontrado
+```
+
+Es el tipo donde `direction: "DERIVED"` es el caso habitual: de un libro salen
+la película, la serie o el juego.
+
 ### Games
 
 ```
@@ -327,6 +404,13 @@ nuevos se persisten en la DB local.
 Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
 NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
 no por el orden curado de relaciones que devuelve IGDB.
+
+```
+GET /v1/games/{slug}/adaptations
+→ 200  Adaptaciones y obras derivadas de este juego (mismo contrato que
+       /v1/movies/{slug}/adaptations)
+→ 404  Slug no encontrado
+```
 
 **`credits[]`** (en detail de movies, series, books y games): cada credit incluye
 `person_name`, `person_slug`, `profile_url`, `role`, `character_name`,

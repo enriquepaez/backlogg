@@ -1,23 +1,45 @@
 """Recommendations service — business logic + external fan-out orchestration.
 
-Read-only domain: builds personalized suggestions for the authenticated user
-from their rating/library seeds. Local genre-overlap candidates come first
-(via the repository); the external similar-items fan-out (feature 16,
-``movies.service.get_similar_movies`` / ``series.service.get_similar_series``)
-is only triggered for movie/series seeds when local candidates are not enough,
-so we never hit TMDB when the catalog already supplies ``needed`` candidates.
+Read-only domain, with two unrelated readers in it:
+
+``get_recommendations``
+    builds personalized suggestions for the authenticated user from their
+    rating/library seeds. Local genre-overlap candidates come first (via the
+    repository); the external similar-items fan-out (feature 16,
+    ``movies.service.get_similar_movies`` /
+    ``series.service.get_similar_series``) is only triggered for movie/series
+    seeds when local candidates are not enough, so we never hit TMDB when the
+    catalog already supplies ``needed`` candidates.
+
+``get_item_adaptations``
+    serves the cross-media edges feature 79 wrote into ``item_relations``
+    (feature 92). Public, anonymous, about one catalog item and not about a
+    user — it lives here because this slice owns the Wikidata layer
+    (``wikidata_sync.py`` wrote those rows), and it is reached through the four
+    content routers, the same way ``ratings.service`` is.
 """
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.movies import service as movies_service
+from backlogg.ratings import repository as ratings_repo
 from backlogg.recommendations import repository as repo
 from backlogg.recommendations.schemas import (
     TYPE_FILTER_TO_ITEM_TYPE,
+    AdaptationDirection,
+    AdaptationOut,
+    AdaptationsOut,
     RecommendationOut,
     RecommendationsOut,
 )
 from backlogg.series import service as series_service
+from backlogg.shared.item_relations import (
+    RELATION_ADAPTATION,
+    RELATION_DERIVATIVE,
+    SOURCE_WIKIDATA,
+    get_relations_for_item,
+)
 from backlogg.users.models import User
 
 _ALL_ITEM_TYPES = ["MOVIE", "SERIES", "BOOK", "GAME"]
@@ -154,3 +176,92 @@ def _paginate(results: list[RecommendationOut], page: int, limit: int) -> Recomm
     start = (page - 1) * limit
     page_items = results[start : start + limit]
     return RecommendationsOut(results=page_items, page=page, limit=limit)
+
+
+# ── Adaptations (feature 92) ──────────────────────────────────────────────────
+
+_ITEM_NOT_FOUND_DETAIL = {
+    "MOVIE": "Movie not found",
+    "SERIES": "Series not found",
+    "BOOK": "Book not found",
+    "GAME": "Game not found",
+}
+
+# (relation, the anchor is the ``from`` end) -> where the *other* end sits.
+#
+# ``ADAPTATION`` means "from is based on to" and ``DERIVATIVE`` means "to is
+# derived from from" (``shared/item_relations.py``), so the same relation reads
+# in opposite directions depending on which side the item in the URL is on —
+# which is exactly why the direction has to be resolved here and not left to
+# the client.
+_DIRECTION_OF_OTHER_END = {
+    (RELATION_ADAPTATION, True): AdaptationDirection.SOURCE,
+    (RELATION_ADAPTATION, False): AdaptationDirection.DERIVED,
+    (RELATION_DERIVATIVE, True): AdaptationDirection.DERIVED,
+    (RELATION_DERIVATIVE, False): AdaptationDirection.SOURCE,
+}
+
+
+async def get_item_adaptations(db: AsyncSession, item_type: str, slug: str) -> AdaptationsOut:
+    """Cross-media adaptations of one catalog item, both directions resolved.
+
+    404 is reserved for a slug that names no item. An item that simply has no
+    adaptations returns ``200`` with an empty list, and that is the **normal**
+    case, not an error: the Wikidata pass is precise and sparse by design (18
+    edges over 1.092 anchored items in the feature 79 QA), so most of the
+    catalog will answer empty forever. A 404 there would make the frontend
+    treat the ordinary case as a failure.
+
+    Only ``source='WIKIDATA'`` rows are returned. Feature 83 will write
+    ``INTERNAL``/``COOCCURRENCE`` edges into the very same table, and they are
+    a different kind of claim — an adaptation is a fact somebody asserted, a
+    co-occurrence is an inference from behaviour. Letting the second leak into
+    the "based on" section would quietly turn it into something else, so the
+    filter is applied at the read and not left to whoever queries.
+    """
+    item = await ratings_repo.get_item_by_slug(db, item_type, slug)
+    if item is None:
+        raise HTTPException(status_code=404, detail=_ITEM_NOT_FOUND_DETAIL[item_type])
+
+    edges = await get_relations_for_item(db, item_type, item.id, source=SOURCE_WIKIDATA)
+
+    # (far end, direction), in the repository's order (score desc, id asc).
+    ends: list[tuple[tuple[str, int], AdaptationDirection]] = []
+    for edge in edges:
+        anchor_is_from = edge.from_type == item_type and edge.from_id == item.id
+        direction = _DIRECTION_OF_OTHER_END.get((edge.relation, anchor_is_from))
+        if direction is None:
+            # A relation outside the adaptation vocabulary (today only
+            # COOCCURRENCE, which no WIKIDATA row carries). Skipped rather
+            # than shown under a direction that would be invented for it.
+            continue
+        far_end = (edge.to_type, edge.to_id) if anchor_is_from else (edge.from_type, edge.from_id)
+        ends.append((far_end, direction))
+
+    refs = await repo.get_item_refs(db, {far_end for far_end, _ in ends})
+
+    results: list[AdaptationOut] = []
+    seen: set[tuple[tuple[str, int], AdaptationDirection]] = set()
+    for far_end, direction in ends:
+        ref = refs.get(far_end)
+        if ref is None:
+            continue
+        # ``P144`` and ``P4969`` are declared inverses in Wikidata, so a
+        # well-curated pair arrives as two rows saying the same thing from
+        # opposite ends, and both are stored (the unique key carries
+        # ``relation``). They collapse to one entry here: same neighbour, same
+        # direction, one line in the UI.
+        key = (far_end, direction)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(
+            AdaptationOut(
+                item_type=ref.item_type,
+                slug=ref.slug,
+                title=ref.title,
+                poster_url=ref.poster_url,
+                direction=direction,
+            )
+        )
+    return AdaptationsOut(results=results)
