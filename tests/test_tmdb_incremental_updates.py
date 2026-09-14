@@ -50,6 +50,27 @@ from backlogg.shared.external_ids import upsert_external_id
 
 _SOURCE = "TMDB"
 
+# Every date that reaches a lane's date logic hangs off this single anchor.
+# The hour is pinned **above** ``EXPORT_PUBLISH_HOUR_UTC``
+# (08:00) because ``latest_export_date`` answers "yesterday" before it: a test
+# that set its watermark to "yesterday" and passed a real ``now`` had no diff
+# to make between 00:00 and 08:00 UTC, so the new-releases lane took the
+# "export already processed" exit and the suite went red on the clock alone
+# (blocker of 2026-09-14).  The three lanes take ``now`` as an explicit
+# argument precisely so it can be injected; this is that injection.
+#
+# The calendar day still follows the real one — the gate's window is expressed
+# in offsets from "today", so pinning an absolute date would make the payload
+# fixtures drift out of the window as years pass.  What is frozen is the hour,
+# which is the only part the lanes' date logic is sensitive to.
+#
+# The two exceptions are the tests that drive ``sync_movies_incremental`` /
+# ``sync_series_incremental``: those two entry points build their own ``now``
+# internally and take no argument, so the date they are checked against is
+# read at assert time — see the comments there.
+_NOW = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+_TODAY = _NOW.date()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -105,7 +126,7 @@ def _movie_detail(tmdb_id: int, **overrides) -> dict:
         "title": f"Incremental Movie {tmdb_id}",
         "original_title": f"Incremental Movie {tmdb_id}",
         "overview": "A brand new release.",
-        "release_date": date.today().isoformat(),
+        "release_date": _TODAY.isoformat(),
         "runtime": 99,
         "original_language": "en",
         "poster_path": "/poster.jpg",
@@ -302,7 +323,7 @@ def test_the_daily_diff_orders_the_new_ids_by_popularity(monkeypatch):
 
 async def test_get_known_source_ids_unions_catalog_and_targets(db):
     """ "Known" is both halves: catalogued *and* enumerated-but-not-hydrated."""
-    movie = Movie(title="Known", slug="known-2026-88", last_synced_at=datetime.now(UTC))
+    movie = Movie(title="Known", slug="known-2026-88", last_synced_at=_NOW)
     db.add(movie)
     await db.flush()
     await upsert_external_id(db, "MOVIE", movie.id, _SOURCE, "880001")
@@ -486,7 +507,7 @@ async def test_the_watermark_does_not_advance_past_a_saturated_day(db, monkeypat
     instead of claiming the window.
     """
     monkeypatch.setattr(discovery, "MAX_DISCOVER_PAGES", 2)
-    today = datetime.now(UTC).date()
+    today = _TODAY
     first_day = today - timedelta(days=3)
     saturated_day = today - timedelta(days=2)
     await set_sync_watermark(db, _SOURCE, "CHANGES", "MOVIE", cursor_value=first_day.isoformat())
@@ -505,9 +526,7 @@ async def test_the_watermark_does_not_advance_past_a_saturated_day(db, monkeypat
         patch("httpx.AsyncClient.get", new=fake_get),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
-        result = await sync_jobs._incremental_changes(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
-        )
+        result = await sync_jobs._incremental_changes(sync_jobs._movie_incremental_spec(), now=_NOW)
 
     assert result["truncated_windows"] == 1
     assert result["truncated_labels"] == [
@@ -528,7 +547,7 @@ async def test_the_changes_lane_never_asks_for_more_than_14_days(db):
     the honest plan is: request the 14 days it still has, and report the rest
     as uncovered rather than pretend the catalog was refreshed.
     """
-    today = datetime.now(UTC).date()
+    today = _TODAY
     await set_sync_watermark(
         db,
         _SOURCE,
@@ -549,9 +568,7 @@ async def test_the_changes_lane_never_asks_for_more_than_14_days(db):
         patch("httpx.AsyncClient.get", new=fake_get),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
-        result = await sync_jobs._incremental_changes(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
-        )
+        result = await sync_jobs._incremental_changes(sync_jobs._movie_incremental_spec(), now=_NOW)
 
     assert len(windows) == 1
     start, end = windows[0]
@@ -567,7 +584,7 @@ async def test_the_changes_lane_refreshes_only_what_is_already_in_the_catalog(db
     movie = Movie(
         title="Already Catalogued",
         slug="already-catalogued-2020-88",
-        last_synced_at=datetime.now(UTC) - timedelta(days=200),
+        last_synced_at=_NOW - timedelta(days=200),
     )
     db.add(movie)
     await db.flush()
@@ -589,9 +606,7 @@ async def test_the_changes_lane_refreshes_only_what_is_already_in_the_catalog(db
         patch("httpx.AsyncClient.get", new=fake_get),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
-        result = await sync_jobs._incremental_changes(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
-        )
+        result = await sync_jobs._incremental_changes(sync_jobs._movie_incremental_spec(), now=_NOW)
 
     assert fetched == ["880101"], "the unknown id must not even be fetched"
     assert result["changed_ids"] == 2
@@ -608,7 +623,7 @@ async def test_the_changes_lane_refreshes_only_what_is_already_in_the_catalog(db
 
     watermark = await get_sync_watermark(db, _SOURCE, "CHANGES", "MOVIE")
     assert watermark is not None
-    assert watermark.cursor_value == datetime.now(UTC).date().isoformat()
+    assert watermark.cursor_value == _TODAY.isoformat()
 
 
 async def test_a_failed_changes_window_does_not_advance_the_watermark(db):
@@ -621,9 +636,7 @@ async def test_a_failed_changes_window_does_not_advance_the_watermark(db):
         patch("httpx.AsyncClient.get", new=fake_get),
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
-        result = await sync_jobs._incremental_changes(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
-        )
+        result = await sync_jobs._incremental_changes(sync_jobs._movie_incremental_spec(), now=_NOW)
 
     assert result["errors"] == 1
     assert result["covered_through"] is None
@@ -636,8 +649,7 @@ async def test_a_failed_changes_window_does_not_advance_the_watermark(db):
 def test_the_release_gate_admits_a_recent_release():
     """A dated, described, non-adult release from today clears every check."""
     assert (
-        discovery.release_gate_verdict(_movie_detail(1), gate=_movie_gate(), today=date.today())
-        is None
+        discovery.release_gate_verdict(_movie_detail(1), gate=_movie_gate(), today=_TODAY) is None
     )
 
 
@@ -648,8 +660,8 @@ def test_the_release_gate_admits_a_recent_release():
         # as absolute dates: the gate's window (90 days back, 180 ahead) moves
         # with the calendar, so a hardcoded "2031-01-01" stops meaning
         # "too far ahead" once the suite is run in 2030.
-        ({"release_date": (date.today() - timedelta(days=400)).isoformat()}, "too_old"),
-        ({"release_date": (date.today() + timedelta(days=400)).isoformat()}, "too_far_ahead"),
+        ({"release_date": (_TODAY - timedelta(days=400)).isoformat()}, "too_old"),
+        ({"release_date": (_TODAY + timedelta(days=400)).isoformat()}, "too_far_ahead"),
         ({"release_date": ""}, "no_release_date"),
         ({"release_date": "not-a-date"}, "unparseable_release_date"),
         ({"adult": True}, "adult"),
@@ -663,7 +675,7 @@ def test_the_release_gate_admits_a_recent_release():
 def test_the_release_gate_rejects_and_says_why(overrides, reason):
     """Each rejection is named, so a gate that rejects everything is visible."""
     detail = _movie_detail(1, **overrides)
-    assert discovery.release_gate_verdict(detail, gate=_movie_gate(), today=date.today()) == reason
+    assert discovery.release_gate_verdict(detail, gate=_movie_gate(), today=_TODAY) == reason
 
 
 def test_the_series_gate_does_not_reject_a_cancelled_series():
@@ -677,10 +689,10 @@ def test_the_series_gate_does_not_reject_a_cancelled_series():
     detail = {
         "name": "Cancelled After One Season",
         "overview": "Aired, then dropped.",
-        "first_air_date": date.today().isoformat(),
+        "first_air_date": _TODAY.isoformat(),
         "status": "Canceled",
     }
-    assert discovery.release_gate_verdict(detail, gate=gate, today=date.today()) is None
+    assert discovery.release_gate_verdict(detail, gate=gate, today=_TODAY) is None
 
 
 async def test_a_new_item_that_fails_the_quality_filter_is_not_persisted(db, monkeypatch):
@@ -691,7 +703,7 @@ async def test_a_new_item_that_fails_the_quality_filter_is_not_persisted(db, mon
     but not a *new item*, which is exactly the material the ``vote_count``
     threshold keeps out of the seeded catalog.
     """
-    today = datetime.now(UTC).date()
+    today = _TODAY
     monkeypatch.setattr(sync_jobs, "load_export_ids", lambda name, day: {"880000"}, raising=True)
     monkeypatch.setattr(
         sync_jobs,
@@ -722,7 +734,7 @@ async def test_a_new_item_that_fails_the_quality_filter_is_not_persisted(db, mon
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs._incremental_new_releases(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
     assert result["appeared"] == 2
@@ -743,7 +755,7 @@ async def test_a_new_item_that_fails_the_quality_filter_is_not_persisted(db, mon
 
     watermark = await get_sync_watermark(db, _SOURCE, "DAILY_ID_EXPORT", "MOVIE")
     assert watermark is not None
-    assert watermark.cursor_value == exports.latest_export_date(datetime.now(UTC)).isoformat()
+    assert watermark.cursor_value == exports.latest_export_date(_NOW).isoformat()
 
 
 # ── 4. The promotion sweep ────────────────────────────────────────────────────
@@ -784,7 +796,7 @@ async def test_an_item_that_crosses_the_threshold_reaches_the_catalog(db, monkey
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         promotion = await sync_jobs._incremental_promotion(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
         assert promotion["enumerated"] == 2  # one window per year, same id in both
         assert await count_seed_targets(db, "MOVIE", _SOURCE) == 1
@@ -821,10 +833,10 @@ async def test_the_promotion_sweep_only_covers_the_recent_years(db, monkeypatch)
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs._incremental_promotion(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
-    this_year = datetime.now(UTC).year
+    this_year = _NOW.year
     assert result["end_year"] == this_year + 1
     assert result["start_year"] == this_year - 1
     assert len(years) == 3
@@ -850,7 +862,7 @@ async def test_the_first_run_records_a_baseline_instead_of_flooding(db, monkeypa
 
     with patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)):
         result = await sync_jobs._incremental_new_releases(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
     assert called["n"] == 0
@@ -860,7 +872,7 @@ async def test_the_first_run_records_a_baseline_instead_of_flooding(db, monkeypa
 
     watermark = await get_sync_watermark(db, _SOURCE, "DAILY_ID_EXPORT", "MOVIE")
     assert watermark is not None
-    assert watermark.cursor_value == exports.latest_export_date(datetime.now(UTC)).isoformat()
+    assert watermark.cursor_value == exports.latest_export_date(_NOW).isoformat()
 
 
 async def test_a_baseline_too_far_behind_is_rebaselined_and_reported(db, monkeypatch):
@@ -872,7 +884,7 @@ async def test_a_baseline_too_far_behind_is_rebaselined_and_reported(db, monkeyp
         lambda name, day: (_ for _ in ()).throw(AssertionError("must not download")),
         raising=True,
     )
-    today = datetime.now(UTC).date()
+    today = _TODAY
     await set_sync_watermark(
         db,
         _SOURCE,
@@ -884,7 +896,7 @@ async def test_a_baseline_too_far_behind_is_rebaselined_and_reported(db, monkeyp
 
     with patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)):
         result = await sync_jobs._incremental_new_releases(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
     assert result["rebaselined"] is True
@@ -899,7 +911,7 @@ async def test_a_baseline_no_longer_published_is_rebaselined(db, monkeypatch):
         raise exports.ExportUnavailable("410")
 
     monkeypatch.setattr(sync_jobs, "load_export_ids", _gone, raising=True)
-    today = datetime.now(UTC).date()
+    today = _TODAY
     await set_sync_watermark(
         db,
         _SOURCE,
@@ -911,18 +923,18 @@ async def test_a_baseline_no_longer_published_is_rebaselined(db, monkeypatch):
 
     with patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)):
         result = await sync_jobs._incremental_new_releases(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
     assert result["rebaseline_reason"] == "baseline_unavailable"
     watermark = await get_sync_watermark(db, _SOURCE, "DAILY_ID_EXPORT", "MOVIE")
     assert watermark is not None
-    assert watermark.cursor_value == exports.latest_export_date(datetime.now(UTC)).isoformat()
+    assert watermark.cursor_value == exports.latest_export_date(_NOW).isoformat()
 
 
 async def test_a_fetch_failure_keeps_the_export_watermark_where_it_was(db, monkeypatch):
     """The mark only advances when the stretch really was covered."""
-    today = datetime.now(UTC).date()
+    today = _TODAY
     baseline = (today - timedelta(days=1)).isoformat()
     monkeypatch.setattr(sync_jobs, "load_export_ids", lambda name, day: set(), raising=True)
     monkeypatch.setattr(
@@ -944,7 +956,7 @@ async def test_a_fetch_failure_keeps_the_export_watermark_where_it_was(db, monke
         patch("backlogg.scheduler.jobs.async_session_factory", new=_mocked_session_factory(db)),
     ):
         result = await sync_jobs._incremental_new_releases(
-            sync_jobs._movie_incremental_spec(), now=datetime.now(UTC)
+            sync_jobs._movie_incremental_spec(), now=_NOW
         )
 
     assert result["errors"] == 1
@@ -981,6 +993,11 @@ async def test_a_failing_lane_does_not_abort_the_other_two(db, monkeypatch):
     assert summary["errors"] >= 1
     assert summary["promotion"]["windows"] == 2
     assert summary["changes"]["windows_planned"] == 1
+    # Read *here*, not from ``_TODAY``: ``sync_movies_incremental`` is one of
+    # the two entry points that build their own ``now`` internally, so the
+    # expected value has to follow the same clock production just read. What
+    # ``_TODAY`` freezes is the hour — the only thing the lanes' date logic is
+    # sensitive to — and that is irrelevant to this assertion, which is a date.
     assert summary["changes"]["covered_through"] == datetime.now(UTC).date().isoformat()
 
 
@@ -1024,4 +1041,7 @@ async def test_the_series_incremental_runs_the_same_lanes_on_the_tv_endpoints(db
 
     changes = [url for url, _ in calls if "/tv/changes" in url]
     assert changes and not [url for url, _ in calls if "/movie/changes" in url]
+    # Same as in the movie job above: ``sync_series_incremental`` reads the
+    # clock itself, so the expected date is read at assert time, not frozen at
+    # import time.
     assert summary["changes"]["covered_through"] == datetime.now(UTC).date().isoformat()

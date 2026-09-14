@@ -24,7 +24,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backlogg.books import repository as books_repo
 from backlogg.core.config import settings
@@ -992,6 +992,124 @@ class TestNoDoubleCounting:
         await db.flush()
 
         assert await self._gestures(db, "BOOK") == 2
+
+    async def _toggle_completed(
+        self, db, *, user_id: int, item_id: int, laps: int, end_status: str = "completed"
+    ) -> None:
+        """``completed → dropped`` ``laps`` times, ending on ``end_status``.
+
+        Exactly the two calls ``library/service.set_library_status`` makes on a
+        transition into ``completed`` (upsert the entry, write the event), and
+        only the upsert on the way out — which is what makes every lap leave a
+        new ``status_completed`` row behind.
+
+        ``end_status`` is not a detail: ending on ``dropped`` leaves the
+        library row in a status that *does* contribute (contribution 2) while
+        the ``status_completed`` event of the same user and item is still
+        inside the window, which is the second half of issue #30.
+        """
+        for lap in range(laps):
+            await upsert_library_entry(
+                db, user_id=user_id, item_type="MOVIE", item_id=item_id, status="completed"
+            )
+            await create_status_completed_event(
+                db, user_id=user_id, item_type="MOVIE", item_id=item_id
+            )
+            if lap < laps - 1 or end_status == "dropped":
+                await upsert_library_entry(
+                    db, user_id=user_id, item_type="MOVIE", item_id=item_id, status="dropped"
+                )
+
+    async def test_toggling_completed_over_and_over_is_still_one_gesture(self, db):
+        """Issue #30: the toggle has no ceiling in ``activity_events``.
+
+        ``uq_activity_events_rating_id`` does not constrain these rows — they
+        carry ``rating_id NULL`` and Postgres allows any number of NULLs — so
+        every lap back into ``completed`` writes another event. The writer is
+        deliberately left alone (each transition stays its own fact in the
+        feed); trending is what must stop counting the laps.
+        """
+        movie = await _make_movie(db, "dup-toggle-movie")
+        user_id = await _make_user(db)
+
+        await self._toggle_completed(db, user_id=user_id, item_id=movie.id, laps=6)
+
+        raw_rows = (
+            await db.execute(
+                select(func.count())
+                .select_from(ActivityEvent)
+                .where(ActivityEvent.user_id == user_id, ActivityEvent.item_id == movie.id)
+            )
+        ).scalar_one()
+        assert raw_rows == 6, "the writer is unchanged: every lap still leaves an event"
+
+        # ...and all six collapse into the single gesture they really are.
+        assert await self._gestures(db, "MOVIE") == 1
+
+    async def test_a_cycle_that_ends_in_dropped_is_still_one_gesture(self, db):
+        """The other half of issue #30: the overlap is *between* contributions.
+
+        Contribution 2 excludes ``completed`` because that status is already
+        counted as ``status_completed`` — but a cycle does not end where it
+        started. After ``completed → dropped`` the library row sits in
+        ``dropped`` (a counting status) while the event written on the way in
+        is still inside the window, so the same user pays twice for one
+        back-and-forth: 2.0 for the event plus 0.5 for the intent. One user, one
+        item, one gesture — whichever status the cycle happens to stop on.
+        """
+        movie = await _make_movie(db, "dup-cycle-dropped-movie")
+        user_id = await _make_user(db)
+
+        await self._toggle_completed(
+            db, user_id=user_id, item_id=movie.id, laps=4, end_status="dropped"
+        )
+
+        assert await self._gestures(db, "MOVIE") == 1
+
+    async def test_a_lone_toggling_user_cannot_cross_the_threshold(self, client, db):
+        """The manipulation vector itself: one account, no community.
+
+        Left on ``dropped``, the cycle used to pay **twice** per item (2.0 for
+        the event plus 0.5 for the intent), so half as many items as the
+        threshold were enough for a single user to hand the whole type over to
+        their own backlog. The item count below is chosen to sit exactly on
+        that edge: ``2 * items >= TRENDING_MIN_ACTIVITY`` (it crossed before the
+        fix) and ``items < TRENDING_MIN_ACTIVITY`` (it must not cross now that
+        each item is worth one gesture). With the default of 5 that is the
+        three-item case from the review of this fix.
+
+        A single account can still contribute one gesture per *distinct* item —
+        that is the design, and it costs a real item every time. What it can no
+        longer do is multiply its weight on the items it already touched.
+        """
+        quiet = await _make_movie(db, "dup-toggle-quiet", rating_internal=5.0)
+        user_id = await _make_user(db)
+        item_count = (settings.TRENDING_MIN_ACTIVITY + 1) // 2
+        toggled = []
+        for n in range(item_count):
+            movie = await _make_movie(db, f"dup-toggle-solo-{n}", rating_internal=1.0)
+            toggled.append(movie)
+            await self._toggle_completed(
+                db, user_id=user_id, item_id=movie.id, laps=2, end_status="dropped"
+            )
+
+        slugs = _slugs((await client.get("/v1/trending?type=movie")).json())
+
+        assert quiet.slug in slugs, "the fallback must still list the untouched movie"
+        for movie in toggled:
+            assert slugs.index(quiet.slug) < slugs.index(movie.slug)
+
+    async def test_distinct_users_completing_the_same_item_each_count(self, db):
+        """The de-duplication is per user, not per item — otherwise the fix
+        would silence exactly the signal trending exists to measure: several
+        different people finishing the same thing at the same time."""
+        movie = await _make_movie(db, "dup-many-users-movie")
+
+        for _ in range(3):
+            user_id = await _make_user(db)
+            await self._toggle_completed(db, user_id=user_id, item_id=movie.id, laps=4)
+
+        assert await self._gestures(db, "MOVIE") == 3
 
 
 # ---------------------------------------------------------------------------

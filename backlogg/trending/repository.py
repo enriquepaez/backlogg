@@ -19,7 +19,10 @@ Three facts make a clean, **disjoint** partition possible (see
 ``backlogg/feed/models.py``, ``backlogg/library/service.py`` and
 ``backlogg/ratings/service.py``):
 
-- ``want`` / ``in_progress`` / ``dropped`` **never** produce an event.
+- ``want`` / ``in_progress`` / ``dropped`` **never** produce an event. Careful
+  with what that does *not* say: it is a fact about the **transition**, not
+  about the row's final state. ``completed → dropped`` writes an event on the
+  way in and leaves the row on ``dropped`` afterwards.
 - Re-rating an item does **not** produce a second event, but it is genuine
   fresh engagement.
 - An event is written the first time the rating **has content**, which is not
@@ -35,13 +38,20 @@ contributions:
 Contribution                 Source                 Disjointness argument
 ============================ ====================== ==================================
 ``rating_created``,          ``activity_events``    The canonical row for those two
-``status_completed``                                gestures.
+``status_completed``         (one row per           gestures, collapsed to at most one
+                             ``(user, item,         per user — see "One gesture per
+                             event_type)``)         user" below.
 Backlog intent               ``library_entries``    Restricted to the three statuses
-                             (non-``completed``)    that never emit an event, so it
-                                                    cannot overlap the row above.
-                                                    ``completed`` is deliberately
-                                                    *excluded* here — it is already
-                                                    counted as ``status_completed``.
+                             (non-``completed``,    that never emit an event — a
+                             and with no            ``completed`` row is deliberately
+                             ``status_completed``   *excluded*, it is already counted
+                             of its own in the      as ``status_completed`` — **and**
+                             window)                to (user, item) pairs with no
+                                                    ``status_completed`` event of their
+                                                    own in the window. The status
+                                                    filter alone is not enough after a
+                                                    cycle — see "One gesture per user"
+                                                    below.
 Rating edit                  ``user_ratings``       Restricted to edits that happened
                              (edited *after* its    strictly after the row's own event
                              own event)             (``updated_at > created_at`` **and**
@@ -62,6 +72,65 @@ just now" from "I came back later and changed it". Both cases are pinned by
 Exclusions: a review hidden by moderation (``user_ratings.is_hidden``) never
 contributes — neither through its ``rating_created`` event nor through a
 re-rating — because a hidden review must not push anything into trending.
+
+One gesture per user (issue #30)
+--------------------------------
+The partition above is stated per *kind of row*, and that is not enough on its
+own: the ``completed`` → ``dropped`` → ``completed`` toggle leaks through it
+twice, in two different ways.
+
+**Leak 1 — several events for the same pair.** ``activity_events`` is the one
+of the three tables that can hold several rows for the same user and the same
+item. ``library_entries`` and ``user_ratings`` cannot: ``uq_library_entry_item``
+and ``uq_user_rating_item`` are both ``(user_id, item_type, item_id)``, so
+contributions 2 and 3 are one row per (user, item) by construction — the toggle
+*moves* the library row, it does not add one. ``activity_events`` has no such
+key for ``status_completed``: its dedup key ``uq_activity_events_rating_id``
+only constrains ``rating_created`` (``status_completed`` rows carry
+``rating_id NULL``, and Postgres allows any number of NULLs in a unique
+constraint). So every lap back into ``completed`` writes another event, without
+a ceiling.
+
+Contribution 1 therefore groups by ``(user_id, item_id, event_type)`` and emits
+**one** row per group.
+
+**Leak 2 — the same pair counted by two different contributions.** Excluding
+``completed`` from contribution 2 keeps the two apart *during* the transition,
+but a cycle does not end where it started: after ``completed → dropped`` the
+library row sits on ``dropped``, a status that counts, while the
+``status_completed`` event written on the way in is still inside the window. The
+same user then pays twice for one back-and-forth — 2.0 for the event plus 0.5
+for the intent — and half as many items as the threshold were enough for a
+single account to take over a whole type.
+
+Contribution 2 therefore adds a correlated ``NOT EXISTS``: a library row is
+dropped from the intent side when the **same user** has a ``status_completed``
+event for the **same item** inside the window. Two details are load-bearing.
+The correlation is by (user, item), not by item: another user's completion says
+nothing about this user's intent. And the subquery looks only at
+``status_completed``: a ``rating_created`` event must not erase backlog intent,
+which is a genuinely different gesture, counted on its own by contribution 1.
+When both exist the stronger one survives, which is the completion.
+
+Together the two make the invariant hold again as stated above — at most one
+gesture per ``(user, item, kind of gesture)`` inside the window, whichever
+status the cycle happens to stop on.
+
+Both are read-side fixes on purpose: the writer and the feed keep behaving
+exactly as before (each transition into ``completed`` stays its own narrative
+fact in ``GET /feed``); what changes is only how trending *counts* it.
+
+Which timestamp survives the collapse matters, because the surviving row is
+what the decay is applied to. The group keeps ``MAX(created_at)`` **inside the
+window**: the most recent lap is the gesture the user actually just made, and
+"this user has this item completed right now" is the honest reading of the
+collapsed group. Keeping the oldest would let a stale event from the window's
+edge speak for a gesture made minutes ago, and understate live activity.
+
+``total_gestures`` is computed over the same already-collapsed rows, so the
+``TRENDING_MIN_ACTIVITY`` threshold counts de-duplicated gestures too —
+counting raw rows there would leave the manipulation vector wide open and make
+the fix cosmetic.
 
 Decay
 -----
@@ -154,12 +223,15 @@ async def activity_scores(
 ) -> tuple[int, list[tuple[int, float]]]:
     """Return ``(total_gestures, [(item_id, score), ...])`` for one item type.
 
-    ``total_gestures`` is the number of activity rows for the whole type inside
-    the window — the service compares it against ``TRENDING_MIN_ACTIVITY`` to
-    decide whether the local signal is worth serving. It is computed with a
-    window function over the aggregate (``sum(count(*)) OVER ()``) so the
-    truncation to the top ``limit`` items cannot distort it, and so the whole
-    thing stays a single round trip.
+    ``total_gestures`` is the number of distinct gestures for the whole type
+    inside the window — the service compares it against
+    ``TRENDING_MIN_ACTIVITY`` to decide whether the local signal is worth
+    serving. It counts the same de-duplicated rows that feed the score (see the
+    module docstring: one gesture per ``(user, item, event_type)``), never the
+    raw ``activity_events`` rows. It is computed with a window function over
+    the aggregate (``sum(count(*)) OVER ()``) so the truncation to the top
+    ``limit`` items cannot distort it, and so the whole thing stays a single
+    round trip.
 
     The rows are ordered by decayed score descending; ``item_id`` breaks ties
     so the ordering is deterministic.
@@ -167,18 +239,61 @@ async def activity_scores(
     # ── Contribution 1: the two feed-worthy creation events ──────────────────
     # LEFT JOIN to the rating so a hidden review's event drops out.
     # status_completed rows have rating_id NULL and are unaffected.
-    events = select(
-        ActivityEvent.item_id.label("item_id"),
-        _weight_case(ActivityEvent.event_type, EVENT_WEIGHTS).label("weight"),
-        ActivityEvent.created_at.label("ts"),
-    ).outerjoin(UserRating, ActivityEvent.rating_id == UserRating.id)
-    events = events.where(
-        ActivityEvent.item_type == item_type,
-        ActivityEvent.created_at >= since,
-        (ActivityEvent.rating_id.is_(None)) | (UserRating.is_hidden.is_(False)),
+    #
+    # GROUP BY collapses the completed → dropped → completed toggle (issue #30)
+    # to a single gesture per user and item: ``activity_events`` is the only
+    # one of the three tables that can hold several rows for the same pair.
+    # The surviving timestamp is the most recent lap inside the window, which
+    # is the gesture the user actually just made — the rationale is in the
+    # module docstring. ``event_type`` is a grouping key, so the weight CASE
+    # over it is well defined for the group.
+    events = (
+        select(
+            ActivityEvent.item_id.label("item_id"),
+            _weight_case(ActivityEvent.event_type, EVENT_WEIGHTS).label("weight"),
+            func.max(ActivityEvent.created_at).label("ts"),
+        )
+        .outerjoin(UserRating, ActivityEvent.rating_id == UserRating.id)
+        .where(
+            ActivityEvent.item_type == item_type,
+            ActivityEvent.created_at >= since,
+            (ActivityEvent.rating_id.is_(None)) | (UserRating.is_hidden.is_(False)),
+        )
+        .group_by(
+            ActivityEvent.user_id,
+            ActivityEvent.item_id,
+            ActivityEvent.event_type,
+        )
     )
 
     # ── Contribution 2: backlog intent that never emits an event ─────────────
+    # No grouping needed: ``uq_library_entry_item`` is (user_id, item_type,
+    # item_id), so a user has at most one row per item however many times the
+    # status is toggled — the toggle moves the row, it does not add one.
+    #
+    # The NOT EXISTS is what keeps this contribution disjoint from the first
+    # one *after a cycle* (issue #30). Excluding the ``completed`` status is
+    # not enough: ``completed → dropped`` leaves the row on a counting status
+    # while the ``status_completed`` event written on the way in is still
+    # inside the window, so the same user would pay 2.0 for the event plus 0.5
+    # for the intent. Correlated by (user, item) — not by item alone, because
+    # another user's completion says nothing about this user's intent — and
+    # restricted to ``status_completed``: a ``rating_created`` event must not
+    # erase backlog intent, which is a different, legitimate gesture counted on
+    # its own.
+    completed_by_the_same_user = (
+        select(literal(1))
+        .select_from(ActivityEvent)
+        .where(
+            ActivityEvent.user_id == LibraryEntry.user_id,
+            ActivityEvent.item_type == LibraryEntry.item_type,
+            ActivityEvent.item_id == LibraryEntry.item_id,
+            ActivityEvent.event_type == "status_completed",
+            ActivityEvent.created_at >= since,
+        )
+        .correlate(LibraryEntry)
+        .exists()
+    )
     intent = select(
         LibraryEntry.item_id.label("item_id"),
         _weight_case(LibraryEntry.status, INTENT_WEIGHTS).label("weight"),
@@ -187,11 +302,14 @@ async def activity_scores(
         LibraryEntry.item_type == item_type,
         LibraryEntry.status.in_(INTENT_WEIGHTS),
         LibraryEntry.updated_at >= since,
+        ~completed_by_the_same_user,
     )
 
     # ── Contribution 3: an edit that happened after the row's own event ──────
     # The join is to the rating's own event, and it cannot multiply rows:
     # ``uq_activity_events_rating_id`` allows at most one event per rating.
+    # No grouping needed here either: ``uq_user_rating_item`` is (user_id,
+    # item_type, item_id), so re-rating overwrites one row instead of adding.
     #
     # Both conditions are needed, and neither implies the other:
     #
