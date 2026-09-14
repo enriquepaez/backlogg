@@ -2,7 +2,7 @@ import type { components } from "@backlogg/api-client";
 
 import { getApiClient } from "@/lib/auth/session";
 
-import { isCatalogType, type CatalogType } from "./catalog-types";
+import type { CatalogType } from "./catalog-types";
 
 /**
  * Server-side (no-auth, no-cookies) data source for the global search page
@@ -127,8 +127,13 @@ function parseRetryAfter(response: Response): number | null {
  * used to link to `/{type}/{slug}` (FE-10). Returns `undefined` for any
  * unrecognized value so callers can render the result without a link rather
  * than throw.
+ *
+ * Since issue #33 this is the single shared implementation in
+ * `./catalog-types.ts` (see its doc comment: the same mapping lived in seven
+ * places, one of which had drifted into a cast), re-exported from here
+ * rather than moved outright so the call sites that import it from this
+ * module — `/search`, `/u/{username}` and `/u/{username}/library` — and the
+ * suites that stub this module keep working unchanged. Same re-export
+ * convention as `./notifications.ts` over `./notifications-types.ts`.
  */
-export function toCatalogType(itemType: string): CatalogType | undefined {
-  const lower = itemType.toLowerCase();
-  return isCatalogType(lower) ? lower : undefined;
-}
+export { toCatalogType } from "./catalog-types";

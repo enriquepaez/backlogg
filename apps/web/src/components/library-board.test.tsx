@@ -96,6 +96,27 @@ describe("LibraryBoard", () => {
     );
   });
 
+  // Issue #37: this suite only covered the happy path, so it stayed green
+  // when the shared `toCatalogType` was mutated into a blind cast — the one
+  // mutation it exists to catch. `entry.item.item_type` comes from the
+  // backend over the network, and the board's rule for a value it can't map
+  // is to render the card WITHOUT a link (`href={itemType ? ... :
+  // undefined}`), never to guess a route: a wrong `/podcast/{slug}` link
+  // isn't just a 404, it can resolve to a different, real item.
+  it("renders a card with no link when the item_type maps to no route", async () => {
+    const columns: Record<LibraryStatusValue, LibraryEntry[]> = {
+      ...emptyColumns,
+      want: [entry("movie", "dune-2021", "Dune"), entry("podcast", "some-podcast", "Some Podcast")],
+    };
+
+    render(await LibraryBoard({ entriesByStatus: columns, countsByStatus: emptyCounts }));
+
+    expect(screen.getByText("Some Podcast")).toBeInTheDocument();
+    expect(screen.getByText("Some Podcast").closest("a")).toBeNull();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /Dune/ })).toHaveAttribute("href", "/movie/dune-2021");
+  });
+
   it("shows an empty-column message for a status with no entries", async () => {
     render(
       await LibraryBoard({ entriesByStatus: emptyColumns, countsByStatus: emptyCounts }),

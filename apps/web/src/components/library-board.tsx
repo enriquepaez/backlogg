@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { LibraryBoardCard } from "@/components/library-board-card";
-import { isCatalogType } from "@/lib/catalog-types";
+import { toCatalogType } from "@/lib/catalog-types";
 import {
   LIBRARY_STATUSES,
   STATUS_COLOR_CLASSES,
@@ -9,21 +9,6 @@ import {
   type LibraryStatusValue,
 } from "@/lib/library-types";
 import { cn } from "@/lib/utils";
-
-/**
- * Same lowercase-and-validate mapping as `toCatalogType` (`@/lib/search`) —
- * reimplemented here instead of importing it so this file stays free of
- * `@/lib/search`'s transitive `server-only` import (via `@/lib/auth/session`,
- * see that file's doc comment). Not a problem for `page.tsx` itself, which
- * is only ever rendered inside the real Next.js server runtime, but this
- * component's own test (`library-board.test.tsx`) renders it directly under
- * plain Vitest/jsdom, which has no build-time alias for `server-only` and
- * fails to resolve the import outright.
- */
-function toCatalogType(itemType: string) {
-  const lower = itemType.toLowerCase();
-  return isCatalogType(lower) ? lower : undefined;
-}
 
 export type LibraryBoardProps = {
   /** Sorted (`sortLibraryEntries`, same `?sort=` as the grid) entries per status, capped at `LIBRARY_BOARD_SCAN_LIMIT` — see `page.tsx`'s doc comment. */

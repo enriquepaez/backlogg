@@ -6,12 +6,8 @@ import { RecommendationFilters } from "@/components/recommendation-filters";
 import { RecommendationsPagination } from "@/components/recommendation-pagination";
 import { redirect } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/api-fetch";
-import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
-import {
-  RECOMMENDATIONS_FALLBACK_REASON,
-  getRecommendations,
-  recommendationItemType,
-} from "@/lib/recommendations";
+import { isCatalogType, toCatalogType, type CatalogType } from "@/lib/catalog-types";
+import { RECOMMENDATIONS_FALLBACK_REASON, getRecommendations } from "@/lib/recommendations";
 
 /** Page size for `/recommendations` — mirrors the backend's own default `limit` (`docs/api.md`). */
 const RECOMMENDATIONS_PAGE_SIZE = 20;
@@ -59,6 +55,12 @@ export async function generateMetadata({
  * still calls `getCurrentUser()` itself (the real, server-side session
  * check) and redirects to `/login` on `null`, same defense-in-depth as
  * `/feed`'s page (FE-23).
+ *
+ * Each result's own `item_type` goes the other way through
+ * {@link toCatalogType} (the shared, guarded mapping in
+ * `@/lib/catalog-types`): a value outside the four-type vocabulary yields
+ * `undefined` and the card is skipped, never linked to `/{unknown}/{slug}`
+ * (issue #33 — this used to be a bare cast).
  *
  * `type` is parsed through {@link isCatalogType} before ever reaching
  * `getRecommendations`/the backend — an unrecognized `type` value (typed
@@ -125,7 +127,15 @@ export default async function RecommendationsPage({
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {result.results.map((item) => {
-              const itemType = recommendationItemType(item);
+              const itemType = toCatalogType(item.item_type);
+              // Unknown `item_type` (a fifth type added backend-side before
+              // this vocabulary catches up): skip the card rather than link
+              // it somewhere wrong — issue #33, same handling as
+              // `/trending`'s grid. `grid` lays out whatever children it
+              // gets, so a skipped item leaves no hole.
+              if (!itemType) {
+                return null;
+              }
               return (
                 <CatalogCard
                   key={`${item.item_type}-${item.slug}`}

@@ -11,7 +11,7 @@ vi.mock("next-intl/server", () => ({
 
 // `@/lib/catalog` transitively imports `server-only` (via `@/lib/auth/session`),
 // which Vitest can't resolve outside a Next.js build — so it's mocked. Only
-// the network call is faked: the vocabulary (`trendingItemType`,
+// the network call is faked: the vocabulary (`toCatalogType`,
 // `isCatalogType`, `DEFAULT_TRENDING_PERIOD`) comes from the REAL
 // framework-agnostic `@/lib/catalog-types`, because the item_type → route
 // mapping is exactly what these tests are here to pin down (issue #32).

@@ -12,18 +12,17 @@ vi.mock("next-intl/server", () => ({
 // `@/lib/search` can't be `vi.importActual`-ed here: it transitively pulls in
 // `server-only` through `@/lib/auth/session` (see that file's own doc
 // comment for why), which Vitest can't resolve outside a Next.js build. So
-// `toCatalogType` is reimplemented from the framework-agnostic
-// `@/lib/catalog-types` (no `server-only` dependency) instead of imported
-// from the real module.
+// only its fetch function is faked; `toCatalogType` is the REAL one, taken
+// straight from the framework-agnostic `@/lib/catalog-types` (no
+// `server-only` dependency) that `@/lib/search` re-exports it from since
+// issue #33 — this mock used to hand-roll yet another copy of that mapping,
+// which is the very duplication the issue was about.
 const searchCatalog = vi.fn();
 vi.mock("@/lib/search", async () => {
-  const { isCatalogType } = await import("@/lib/catalog-types");
+  const { toCatalogType } = await import("@/lib/catalog-types");
   return {
     searchCatalog: (query: string, options: unknown) => searchCatalog(query, options),
-    toCatalogType: (itemType: string) => {
-      const lower = itemType.toLowerCase();
-      return isCatalogType(lower) ? lower : undefined;
-    },
+    toCatalogType,
   };
 });
 

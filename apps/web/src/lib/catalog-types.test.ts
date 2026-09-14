@@ -2,28 +2,38 @@ import { describe, expect, it } from "vitest";
 
 import en from "../../messages/en.json";
 import es from "../../messages/es.json";
-import { CATALOG_TYPES, isCatalogType, trendingItemType } from "./catalog-types";
+import { CATALOG_TYPES, isCatalogType, toCatalogType } from "./catalog-types";
 
 /**
- * Guards the trending vocabulary against the regression issue #32 was:
- * `/v1/trending` returns all four `item_type`s, the frontend only knew two,
- * and every book/game card ended up pointing at `/series/{slug}` — sometimes
- * a real, unrelated series.
+ * The single `item_type` → route-segment mapping (issue #33 unified the
+ * seven copies that used to exist: `trendingItemType` here, `toCatalogType`
+ * in `@/lib/search` and `library-board.tsx`, `feedItemType`,
+ * `reviewItemType`, `notificationItemType` and `recommendationItemType`).
+ * This suite is therefore the one place that pins the behaviour every
+ * surface now depends on, and it absorbs what those modules' own suites used
+ * to assert about their private copies.
+ *
+ * It guards two regressions:
+ *
+ * - issue #32 — `/v1/trending` returns all four `item_type`s, the frontend
+ *   only knew two, and every book/game card ended up pointing at
+ *   `/series/{slug}`, sometimes a real, unrelated series.
+ * - issue #33 — `@/lib/recommendations` mapped the same field with a bare
+ *   `as CatalogType` cast, so an unknown type would have produced
+ *   `/{unknown}/{slug}` with nothing to catch it.
  */
-describe("trendingItemType", () => {
+describe("toCatalogType", () => {
   it.each([
     ["MOVIE", "movie"],
     ["SERIES", "series"],
     ["BOOK", "book"],
     ["GAME", "game"],
   ] as const)("maps %s to the %s route segment", (itemType, expected) => {
-    expect(trendingItemType({ item_type: itemType })).toBe(expected);
+    expect(toCatalogType(itemType)).toBe(expected);
   });
 
-  it("covers every type the trending endpoint can return, with no shared segment", () => {
-    const segments = ["MOVIE", "SERIES", "BOOK", "GAME"].map((item_type) =>
-      trendingItemType({ item_type }),
-    );
+  it("covers every type the backend can return, with no shared segment", () => {
+    const segments = ["MOVIE", "SERIES", "BOOK", "GAME"].map(toCatalogType);
 
     // A collapsed mapping (the issue #32 shape, `MOVIE ? movie : series`)
     // would show up here as a repeated segment.
@@ -33,14 +43,26 @@ describe("trendingItemType", () => {
 
   it("returns undefined for an item_type outside the vocabulary instead of guessing", () => {
     // A fifth backend type (or a typo) must not silently become a series
-    // link: callers skip the card on `undefined`.
-    expect(trendingItemType({ item_type: "PODCAST" })).toBeUndefined();
-    expect(trendingItemType({ item_type: "" })).toBeUndefined();
+    // link, nor a `/podcast/{slug}` link: callers skip the card (or drop the
+    // href) on `undefined`. `PERSON` is the one `/v1/search` really returns
+    // today and the case `search.test.ts` used to own.
+    expect(toCatalogType("PODCAST")).toBeUndefined();
+    expect(toCatalogType("PERSON")).toBeUndefined();
+    expect(toCatalogType("SHOW")).toBeUndefined();
+    expect(toCatalogType("")).toBeUndefined();
   });
 
-  it("accepts only the backend's uppercase spelling shape, case-insensitively", () => {
-    expect(trendingItemType({ item_type: "book" })).toBe("book");
-    expect(trendingItemType({ item_type: "Book" })).toBe("book");
+  it("returns undefined for a null/undefined item_type", () => {
+    // `NotificationTargetOut.item_type` is nullable (`new_follower` carries
+    // no target at all) — the case `notifications.test.ts` used to own via
+    // the private `notificationItemType` pre-guard.
+    expect(toCatalogType(null)).toBeUndefined();
+    expect(toCatalogType(undefined)).toBeUndefined();
+  });
+
+  it("accepts the backend's uppercase spelling shape, case-insensitively", () => {
+    expect(toCatalogType("book")).toBe("book");
+    expect(toCatalogType("Book")).toBe("book");
   });
 });
 

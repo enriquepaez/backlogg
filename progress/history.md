@@ -1690,3 +1690,149 @@ como declaración de intención.
 Quedan **dos** issues abiertos: el #20 (solo falta medir contra Neon; el código
 está desplegado desde la migración `0036`) y el #33 (frontend, low). Ninguna
 feature es elegible mientras el bloque de recomendaciones siga congelado.
+
+---
+
+## 2026-09-14 (tercera) — `chore/close_issue_20_prod_measurement`
+
+Sin cambios de código: el issue #20 tenía el arreglo hecho y desplegado desde la
+migración `0036`, y lo único pendiente era la medición contra producción que su
+campo `verification` dejaba anotada desde el 2026-09-04.
+
+### Medición contra Neon (PostgreSQL 17.11)
+
+| Comprobación | Resultado |
+|---|---|
+| `uq_external_id` | `UNIQUE (item_type, source, external_id)` — reparada |
+| Revisión alembic | `0040` |
+| **Ítems sin enlazar** | **0 en los cuatro tipos** |
+| Filas `PERSON` de TMDB | 61.483, frente a 57.436 `MOVIE` y 11.002 `SERIES` |
+| Pares compartidos entre tipos | **7.361** |
+| `seed_targets` | poblada: 57.197 `MOVIE`, 32.025 `GAME`, 10.899 `SERIES` |
+
+**La prueba de fuego es la quinta fila.** Esos 7.361 pares `(source, external_id)`
+compartidos por más de un `item_type` eran **literalmente imposibles** bajo la
+restricción vieja: cada uno habría sido una colisión, y cada colisión un ítem
+escrito pero no enlazado, perdido en silencio. Desglose: 4.163 `MOVIE+PERSON`,
+925 `PERSON+SERIES`, 298 los tres a la vez, y 1.975 `MOVIE+SERIES`.
+
+Los 5.386 que enfrentan `PERSON` contra catálogo son el bug exacto del issue:
+sobre 68.438 ítems TMDB enlazados, **el 7,87% del catálogo se habría perdido**.
+El issue predijo que la tasa crecería con el tamaño de `people` respecto al
+0,93% medido en dev — se confirma, y sube 8,5x.
+
+El escenario que temía el issue #21 **no se dio**: `seed_targets` está poblada en
+producción, así que la reparación de `0036` sí tuvo targets que reabrir.
+
+### Hallazgo lateral que no reabre el issue
+
+275 targets `MOVIE` y 14 `SERIES` tienen `attempts >= TMDB_SEED_MAX_ATTEMPTS`
+(0,48% de `MOVIE`) y ninguno marcado `unreachable_at`. Son ítems **no
+hidratados** —nunca llegaron al catálogo—, que es cosa distinta de «escrito pero
+no enlazado». El contador `stuck` de la feature 86 ya los contempla, y el
+residuo sin enlazar sigue siendo 0.
+
+### Consecuencia
+
+**La siembra real de producción queda desbloqueada.** Era el prerrequisito que
+faltaba del bloque A de `progress/priority_order.md`, y el motivo por el que no
+tenía sentido ejecutar las features 86-88 contra Neon.
+
+Queda **un** issue abierto en todo el proyecto: el #33 (frontend, low). Ninguna
+feature es elegible mientras el bloque de recomendaciones siga congelado.
+
+### Issue #33 en la misma rama — el guard y la unificación
+
+Añadido a esta rama a petición del usuario, por lo que pasó a llamarse
+`fix/recommendations_item_type_guard`.
+
+El issue pedía un guard en `recommendations.ts:83` y ofrecía la unificación de
+las funciones duplicadas como «opción más amplia, **no obligatoria**». **Se
+tomó**, y el censo es la razón: había **siete** sitios haciendo el mismo mapeo
+`item_type → CatalogType` y **cinco eran byte a byte idénticas**. Seis tenían el
+guard correcto; solo el de recomendaciones casteaba a ciegas. Con dos bugs ya
+nacidos del patrón (#32 y éste), arreglar el séptimo dejaba el criadero intacto.
+
+El implementer encontró una **octava** copia que el censo no vio: un mapping
+escrito a mano dentro del mock de `@/lib/search` en `search/page.test.tsx`.
+
+Resultado: una sola `toCatalogType(itemType: string | null | undefined)` en
+`catalog-types.ts` —el módulo sin imports, seguro desde Client y Server
+Components—, que absorbe el pre-guard de notificaciones. `search.ts` conserva el
+nombre como re-export para no tocar a sus importadores.
+
+`recommendationItemType` se **elimina** en vez de reescribirse: era un wrapper de
+una línea por dominio, igual que `trendingItemType`, y conservarlo habría dejado
+en pie dos de las siete que la unificación existe para borrar.
+
+### Verificación
+
+- **Mutación** (reviewer): sustituir el cuerpo de la canónica por el cast a
+  ciegas pone en rojo **7 suites**; revertir la página al cast, los 2 casos
+  clave. El punto de riesgo real —que un `vi.mock` interceptara distinto un
+  re-export que una función local— se descartó comprobando que `vi.mock`
+  reemplaza el registro de módulo entero y que no hay ni un `importActual`.
+- **QA del leader sobre la app compilada y servida**, con backend real detrás:
+  `/es/trending` renderiza 20 tarjetas, 5 de cada tipo, **todos los enlaces al
+  tipo correcto y ninguno a un tipo no reconocido** — exactamente el mix donde
+  el #32 mandaba books y games a `/series/`. `/es/recommendations` sin sesión
+  redirige a login (307).
+- Los cuatro gates de `apps/web`: typecheck, lint, build y **1239 tests**.
+
+### Issues abiertos al cerrar la sesión
+
+Se registran **#36** (el mismo cast sin guard en `catalog.ts:289`, sobre las
+filas de `/v1/genres` — el pariente vivo del #33) y **#37** (la página
+`u/[username]` no tiene suite de render, y dos superficies del mapeo no cubren
+el valor desconocido; los tres huecos son preexistentes y salieron al medir por
+mutación qué superficies detectaban el fallo).
+
+### Issues #36 y #37 en la misma rama — se acabó el ciclo de crear tickets
+
+El usuario paró la sesión con una crítica correcta: cada issue resuelto estaba
+generando issues nuevos. El balance del día era −3 (seis cerrados, tres
+abiertos), pero el patrón que señalaba era real, y el #36 lo demostraba: **una
+línea, en la superficie que se acababa de tocar, con la función que lo arregla
+ya escrita**. Convertir eso en un ticket es burocracia, no gestión.
+
+**Criterio nuevo, y se aplica desde aquí**: si lo encontrado se arregla en la
+superficie que ya se está tocando y cuesta menos que redactar el ticket, se
+arregla. Un issue solo cuando sea trabajo real y separable.
+
+Los dos se resolvieron en esta misma rama:
+
+- **#36**: `getGenrePage` pasa a `flatMap` con la canónica y descarta la fila
+  cuyo `item_type` no mapea. El `toLowerCase` quedó comprobado **en el origen**
+  —`backlogg/genres/repository.py` emite los cuatro tipos como literales en
+  minúscula—, así que es no-op y ninguna fila válida se pierde.
+- **#37**: `u/[username]/page.test.tsx` pasa de 3 tests de metadatos a **18**.
+  El mock identidad de `@/lib/search` pasa a la función real, acompañado por fin
+  de la suite que la ejecuta — la condición que el propio issue ponía para
+  tocarlo. Más tres tests de borde en `library-board`, `notificationHref` y
+  `notification-bell`.
+
+**La review cambió de instrucción**: se le pidió explícitamente que no
+devolviera deuda para registrar, sino cambios a aplicar aquí, y que un
+`APPROVED` limpio era un resultado válido sin lista de pegas adjunta.
+
+Aun así hizo el trabajo duro: aplicó **17 mutaciones** sobre el cuerpo de la
+página —las 5 del implementer más 12 propias— y midió que **cada uno de los 13
+tests es el matador único de al menos una**. No es una suite que se afirme sobre
+sus propios mocks, que era el riesgo de escribirla a posteriori.
+
+La única mutación superviviente de las 17 —el fallback `display_name ?? username`
+de `generateMetadata`, gemela de una que sí estaba cubierta— se cerró **también
+aquí**, con 2 tests. Cero issues nuevos.
+
+Medida del efecto global: romper la canónica `toCatalogType` pasa de poner en
+rojo las **7 suites** que midió el #33 a poner **12 suites y 13 tests**, con
+`u/[username]` dentro. Ese era el objetivo del #37.
+
+### Estado al cerrar la sesión
+
+**Cero issues abiertos en todo el proyecto.** Es la primera vez.
+
+Ninguna feature es elegible mientras el bloque de recomendaciones siga
+congelado (`AGENTS.md` §4), así que el siguiente movimiento es una decisión del
+usuario: descongelarlo, o abrir trabajo nuevo. La siembra real de producción
+quedó desbloqueada esta misma sesión al cerrar el #20.

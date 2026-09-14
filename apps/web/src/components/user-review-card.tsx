@@ -1,24 +1,9 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { StarRating } from "@/components/star-rating";
-import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
+import { toCatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
 import type { UserReview } from "@/lib/user-content";
-
-/**
- * Maps the backend's uppercase `UserReviewItemOut.item_type` to the
- * route-segment `CatalogType` used to link to `/{type}/{slug}` (FE-10). Same
- * logic as `toCatalogType` (`@/lib/search.ts`), duplicated rather than
- * imported: that module transitively pulls in `server-only` (via
- * `@/lib/auth/session`), which would break this component's own test suite
- * (and any future Client Component that reuses it) — same rationale
- * `feedItemType` in `@/components/feed-entry-list.tsx` already documents for
- * the identical shape.
- */
-function reviewItemType(itemType: string): CatalogType | undefined {
-  const lower = itemType.toLowerCase();
-  return isCatalogType(lower) ? lower : undefined;
-}
 
 /**
  * Extracted from `/u/{username}`'s own `page.tsx` (FE-21) by FE-33, which
@@ -45,7 +30,7 @@ export type UserReviewCardProps = {
 };
 
 export function UserReviewCard({ review, locale, dateLabel }: UserReviewCardProps) {
-  const itemType = reviewItemType(review.item.item_type);
+  const itemType = toCatalogType(review.item.item_type);
   const href = itemType ? `/${itemType}/${review.item.slug}` : undefined;
 
   return (

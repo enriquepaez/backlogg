@@ -127,6 +127,13 @@ describe("searchCatalog", () => {
   });
 });
 
+/**
+ * Since issue #33 `toCatalogType` is a re-export of the shared
+ * implementation in `@/lib/catalog-types` (whose own suite covers the
+ * mapping in full). Kept here on purpose: `/search`, `/u/{username}` and
+ * `/u/{username}/library` all import it from THIS module, so these cases are
+ * what would fail if the re-export were ever dropped.
+ */
 describe("toCatalogType", () => {
   it("lowercases known item types", () => {
     expect(toCatalogType("MOVIE")).toBe("movie");

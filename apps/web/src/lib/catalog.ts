@@ -9,6 +9,7 @@ import {
   type CatalogListResult,
   type CatalogSort,
   type CatalogType,
+  toCatalogType,
   type GenreWithType,
   type TrendingPeriod,
 } from "./catalog-types";
@@ -90,7 +91,7 @@ export const BROWSE_PAGE_SIZE = 24;
  * `type` filter, so the backend returns a mix of **all four** catalog types
  * (up to ~5 of each, capped at 20 — `docs/api.md`). Ranked from local
  * activity, no external call. Callers must map `item_type` through
- * {@link trendingItemType} rather than assuming movie/series (issue #32).
+ * {@link toCatalogType} rather than assuming movie/series (issue #32).
  */
 export async function getTrending(): Promise<TrendingItem[]> {
   try {
@@ -270,6 +271,21 @@ export type GenrePageResult = { ok: true; genres: GenreWithType[] } | { ok: fals
  * {@link getGenres}, redundant there since the caller already knows the
  * type it asked for) since this page groups genres by type and links each
  * one to `/browse/{item_type}?genre=slug`.
+ *
+ * That `item_type` goes through {@link toCatalogType} rather than a cast
+ * (issue #36). It used to be `genre.item_type as CatalogType` — an unchecked
+ * assertion over a value that arrives from the network, the same shape that
+ * produced issues #32 and #33 on two other surfaces. Here the response
+ * *should* already be constrained (the field is filled by the backend, and
+ * the endpoint is even queried with a `CatalogType`), but "should" is what
+ * the cast was already assuming: a fifth backend type exposed through this
+ * endpoint would have reached the page as a `/browse/{unknown}` link with
+ * nothing to catch it. A row whose type doesn't map is dropped from the
+ * list instead — same "skip it rather than link it wrong" rule the other
+ * seven `toCatalogType` call sites follow. The mapping's `toLowerCase()` is
+ * a no-op on this endpoint's already-lowercase values (`"movie"`, not
+ * `"MOVIE"`, unlike every other surface), so the four known types pass
+ * through unchanged.
  */
 export async function getGenrePage(type?: CatalogType): Promise<GenrePageResult> {
   try {
@@ -282,12 +298,12 @@ export async function getGenrePage(type?: CatalogType): Promise<GenrePageResult>
     }
     return {
       ok: true,
-      genres: data.genres.map((genre) => ({
-        name: genre.name,
-        slug: genre.slug,
-        count: genre.count,
-        item_type: genre.item_type as CatalogType,
-      })),
+      genres: data.genres.flatMap((genre) => {
+        const itemType = toCatalogType(genre.item_type);
+        return itemType
+          ? [{ name: genre.name, slug: genre.slug, count: genre.count, item_type: itemType }]
+          : [];
+      }),
     };
   } catch (error) {
     console.error(`getGenrePage(${type}): failed to reach the API`, error);

@@ -2,7 +2,7 @@ import type { components } from "@backlogg/api-client";
 
 import { apiFetch } from "./api-fetch";
 import { authHeader } from "./auth/session";
-import { notificationHref, notificationItemType, type NotificationItem } from "./notifications-types";
+import { notificationHref, type NotificationItem } from "./notifications-types";
 
 /**
  * Notifications data source (FE-24): `GET /v1/notifications`,
@@ -24,7 +24,7 @@ import { notificationHref, notificationItemType, type NotificationItem } from ".
  */
 
 export type { NotificationItem };
-export { notificationHref, notificationItemType };
+export { notificationHref };
 
 type NotificationListOut = components["schemas"]["NotificationListOut"];
 type UnreadCountOut = components["schemas"]["UnreadCountOut"];

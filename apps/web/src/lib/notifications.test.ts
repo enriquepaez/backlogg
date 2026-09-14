@@ -4,11 +4,17 @@
 // (`@/lib/api-fetch`), which depends on `next/headers`' request-scoped
 // `cookies()` and only works inside a real Next.js request — same rationale
 // as `feed.test.ts`: mock `apiFetch`/`authHeader` directly rather than
-// exercise the real cookie-reading/refresh machinery. `notificationHref`/
-// `notificationItemType` are plain re-exports of `./notifications-types.ts`
-// — tested here (rather than in a dedicated `notifications-types.test.ts`)
-// the same way `feed.test.ts` covers `isFeedTab` alongside the fetch
-// helpers in `./feed.ts`.
+// exercise the real cookie-reading/refresh machinery. `notificationHref` is
+// a plain re-export of `./notifications-types.ts` — tested here (rather than
+// in a dedicated `notifications-types.test.ts`) the same way `feed.test.ts`
+// covers `isFeedTab` alongside the fetch helpers in `./feed.ts`.
+//
+// It used to export `notificationItemType` too, a private copy of the
+// item_type → route mapping; issue #33 replaced it with the shared
+// `toCatalogType` (`@/lib/catalog-types`), so its two cases (a known
+// uppercase type, and `null`/unknown → `undefined`) now live in
+// `catalog-types.test.ts`. What stays here is `notificationHref`'s own
+// behaviour, which exercises the mapping end to end anyway.
 import { describe, expect, it, vi } from "vitest";
 
 const apiFetchMock = vi.fn();
@@ -27,7 +33,6 @@ const {
   markRead,
   deleteNotification,
   notificationHref,
-  notificationItemType,
 } = await import("./notifications");
 
 function backendResponse(status: number): Response {
@@ -52,18 +57,6 @@ const reviewLikeNotification = {
   created_at: "2026-05-25T18:04:11Z",
 };
 
-describe("notificationItemType", () => {
-  it("lowercases a known uppercase item_type", () => {
-    expect(notificationItemType("MOVIE")).toBe("movie");
-    expect(notificationItemType("GAME")).toBe("game");
-  });
-
-  it("returns undefined for null or an unknown value", () => {
-    expect(notificationItemType(null)).toBeUndefined();
-    expect(notificationItemType("SHOW")).toBeUndefined();
-  });
-});
-
 describe("notificationHref", () => {
   it("links new_follower to the actor's profile", () => {
     expect(notificationHref(newFollowerNotification)).toBe("/u/bob");
@@ -87,6 +80,24 @@ describe("notificationHref", () => {
       notificationHref({
         ...reviewLikeNotification,
         target: { ...reviewLikeNotification.target, item_type: null },
+      }),
+    ).toBeUndefined();
+  });
+
+  // Issue #37: the two cases above only cover a MISSING target. A target
+  // that is present but outside the four-type vocabulary is the other half
+  // of `toCatalogType`'s contract, and the half a blind cast would get
+  // wrong — it would link to `/podcast/the-rest-is-history` instead of
+  // refusing to link at all.
+  it("returns undefined for review_like when item_type is outside the catalog vocabulary", () => {
+    expect(
+      notificationHref({
+        ...reviewLikeNotification,
+        target: {
+          ...reviewLikeNotification.target,
+          item_type: "PODCAST",
+          slug: "the-rest-is-history",
+        },
       }),
     ).toBeUndefined();
   });

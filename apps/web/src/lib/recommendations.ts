@@ -19,6 +19,12 @@ import type { CatalogType } from "./catalog-types";
  * of declaring a parallel union — the backend's `RecommendationTypeFilter`
  * enum (`movie`/`series`/`book`/`game`) is exactly the same vocabulary as the
  * browse/trending route-segment type.
+ *
+ * This module used to export a `recommendationItemType(item)` that mapped a
+ * result's uppercase `item_type` down to that vocabulary with a bare cast
+ * (`item.item_type.toLowerCase() as CatalogType`) — issue #33. It is gone:
+ * `toCatalogType` (`./catalog-types.ts`) is the one shared, guarded mapping,
+ * and the page calls it with `item.item_type` like every other surface does.
  */
 
 export type Recommendation = components["schemas"]["RecommendationOut"];
@@ -69,16 +75,4 @@ export async function getRecommendations(
     console.error("getRecommendations: failed to reach the API", error);
     return { ok: false };
   }
-}
-
-/**
- * Maps a recommendation's uppercase `item_type` (`"MOVIE"`/`"SERIES"`/
- * `"BOOK"`/`"GAME"` — `RecommendationOut.item_type` is a plain string in the
- * generated schema, mirroring the backend's `TYPE_FILTER_TO_ITEM_TYPE`
- * values) down to the lowercase {@link CatalogType} vocabulary used for
- * routing (`/{type}/{slug}`), same idea as `trendingItemType` in
- * `./catalog.ts`.
- */
-export function recommendationItemType(item: Recommendation): CatalogType {
-  return item.item_type.toLowerCase() as CatalogType;
 }

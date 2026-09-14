@@ -429,3 +429,91 @@ escrito antes de escribir código; ese requisito se retira.
   limitar la capa semántica a books (Open Library es CC0) y games. La tabla
   `item_embeddings` es polimórfica por `item_type`, así que replegarse es
   reprocesar dos tipos, no rehacer el diseño.
+
+---
+
+## Estado del bloqueo (2026-09-14)
+
+Las ocho features del bloque siguen `pending` y congeladas por `AGENTS.md` §4.
+Esta sección recoge el análisis hecho el 2026-09-14 para decidir **qué haría
+falta realmente** para descongelarlas, porque la nota original —«con cero
+usuarios no se puede evaluar»— resultó ser cierta solo para parte del bloque.
+
+### El bloqueo no es técnico
+
+Las dos dependencias externas al bloque, las features **72** (`books_classification_ddc_lcc`)
+y **74** (`credits_source_author_role`), están `done`. El grafo interno está
+completo: ninguna de las ocho espera código de otra que no exista.
+
+### La razón del congelamiento no aplica por igual a las ocho
+
+| Feature | ¿Necesita usuarios? | Por qué |
+|---|---|---|
+| **83** `cooccurrence_layer` | **Sí, como dato de entrada** | Es coseno sobre la matriz ítem-usuario construida desde `library_entries` y `user_ratings`. Sin bibliotecas no hay matriz: es *imposible*, no solo inevaluable |
+| **82** `recommendations_ranker` | Para **evaluar** | Funciona sin usuarios; lo que no se puede es saber si los pesos `REC_WEIGHT_*` son buenos |
+| **75** `pgvector_item_embeddings` | No | Opera sobre título, sinopsis y géneros del catálogo |
+| **76** `themes_taxonomy` | No | Taxonomía propia sobre los géneros ya ingeridos |
+| **77** `themes_manual_mapping` | No | Mapeo manual de ~55 entradas de taxonomías cerradas |
+| **78** `themes_longtail_autoassign` | No | Similitud de embeddings sobre subjects de Open Library |
+| **79** `wikidata_adaptations` | No | Consulta P144/P4969 de Wikidata contra el catálogo |
+| **80** `similar_semantic_rewrite` | No | Coseno sobre el índice HNSW de la 75 |
+
+Un embedding de una película no necesita que nadie la haya visto. Wikidata
+tampoco. La taxonomía de themes tampoco. **Seis de las ocho son trabajo de
+catálogo**, verificable el día que se escriban.
+
+### El prerrequisito real era el catálogo, y ya está resuelto
+
+Lo que de verdad frenaba a esas seis no era la falta de usuarios sino la falta
+de catálogo: recomendar sobre las ~600 películas de dev no significa nada. Ese
+prerrequisito estaba bloqueado por el **issue #20** (`uq_external_id` sin
+`item_type`, que perdía catálogo en silencio), **cerrado el 2026-09-14** tras
+medir contra producción. Neon tiene hoy ~68.000 ítems TMDB enlazados y 0 ítems
+sin enlazar.
+
+### Qué falta, en concreto
+
+1. **Una decisión del usuario** sobre descongelar, total o parcialmente.
+2. **Solo para la 75** — dos cosas que conviene comprobar *antes* de
+   comprometerse:
+   - Que `pgvector` esté disponible en el **free tier de Neon**.
+   - Cómo generar embeddings de ~100k ítems **sin coste**. La vía de coste cero
+     es un modelo local ejecutado en el runner de GitHub Actions; una API de
+     embeddings tiene coste por token y el proyecto vive en free tiers.
+3. El riesgo legal de TMDB para la 75 ya está aceptado (ver sección anterior).
+
+### Ruta recomendada: descongelar parcialmente
+
+Empezar por la **79 (`wikidata_adaptations`)**: dependencias vacías, Wikidata es
+CC0, no usa IA, no cuesta nada, no necesita usuarios — y desbloquea `FE-66`, la
+sección de adaptaciones cross-media que este mismo plan describe como la de
+mayor valor percibido. La **76** es igual de barata.
+
+Dejar **82 y 83** congeladas hasta que haya comunidad real: ahí el argumento
+original se sostiene entero.
+
+### Por qué NO poblar la base con usuarios sintéticos
+
+Se planteó el 2026-09-14 como forma de descongelar 82 y 83. **Descartado como
+llave de desbloqueo**, por tres razones:
+
+1. **Bibliotecas aleatorias producen ruido.** El coseno sobre una matriz
+   aleatoria devuelve resultados —no falla, no da error— pero son basura. Una
+   capa que produce basura en silencio es peor que una que no existe.
+2. **Bibliotecas con estructura son circulares.** Si se generan arquetipos que
+   consumen clusters coherentes para que «parezca real», la co-ocurrencia
+   encuentra *exactamente la señal que se metió*. Se valida que el algoritmo
+   recupera su propio generador, no que funcione con humanos. Lo mismo vale
+   para calibrar los pesos del ranker contra gusto inventado.
+3. **No aporta nada a seis de las ocho features**, que es donde está el trabajo
+   realmente desbloqueable.
+
+**Dónde sí valen:** para dimensionar y probar **mecánica** — ¿el job nocturno
+termina en tiempo?, ¿la matriz cabe en memoria del runner?, ¿`item_relations`
+aguanta el volumen de escritura? Eso es legítimo y necesario, va **dentro** de
+la verificación de la feature 83 cuando le toque, y la conclusión que autoriza
+es «el batch corre y escala», nunca «las recomendaciones son buenas».
+
+**Nunca en producción.** Desde la feature 81 y los issues #29/#30/#35, trending
+cuenta personas distintas; usuarios sintéticos en Neon contaminarían trending,
+el feed y los agregados de rating, y revertirlo a escala sería trabajo serio.
