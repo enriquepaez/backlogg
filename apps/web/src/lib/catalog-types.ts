@@ -49,6 +49,54 @@ export function isCatalogType(value: string): value is CatalogType {
 }
 
 /**
+ * THE mapping from a backend `item_type` (uppercase — `"MOVIE"`/`"SERIES"`/
+ * `"BOOK"`/`"GAME"`, a plain `string` in the generated schema everywhere it
+ * appears: `TrendingItemOut`, `SearchResultItem`, `FeedItemOut`,
+ * `UserReviewItemOut`, `LibraryItemOut`, `NotificationTargetOut`,
+ * `RecommendationOut`) to the lowercase {@link CatalogType} route vocabulary
+ * used to link to `/{type}/{slug}`.
+ *
+ * **Returns `undefined` for anything outside the vocabulary instead of
+ * guessing, and callers MUST skip (or render unlinked) such an item.** That
+ * is the whole point of this function, and it is not hypothetical: issue #32
+ * was a private two-type copy of this mapping (`=== "MOVIE" ? "movie" :
+ * "series"`) that sent every book and game to `/series/{slug}` — which does
+ * not just 404, it can resolve to a *different, real* series, and the detail
+ * route's on-demand fallback then ingests a title nobody asked for. A
+ * missing card is recoverable; a confidently wrong link is not. Issue #33
+ * was the same class of bug one step later (`item_type.toLowerCase() as
+ * CatalogType` in `@/lib/recommendations`): a cast, so a fifth backend type
+ * would have produced `/{unknown}/{slug}` with nothing to catch it.
+ *
+ * Accepts `null`/`undefined` (both → `undefined`) because
+ * `NotificationTargetOut.item_type` is nullable — `new_follower`
+ * notifications carry no target at all. That absorbs the only real variation
+ * between the seven copies this replaces and spares that call site a
+ * pre-guard; for the other six the wider parameter type costs nothing, since
+ * they all pass a non-nullable `string` anyway.
+ *
+ * Lives in this module — the framework-agnostic one, with zero imports and
+ * therefore no transitive `server-only` — precisely so that every surface
+ * can reach it: Server Components (`/trending`, `/search`, `/recommendations`,
+ * `/u/{username}`), Client Components (`notification-bell.tsx` via
+ * `notificationHref`) and their Vitest suites alike. Each of those used to
+ * carry its own byte-identical copy (`trendingItemType`, `toCatalogType` ×2,
+ * `feedItemType`, `reviewItemType`, `notificationItemType`,
+ * `recommendationItemType`) with a comment explaining that importing the
+ * shared one would drag in `server-only`; that reasoning was sound about
+ * `@/lib/search` and wrong about where the helper belonged. Re-exported by
+ * `./catalog.ts` (`export *`) and by `./search.ts`, so the call sites that
+ * already imported it from there keep working.
+ */
+export function toCatalogType(itemType: string | null | undefined): CatalogType | undefined {
+  if (!itemType) {
+    return undefined;
+  }
+  const lower = itemType.toLowerCase();
+  return isCatalogType(lower) ? lower : undefined;
+}
+
+/**
  * Tailwind classes for each catalog type's design-system color pair (FE-57,
  * `--type-<type>`/`--type-<type>-foreground` in `globals.css`). Same
  * colocation convention as `library-types.ts`'s `STATUS_COLOR_CLASSES` (kept
@@ -132,36 +180,6 @@ export type CatalogListPage = {
  * that shape omits it.
  */
 export type GenreWithType = CatalogGenre & { item_type: CatalogType };
-
-/**
- * Maps the uppercase `item_type` the trending endpoint returns
- * (`TrendingItemOut.item_type` ∈ `MOVIE`/`SERIES`/`BOOK`/`GAME`) to the
- * lowercase {@link CatalogType} route vocabulary (`/{type}/{slug}`,
- * `Home.typeBadge`). Shared by the home page's trending section (FE-8) and
- * the `/trending` browse page (FE-12); re-exported from `./catalog.ts`.
- *
- * Lives here rather than in `./catalog.ts` for the same reason as the rest
- * of this module: it's pure vocabulary with no network access, so tests (and
- * any future Client Component) can reach it without dragging in
- * `server-only` through `@/lib/auth/session`.
- *
- * Takes the structural `{ item_type: string }` instead of `TrendingItem` so
- * this module keeps its zero imports; every `TrendingItem` satisfies it.
- *
- * Returns `undefined` for an `item_type` outside the vocabulary instead of
- * guessing (issue #32: the previous `=== "MOVIE" ? "movie" : "series"` sent
- * every book and game to `/series/{slug}`, which does not just 404 — it can
- * resolve to a *different, real* series, and the detail route's on-demand
- * fallback then ingests a title nobody asked for). Callers must skip such an
- * item: a missing
- * card is recoverable, a confidently wrong link is not. Same lowercase +
- * {@link isCatalogType} guard as `feedItemType` (`feed-entry-list.tsx`) and
- * `toCatalogType` (`@/lib/search.ts`) use for the same backend shape.
- */
-export function trendingItemType(item: { item_type: string }): CatalogType | undefined {
-  const lower = item.item_type.toLowerCase();
-  return isCatalogType(lower) ? lower : undefined;
-}
 
 /** Sort of `/v1/trending`'s `period` query param (`docs/api.md`). */
 export type TrendingPeriod = "day" | "week";

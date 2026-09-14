@@ -17,8 +17,7 @@ vi.mock("@/lib/auth/session", () => ({
     accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
 }));
 
-const { RECOMMENDATIONS_FALLBACK_REASON, getRecommendations, recommendationItemType } =
-  await import("./recommendations");
+const { RECOMMENDATIONS_FALLBACK_REASON, getRecommendations } = await import("./recommendations");
 
 function backendResponse(status: number): Response {
   return new Response(null, { status });
@@ -73,23 +72,6 @@ describe("getRecommendations", () => {
     apiFetchMock.mockRejectedValueOnce(new Error("network down"));
 
     expect(await getRecommendations()).toEqual({ ok: false });
-  });
-});
-
-describe("recommendationItemType", () => {
-  it("lowercases the backend's item_type for routing", () => {
-    expect(recommendationItemType({ ...recommendationsPage.results[0], item_type: "MOVIE" })).toBe(
-      "movie",
-    );
-    expect(recommendationItemType({ ...recommendationsPage.results[0], item_type: "SERIES" })).toBe(
-      "series",
-    );
-    expect(recommendationItemType({ ...recommendationsPage.results[0], item_type: "BOOK" })).toBe(
-      "book",
-    );
-    expect(recommendationItemType({ ...recommendationsPage.results[0], item_type: "GAME" })).toBe(
-      "game",
-    );
   });
 });
 

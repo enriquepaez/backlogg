@@ -233,6 +233,32 @@ describe("getGenrePage", () => {
     expect(await getGenrePage("series")).toEqual({ ok: true, genres: seriesGenresFixture.genres });
   });
 
+  // Issue #36: `item_type: genre.item_type as CatalogType` was an unchecked
+  // assertion over data that arrives from the network — the same shape that
+  // caused issues #32 and #33 on two other surfaces. A fifth backend type
+  // reaching this endpoint would have produced a `/browse/{unknown}` link
+  // with nothing to catch it, so the row is dropped instead. The two tests
+  // above are the other half of this contract: they assert the four known
+  // lowercase values survive `toCatalogType` byte for byte (its
+  // `toLowerCase()` is a no-op on an already-lowercase value).
+  it("drops a genre whose item_type isn't a known catalog type, keeping the rest", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/genres`, () =>
+        HttpResponse.json({
+          genres: [
+            { name: "True Crime", slug: "true-crime", item_type: "podcast", count: 9 },
+            ...allGenresFixture.genres,
+          ],
+        }),
+      ),
+    );
+
+    const result = await getGenrePage();
+
+    expect(result).toEqual({ ok: true, genres: allGenresFixture.genres });
+    expect(result.ok && result.genres.map((genre) => genre.slug)).not.toContain("true-crime");
+  });
+
   it("returns ok: false on a non-200 response — distinct from an empty result", async () => {
     server.use(
       http.get(`${MOCK_API_BASE_URL}/v1/genres`, () =>

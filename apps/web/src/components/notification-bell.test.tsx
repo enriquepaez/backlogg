@@ -78,6 +78,26 @@ const reviewLikeNoSlug = {
   created_at: "2026-05-25T18:04:11Z",
 };
 
+/**
+ * Issue #37: a target that IS resolved but whose `item_type` falls outside
+ * the four catalog types — distinct from `reviewLikeNoSlug` above (nothing
+ * resolved at all), and the case a blind cast would turn into a confident
+ * `/podcast/{slug}` link.
+ */
+const reviewLikeUnknownType = {
+  id: 7,
+  type: "review_like",
+  actor: { username: "heidi", display_name: "Heidi", avatar_url: null },
+  target: {
+    target_type: "review",
+    target_id: 1024,
+    item_type: "PODCAST",
+    slug: "the-rest-is-history",
+  },
+  is_read: false,
+  created_at: "2026-05-25T18:04:11Z",
+};
+
 const userCompleted = {
   id: 5,
   type: "user_completed",
@@ -273,6 +293,24 @@ describe("NotificationBell", () => {
 
     const message = await screen.findByText('reviewLike:{"name":"Dave"}');
     expect(message.closest("a")).toBeNull();
+  });
+
+  it("does not render a link for a review_like whose item_type has no route (defensive)", async () => {
+    server.use(unreadCountHandler(0));
+    server.use(notificationsHandler([reviewLikeUnknownType]));
+    server.use(http.post("/api/notifications/read", () => new HttpResponse(null, { status: 204 })));
+
+    renderWithQuery(<NotificationBell />);
+
+    await act(async () => {
+      openBell();
+    });
+
+    const message = await screen.findByText('reviewLike:{"name":"Heidi"}');
+    expect(message.closest("a")).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: /the-rest-is-history/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an empty state when there are no notifications", async () => {

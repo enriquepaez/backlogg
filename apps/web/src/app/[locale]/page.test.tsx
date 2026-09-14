@@ -15,9 +15,10 @@ vi.mock("@/i18n/navigation", () => ({
   ),
 }));
 
-// Only the network calls are faked; the real `trendingItemType` (from the
-// `server-only`-free `@/lib/catalog-types`) is what these tests exercise.
-// Same mocking rationale as `trending/page.test.tsx`.
+// Only the network calls are faked; the real `toCatalogType` (from the
+// `server-only`-free `@/lib/catalog-types`, re-exported by `@/lib/catalog`)
+// is what these tests exercise. Same mocking rationale as
+// `trending/page.test.tsx`.
 const getTrending = vi.fn();
 const getAllFeatured = vi.fn();
 vi.mock("@/lib/catalog", async () => {
@@ -79,8 +80,9 @@ function cards() {
 /**
  * The home page's trending section had its own private copy of the
  * item_type → route mapping, so it shipped the same wrong links as
- * `/trending` (issue #32). It now uses the shared `trendingItemType`; this
- * suite makes sure a private copy can't come back unnoticed.
+ * `/trending` (issue #32). It now uses the shared `toCatalogType` (the one
+ * mapping for all seven surfaces since issue #33); this suite makes sure a
+ * private copy can't come back unnoticed.
  */
 describe("Home trending section (issue #32)", () => {
   it("links each trending card to its own type's route", async () => {

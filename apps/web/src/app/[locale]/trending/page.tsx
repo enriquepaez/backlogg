@@ -7,7 +7,7 @@ import {
   DEFAULT_TRENDING_PERIOD,
   getTrendingPage,
   isCatalogType,
-  trendingItemType,
+  toCatalogType,
   type CatalogType,
   type TrendingPeriod,
 } from "@/lib/catalog";
@@ -86,10 +86,10 @@ export default async function TrendingPage({
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {result.results.map((item) => {
-            const itemType = trendingItemType(item);
+            const itemType = toCatalogType(item.item_type);
             // Unknown `item_type` (a fifth type added backend-side before
             // this vocabulary catches up): skip the card rather than link it
-            // somewhere wrong — see `trendingItemType`'s doc/issue #32.
+            // somewhere wrong — see `toCatalogType`'s doc/issue #32.
             if (!itemType) {
               return null;
             }

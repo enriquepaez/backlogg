@@ -5,7 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { StarRating } from "@/components/star-rating";
-import { isCatalogType, type CatalogType } from "@/lib/catalog-types";
+import { toCatalogType } from "@/lib/catalog-types";
 import { formatDate } from "@/lib/format-date";
 import { STATUS_COLOR_CLASSES } from "@/lib/library-types";
 import { cn } from "@/lib/utils";
@@ -13,22 +13,6 @@ import { cn } from "@/lib/utils";
 import type { components } from "@backlogg/api-client";
 
 export type FeedEntry = components["schemas"]["FeedEntryOut"];
-
-/**
- * Maps the backend's uppercase `FeedItemOut.item_type` to the route-segment
- * `CatalogType` used to link to `/{type}/{slug}` (FE-10). Same logic as
- * `toCatalogType` (`@/lib/search.ts`), duplicated rather than imported: that
- * module transitively pulls in `server-only` (via `@/lib/auth/session`),
- * which would make this component's own test suite require the
- * `@vitest-environment node` override the rest of this file has no other
- * reason to need — same "small, self-contained helper beats an awkward
- * cross-module dependency" rationale `trendingItemType` (`[locale]/page.tsx`)
- * already applies for the same underlying shape.
- */
-function feedItemType(itemType: string): CatalogType | undefined {
-  const lower = itemType.toLowerCase();
-  return isCatalogType(lower) ? lower : undefined;
-}
 
 export type FeedEntryListProps = {
   entries: FeedEntry[];
@@ -76,7 +60,7 @@ function FeedEntryCard({
   locale: string;
   t: FeedEntryTranslator;
 }) {
-  const itemType = feedItemType(entry.item.item_type);
+  const itemType = toCatalogType(entry.item.item_type);
   const itemHref = itemType ? `/${itemType}/${entry.item.slug}` : undefined;
   const isCompleted = entry.event_type === "status_completed";
 

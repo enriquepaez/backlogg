@@ -9,7 +9,7 @@ import {
   CATALOG_TYPES,
   getAllFeatured,
   getTrending,
-  trendingItemType,
+  toCatalogType,
 } from "@/lib/catalog";
 
 /**
@@ -66,12 +66,12 @@ export default async function Home({ params }: PageProps<"/[locale]">) {
         viewAllLabel={t("trendingViewAll")}
       >
         {trending.map((item) => {
-          const type = trendingItemType(item);
+          const type = toCatalogType(item.item_type);
           // Unknown `item_type`: skip the card instead of linking it
           // somewhere wrong. This section used to keep a private two-type
           // copy of the mapping — the second half of issue #32, since
           // `getTrending()` returns all four types too — and now shares the
-          // one in `@/lib/catalog`.
+          // one in `@/lib/catalog-types` (re-exported by `@/lib/catalog`).
           if (!type) {
             return null;
           }

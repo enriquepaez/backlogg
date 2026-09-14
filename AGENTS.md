@@ -71,6 +71,30 @@
 > usuarios no se puede evaluar. Se descongelan cuando haya gente usando la app.
 > Mientras tanto, en el dominio de datos **no se abren features**, y un issue
 > solo se registra si pierde datos o rompe algo que el usuario ve.
+>
+> **Matiz añadido el 2026-09-14, tras revisar el grafo**: esa razón **no aplica
+> por igual a las ocho**. Solo la **83** necesita usuarios como *dato de
+> entrada* (co-ocurrencia sobre bibliotecas: sin bibliotecas no hay matriz) y la
+> **82** los necesita para *evaluar* sus pesos. Las otras seis operan sobre el
+> **catálogo**, no sobre comportamiento, y el prerrequisito que de verdad las
+> frenaba —un catálogo sembrado— se desbloqueó al cerrar el issue #20 ese mismo
+> día. Descongelarlas es una decisión del usuario, no un cambio de criterio:
+> el análisis y la ruta recomendada están en `docs/recommendations-plan.md`,
+> sección «Estado del bloqueo». **Hasta que el usuario lo diga, siguen sin
+> elegirse las ocho.**
+
+### Cuándo abrir un issue y cuándo no (2026-09-14)
+
+Si lo que encuentras se arregla **en la superficie que ya estás tocando** y
+cuesta menos que redactar el ticket, **arréglalo ahí**. Abre un issue solo
+cuando sea **trabajo real y separable**.
+
+La regla nace de un caso concreto: el issue #36 era una línea, en el archivo que
+se acababa de modificar, y la función que lo arreglaba ya estaba escrita.
+Registrarlo fue burocracia, no gestión — y el efecto acumulado es un backlog que
+nunca baja por mucho que se cierren issues. Vale también para el reviewer: la
+deuda que cabe en la rama se devuelve como **cambio a aplicar**, no como issue
+futuro.
 
 ## 5. Flujo por feature (workflow completo)
 
