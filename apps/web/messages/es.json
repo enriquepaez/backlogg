@@ -644,6 +644,13 @@
         "SOURCE_AUTHOR": "Autoría de la obra original"
       }
     },
+    "relatedWorks": {
+      "heading": "Obras relacionadas",
+      "directions": {
+        "SOURCE": "{title} se basa en esta obra",
+        "DERIVED": "Obra derivada de {title}"
+      }
+    },
     "similar": {
       "heading": "También te puede interesar",
       "empty": "Todavía no hay títulos similares."

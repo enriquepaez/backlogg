@@ -1956,3 +1956,59 @@ la respuesta. Los cuatro `.bru` están y el api-client regenerado.
 
 `bash init.sh` verde: **1706 tests** (partida: 1688). `pnpm --filter web
 typecheck` verde. Cero issues abiertos.
+
+---
+
+## 2026-09-15 — FE-66 `item_detail_adaptations_section` (frontend)
+
+**Primera superficie de usuario del trabajo de Wikidata.** Las backend 79 (PR
+#219) y 92 (PR #220) sembraron y sirvieron las adaptaciones; esta las muestra.
+
+**La decisión que mandó sobre la feature no salió de la ficha, salió de probar
+el endpoint a mano.** El título decía «adaptaciones cross-media», pero 16 de las
+18 aristas reales son `SERIES→SERIES`: bajo *Better Call Saul* el endpoint
+devuelve *Breaking Bad* y un spin-off animado, ninguno de los dos una
+adaptación. El usuario no reconoció el spin-off, y esa reacción fue el dato: una
+sección titulada «Adaptaciones» que liste eso no produce el «no sabía que había
+libro», produce «¿y esto qué es?». Decisión del usuario: **una sola sección con
+título neutro** («Obras relacionadas» / «Related works»), badge de tipo por
+entrada con los colores de FE-57 y la dirección en el texto. Lo cross-media
+destaca solo, por el color del badge.
+
+**Posición (decisión del leader):**
+`Hero → [Credits | Platforms | nada] → Obras relacionadas → Your rating → Reviews → You might also like`.
+Es un hecho declarado, no una sugerencia, así que va con los créditos y no
+pegado al bloque algorítmico — la misma distinción que el backend mantiene al
+servir solo `source='WIKIDATA'`. Reflejado en `docs/detail-page-layout.md`.
+
+**Copy.** `SOURCE` → «{title} se basa en esta obra» / «{title} is based on this
+work»; `DERIVED` → «Obra derivada de {title}» / «Derived from {title}». Interpola
+el título del **ítem de la página**, nunca el del relacionado, así que cada
+tarjeta se explica sola sin depender del orden de la lista. El
+`Record<RelatedWorkDirection, string>` es exhaustivo y sin fallback a valor
+crudo: el backend define un enum cerrado de dos valores y una entrada sin frase
+sería la «lista indiferenciada» que la acceptance prohíbe.
+
+**El guard de `item_type` se aplicó en la capa de fetch**, no en el JSX:
+`toRelatedWorks` (`catalog.ts`) pasa cada entrada por `toCatalogType` y descarta
+la que no mapee, de modo que el tipado impide aguas abajo que un tipo crudo
+construya un enlace. Razonamiento del implementer, correcto para este proyecto:
+*una tarjeta que falta se recupera, un enlace confiadamente equivocado no*.
+`APPROVED` a la primera; el reviewer mató todas las mutaciones que probó.
+
+**QA del leader** (app real: backend `:8000` + `next dev` `:3000`):
+
+- Orden de `h2` en la página: Créditos → **Obras relacionadas** → Tu puntuación →
+  Reseñas → También te puede interesar. El acordado.
+- *Better Call Saul*: las dos direcciones a la vez, con los textos correctos.
+- **El cruce de tipo funciona en los dos sentidos**: desde `/es/series/the-handmaids-tale-2017`
+  la tarjeta enlaza a `/es/book/…` con badge «Libro» y clase `bg-type-book`; desde
+  `/es/book/the-handmaids-tale-1985` enlaza a `/es/series/…`. Ese es exactamente
+  el bug de los issues #32/#33/#36 evitado: el enlace va a la ruta del **tipo del
+  relacionado**, no a la de la página.
+- Caso vacío real (`/es/movie/dune-2021`, `/es/game/elden-ring`): la sección no
+  se renderiza, ni encabezado ni placeholder.
+- Inglés verificado (`/en/series/better-call-saul-2015`).
+
+Gate de frontend en verde: `typecheck && lint && build && test`, **1305 tests**
+en 136 ficheros. `init.sh` también verde (1706). Cero issues abiertos.

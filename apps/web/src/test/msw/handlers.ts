@@ -16,6 +16,7 @@ type SimilarMoviesOut = components["schemas"]["SimilarMoviesOut"];
 type SimilarSeriesListOut = components["schemas"]["SimilarSeriesListOut"];
 type SimilarBooksOut = components["schemas"]["SimilarBooksOut"];
 type SimilarGameListOut = components["schemas"]["SimilarGameListOut"];
+type AdaptationsOut = components["schemas"]["AdaptationsOut"];
 type SearchResponse = components["schemas"]["SearchResponse"];
 
 /**
@@ -299,6 +300,42 @@ export const similarGamesFixture: SimilarGameListOut = {
 };
 
 /**
+ * `GET /v1/{type}/{slug}/adaptations` (FE-66, backend feature 92). One
+ * fixture for all four types — the endpoint returns the same
+ * `AdaptationsOut` shape everywhere — and deliberately **mixed**: two types
+ * and both directions at once, which is exactly what the dev catalog serves
+ * for *Better Call Saul* (a `SOURCE` series and a `DERIVED` one) and for
+ * *The Handmaid's Tale* (a cross-media book). A same-type edge is the
+ * majority case here, not an exotic one (16 of the 18 edges are
+ * `SERIES`→`SERIES`), so the fixture keeps one.
+ */
+export const adaptationsFixture: AdaptationsOut = {
+  results: [
+    {
+      item_type: "BOOK",
+      slug: "dune-1965",
+      title: "Dune",
+      poster_url: "https://covers.openlibrary.org/b/id/1-L.jpg",
+      direction: "SOURCE",
+    },
+    {
+      item_type: "GAME",
+      slug: "dune-1992",
+      title: "Dune",
+      poster_url: null,
+      direction: "DERIVED",
+    },
+    {
+      item_type: "MOVIE",
+      slug: "dune-1984",
+      title: "Dune",
+      poster_url: null,
+      direction: "SOURCE",
+    },
+  ],
+};
+
+/**
  * Second page of the movies list (FE-9 browse: pagination). `total: 30` with
  * `limit: 24` (the browse page's fixed page size, see `BROWSE_PAGE_SIZE` in
  * `src/lib/catalog.ts`) puts this at page 2 of 2.
@@ -493,6 +530,15 @@ export const handlers = [
     return HttpResponse.json({ detail: "Movie not found" }, { status: 404 });
   }),
 
+  // FE-66 item detail: declared adaptations/derived works. Its own `:slug`
+  // segment, same as `/similar` above.
+  http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/adaptations`, ({ params }) => {
+    if (params.slug === duneFixture.slug) {
+      return HttpResponse.json(adaptationsFixture);
+    }
+    return HttpResponse.json({ detail: "Movie not found" }, { status: 404 });
+  }),
+
   http.get(`${MOCK_API_BASE_URL}/v1/series`, () => {
     return HttpResponse.json(seriesListFixture);
   }),
@@ -508,6 +554,15 @@ export const handlers = [
   http.get(`${MOCK_API_BASE_URL}/v1/series/:slug/similar`, ({ params }) => {
     if (params.slug === chernobylFixture.slug) {
       return HttpResponse.json(similarSeriesFixture);
+    }
+    return HttpResponse.json({ detail: "Series not found" }, { status: 404 });
+  }),
+
+  // FE-66 item detail: declared adaptations/derived works. Its own `:slug`
+  // segment, same as `/similar` above.
+  http.get(`${MOCK_API_BASE_URL}/v1/series/:slug/adaptations`, ({ params }) => {
+    if (params.slug === chernobylFixture.slug) {
+      return HttpResponse.json(adaptationsFixture);
     }
     return HttpResponse.json({ detail: "Series not found" }, { status: 404 });
   }),
@@ -531,6 +586,15 @@ export const handlers = [
     return HttpResponse.json({ detail: "Book not found" }, { status: 404 });
   }),
 
+  // FE-66 item detail: declared adaptations/derived works. Its own `:slug`
+  // segment, same as `/similar` above.
+  http.get(`${MOCK_API_BASE_URL}/v1/books/:slug/adaptations`, ({ params }) => {
+    if (params.slug === duneBookFixture.slug) {
+      return HttpResponse.json(adaptationsFixture);
+    }
+    return HttpResponse.json({ detail: "Book not found" }, { status: 404 });
+  }),
+
   http.get(`${MOCK_API_BASE_URL}/v1/games`, () => {
     return HttpResponse.json(gameListFixture);
   }),
@@ -546,6 +610,15 @@ export const handlers = [
   http.get(`${MOCK_API_BASE_URL}/v1/games/:slug/similar`, ({ params }) => {
     if (params.slug === hadesFixture.slug) {
       return HttpResponse.json(similarGamesFixture);
+    }
+    return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
+  }),
+
+  // FE-66 item detail: declared adaptations/derived works. Its own `:slug`
+  // segment, same as `/similar` above.
+  http.get(`${MOCK_API_BASE_URL}/v1/games/:slug/adaptations`, ({ params }) => {
+    if (params.slug === hadesFixture.slug) {
+      return HttpResponse.json(adaptationsFixture);
     }
     return HttpResponse.json({ detail: "Game not found" }, { status: 404 });
   }),

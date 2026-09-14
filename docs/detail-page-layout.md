@@ -154,6 +154,53 @@ criterios divergen a propósito: en Credits el vacío es contradictorio con el
 hero, en Platforms no hay nada arriba que lo contradiga. Si algún día se
 unifican, es una decisión propia y afecta a FE-10 y FE-60.
 
+## Sección "Obras relacionadas" — los 4 tipos (FE-66)
+
+Va **justo después del hueco type-dependent y antes de "Your rating"**, en
+los cuatro tipos. Decisión del leader, 2026-09-15: una obra relacionada es un
+**hecho declarado** sobre el ítem (Wikidata `P144`/`P4969`, backend 79/92),
+igual que los créditos — no una sugerencia. Ponerla pegada a "You might also
+like" la mezclaría visualmente con el algoritmo y borraría la distinción que
+el backend mantiene a propósito al servir solo aristas `source='WIKIDATA'` y
+dejar fuera la capa inferida (`INTERNAL`/`COOCCURRENCE`) de la feature 83.
+
+Dato: `GET /v1/{type}/{slug}/adaptations` → `{results: [{item_type, slug,
+title, poster_url, direction}]}`. `direction` se lee desde el ítem de la URL:
+`SOURCE` = el de la página está basado en el relacionado; `DERIVED` = el
+relacionado sale del de la página.
+
+### Una sola sección, título neutro (decisión del usuario, 2026-09-15)
+
+**«Obras relacionadas» / «Related works», no «Adaptaciones».** El nombre de
+la ficha (FE-66) hablaba de adaptaciones cross-media; el dato real dice otra
+cosa: 16 de las 18 aristas del catálogo son `SERIES→SERIES`, y bajo *Better
+Call Saul* el endpoint devuelve *Breaking Bad* (`SOURCE`) y *Better Call Saul
+Presents: Slippin' Jimmy* (`DERIVED`) — precuela y spin-off, ninguna de las
+dos una adaptación. Un encabezado que prometa adaptaciones sobre esa lista se
+lee como un bug.
+
+Consecuencias en la UI:
+
+- **Un solo bloque**, sin separar cross-media de mismo-tipo.
+- Cada entrada lleva su **badge de tipo** con el color de FE-57
+  (`TYPE_COLOR_CLASSES`) — lo cross-media destaca solo, por el color.
+- La **dirección va en el texto de cada entrada**, nunca en el orden ni en
+  agrupaciones: el texto interpola el título del ítem de la página («*Better
+  Call Saul* se basa en esta obra» / «Obra derivada de *Better Call Saul*»),
+  así que una tarjeta se entiende sola.
+- El enlace usa **el tipo del ítem relacionado**, no el de la página
+  (`toCatalogType`, nunca un cast — issues #32/#33/#36).
+
+### Sección vacía: no se renderiza (como Credits, no como Platforms)
+
+Sin aristas no aparece **nada**: ni encabezado ni placeholder. Aquí el vacío
+no es la excepción sino el caso mayoritario —la cobertura de Wikidata es
+precisa y baja por diseño—, así que un encabezado huérfano sería el estado
+normal de la sección. A diferencia de `ItemCredits`, la comprobación vive en
+el propio componente (`ItemRelatedWorks`) y no en el JSX de la página: es
+intrínseca a lo que la sección es, no consecuencia de un filtro que aplique
+la página.
+
 ## Orden de secciones de la página (no solo del `dl` de metadata)
 
 Decisión del usuario (2026-08-27): justo debajo del bloque de info (hero:
@@ -170,8 +217,8 @@ poster, título, metadata, géneros, rating, botones de estado), antes de
 Movie y series no muestran nada en este hueco si la sección Credits queda
 vacía tras el filtro — ver arriba.
 
-Orden completo de la página: Hero → [Credits \| Platforms \| nada] → Your
-rating → Reviews → You might also like.
+Orden completo de la página: Hero → [Credits \| Platforms \| nada] → Obras
+relacionadas → Your rating → Reviews → You might also like.
 
 `Platforms` (`ItemPlatforms`, componente nuevo) vivía antes dentro de
 `ItemHero` como una fila de badges más (FE-60, junto a los géneros). Se
