@@ -1248,7 +1248,7 @@
         "loading.tsx / skeleton coherente con el resto del detail page si la sección se carga aparte",
         "pnpm --filter web typecheck && lint && build && test en verde"
       ],
-      "status": "blocked"
+      "status": "done"
     },
     {
       "id": 66,

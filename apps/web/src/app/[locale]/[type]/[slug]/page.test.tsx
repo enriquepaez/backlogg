@@ -23,10 +23,16 @@ vi.mock("@/lib/env", () => ({
 
 const getItemDetail = vi.fn();
 const getSimilarItems = vi.fn();
+// FE-66. Defaults to `[]` here (and not only in each `beforeEach`) so every
+// pre-existing suite in this file keeps passing unchanged: with no declared
+// relations the section renders nothing at all, exactly as before the
+// feature existed. `vi.clearAllMocks()` clears calls, not implementations.
+const getAdaptations = vi.fn().mockResolvedValue([]);
 const CATALOG_TYPES = ["movie", "series", "book", "game"];
 vi.mock("@/lib/catalog", () => ({
   getItemDetail: (type: string, slug: string) => getItemDetail(type, slug),
   getSimilarItems: (type: string, slug: string) => getSimilarItems(type, slug),
+  getAdaptations: (type: string, slug: string) => getAdaptations(type, slug),
   isCatalogType: (value: string) => CATALOG_TYPES.includes(value),
 }));
 
@@ -82,6 +88,29 @@ vi.mock("@/components/item-reviews", () => ({
 }));
 vi.mock("@/components/item-similar", () => ({
   ItemSimilar: () => <div data-testid="item-similar" />,
+}));
+// Exposed via `data-props` (same pattern as the `ItemHero` mock above) so
+// this file can assert what the page hands down — the mapped items, the
+// per-type badge labels and the two interpolated direction sentences —
+// without duplicating `ItemRelatedWorks`' own rendering tests. Mirrors the
+// component's "nothing at all when empty" rule, so the ordering assertions
+// below stay honest.
+vi.mock("@/components/item-related-works", () => ({
+  ItemRelatedWorks: (props: {
+    items: { type: string; slug: string; direction: string }[];
+    heading: string;
+    typeLabels: Record<string, string>;
+    directionLabels: Record<string, string>;
+  }) =>
+    props.items.length === 0 ? null : (
+      <div
+        data-testid="item-related-works"
+        data-heading={props.heading}
+        data-items={JSON.stringify(props.items)}
+        data-type-labels={JSON.stringify(props.typeLabels)}
+        data-direction-labels={JSON.stringify(props.directionLabels)}
+      />
+    ),
 }));
 vi.mock("@/components/rating-widget", () => ({
   RatingWidget: () => <div data-testid="rating-widget" />,
@@ -1033,6 +1062,201 @@ describe("ItemDetailPage — Credits/Platforms sit right after the hero, before 
     const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
     expect(testIdOrder(container)).toEqual([
       "item-hero",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
+  });
+});
+
+describe("ItemDetailPage — 'Related works' section (FE-66)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getAdaptations.mockResolvedValue([]);
+  });
+
+  /**
+   * What `getAdaptations` returns for a page whose item is *Better Call
+   * Saul*: both directions at once, and a type that is **not** the page's
+   * (the cross-media payoff of the feature). Already mapped to route
+   * segments — `@/lib/catalog` puts `item_type` through `toCatalogType`
+   * before the page ever sees it.
+   */
+  const relatedWorks = [
+    {
+      type: "series",
+      slug: "breaking-bad-2008",
+      title: "Breaking Bad",
+      poster_url: null,
+      direction: "SOURCE",
+    },
+    {
+      type: "book",
+      slug: "the-handmaids-tale-1985",
+      title: "The Handmaid's Tale",
+      poster_url: null,
+      direction: "DERIVED",
+    },
+  ];
+
+  function relatedWorksEl(container: HTMLElement): Element | null {
+    return container.querySelector('[data-testid="item-related-works"]');
+  }
+
+  it.each(["movie", "series", "book", "game"] as const)(
+    "fetches and renders the section on a %s detail page",
+    async (type) => {
+      getItemDetail.mockResolvedValue({
+        status: "ok",
+        item: type === "game" ? gameItem : movieItem,
+      });
+      getAdaptations.mockResolvedValue(relatedWorks);
+
+      const { container } = render(await ItemDetailPage(buildProps(type, "some-slug")));
+
+      expect(getAdaptations).toHaveBeenCalledWith(type, "some-slug");
+      expect(relatedWorksEl(container)).not.toBeNull();
+    },
+  );
+
+  it("hands the entries down untouched, keeping each one's own type and direction", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(
+      JSON.parse(relatedWorksEl(container)?.getAttribute("data-items") ?? "null"),
+    ).toEqual(relatedWorks);
+  });
+
+  it("uses the neutral heading key, not an 'adaptations' one", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(relatedWorksEl(container)?.getAttribute("data-heading")).toBe("relatedWorks.heading");
+  });
+
+  // The direction sentences name the item the reader is on, so the page —
+  // the only place that knows both the translator and that title — does the
+  // interpolation. `getTranslations` is mocked to echo `key:{vars}`.
+  it("interpolates the page item's own title into both direction sentences", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, title: "Better Call Saul" },
+    });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("series", "better-call-saul-2015")));
+
+    expect(
+      JSON.parse(relatedWorksEl(container)?.getAttribute("data-direction-labels") ?? "null"),
+    ).toEqual({
+      SOURCE: 'relatedWorks.directions.SOURCE:{"title":"Better Call Saul"}',
+      DERIVED: 'relatedWorks.directions.DERIVED:{"title":"Better Call Saul"}',
+    });
+  });
+
+  // The grid mixes types, so it needs the badge label for all four — not
+  // just the page's own, the way `ItemSimilar` does.
+  it("passes the badge label for all four types, not only the page's", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(
+      JSON.parse(relatedWorksEl(container)?.getAttribute("data-type-labels") ?? "null"),
+    ).toEqual({
+      movie: "typeBadge.movie",
+      series: "typeBadge.series",
+      book: "typeBadge.book",
+      game: "typeBadge.game",
+    });
+  });
+
+  it("renders no section at all when the item has no declared relations", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getAdaptations.mockResolvedValue([]);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(relatedWorksEl(container)).toBeNull();
+    expect(container.textContent).not.toContain("relatedWorks.heading");
+  });
+
+  it("still renders the rest of the page when the adaptations fetch degrades to an empty list", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getAdaptations.mockResolvedValue([]);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(container.querySelector('[data-testid="item-hero"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="item-similar"]')).not.toBeNull();
+  });
+
+  // Position agreed for FE-66 and written down in
+  // `docs/detail-page-layout.md`: after the type-dependent slot (Credits |
+  // Platforms | nothing), before "Your rating" — with the credits, which are
+  // facts about the work, not next to the algorithmic "You might also like".
+  function testIdOrder(container: HTMLElement): string[] {
+    return Array.from(
+      container.querySelectorAll(
+        '[data-testid="item-hero"], [data-testid="item-credits"], [data-testid="item-platforms"], [data-testid="item-related-works"], [data-testid="rating-widget"], [data-testid="item-reviews"], [data-testid="item-similar"]',
+      ),
+    ).map((el) => el.getAttribute("data-testid") as string);
+  }
+
+  it("movie: hero, credits, related works, rating-widget, reviews, similar — in that order", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, credits: [castCredit] },
+    });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "item-credits",
+      "item-related-works",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
+  });
+
+  it("game: hero, platforms, related works, rating-widget, reviews, similar — in that order", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: gameItem });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("game", "hades")));
+
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "item-platforms",
+      "item-related-works",
+      "rating-widget",
+      "item-reviews",
+      "item-similar",
+    ]);
+  });
+
+  it("book: hero, related works, rating-widget, reviews, similar — the section fills the otherwise empty slot's successor", async () => {
+    getItemDetail.mockResolvedValue({
+      status: "ok",
+      item: { ...movieItem, release_date: undefined, first_publish_date: "1965-08-01" },
+    });
+    getAdaptations.mockResolvedValue(relatedWorks);
+
+    const { container } = render(await ItemDetailPage(buildProps("book", "dune-1965")));
+
+    expect(testIdOrder(container)).toEqual([
+      "item-hero",
+      "item-related-works",
       "rating-widget",
       "item-reviews",
       "item-similar",

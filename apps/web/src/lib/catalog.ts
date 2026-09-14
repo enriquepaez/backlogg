@@ -13,6 +13,7 @@ import {
   type GenreWithType,
   type TrendingPeriod,
 } from "./catalog-types";
+import type { RelatedWorkDirection } from "./related-work-labels";
 
 /**
  * Public (no-auth, no-cookies) fetch helpers for the catalog's public pages:
@@ -548,6 +549,128 @@ export async function getSimilarItems(
     }
   } catch (error) {
     console.error(`getSimilarItems(${type}, ${slug}): failed to reach the API`, error);
+    return [];
+  }
+}
+
+/** One entry of `GET /v1/{type}/{slug}/adaptations` (`docs/api.md`, backend feature 92). */
+type AdaptationOut = components["schemas"]["AdaptationOut"];
+
+/**
+ * One related work for the item detail page's "Related works" section
+ * (FE-66), already resolved into the vocabulary the UI links with: `type` is
+ * a {@link CatalogType} route segment, not the backend's raw uppercase
+ * `item_type` string.
+ *
+ * `direction` is typed with the UI's own {@link RelatedWorkDirection} union
+ * (`./related-work-labels`), which {@link toRelatedWorks} assigns the
+ * generated schema's `AdaptationDirection` into — so a third direction added
+ * backend-side fails the build here, at the one place that could absorb it,
+ * instead of reaching `ItemRelatedWorks` as a card with no direction text.
+ */
+export type RelatedWork = {
+  type: CatalogType;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  direction: RelatedWorkDirection;
+};
+
+/**
+ * Maps the raw `AdaptationOut[]` onto {@link RelatedWork}[], putting every
+ * `item_type` through {@link toCatalogType} — never a cast, never an
+ * assumption that the related item shares the type of the page it is listed
+ * on. This endpoint is the one where that assumption is most tempting and
+ * most dangerous at once: the related item may be **any** of the four types
+ * (that is the whole point of the section — "no sabía que había libro"), yet
+ * 16 of the 18 edges in the development catalog happen to be
+ * `SERIES`→`SERIES`, so a hardcoded "same type as the page" would look
+ * correct almost every time and link to a *different, real* item the rest of
+ * the time. Issues #32, #33 and #36 were each exactly that failure.
+ *
+ * An entry whose type doesn't map is dropped rather than rendered unlinked
+ * — same rule every other `toCatalogType` call site follows
+ * ({@link getGenrePage}, `/trending`, `/recommendations`): a missing card is
+ * recoverable, a confidently wrong link is not. Dropping the last entry
+ * simply leaves an empty list, which renders nothing at all (see
+ * `ItemRelatedWorks`).
+ */
+function toRelatedWorks(results: AdaptationOut[]): RelatedWork[] {
+  return (results ?? []).flatMap((entry) => {
+    const type = toCatalogType(entry.item_type);
+    if (!type) {
+      return [];
+    }
+    return [
+      {
+        type,
+        slug: entry.slug,
+        title: entry.title,
+        poster_url: entry.poster_url,
+        direction: entry.direction,
+      },
+    ];
+  });
+}
+
+/**
+ * Adaptations and derived works of one item — `GET /v1/{type}/{slug}/
+ * adaptations` for all four catalog types (backend feature 92, same
+ * `{results: [...]}` contract and the same `AdaptationsOut` schema for every
+ * type, unlike `similar`'s four per-type wrapper names). Source: Wikidata's
+ * `P144`/`P4969`, i.e. **declared facts**, not the inferred co-occurrence
+ * layer backend feature 83 will write into the same table — the endpoint
+ * already filters to `source='WIKIDATA'`, which is why this section belongs
+ * next to the credits rather than next to "You might also like"
+ * (`docs/detail-page-layout.md`).
+ *
+ * Degrades to an empty array on any failure (network error or non-200) —
+ * same spirit as {@link getSimilarItems}: a secondary section must not take
+ * down a page whose point is the item itself. An empty array is also the
+ * *normal* answer here (coverage is precise and low by design), and it
+ * renders nothing at all rather than an empty heading, so the degraded path
+ * and the common path look identical to the user by design.
+ */
+export async function getAdaptations(
+  type: CatalogType,
+  slug: string,
+): Promise<RelatedWork[]> {
+  try {
+    const client = getApiClient();
+    const next = { revalidate: ITEM_REVALIDATE_SECONDS };
+
+    switch (type) {
+      case "movie": {
+        const { data, response } = await client.GET("/v1/movies/{slug}/adaptations", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? toRelatedWorks(data.results) : [];
+      }
+      case "series": {
+        const { data, response } = await client.GET("/v1/series/{slug}/adaptations", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? toRelatedWorks(data.results) : [];
+      }
+      case "book": {
+        const { data, response } = await client.GET("/v1/books/{slug}/adaptations", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? toRelatedWorks(data.results) : [];
+      }
+      case "game": {
+        const { data, response } = await client.GET("/v1/games/{slug}/adaptations", {
+          params: { path: { slug } },
+          next,
+        });
+        return response.status === 200 && data ? toRelatedWorks(data.results) : [];
+      }
+    }
+  } catch (error) {
+    console.error(`getAdaptations(${type}, ${slug}): failed to reach the API`, error);
     return [];
   }
 }

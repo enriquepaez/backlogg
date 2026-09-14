@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   MOCK_API_BASE_URL,
+  adaptationsFixture,
   allGenresFixture,
   bookListFixture,
   chernobylFixture,
@@ -40,6 +41,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 const {
+  getAdaptations,
   getAllFeatured,
   getFeatured,
   getGenrePage,
@@ -477,6 +479,168 @@ describe("getSimilarItems", () => {
     );
 
     expect(await getSimilarItems("game", hadesFixture.slug)).toEqual([]);
+  });
+});
+
+/**
+ * FE-66's "Related works" section. The shape under test is the mapping, not
+ * just the round trip: every `item_type` goes through `toCatalogType`, so
+ * the section can only ever link a related item under *its own* route
+ * segment (issues #32/#33/#36 — a guessed or cast `item_type` producing a
+ * silently wrong link). This is the endpoint where the guess would look
+ * right most of the time, since most edges happen to be same-type.
+ */
+describe("getAdaptations", () => {
+  /** The fixture mapped as the UI consumes it: lowercase route `type`, everything else verbatim. */
+  const mappedFixture = [
+    {
+      type: "book",
+      slug: "dune-1965",
+      title: "Dune",
+      poster_url: "https://covers.openlibrary.org/b/id/1-L.jpg",
+      direction: "SOURCE",
+    },
+    {
+      type: "game",
+      slug: "dune-1992",
+      title: "Dune",
+      poster_url: null,
+      direction: "DERIVED",
+    },
+    {
+      type: "movie",
+      slug: "dune-1984",
+      title: "Dune",
+      poster_url: null,
+      direction: "SOURCE",
+    },
+  ];
+
+  it.each([
+    ["movie", duneFixture.slug],
+    ["series", chernobylFixture.slug],
+    ["book", duneBookFixture.slug],
+    ["game", hadesFixture.slug],
+  ] as const)(
+    "maps every entry's item_type to its own route segment for a %s page",
+    async (type, slug) => {
+      expect(await getAdaptations(type, slug)).toEqual(mappedFixture);
+    },
+  );
+
+  it("passes title, slug and poster through verbatim, and drops nothing that maps", async () => {
+    const results = await getAdaptations("movie", duneFixture.slug);
+
+    expect(results).toHaveLength(adaptationsFixture.results.length);
+    expect(results.map((work) => [work.slug, work.title, work.poster_url])).toEqual(
+      adaptationsFixture.results.map((entry) => [entry.slug, entry.title, entry.poster_url]),
+    );
+  });
+
+  it("keeps both directions as the backend resolved them, never recomputing one from the order", async () => {
+    const results = await getAdaptations("movie", duneFixture.slug);
+
+    expect(results.map((work) => work.direction)).toEqual(["SOURCE", "DERIVED", "SOURCE"]);
+  });
+
+  it("keeps a same-type edge (the majority case: 16 of 18 edges are SERIES->SERIES)", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/series/:slug/adaptations`, () =>
+        HttpResponse.json({
+          results: [
+            {
+              item_type: "SERIES",
+              slug: "breaking-bad-2008",
+              title: "Breaking Bad",
+              poster_url: null,
+              direction: "SOURCE",
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(await getAdaptations("series", chernobylFixture.slug)).toEqual([
+      {
+        type: "series",
+        slug: "breaking-bad-2008",
+        title: "Breaking Bad",
+        poster_url: null,
+        direction: "SOURCE",
+      },
+    ]);
+  });
+
+  // The guard's whole point: an item_type outside the four-type vocabulary
+  // (a fifth backend type added before the frontend catches up) is dropped,
+  // not linked to `/{unknown}/{slug}` and not silently re-typed as the
+  // page's own type. A missing card is recoverable; a confidently wrong
+  // link is not.
+  it("drops an entry whose item_type is outside the vocabulary instead of guessing a route", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/adaptations`, () =>
+        HttpResponse.json({
+          results: [
+            {
+              item_type: "PODCAST",
+              slug: "dune-the-podcast",
+              title: "Dune: The Podcast",
+              poster_url: null,
+              direction: "DERIVED",
+            },
+            {
+              item_type: "BOOK",
+              slug: "dune-1965",
+              title: "Dune",
+              poster_url: null,
+              direction: "SOURCE",
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(await getAdaptations("movie", duneFixture.slug)).toEqual([
+      {
+        type: "book",
+        slug: "dune-1965",
+        title: "Dune",
+        poster_url: null,
+        direction: "SOURCE",
+      },
+    ]);
+  });
+
+  it("returns an empty list when the item has no declared relations — the normal case, not an error", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/books/:slug/adaptations`, () =>
+        HttpResponse.json({ results: [] }),
+      ),
+    );
+
+    expect(await getAdaptations("book", duneBookFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array on a non-200 response", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/adaptations`, () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+
+    expect(await getAdaptations("movie", duneFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array when the network fails", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/games/:slug/adaptations`, () => HttpResponse.error()),
+    );
+
+    expect(await getAdaptations("game", hadesFixture.slug)).toEqual([]);
+  });
+
+  it("degrades to an empty array on a 404 (unknown slug)", async () => {
+    expect(await getAdaptations("series", "no-such-series")).toEqual([]);
   });
 });
 

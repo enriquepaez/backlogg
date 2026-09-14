@@ -5,13 +5,16 @@ import { notFound } from "next/navigation";
 import { ItemCredits, type ItemCredit } from "@/components/item-credits";
 import { ItemHero, type ItemMetadataField } from "@/components/item-hero";
 import { ItemPlatforms } from "@/components/item-platforms";
+import { ItemRelatedWorks } from "@/components/item-related-works";
 import { ItemReviews } from "@/components/item-reviews";
 import { ItemSimilar } from "@/components/item-similar";
 import { RatingWidget } from "@/components/rating-widget";
 import { HERO_ROLES, creditRoleLabels } from "@/lib/credit-role-labels";
 import { env } from "@/lib/env";
 import { gameTypeLabel } from "@/lib/game-type-labels";
+import { relatedWorkDirectionLabels } from "@/lib/related-work-labels";
 import {
+  getAdaptations,
   getItemDetail,
   getSimilarItems,
   isCatalogType,
@@ -435,9 +438,15 @@ export default async function ItemDetailPage({
   }
   const type = rawType;
 
-  const [result, similar, t, tBadge] = await Promise.all([
+  const [result, similar, relatedWorks, t, tBadge] = await Promise.all([
     getItemDetail(type, slug),
     getSimilarItems(type, slug),
+    // FE-66: declared `based on` / `derivative work` edges (Wikidata), a
+    // different kind of claim from `similar` above — hence its own section
+    // next to the credits rather than next to "You might also like"
+    // (`docs/detail-page-layout.md`). Degrades to `[]` like `similar`, and
+    // `[]` renders nothing at all.
+    getAdaptations(type, slug),
     getTranslations("ItemDetail"),
     // FE-57: `Home.typeBadge` holds the singular type label ("Movie") used
     // by every `CatalogCard` type badge — reused here for `ItemSimilar`'s
@@ -467,6 +476,17 @@ export default async function ItemDetailPage({
   // Computed once: the render below needs both the list and whether it's
   // empty (see the `ItemCredits` call for why an empty one renders nothing).
   const credits = getCredits(item);
+  // FE-66's "Related works" grid mixes types by design (a series page can
+  // list a book), so unlike `ItemSimilar` — where every card shares the
+  // page's own type — it needs the label for all four. Spelled out rather
+  // than built from `CATALOG_TYPES` so the `Record<CatalogType, string>` is
+  // exhaustive by type-checking, with no cast.
+  const typeLabels: Record<CatalogType, string> = {
+    movie: tBadge("typeBadge.movie"),
+    series: tBadge("typeBadge.series"),
+    book: tBadge("typeBadge.book"),
+    game: tBadge("typeBadge.game"),
+  };
 
   return (
     <div className="flex flex-col">
@@ -527,6 +547,23 @@ export default async function ItemDetailPage({
           emptyMessage={t("platformsEmpty")}
         />
       )}
+
+      {/* FE-66, position decided for this feature and written down in
+          `docs/detail-page-layout.md`: right after the type-dependent slot
+          (Credits | Platforms | nothing), before "Your rating". A related
+          work is a *declared fact* about the item, like its credits — not a
+          suggestion, like "You might also like" at the bottom of the page,
+          which the backend deliberately keeps separate (only
+          `source='WIKIDATA'` edges reach this endpoint, never feature 83's
+          inferred co-occurrence layer). Renders nothing — no heading, no
+          placeholder — when there are no edges, which is the common case;
+          `ItemRelatedWorks` owns that check. */}
+      <ItemRelatedWorks
+        items={relatedWorks}
+        heading={t("relatedWorks.heading")}
+        typeLabels={typeLabels}
+        directionLabels={relatedWorkDirectionLabels(t, item.title)}
+      />
 
       <RatingWidget
         type={type}

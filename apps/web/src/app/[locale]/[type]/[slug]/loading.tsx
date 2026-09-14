@@ -1,8 +1,16 @@
 /**
  * Route-level loading UI for `/{type}/{slug}` (FE-10), shown by Next while
- * the page's data fetches (`getItemDetail`/`getSimilarItems`) are in flight
- * during a navigation to this segment. Echoes `ItemHero`'s layout (poster +
- * title/metadata column), same pattern as `browse/[type]/loading.tsx` (FE-9).
+ * the page's data fetches (`getItemDetail`/`getSimilarItems`/
+ * `getAdaptations`) are in flight during a navigation to this segment.
+ * Echoes `ItemHero`'s layout (poster + title/metadata column), same pattern
+ * as `browse/[type]/loading.tsx` (FE-9).
+ *
+ * No skeleton for the "Related works" section (FE-66) on purpose: it is
+ * fetched server-side in the page's own `Promise.all`, not streamed or
+ * loaded client-side, so it is already covered by this one route-level
+ * fallback — and a placeholder block for it would be wrong far more often
+ * than right, since most items have no related works and the section then
+ * renders nothing at all.
  */
 export default function ItemDetailLoading() {
   return (
