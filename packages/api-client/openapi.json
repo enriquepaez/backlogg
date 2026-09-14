@@ -283,6 +283,49 @@
         }
       }
     },
+    "/v1/movies/{slug}/adaptations": {
+      "get": {
+        "tags": [
+          "movies"
+        ],
+        "summary": "Movie adaptations",
+        "description": "Adaptations and derived works of this movie, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another movie. Empty list when there are none; 404 only for an unknown slug.",
+        "operationId": "get_movie_adaptations_v1_movies__slug__adaptations_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptationsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/movies/{slug}/ratings": {
       "get": {
         "tags": [
@@ -844,6 +887,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SimilarSeriesListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/series/{slug}/adaptations": {
+      "get": {
+        "tags": [
+          "series"
+        ],
+        "summary": "Series adaptations",
+        "description": "Adaptations and derived works of this series, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another series. Empty list when there are none; 404 only for an unknown slug.",
+        "operationId": "get_series_adaptations_v1_series__slug__adaptations_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptationsOut"
                 }
               }
             }
@@ -1439,6 +1525,49 @@
         }
       }
     },
+    "/v1/books/{slug}/adaptations": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Book adaptations",
+        "description": "Adaptations and derived works of this book, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another book. Empty list when there are none; 404 only for an unknown slug.",
+        "operationId": "get_book_adaptations_v1_books__slug__adaptations_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptationsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/books/{slug}/ratings": {
       "get": {
         "tags": [
@@ -2000,6 +2129,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SimilarGameListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/games/{slug}/adaptations": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "summary": "Game adaptations",
+        "description": "Adaptations and derived works of this game, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another game. Empty list when there are none; 404 only for an unknown slug.",
+        "operationId": "get_game_adaptations_v1_games__slug__adaptations_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptationsOut"
                 }
               }
             }
@@ -4994,6 +5166,94 @@
   },
   "components": {
     "schemas": {
+      "AdaptationDirection": {
+        "type": "string",
+        "enum": [
+          "SOURCE",
+          "DERIVED"
+        ],
+        "title": "AdaptationDirection",
+        "description": "Which end of the relation the **related** item sits on.\n\nThe value is read from the point of view of the item in the URL, because\nthat is the page the caller is on:\n\n``SOURCE``\n    the item in the URL is *based on* the related one \u2014 \"this film comes\n    from this novel\".\n``DERIVED``\n    the related item *comes out of* the item in the URL \u2014 \"this novel got\n    adapted into this series\".\n\nTwo values and not four: ``item_relations`` stores ``ADAPTATION``\n(``P144``) and ``DERIVATIVE`` (``P4969``), which Wikidata declares to be\ninverses of each other, so the raw ``relation`` says nothing on its own\nuntil it is combined with *which side the anchor is on*. Leaking that pair\nto the client would hand it the same join to redo \u2014 and the whole point of\nthe feature is that the direction arrives resolved in the data (feature 92\nacceptance), not implied by the order or by the reader's arithmetic."
+      },
+      "AdaptationOut": {
+        "properties": {
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/AdaptationDirection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_type",
+          "slug",
+          "title",
+          "poster_url",
+          "direction"
+        ],
+        "title": "AdaptationOut",
+        "description": "One adaptation of the item in the URL, as declared by Wikidata.\n\n``item_type`` is **not** optional and cannot be inferred from the page the\ncaller is on: the related item may be **any of the four types, including\nthe same one as the item in the URL**. ``P144`` (\"based on\") asserts a\nderivation, not a change of medium, so a remake or a spin-off series of\nanother series is a legitimate edge \u2014 and today it is the *majority* of\nwhat the endpoint serves (16 of the 18 edges in the development catalog are\n``SERIES``\u2192``SERIES``). The response does not filter those out; see\n``docs/api.md`` \u00a7 Movies.\n\nThat is what makes the field load-bearing rather than redundant: the page\nwhere a client would be most tempted to assume the type is exactly the page\nwhere the assumption is most often right *and* silently wrong the rest of\nthe time. Issues #32, #33 and #36 were all the same failure \u2014 an\n``item_type`` guessed instead of carried, producing a link that 404s in\nsilence \u2014 so it travels next to the slug it belongs to."
+      },
+      "AdaptationsOut": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptationOut"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "AdaptationsOut",
+        "example": {
+          "results": [
+            {
+              "direction": "SOURCE",
+              "item_type": "BOOK",
+              "poster_url": "https://covers.openlibrary.org/b/id/1.jpg",
+              "slug": "dune-1965",
+              "title": "Dune"
+            },
+            {
+              "direction": "DERIVED",
+              "item_type": "GAME",
+              "slug": "dune-1992",
+              "title": "Dune"
+            },
+            {
+              "direction": "SOURCE",
+              "item_type": "MOVIE",
+              "slug": "dune-1984",
+              "title": "Dune"
+            }
+          ]
+        }
+      },
       "AdminActionListOut": {
         "properties": {
           "items": {

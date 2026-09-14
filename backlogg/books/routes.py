@@ -10,6 +10,8 @@ from backlogg.library import service as library_service
 from backlogg.library.schemas import LibraryEntryIn, LibraryStatusOut
 from backlogg.ratings import service as ratings_service
 from backlogg.ratings.schemas import RatingIn, RatingListOut, RatingOut
+from backlogg.recommendations import service as recommendations_service
+from backlogg.recommendations.schemas import AdaptationsOut
 from backlogg.users.auth import get_current_user, get_current_user_optional
 from backlogg.users.models import User
 
@@ -50,6 +52,21 @@ async def list_books(
 )
 async def get_similar_books(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_books(db, slug)
+
+
+@router.get(
+    "/{slug}/adaptations",
+    response_model=AdaptationsOut,
+    summary="Book adaptations",
+    description=(
+        "Adaptations and derived works of this book, as declared by Wikidata. Each entry carries "
+        "the related item's item_type/slug and the direction; the related item may be of any "
+        "type, including another book. Empty list when there are none; 404 only for an "
+        "unknown slug."
+    ),
+)
+async def get_book_adaptations(slug: str, db: AsyncSession = Depends(get_db)):
+    return await recommendations_service.get_item_adaptations(db, item_type="BOOK", slug=slug)
 
 
 @router.get(

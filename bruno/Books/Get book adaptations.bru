@@ -1,0 +1,37 @@
+meta {
+  name: Get book adaptations
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/v1/books/the-handmaids-tale-1985/adaptations
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("results field is an array", function() {
+    expect(res.body.results).to.be.an("array");
+  });
+
+  test("every entry carries item_type, slug and direction", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.item_type).to.be.oneOf(["MOVIE", "SERIES", "BOOK", "GAME"]);
+      expect(entry.slug).to.be.a("string");
+      expect(entry.direction).to.be.oneOf(["SOURCE", "DERIVED"]);
+    });
+  });
+}
+
+docs {
+  The other end of the edge exercised by "Get series adaptations": the same
+  stored relation, read from the novel's page, comes back as item_type SERIES
+  with direction DERIVED ("this novel got adapted into that series"). Only one
+  of the two rows is stored — item_relations keeps no mirror edge — so the
+  direction is resolved server-side from which end the slug sits on.
+}

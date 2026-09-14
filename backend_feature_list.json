@@ -1834,6 +1834,28 @@
         "bash init.sh en verde"
       ],
       "status": "done"
+    },
+    {
+      "id": 92,
+      "name": "item_adaptations_endpoint",
+      "title": "Servir las adaptaciones cross-media de item_relations por HTTP (sub-recurso /adaptations)",
+      "description": "La feature 79 sembró item_relations con las adaptaciones de Wikidata (P144 'based on' y P4969 'derivative work') y deliberadamente no añadió superficie HTTP: su trabajo era el volcado y el ancla de QID, no la presentación. El resultado es que el dato está en la base de datos y ningún endpoint lo expone, así que FE-66 (item_detail_adaptations_section) no tiene de dónde leerlo. Esta feature cierra ese hueco y nada más. || FORMA: sub-recurso por tipo, GET /v1/{movies|series|books|games}/{slug}/adaptations, hermano del /similar que ya existe en los cuatro tipos. Sub-recurso y no campo dentro del detail porque la cobertura es baja por diseño (la mayoría de ítems no tendrán ninguna) y no merece engordar el payload del detail de todo el catálogo para el caso raro. || LAS DOS DIRECCIONES SON DISTINTAS Y LA RESPUESTA LO TIENE QUE DECIR. La relación es bidireccional y item_relations no guarda arista espejo: get_relations_for_item (backlogg/shared/item_relations.py, ya escrito y probado) lee los dos lados, y es la respuesta la que debe distinguir 'esta película viene de este libro' de 'de este libro salió esta serie'. Una lista indiferenciada obligaría al frontend a adivinar la dirección, que es justo lo que la acceptance de FE-66 prohíbe. || CADA ENTRADA LLEVA SU item_type. Es el punto donde este proyecto ya se ha equivocado tres veces: los issues #32, #33 y #36 fueron todos la misma forma — un item_type mal mapeado que produce un enlace roto en silencio. El item relacionado es de OTRO tipo por definición, así que su item_type y su slug son obligatorios en la respuesta y el frontend no puede inferirlos de la página en la que está.",
+      "depends_on": [
+        79
+      ],
+      "acceptance": [
+        "GET /v1/{movies|series|books|games}/{slug}/adaptations en los cuatro tipos, con el mismo contrato",
+        "Cada entrada lleva item_type, slug, title y poster_url del ítem relacionado, más la dirección de la relación",
+        "Las dos direcciones se distinguen en el dato (origen vs obra derivada), no en el orden ni implícitamente",
+        "Un ítem sin adaptaciones devuelve 200 con lista vacía, nunca 404; el 404 queda para el slug desconocido",
+        "Lee item_relations por los dos lados vía get_relations_for_item; no se reimplementa la consulta",
+        "Solo se devuelven aristas de source='WIKIDATA'; la capa INTERNAL de la feature 83 no se filtra a esta respuesta sin decidirlo antes",
+        "docs/api.md actualizado y bruno/ sincronizado con los cuatro .bru nuevos",
+        "packages/api-client regenerado y pnpm --filter web typecheck en verde",
+        "Tests de los cuatro tipos, incluido el caso sin adaptaciones y el de relación en cada dirección",
+        "bash init.sh en verde"
+      ],
+      "status": "done"
     }
   ]
 }

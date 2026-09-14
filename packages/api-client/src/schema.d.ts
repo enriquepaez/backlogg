@@ -61,6 +61,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/movies/{slug}/adaptations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Movie adaptations
+         * @description Adaptations and derived works of this movie, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another movie. Empty list when there are none; 404 only for an unknown slug.
+         */
+        get: operations["get_movie_adaptations_v1_movies__slug__adaptations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/movies/{slug}/ratings": {
         parameters: {
             query?: never;
@@ -181,6 +201,26 @@ export interface paths {
          * @description Up to 10 similar series (TMDB). New items are persisted locally.
          */
         get: operations["get_similar_series_v1_series__slug__similar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/series/{slug}/adaptations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Series adaptations
+         * @description Adaptations and derived works of this series, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another series. Empty list when there are none; 404 only for an unknown slug.
+         */
+        get: operations["get_series_adaptations_v1_series__slug__adaptations_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -317,6 +357,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/books/{slug}/adaptations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Book adaptations
+         * @description Adaptations and derived works of this book, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another book. Empty list when there are none; 404 only for an unknown slug.
+         */
+        get: operations["get_book_adaptations_v1_books__slug__adaptations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/books/{slug}/ratings": {
         parameters: {
             query?: never;
@@ -437,6 +497,26 @@ export interface paths {
          * @description Up to 10 similar games (IGDB similar_games). New items are persisted locally.
          */
         get: operations["get_similar_games_v1_games__slug__similar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/games/{slug}/adaptations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Game adaptations
+         * @description Adaptations and derived works of this game, as declared by Wikidata. Each entry carries the related item's item_type/slug and the direction; the related item may be of any type, including another game. Empty list when there are none; 404 only for an unknown slug.
+         */
+        get: operations["get_game_adaptations_v1_games__slug__adaptations_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1417,6 +1497,91 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdaptationDirection
+         * @description Which end of the relation the **related** item sits on.
+         *
+         *     The value is read from the point of view of the item in the URL, because
+         *     that is the page the caller is on:
+         *
+         *     ``SOURCE``
+         *         the item in the URL is *based on* the related one — "this film comes
+         *         from this novel".
+         *     ``DERIVED``
+         *         the related item *comes out of* the item in the URL — "this novel got
+         *         adapted into this series".
+         *
+         *     Two values and not four: ``item_relations`` stores ``ADAPTATION``
+         *     (``P144``) and ``DERIVATIVE`` (``P4969``), which Wikidata declares to be
+         *     inverses of each other, so the raw ``relation`` says nothing on its own
+         *     until it is combined with *which side the anchor is on*. Leaking that pair
+         *     to the client would hand it the same join to redo — and the whole point of
+         *     the feature is that the direction arrives resolved in the data (feature 92
+         *     acceptance), not implied by the order or by the reader's arithmetic.
+         * @enum {string}
+         */
+        AdaptationDirection: "SOURCE" | "DERIVED";
+        /**
+         * AdaptationOut
+         * @description One adaptation of the item in the URL, as declared by Wikidata.
+         *
+         *     ``item_type`` is **not** optional and cannot be inferred from the page the
+         *     caller is on: the related item may be **any of the four types, including
+         *     the same one as the item in the URL**. ``P144`` ("based on") asserts a
+         *     derivation, not a change of medium, so a remake or a spin-off series of
+         *     another series is a legitimate edge — and today it is the *majority* of
+         *     what the endpoint serves (16 of the 18 edges in the development catalog are
+         *     ``SERIES``→``SERIES``). The response does not filter those out; see
+         *     ``docs/api.md`` § Movies.
+         *
+         *     That is what makes the field load-bearing rather than redundant: the page
+         *     where a client would be most tempted to assume the type is exactly the page
+         *     where the assumption is most often right *and* silently wrong the rest of
+         *     the time. Issues #32, #33 and #36 were all the same failure — an
+         *     ``item_type`` guessed instead of carried, producing a link that 404s in
+         *     silence — so it travels next to the slug it belongs to.
+         */
+        AdaptationOut: {
+            /** Item Type */
+            item_type: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Poster Url */
+            poster_url: string | null;
+            direction: components["schemas"]["AdaptationDirection"];
+        };
+        /**
+         * AdaptationsOut
+         * @example {
+         *       "results": [
+         *         {
+         *           "direction": "SOURCE",
+         *           "item_type": "BOOK",
+         *           "poster_url": "https://covers.openlibrary.org/b/id/1.jpg",
+         *           "slug": "dune-1965",
+         *           "title": "Dune"
+         *         },
+         *         {
+         *           "direction": "DERIVED",
+         *           "item_type": "GAME",
+         *           "slug": "dune-1992",
+         *           "title": "Dune"
+         *         },
+         *         {
+         *           "direction": "SOURCE",
+         *           "item_type": "MOVIE",
+         *           "slug": "dune-1984",
+         *           "title": "Dune"
+         *         }
+         *       ]
+         *     }
+         */
+        AdaptationsOut: {
+            /** Results */
+            results: components["schemas"]["AdaptationOut"][];
+        };
         /** AdminActionListOut */
         AdminActionListOut: {
             /** Items */
@@ -3157,6 +3322,37 @@ export interface operations {
             };
         };
     };
+    get_movie_adaptations_v1_movies__slug__adaptations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdaptationsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_movie_ratings_v1_movies__slug__ratings_get: {
         parameters: {
             query?: {
@@ -3422,6 +3618,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimilarSeriesListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_series_adaptations_v1_series__slug__adaptations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdaptationsOut"];
                 };
             };
             /** @description Validation Error */
@@ -3713,6 +3940,37 @@ export interface operations {
             };
         };
     };
+    get_book_adaptations_v1_books__slug__adaptations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdaptationsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_book_ratings_v1_books__slug__ratings_get: {
         parameters: {
             query?: {
@@ -3978,6 +4236,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimilarGameListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_game_adaptations_v1_games__slug__adaptations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdaptationsOut"];
                 };
             };
             /** @description Validation Error */

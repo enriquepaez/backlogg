@@ -1899,3 +1899,60 @@ protege a la 83: una fila `INTERNAL/COOCCURRENCE` con `score=0.42` sembrada a
 mano sobre el mismo par **sobrevive intacta** a una pasada completa de Wikidata.
 
 `bash init.sh` verde: **1688 tests** (partida: 1649). Cero issues abiertos.
+
+---
+
+## 2026-09-14 (noche) — Feature 92 `item_adaptations_endpoint`
+
+**Feature nueva, creada en esta sesión.** La 79 dejó `item_relations` poblada y
+sin servir: no añadió superficie HTTP por diseño, así que FE-66 no tenía de
+dónde leer el dato. Esta feature cierra ese hueco y nada más. El usuario eligió
+hacer visible lo sembrado antes que añadir otra capa invisible (la 76 sigue
+pendiente).
+
+**Qué se construyó.** `GET /v1/{movies|series|books|games}/{slug}/adaptations`,
+hermano del `/similar` que ya existía en los cuatro tipos. Sub-recurso y no
+campo del detail porque la cobertura es baja por diseño (18 aristas sobre 1.092
+ítems anclados) y no compensa engordar el payload del detail de todo el
+catálogo. Respuesta: `{results: [{item_type, slug, title, poster_url,
+direction}]}`, donde `direction` se lee desde el ítem de la URL — `SOURCE` («está
+basado en») o `DERIVED` («de este sale»). La tabla no guarda arista espejo, así
+que la dirección la resuelve el servidor leyendo los dos lados con
+`get_relations_for_item`, que ya existía y no se reimplementó.
+
+**El leader se equivocó y lo corrigió con datos delante.** El plan afirmaba que
+el ítem relacionado es «de otro tipo por definición». Es falso: **16 de las 18
+aristas reales son `SERIES→SERIES`** (*Batman: TAS* → *The New Batman
+Adventures*), porque `P144` afirma «based on» sin exigir cruce de medios. El
+implementer no filtró y marcó la decisión como de producto en vez de tomarla en
+silencio. Decisión del leader: **las mismo-tipo se quedan** — el endpoint es la
+capa de dato y filtrar ahí destruiría información que el frontend no puede
+recuperar. Queda anotado para FE-66 que su título dice «cross-media» y que su
+copy tendrá que funcionar para ambos casos.
+
+**Review en dos rondas, las dos por consecuencias de esa corrección.** El
+endpoint estaba bien desde la primera (el reviewer verificó a mano las cuatro
+combinaciones de dirección y comprobó que `anchor_is_from` se apoya en el **id**
+y no en el tipo, que es lo correcto cuando ambos extremos son `SERIES`). Faltaban
+dos cosas: (1) ningún test fijaba el caso mismo-tipo, así que la suite era igual
+de compatible con una implementación que lo filtrase y con una que resolviese la
+dirección por tipo — dos regresiones silenciosas sobre el 89 % de las aristas
+vivas; (2) **el contrato publicado contradecía la decisión**: tres sitios seguían
+diciendo «cruza tipos por definición», y uno era el docstring de `AdaptationOut`,
+que se serializa a `description` en `openapi.json` y `schema.d.ts` — el texto que
+lee quien implemente FE-66. La corrección del leader se había quedado en el plan
+sin llegar al artefacto que consume el frontend. El implementer encontró además
+cuatro `description=` de ruta con la misma frase. `APPROVED` en la segunda ronda,
+sin tocar `service.py` ni `repository.py`.
+
+**QA del leader** (API local contra la DB de dev): *Better Call Saul* devuelve
+las **dos direcciones en una sola respuesta** —`SOURCE` a *Breaking Bad* y
+`DERIVED` a *Slippin' Jimmy*—, que es justo el caso que una lista indiferenciada
+haría ilegible. *The Handmaid's Tale* cruza serie↔libro en los dos sentidos.
+200 con lista vacía en `movies/dune-2021` y `games/elden-ring`; 404 en los cuatro
+tipos para slug desconocido. Y la comprobación que protege a la feature 83: una
+fila `INTERNAL/COOCCURRENCE` con `score=0.91` sembrada a mano **no aparece** en
+la respuesta. Los cuatro `.bru` están y el api-client regenerado.
+
+`bash init.sh` verde: **1706 tests** (partida: 1688). `pnpm --filter web
+typecheck` verde. Cero issues abiertos.

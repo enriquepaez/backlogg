@@ -1,0 +1,38 @@
+meta {
+  name: Get series adaptations
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/v1/series/the-handmaids-tale-2017/adaptations
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("results field is an array", function() {
+    expect(res.body.results).to.be.an("array");
+  });
+
+  test("every entry carries item_type, slug and direction", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.item_type).to.be.oneOf(["MOVIE", "SERIES", "BOOK", "GAME"]);
+      expect(entry.slug).to.be.a("string");
+      expect(entry.direction).to.be.oneOf(["SOURCE", "DERIVED"]);
+    });
+  });
+}
+
+docs {
+  Cross-media adaptations from Wikidata (feature 92). This slug is one of the
+  real cross-type edges seeded by the feature 79 pass: the series is based on
+  the novel, so the entry comes back as item_type BOOK with direction SOURCE.
+
+  An empty results array is the normal answer for most of the catalog and is NOT
+  an error; 404 is only for a slug that names no series.
+}
