@@ -236,7 +236,7 @@ cambia.
 |---|---|
 | `RENDER_API_URL` | nightly-sync.yml |
 | `ADMIN_API_KEY` | nightly-sync.yml |
-| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml, incremental-sync.yml |
+| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml, incremental-sync.yml, wikidata-sync.yml |
 | `TMDB_API_KEY` | backfill-sync.yml, incremental-sync.yml |
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | backfill-sync.yml, incremental-sync.yml |
 
@@ -1160,12 +1160,20 @@ async def m():
 asyncio.run(m())"'
 ```
 
-Se esperan **siete filas** (dos por cada tipo de TMDB, dos de IGDB, una de
-Open Library). Una fila **ausente** significa «ese mecanismo no ha corrido
-nunca» y es distinto de una fila con `cursor_value` NULL, que significa «corrió
-y no produjo corte utilizable». Siguen siendo siete después del issue #34: los
-dos barridos de promoción no escriben marca porque no tienen «desde cuándo», así
-que para saber si corrieron hay que mirar el log del run, no esta tabla.
+Del incremental se esperan **siete filas** (dos por cada tipo de TMDB, dos de
+IGDB, una de Open Library). Una fila **ausente** significa «ese mecanismo no ha
+corrido nunca» y es distinto de una fila con `cursor_value` NULL, que significa
+«corrió y no produjo corte utilizable». Siguen siendo siete después del issue
+#34: los dos barridos de promoción no escriben marca porque no tienen «desde
+cuándo», así que para saber si corrieron hay que mirar el log del run, no esta
+tabla.
+
+Desde la feature 79 la tabla aloja además hasta **cinco filas de `WIKIDATA`**
+(cuatro de `SPARQL_ANCHOR`, una por tipo, y una de `SPARQL_RELATIONS`/`ALL`),
+con una semántica de `cursor_value` distinta: ahí `NULL` con la fila presente
+significa «ese recorrido **terminó**», porque el volcado mensual limpia su
+cursor al llegar al final para empezar de cero el mes siguiente. Ver
+«Volcado de Wikidata».
 
 ### Si lleva días sin correr
 
@@ -1197,6 +1205,64 @@ Cada mecanismo se degrada distinto, y la diferencia importa:
    la marca está atrás y la edición publicada es nueva, así que hará la pasada
    completa (~2 h). El work dir se cachea por edición, de modo que un run que
    muera a mitad se reanuda sin volver a bajar los 12,59 GB de ediciones.
+
+## Volcado de Wikidata (feature 79)
+
+`.github/workflows/wikidata-sync.yml` ejecuta `scripts/sync_wikidata.py` en el
+runner contra Neon. Cron **mensual** (`0 3 3 * *`) más `workflow_dispatch`.
+No necesita más secret que `DATABASE_URL`: el endpoint SPARQL de Wikidata es
+público y sus datos son CC0.
+
+Dos pasadas, en este orden: **ancla** (id externo → QID, a
+`external_ids(source='WIKIDATA')`) y **relaciones** (`P144`/`P4969` →
+`item_relations`, resolviendo los dos extremos contra ese QID). Detalle de la
+fuente en `docs/external-apis.md` §Wikidata.
+
+```bash
+# Pasada completa (ancla y luego relaciones)
+gh workflow run wikidata-sync.yml
+
+# Solo una de las dos, o solo un tipo de ítem
+gh workflow run wikidata-sync.yml -f pass=anchor -f item_type=BOOK
+gh workflow run wikidata-sync.yml -f pass=relations
+
+gh run list --workflow=wikidata-sync.yml --limit 3
+```
+
+**Códigos de salida.** `0` = las dos pasadas terminaron su recorrido; `2` =
+corrió pero **degradado** (se acabó el presupuesto de reloj a mitad, o hubo
+QIDs que no se pudieron enlazar — issues #22/#24), y el workflow lo saca como
+`::warning::` sin tumbar el job; `1` = fallo irrecuperable.
+
+**Reanudar.** Re-lanzar el workflow. Ambas pasadas son upsert y guardan cursor
+en `sync_watermarks`, así que el segundo dispatch continúa en vez de repetir o
+duplicar:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT kind, item_type, cursor_value, last_run_at \
+  FROM sync_watermarks WHERE source='WIKIDATA' ORDER BY kind, item_type;"
+```
+
+`cursor_value IS NULL` con la fila presente significa «ese recorrido terminó»;
+la ausencia de la fila, «nunca ha corrido».
+
+**Cobertura del ancla.** El informe por tipo de ítem va al step summary del run
+y al log. A mano:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT item_type, count(*) FILTER (WHERE source='WIKIDATA') AS anchored, \
+  count(*) FILTER (WHERE source<>'WIKIDATA') AS linked \
+  FROM external_ids GROUP BY item_type ORDER BY item_type;"
+```
+
+Una cobertura baja es un dato, no un fallo — especialmente en `GAME`, donde la
+propiedad que guarda el id numérico de IGDB casi no está poblada
+(`docs/external-apis.md` explica por qué no se usa la del slug).
+
+**⛔ Nunca `DELETE FROM item_relations` a secas.** La tabla la comparten la
+feature 79 (`source='WIKIDATA'`) y la 83 (`source='INTERNAL'`); un borrado
+ancho se lleva la otra capa por delante. Si hay que limpiar, acotar siempre por
+`source`.
 
 ## Endpoints admin
 

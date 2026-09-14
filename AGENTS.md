@@ -80,8 +80,19 @@
 > frenaba —un catálogo sembrado— se desbloqueó al cerrar el issue #20 ese mismo
 > día. Descongelarlas es una decisión del usuario, no un cambio de criterio:
 > el análisis y la ruta recomendada están en `docs/recommendations-plan.md`,
-> sección «Estado del bloqueo». **Hasta que el usuario lo diga, siguen sin
-> elegirse las ocho.**
+> sección «Estado del bloqueo».
+>
+> **Descongelamiento parcial autorizado por el usuario el 2026-09-14.** La
+> primera elegida es la **79** (`wikidata_adaptations`): coste cero, mapeo por
+> id externo y no heurístico, y deja valor —el ancla de QID como póliza de
+> migración— aunque el resto del bloque nunca se descongele.
+>
+> **Siguen sin elegirse: 75, 76, 77, 78, 80, 82 y 83.** Para la **82** y la
+> **83** el argumento original se mantiene intacto (necesitan usuarios: la 83
+> como dato de entrada, la 82 para evaluar sus pesos) y **no se descongelan**.
+> Las otras cinco esperan una decisión del usuario, una a una, con el mismo
+> criterio; la **75** además exige comprobar antes que `pgvector` está en el
+> free tier de Neon y que los embeddings de ~100k ítems se generan sin coste.
 
 ### Cuándo abrir un issue y cuándo no (2026-09-14)
 

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 # Import all models so Alembic can detect them
 import backlogg.shared.external_ids  # noqa: F401
+import backlogg.shared.item_relations  # noqa: F401
 import backlogg.shared.models  # noqa: F401
 from alembic import context
 from backlogg.core.database import Base  # noqa: F401

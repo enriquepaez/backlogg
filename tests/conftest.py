@@ -107,6 +107,28 @@ def _disable_open_library_pacing():
 
 
 @pytest.fixture(autouse=True)
+def _disable_wikidata_pacing():
+    """Switch off the 1 req/s Wikidata pacer for every test (feature 79).
+
+    Same reasoning as ``_disable_open_library_pacing`` above: the pacer is a
+    process-wide singleton that sleeps for real, so leaving it on would add a
+    full second per mocked SPARQL request for no signal — every one of those
+    requests is a mock. The pacing itself is asserted in
+    ``tests/recommendations/test_wikidata_adapter.py``, which re-enables it on
+    purpose with an injected clock.
+    """
+    from backlogg.recommendations.adapters import wikidata
+
+    pacer = wikidata._wd_pacer
+    previous = pacer.min_interval
+    pacer.min_interval = 0.0
+    pacer.reset()
+    yield
+    pacer.min_interval = previous
+    pacer.reset()
+
+
+@pytest.fixture(autouse=True)
 def _reset_response_cache():
     """Clear the in-process response cache before every test.
 

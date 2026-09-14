@@ -935,6 +935,92 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
   clave), MobyGames (de pago y con límites de ritmo muy bajos: 720
   peticiones/hora en el tier no comercial).
 
+## Wikidata (adaptaciones cross-media + ancla de QID) — feature 79
+
+- **Endpoint**: `https://query.wikidata.org/sparql` (SPARQL, Wikidata Query
+  Service). **Sin auth, sin cuenta, sin clave.**
+- **Licencia**: los datos son **CC0**. Sin restricción comercial de ningún
+  tipo — al contrario que TMDB e IGDB, que son solo uso no comercial. Coste
+  cero en todos los sentidos.
+- **Quién lo usa**: `scripts/sync_wikidata.py`, programado por
+  `.github/workflows/wikidata-sync.yml` (cron mensual + `workflow_dispatch`).
+  Corre en el runner contra Neon, no vía Render: la pasada de anclaje recorre
+  todo el catálogo enlazado y no cabe en una petición de 15 min. **No añade
+  superficie HTTP**, así que `bruno/` y `docs/api.md` no cambian.
+- **external_ids source value**: `WIKIDATA` (el valor es el QID, `Q186341`).
+
+### Las propiedades que se usan, y por qué esas
+
+| Propiedad | Qué es | Para qué |
+|---|---|---|
+| `P4947` | TMDB movie ID | ancla de MOVIE |
+| `P4983` | TMDB TV series ID | ancla de SERIES |
+| `P648`  | Open Library ID (la forma `OL…W` es la obra) | ancla de BOOK |
+| `P9043` | IGDB **numeric** game ID | ancla de GAME |
+| `P144`  | *based on* — el sujeto está basado en el objeto | `relation='ADAPTATION'` |
+| `P4969` | *derivative work* — el objeto deriva del sujeto | `relation='DERIVATIVE'` |
+
+Volumen medido contra el endpoint real el **2026-09-14**: `P4947` 284.627
+sentencias, `P4983` 63.703, `P648` 512.900, `P9043` 1.033, `P5794` 148.333.
+
+**`P5794` no se usa aunque esté 148× más poblada que `P9043`.** Su valor es el
+*slug* de IGDB (`https://www.igdb.com/games/$1`), y la identidad de un juego en
+este catálogo es el id numérico. Lo único que guarda el slug localmente es
+`games.slug`, que es un slug de presentación y se realinea cuando la fuente
+renombra el ítem (`docs/conventions.md`): emparejar por ahí sería emparejar por
+nombre, que es justo lo que esta fuente se eligió para evitar. Consecuencia
+asumida y **reportada**: los juegos tienen un ancla fina.
+
+### Cómo se consulta: desde el catálogo, no desde Wikidata
+
+Lo obvio sería volcar todos los valores de `P4947` y hacer el join en local.
+Medido, eso son cientos de miles de filas y requiere paginar con un *sorted
+scan* por página: una página de 5.000 filas costó ~33 s contra el límite de
+**60 s por consulta** del endpoint.
+
+Se hace al revés: un bloque `VALUES` con los ids que el catálogo **sí** tiene
+(500 por petición, vía `POST` porque no caben en una URL). Cada consulta pasa a
+ser un puñado de lookups por índice, responde en menos de un segundo, y no se
+descargan las ~750.000 sentencias sobre ítems que no tenemos. Además la
+reanudación es trivial: el cursor es una posición en **nuestra** tabla
+(`external_ids.id`), que está totalmente ordenada y no la puede reordenar una
+edición en Wikidata a mitad de run.
+
+### Trato con el endpoint
+
+- `User-Agent` identificativo con dirección de contacto — WDQS bloquea a los
+  clientes genéricos. Misma política que el issue #26 impuso a Open Library.
+- Ritmo limitado a **1 req/s** con el `RequestPacer` compartido
+  (`backlogg/shared/pacing.py`). WDQS no publica un número de req/s: limita
+  concurrencia, corta a los 60 s por consulta y responde `429` con
+  `Retry-After`. Como es un batch mensual sin nadie esperando, ir despacio no
+  cuesta nada.
+- Reintentos con backoff exponencial en `429`/`5xx`/timeouts. Un **400 no se
+  reintenta**: WDQS contesta 400 a una consulta mal formada o demasiado cara, y
+  reenviarla igual solo quema presupuesto del endpoint.
+
+### Las dos pasadas, y por qué ese orden
+
+1. **Ancla** — id externo → QID → `external_ids(source='WIKIDATA')`, vía
+   `upsert_external_id` (hereda la instrumentación de los issues #22 y #24).
+   Informe de cobertura **por tipo de ítem** al terminar.
+2. **Relaciones** — `P144`/`P4969` → `item_relations`, resolviendo **los dos
+   extremos** contra el QID que persistió la pasada 1.
+
+La 2 depende de la 1: el extremo lejano de una sentencia llega como QID y la
+única forma de convertirlo en una fila del catálogo es el ancla. Un extremo que
+no esté en el catálogo se **descarta y se cuenta** (`unmatched_ends`); no hay
+camino por título en ninguna parte del código.
+
+Ambas pasadas son upsert y guardan cursor en `sync_watermarks`
+(`WIKIDATA / SPARQL_ANCHOR / <tipo>` y `WIKIDATA / SPARQL_RELATIONS / ALL`), así
+que un re-dispatch continúa donde murió. Al terminar el recorrido el cursor se
+**limpia**, para que el mes siguiente empiece de cero: Wikidata se sigue
+editando, y un job que solo mirase filas nuevas nunca recogería un QID que
+alguien rellenó para un ítem que ya teníamos.
+
+Esquema de `item_relations` en `docs/schema.md`, sección «Item relations».
+
 ## SMTP (Email) — feature 36 `account_recovery`
 
 - **Transporte**: SMTP genérico vía la stdlib (`smtplib` +
@@ -978,6 +1064,7 @@ series, donde no lo sería, existe la vía de alta inmediata por fecha.
 | `BOOKS_SEED_MIN_PAGES`         | Open Library seed | Mínimo `number_of_pages_median`; descarta folletos (default: 100) |
 | `BOOKS_SEED_MIN_EDITIONS`      | Open Library seed | Mínimo `edition_count` del stream inglés: el filtro de notoriedad que separa la entrega suelta de la obra canónica (default: 10) |
 | `BOOKS_SEED_MIN_EDITIONS_ES`   | Open Library seed | Ídem para el stream en castellano. **No subir a 3**: *Reina roja* tiene exactamente 2 ediciones (default: 2) |
+| `WIKIDATA_SYNC_TIME_BUDGET_MINUTES` | Volcado Wikidata | Techo de reloj por pasada, en minutos. El job se para solo antes de que lo mate el timeout de Actions, conservando cursor e informe; un re-dispatch continúa. 0 lo desactiva (default: 300) |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
 | `SYNC_SLICE_SIZE_MOVIES` / `_SERIES` / `_BOOKS` / `_GAMES` | Sync job | Override por tipo del anterior. Movies necesita ~350/noche y series ~61 para la ventana de 6 meses de TMDB (default: sin valor → cae al global) |
 

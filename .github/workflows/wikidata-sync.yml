@@ -1,0 +1,111 @@
+name: Monthly Wikidata sync
+
+on:
+  schedule:
+    # 03:00 UTC on the 3rd of every month — an hour after the nightly sync
+    # window so the two never share the Neon connection budget, and monthly
+    # because these statements do not change: a novel does not stop having
+    # been adapted into a film.
+    - cron: '0 3 3 * *'
+  workflow_dispatch:
+    inputs:
+      pass:
+        description: 'Which pass to run. anchor = resolve catalog external ids to Wikidata QIDs into external_ids (the migration policy). relations = turn P144/P4969 statements into item_relations, resolving BOTH ends against the QIDs the anchor persisted. all = anchor first, then relations — the order is not optional.'
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - anchor
+          - relations
+      item_type:
+        description: 'anchor pass only — restrict it to one content type (blank = all four). Useful to re-run a single type after changing its property mapping.'
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - MOVIE
+          - SERIES
+          - BOOK
+          - GAME
+      budget_minutes:
+        description: 'Wall-clock ceiling per pass, in minutes (blank = WIKIDATA_SYNC_TIME_BUDGET_MINUTES, 300). The job stops itself at the ceiling keeping its cursor; re-dispatch to continue.'
+        required: false
+        type: string
+        default: ''
+
+# Runs directly against the production database (Neon) and the public Wikidata
+# SPARQL endpoint, bypassing Render's ~15 min per-request timeout — the same
+# arrangement as backfill-sync.yml, and for the same reason: the anchor pass
+# walks every externally-linked item in the catalog, which does not fit in a
+# request. There is no admin endpoint for this and no Bruno request, because
+# the feature adds no HTTP surface.
+#
+# No API key of any kind: query.wikidata.org is public and its data is CC0.
+# DATABASE_URL is the only secret this workflow needs.
+#
+# Re-dispatching is safe and is the documented way to finish an interrupted
+# run: both passes are upserts and both keep a cursor in sync_watermarks, so a
+# second dispatch continues instead of redoing or duplicating work.
+jobs:
+  wikidata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Exit code 2 = the run finished but is degraded: the time budget
+      # expired mid-walk, or QID links/identities were skipped (issues #22 and
+      # #24). Surfaced as a warning annotation rather than a failed job — a
+      # partial anchor is still better than no anchor, and the cursor means the
+      # next dispatch picks it up — but it must never be reported as green.
+      - name: Sync Wikidata anchor and adaptations
+        run: |
+          set +e
+          uv run python scripts/sync_wikidata.py \
+            --pass "${{ github.event.inputs.pass || 'all' }}" \
+            ${{ github.event.inputs.item_type != '' && format('--item-type {0}', github.event.inputs.item_type) || '' }} \
+            ${{ github.event.inputs.budget_minutes != '' && format('--budget-minutes {0}', github.event.inputs.budget_minutes) || '' }} \
+            2>&1 | tee wikidata-sync.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::wikidata sync finished DEGRADED — the walk was cut short by the time budget or some QIDs could not be linked. Re-dispatch this workflow to continue; the cursor in sync_watermarks is kept."
+          elif [ "$status" -ne 0 ]; then
+            echo "::error::wikidata sync failed (exit $status)"
+            exit "$status"
+          fi
+
+      # The acceptance list asks for a coverage report per item type after the
+      # first run. It is in the log; this pins it to the run summary so it does
+      # not have to be dug out of 100.000 lines of INFO.
+      - name: Publish anchor coverage report
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Wikidata anchor coverage"
+            echo ''
+            echo '```'
+            grep -A 6 'anchor coverage by item type' wikidata-sync.log || echo 'no coverage report in this run'
+            echo '```'
+            echo ''
+            echo "## Relations"
+            echo ''
+            echo '```'
+            grep 'wikidata relations:' wikidata-sync.log || echo 'relations pass did not run'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
