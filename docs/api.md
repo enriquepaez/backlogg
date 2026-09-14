@@ -1023,9 +1023,9 @@ días pesa mucho menos que uno de hace seis horas:
 
 | Contribución | Tabla | Recorte | Peso |
 |---|---|---|---|
-| Rating/review creado | `activity_events` (`rating_created`) | — | 3,0 |
-| Item completado | `activity_events` (`status_completed`) | — | 2,0 |
-| Intención de backlog | `library_entries` | solo `want` / `in_progress` / `dropped` | 1,0 / 1,5 / 0,5 |
+| Rating/review creado | `activity_events` (`rating_created`) | un gesto por `(usuario, ítem, tipo de evento)` | 3,0 |
+| Item completado | `activity_events` (`status_completed`) | un gesto por `(usuario, ítem, tipo de evento)` | 2,0 |
+| Intención de backlog | `library_entries` | solo `want` / `in_progress` / `dropped`, y solo si ese usuario no tiene ya un `status_completed` del ítem en la ventana | 1,0 / 1,5 / 0,5 |
 | Edición de rating | `user_ratings` | solo ediciones **posteriores al propio evento** de la fila | 1,0 |
 
 Los recortes no son cosméticos: `activity_events` **es un espejo** de las otras
@@ -1049,6 +1049,33 @@ evento.created_at` (o fila sin evento). Justificación completa en
 Una review **oculta por moderación** (`user_ratings.is_hidden`) no cuenta, ni
 por su evento ni por su fila.
 
+**Un gesto por usuario, ítem y tipo de gesto** (issue #30). El toggle
+`completed → dropped → completed` se escapaba de los recortes anteriores por
+dos sitios distintos, y hacen falta los dos arreglos:
+
+1. **Varias filas del mismo usuario sobre el mismo ítem.** `activity_events` es
+   la única de las tres tablas que lo permite: `library_entries` y
+   `user_ratings` tienen unique por `(user_id, item_type, item_id)`, pero cada
+   vuelta a `completed` escribe un `status_completed` nuevo (esas filas llevan
+   `rating_id NULL` y `uq_activity_events_rating_id` no las frena). La
+   agregación agrupa por `(usuario, ítem, tipo de evento)` y se queda con
+   **una** fila por grupo, con el `created_at` **más reciente** de la ventana
+   (el gesto que el usuario acaba de hacer es el que decae).
+2. **El mismo par contado por dos contribuciones.** Excluir `completed` de la
+   contribución 2 separa las tablas *durante* la transición, pero un ciclo no
+   acaba donde empezó: tras `completed → dropped` la fila queda en `dropped`
+   (que sí cuenta) mientras su `status_completed` sigue dentro de la ventana,
+   así que el mismo usuario pagaba 2,0 + 0,5 por una sola ida y vuelta. La
+   contribución 2 añade un `NOT EXISTS` correlacionado por **usuario e ítem**
+   (no por ítem solo: la finalización de otro usuario no dice nada de la
+   intención de este) y limitado a `status_completed` (un `rating_created` no
+   borra la intención de backlog, que es un gesto distinto).
+
+Los dos recortes son de **lectura**: `GET /feed` sigue mostrando cada
+transición como un hecho propio. Lo que un usuario solo sí puede seguir
+aportando es un gesto por ítem **distinto** que toque — eso es el diseño, y le
+cuesta un ítem real cada vez.
+
 **2. Fallback (cuando no hay actividad suficiente).** Es el estado por defecto
 mientras la comunidad no exista. El orden es el **canónico del catálogo**
 (feature 66) — `rating_internal DESC NULLS LAST` como criterio visible,
@@ -1065,9 +1092,9 @@ sobre todo el catálogo, en vez de devolver un hueco. Solo se relaja con
 resultado **totalmente** vacío: un resultado parcial sigue respetando `period`.
 
 **Umbral.** Un tipo usa la señal local cuando tiene al menos
-`TRENDING_MIN_ACTIVITY` gestos dentro de la ventana; por debajo, cae al
-fallback. Se evalúa **por tipo**, no globalmente, y es configurable por env
-(default 5, ver `.env.example`).
+`TRENDING_MIN_ACTIVITY` gestos dentro de la ventana —gestos ya deduplicados, no
+filas crudas—; por debajo, cae al fallback. Se evalúa **por tipo**, no
+globalmente, y es configurable por env (default 5, ver `.env.example`).
 
 **Efecto de `period`** (valores admitidos: `day` y `week`, sin cambios):
 

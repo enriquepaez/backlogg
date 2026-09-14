@@ -1495,3 +1495,95 @@ Propiedad del diseño nuevo que conviene no perder de vista: un refresco fallido
 rancio y vuelve a la cabeza de la rotación la noche siguiente. El cursor viejo no
 lo hacía: avanzaba por encima de los fallos y no volvía hasta dar la vuelta
 entera.
+
+---
+
+## 2026-09-14 — `fix/trending_activity_toggle_dedup`
+
+Sesión sin feature: el backlog de features está **agotado**. Las 8 `pending` del
+backend son el bloque de recomendaciones congelado el 2026-09-13 (`AGENTS.md`
+§4) y las 3 de frontend (`FE-66`, `FE-67`, `FE-69`) están `blocked` por esas
+mismas features 79, 80 y 82. Se trabajó sobre el backlog de issues.
+
+### A. Blocker: la suite dependía de la hora del reloj
+
+`bash init.sh` salía **rojo en `main`** a las 05:41 UTC. Dos tests de
+`tests/test_tmdb_incremental_updates.py` fijaban el watermark a `today - 1` y
+llamaban a la lane con `now=datetime.now(UTC)`, pero `latest_export_date()`
+devuelve **ayer** antes de las 08:00 UTC (`EXPORT_PUBLISH_HOUR_UTC = 8`), así
+que `baseline_day >= export_day` y `_incremental_new_releases` salía por el
+atajo «export ya procesado» — `appeared=0`, `errors=0`.
+
+Producción era correcta; los tests no congelaban el reloj. **Cualquier CI que
+corriera entre 00:00 y 08:00 UTC fallaba.** Arreglado colgando todas las fechas
+del archivo de un anclaje único con la hora fijada a las 12:00 UTC. El día
+natural **sigue** siendo el real a propósito: la ventana del gate se expresa en
+offsets desde «hoy», así que una fecha absoluta haría que los fixtures se
+salieran de la ventana con los años. Ninguna aserción se relajó: `appeared == 2`
+y `errors == 1` siguen literales y ahora se alcanzan por el camino del diff.
+
+Dos excepciones deliberadas: los asserts sobre `covered_through` leen la fecha
+**en el assert**, porque `sync_movies_incremental` / `sync_series_incremental`
+son las dos entradas que construyen su `now` por dentro y no aceptan argumento.
+Congelarlas contra un valor de import-time estiraba una ventana de milisegundos
+a los ~45 s de la suite. Está comentado en los tres sitios para que nadie lo
+«arregle» de vuelta.
+
+### B. Issue #30 — el toggle resultó tener dos fugas, no una
+
+El issue describía una: `completed → dropped → completed` escribe un
+`activity_event` por vuelta sin tope (`uq_activity_events_rating_id` no lo frena
+porque esos eventos llevan `rating_id NULL`). Se cerró agrupando la
+contribución 1 de `activity_scores` por `(user_id, item_id, event_type)` con
+`max(created_at)`.
+
+**El reviewer encontró la segunda, que no estaba en el análisis del issue** y
+que dejaba el arreglo a medias: el ciclo no termina donde empezó. Tras
+`completed → dropped` la fila de `library_entries` se queda en `dropped` —un
+estado que **sí** cuenta— mientras el evento `status_completed` escrito a la ida
+sigue dentro de la ventana. El mismo par (usuario, ítem) lo cobraban dos
+contribuciones que el docstring declaraba disjuntas: 2,0 por el evento más 0,5
+por la intención. Medido: **1 usuario con 3 ítems terminando en `dropped` daba 6
+gestos, cruzaba `TRENDING_MIN_ACTIVITY=5` él solo y expulsaba del listado a una
+película bien valorada que nadie había tocado.**
+
+La premisa del docstring («`want`/`in_progress`/`dropped` nunca generan evento»)
+era cierta **por transición** y falsa **por estado final**. Se cierra con un
+`NOT EXISTS` correlacionado por `(user_id, item_type, item_id)` sobre
+`activity_events`, limitado a `status_completed` y a la misma ventana: cuando
+coexisten sobrevive el gesto fuerte. Docstring y `docs/api.md` corregidos — el
+titular «un gesto por usuario e ítem» era literalmente falso en ese caso.
+
+Por qué los tres tests de la primera ronda no lo vieron: el helper
+`_toggle_completed` terminaba **siempre en `completed`**, que es justo el final
+que evita el solapamiento. Punto ciego de cobertura, no mala suerte.
+
+### QA del leader
+
+- `main` **rojo** a las 06:10 UTC reproducido en worktree limpio: los 2 tests.
+- **Plan de ejecución medido**, que era el riesgo sin mirar: un `NOT EXISTS`
+  correlacionado puede degenerar en una ejecución por fila. Se compiló el
+  statement **real** (capturándolo, no reescribiéndolo) y se pasó por
+  `EXPLAIN (ANALYZE, BUFFERS)` contra 300.032 filas de `activity_events` en una
+  transacción revertida: Postgres lo resuelve como **Hash Anti Join**, 94 ms.
+  El endpoint cachea 15 min (`CACHE_TTL_TRENDING=900`).
+- Los cuatro casos de sobre-frenada del filtro, verificados contra Postgres real
+  por el reviewer: un `rating_created` no borra la intención de backlog, la
+  finalización de **otro** usuario no borra la de éste, un `status_completed`
+  fuera de la ventana no borra una intención dentro, y completar X no afecta a
+  querer Y.
+- `bash init.sh` verde: **1629 tests**.
+
+Sin migraciones, sin tocar el escritor de eventos ni el feed: `GET /feed` sigue
+contando cada finalización como su propio hecho narrativo. Lo que cambia es solo
+cómo trending los **cuenta**.
+
+### Issue #35 abierto
+
+`TRENDING_MIN_ACTIVITY` es un umbral de **gestos**, no de **personas**. Cerrado
+el vector barato del #30 (coste cero por gesto), queda el caro: un usuario con 5
+ítems distintos y un gesto legítimo en cada uno cruza el umbral él solo. Con
+cero usuarios eso no es un borde, es el escenario real. La infraestructura para
+arreglarlo ya está: `user_id` viaja por la query desde el #30, así que
+`count(DISTINCT user_id)` no obliga a rehacer nada. Se arreglaría en el mismo
+sitio que el issue #29.
