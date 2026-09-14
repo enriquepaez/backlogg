@@ -15,6 +15,14 @@ Coverage map against the feature's acceptance criteria:
 - *decay*  → ``TestDecay``
 - *per-type threshold* → ``TestThreshold``
 - *no double counting* → ``TestNoDoubleCounting``
+
+Plus the three issues fixed on top of it:
+
+- *banned authors push nothing* (issue #29) → ``TestBannedAuthors``
+- *the threshold counts people, not gestures* (issue #35) →
+  ``TestDistinctUserThreshold``
+- *the fallback runs no discarded ``COUNT(*)``* (issue #31) →
+  ``TestFallbackSkipsTheDiscardedCount``
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -27,17 +35,21 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from backlogg.books import repository as books_repo
+from backlogg.books.schemas import BookSortEnum
 from backlogg.core.config import settings
 from backlogg.feed.models import ActivityEvent
 from backlogg.feed.repository import create_rating_event, create_status_completed_event
 from backlogg.games import repository as games_repo
+from backlogg.games.schemas import GameSortEnum
 from backlogg.library.models import LibraryEntry
 from backlogg.library.repository import upsert_library_entry
 from backlogg.main import app
 from backlogg.movies import repository as movies_repo
+from backlogg.movies.schemas import MovieSortEnum
 from backlogg.ratings.models import UserRating
 from backlogg.ratings.repository import upsert_rating
 from backlogg.series import repository as series_repo
+from backlogg.series.schemas import SeriesSortEnum
 from backlogg.trending import repository as trending_repo
 from backlogg.trending import service as trending_service
 from backlogg.users.repository import create_user
@@ -195,7 +207,7 @@ async def _make_game(db, slug: str, **kwargs):
 _seq = iter(range(10_000, 99_999))
 
 
-async def _make_user(db, prefix: str = "trend"):
+async def _make_user(db, prefix: str = "trend", *, banned: bool = False):
     username = f"{prefix}-user-{next(_seq)}"
     user = await create_user(
         db,
@@ -204,6 +216,7 @@ async def _make_user(db, prefix: str = "trend"):
             "email": f"{username}@example.com",
             "password_hash": "hash",
             "display_name": username,
+            "is_banned": banned,
         },
     )
     return user.id
@@ -276,10 +289,10 @@ async def _add_rating(
     return rating
 
 
-async def _burst(db, *, item_type, item_id, count, age, status="want"):
+async def _burst(db, *, item_type, item_id, count, age, status="want", banned=False):
     """``count`` distinct users adding the item to their backlog, all ``age`` old."""
     for _ in range(count):
-        user_id = await _make_user(db)
+        user_id = await _make_user(db, banned=banned)
         await _add_library_entry(
             db, user_id=user_id, item_type=item_type, item_id=item_id, status=status, age=age
         )
@@ -660,7 +673,7 @@ class TestLocalActivity:
                 rating_id=rating.id,
             )
 
-        total, scored = await trending_repo.activity_scores(
+        signal = await trending_repo.activity_scores(
             db,
             item_type="SERIES",
             since=datetime.now(UTC) - timedelta(days=7),
@@ -669,8 +682,8 @@ class TestLocalActivity:
             limit=20,
         )
 
-        assert total == 0
-        assert scored == []
+        assert signal.total_gestures == 0
+        assert signal.scored == []
 
     async def test_activity_on_a_deleted_catalog_row_is_dropped_not_fatal(self, client, db):
         """The activity tables are polymorphic and carry no FK, so an item id
@@ -712,7 +725,7 @@ class TestDecay:
         now = datetime.now(UTC)
         await _burst(db, item_type="BOOK", item_id=item.id, count=1, age=timedelta(seconds=0))
 
-        _, fresh_scores = await trending_repo.activity_scores(
+        fresh = await trending_repo.activity_scores(
             db,
             item_type="BOOK",
             since=now - timedelta(days=7),
@@ -720,7 +733,7 @@ class TestDecay:
             half_life_seconds=half_life.total_seconds(),
             limit=20,
         )
-        _, aged_scores = await trending_repo.activity_scores(
+        aged = await trending_repo.activity_scores(
             db,
             item_type="BOOK",
             since=now - timedelta(days=7),
@@ -729,7 +742,7 @@ class TestDecay:
             limit=20,
         )
 
-        assert aged_scores[0][1] == pytest.approx(fresh_scores[0][1] / 2, rel=1e-6)
+        assert aged.scored[0][1] == pytest.approx(fresh.scored[0][1] / 2, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +809,7 @@ class TestNoDoubleCounting:
     """
 
     async def _gestures(self, db, item_type: str) -> int:
-        total, _ = await trending_repo.activity_scores(
+        signal = await trending_repo.activity_scores(
             db,
             item_type=item_type,
             since=datetime.now(UTC) - timedelta(days=7),
@@ -804,7 +817,7 @@ class TestNoDoubleCounting:
             half_life_seconds=42 * 3600,
             limit=20,
         )
-        return total
+        return signal.total_gestures
 
     async def test_a_rating_counts_once_not_twice(self, db):
         """A rating writes a ``user_ratings`` row *and* a ``rating_created``
@@ -1066,7 +1079,7 @@ class TestNoDoubleCounting:
 
         assert await self._gestures(db, "MOVIE") == 1
 
-    async def test_a_lone_toggling_user_cannot_cross_the_threshold(self, client, db):
+    async def test_a_lone_toggling_user_cannot_cross_the_threshold(self, client, db, monkeypatch):
         """The manipulation vector itself: one account, no community.
 
         Left on ``dropped``, the cycle used to pay **twice** per item (2.0 for
@@ -1081,7 +1094,18 @@ class TestNoDoubleCounting:
         A single account can still contribute one gesture per *distinct* item —
         that is the design, and it costs a real item every time. What it can no
         longer do is multiply its weight on the items it already touched.
+
+        ``TRENDING_MIN_USERS`` is pinned to 1 here on purpose, and removing
+        that line would quietly gut the test. This case is one account, so the
+        people minimum added for issue #35 rejects it before the gesture count
+        is even consulted — measured in review: with the real default of 3 this
+        test stopped failing when the ``GROUP BY`` that collapses the laps was
+        removed, because the fallback was already being chosen for an unrelated
+        reason. The invariant itself is still pinned by the repository-level
+        tests above; what the pin restores is its end-to-end mirror, which is
+        the only place the *gesture* threshold is exercised against the toggle.
         """
+        monkeypatch.setattr(settings, "TRENDING_MIN_USERS", 1)
         quiet = await _make_movie(db, "dup-toggle-quiet", rating_internal=5.0)
         user_id = await _make_user(db)
         item_count = (settings.TRENDING_MIN_ACTIVITY + 1) // 2
@@ -1129,3 +1153,466 @@ def test_decay_half_life_is_shorter_than_its_window():
     unobservable — the ranking would degenerate into a raw count."""
     for period, window in trending_service.ACTIVITY_WINDOWS.items():
         assert trending_service.DECAY_HALF_LIVES[period] < window
+
+
+# ---------------------------------------------------------------------------
+# Moderation: a banned author pushes nothing (issue #29)
+# ---------------------------------------------------------------------------
+
+
+class TestBannedAuthors:
+    """``visible_review_filters()`` says a banned author disappears from every
+    surface that lists or aggregates reviews. Trending aggregates *three*
+    tables, so the exclusion has to hold on all three contributions — the
+    events, the backlog intent and the rating edits — and on the threshold,
+    which is computed over the same rows.
+
+    Banning removes a user's influence over what the front page shows, not
+    just their reviews: that is the decision these tests pin.
+    """
+
+    async def _signal(self, db, item_type: str):
+        now = datetime.now(UTC)
+        return await trending_repo.activity_scores(
+            db,
+            item_type=item_type,
+            since=now - timedelta(days=7),
+            now=now,
+            half_life_seconds=42 * 3600,
+            limit=20,
+        )
+
+    async def test_a_banned_authors_rating_event_does_not_count(self, db):
+        """Contribution 1, ``rating_created``: the rating's own visibility is
+        not the only thing that matters — the author's is too."""
+        movie = await _make_movie(db, "ban-rating-movie")
+        user_id = await _make_user(db, banned=True)
+        rating = await _add_rating(
+            db, user_id=user_id, item_type="MOVIE", item_id=movie.id, age=timedelta(minutes=5)
+        )
+        await _add_event(
+            db,
+            user_id=user_id,
+            item_type="MOVIE",
+            item_id=movie.id,
+            event_type="rating_created",
+            age=timedelta(minutes=5),
+            rating_id=rating.id,
+        )
+
+        signal = await self._signal(db, "MOVIE")
+
+        assert signal.total_gestures == 0
+        assert signal.scored == []
+
+    async def test_a_banned_authors_completion_event_does_not_count(self, db):
+        """Contribution 1, ``status_completed``: these rows carry
+        ``rating_id NULL``, so the author filter cannot ride on the rating
+        join — it has to be the **event's** own ``user_id``."""
+        series = await _make_series(db, "ban-completion-series")
+        user_id = await _make_user(db, banned=True)
+        await _add_event(
+            db,
+            user_id=user_id,
+            item_type="SERIES",
+            item_id=series.id,
+            event_type="status_completed",
+            age=timedelta(minutes=5),
+        )
+
+        signal = await self._signal(db, "SERIES")
+
+        assert signal.total_gestures == 0
+
+    async def test_a_banned_users_backlog_intent_does_not_count(self, db):
+        """Contribution 2: ``library_entries`` has no moderation flag of its
+        own, so the only thing that can retire these rows is their owner."""
+        book = await _make_book(db, "ban-intent-book")
+        await _burst(
+            db,
+            item_type="BOOK",
+            item_id=book.id,
+            count=6,
+            age=timedelta(minutes=5),
+            banned=True,
+        )
+
+        signal = await self._signal(db, "BOOK")
+
+        assert signal.total_gestures == 0
+
+    async def test_a_banned_users_rating_edit_does_not_count(self, db):
+        """Contribution 3: the one that literally reuses
+        ``visible_review_filters()`` — it lists/aggregates ``user_ratings``."""
+        game = await _make_game(db, "ban-edit-game")
+        user_id = await _make_user(db, banned=True)
+        await _add_rating(
+            db,
+            user_id=user_id,
+            item_type="GAME",
+            item_id=game.id,
+            age=timedelta(minutes=5),
+            re_rated=True,
+        )
+
+        signal = await self._signal(db, "GAME")
+
+        assert signal.total_gestures == 0
+
+    async def test_an_active_users_gestures_survive_next_to_a_banned_ones(self, db):
+        """The exclusion must cut the banned author's rows only.
+
+        Both users here have a ``status_completed`` event, the row shape whose
+        ``rating_id`` is NULL: if the new author join were hung off the LEFT
+        JOIN to ``user_ratings`` it would drop *both* of them, and the type
+        would silently lose every completion it has.
+        """
+        movie = await _make_movie(db, "ban-mixed-movie")
+        for banned in (True, False):
+            user_id = await _make_user(db, banned=banned)
+            await _add_event(
+                db,
+                user_id=user_id,
+                item_type="MOVIE",
+                item_id=movie.id,
+                event_type="status_completed",
+                age=timedelta(minutes=5),
+            )
+
+        signal = await self._signal(db, "MOVIE")
+
+        assert signal.total_gestures == 1
+        assert signal.distinct_users == 1
+        assert [item_id for item_id, _ in signal.scored] == [movie.id]
+
+    async def test_a_banned_users_completion_does_not_resurrect_their_own_intent(self, db):
+        """Where the two exclusions meet (issue #29, point 4).
+
+        Contribution 2 drops a library row when the **same user** has a
+        ``status_completed`` event in the window — that is the ``NOT EXISTS``
+        of issue #30. A banned user's completion event no longer counts, so the
+        question is whether the row it was suppressing should come back. It
+        must not: the library row belongs to the same banned user and is
+        excluded on its own account, before the ``NOT EXISTS`` is ever
+        relevant. Both halves of the cycle leave with their owner.
+        """
+        movie = await _make_movie(db, "ban-cycle-movie")
+        user_id = await _make_user(db, banned=True)
+        await _add_event(
+            db,
+            user_id=user_id,
+            item_type="MOVIE",
+            item_id=movie.id,
+            event_type="status_completed",
+            age=timedelta(minutes=5),
+        )
+        await _add_library_entry(
+            db,
+            user_id=user_id,
+            item_type="MOVIE",
+            item_id=movie.id,
+            status="dropped",
+            age=timedelta(minutes=4),
+        )
+
+        signal = await self._signal(db, "MOVIE")
+
+        assert signal.total_gestures == 0
+
+    async def test_banned_activity_does_not_carry_a_type_over_the_threshold(self, client, db):
+        """End to end: moderation reaches the front page, not just the lists.
+
+        Enough banned gestures to clear both minimums several times over, and
+        the type still falls back to the catalog order.
+        """
+        quiet = await _make_book(db, "ban-thr-quiet", rating_internal=5.0)
+        pushed = await _make_book(db, "ban-thr-pushed", rating_internal=1.0)
+        await _burst(
+            db,
+            item_type="BOOK",
+            item_id=pushed.id,
+            count=max(settings.TRENDING_MIN_ACTIVITY, settings.TRENDING_MIN_USERS) + 2,
+            age=timedelta(minutes=5),
+            banned=True,
+        )
+
+        slugs = _slugs((await client.get("/v1/trending?type=book")).json())
+
+        assert slugs.index(quiet.slug) < slugs.index(pushed.slug)
+
+
+# ---------------------------------------------------------------------------
+# The threshold counts people, not gestures (issue #35)
+# ---------------------------------------------------------------------------
+
+
+class TestDistinctUserThreshold:
+    """``TRENDING_MIN_ACTIVITY`` alone is a proxy for "there is a community
+    here", and it is a good proxy only once the community exists. One account
+    rating or shelving ``TRENDING_MIN_ACTIVITY`` *different* items crosses it
+    by itself with entirely legitimate gestures, and then owns the whole type.
+
+    So the local signal needs a second, independent condition:
+    ``TRENDING_MIN_USERS`` distinct people behind those same de-duplicated,
+    moderation-filtered gestures.
+    """
+
+    async def _signal(self, db, item_type: str):
+        now = datetime.now(UTC)
+        return await trending_repo.activity_scores(
+            db,
+            item_type=item_type,
+            since=now - timedelta(days=7),
+            now=now,
+            half_life_seconds=42 * 3600,
+            limit=20,
+        )
+
+    async def test_a_lone_user_with_enough_items_does_not_serve_the_ranking(self, client, db):
+        """The issue itself: one person, one gesture per item, no community."""
+        assert settings.TRENDING_MIN_USERS > 1
+        quiet = await _make_movie(db, "min-users-quiet", rating_internal=5.0)
+        user_id = await _make_user(db)
+        touched = []
+        for n in range(settings.TRENDING_MIN_ACTIVITY + 1):
+            movie = await _make_movie(db, f"min-users-solo-{n}", rating_internal=1.0)
+            touched.append(movie)
+            await _add_library_entry(
+                db,
+                user_id=user_id,
+                item_type="MOVIE",
+                item_id=movie.id,
+                status="want",
+                age=timedelta(minutes=5),
+            )
+
+        signal = await self._signal(db, "MOVIE")
+        slugs = _slugs((await client.get("/v1/trending?type=movie")).json())
+
+        # The gesture count is comfortably over the old threshold: it is the
+        # people count, and only it, that sends this back to the catalog.
+        assert signal.total_gestures > settings.TRENDING_MIN_ACTIVITY
+        assert signal.distinct_users == 1
+        assert quiet.slug in slugs
+        for movie in touched:
+            assert slugs.index(quiet.slug) < slugs.index(movie.slug)
+
+    async def test_enough_distinct_users_still_serve_the_local_ranking(self, client, db):
+        """The other side of the same coin — the gate must not swallow real
+        signal. Several different people on one item is exactly what trending
+        exists to surface."""
+        quiet = await _make_game(db, "min-users-quiet-game", rating_internal=5.0)
+        busy = await _make_game(db, "min-users-busy-game", rating_internal=1.0)
+        crowd = max(settings.TRENDING_MIN_ACTIVITY, settings.TRENDING_MIN_USERS)
+        await _burst(db, item_type="GAME", item_id=busy.id, count=crowd, age=timedelta(minutes=5))
+
+        signal = await self._signal(db, "GAME")
+        slugs = _slugs((await client.get("/v1/trending?type=game")).json())
+
+        assert signal.distinct_users == crowd
+        assert slugs == [busy.slug]
+        assert quiet.slug not in slugs
+
+    async def test_distinct_users_counts_people_not_their_gestures(self, db):
+        """Two gestures from one account are still one person — the counter is
+        over the collapsed rows, per user, not per row."""
+        movie = await _make_movie(db, "min-users-two-gestures-movie")
+        user_id = await _make_user(db)
+        rating = await _add_rating(
+            db, user_id=user_id, item_type="MOVIE", item_id=movie.id, age=timedelta(minutes=5)
+        )
+        await _add_event(
+            db,
+            user_id=user_id,
+            item_type="MOVIE",
+            item_id=movie.id,
+            event_type="rating_created",
+            age=timedelta(minutes=5),
+            rating_id=rating.id,
+        )
+        await _add_event(
+            db,
+            user_id=user_id,
+            item_type="MOVIE",
+            item_id=movie.id,
+            event_type="status_completed",
+            age=timedelta(minutes=5),
+        )
+
+        signal = await self._signal(db, "MOVIE")
+
+        assert signal.total_gestures == 2
+        assert signal.distinct_users == 1
+
+    async def test_banned_users_do_not_count_towards_the_minimum(self, db):
+        """The two exclusions compose: the people counter runs over the same
+        filtered rows as the score, so a banned crowd is not a crowd."""
+        book = await _make_book(db, "min-users-banned-book")
+        await _burst(db, item_type="BOOK", item_id=book.id, count=2, age=timedelta(minutes=5))
+        await _burst(
+            db,
+            item_type="BOOK",
+            item_id=book.id,
+            count=5,
+            age=timedelta(minutes=5),
+            banned=True,
+        )
+
+        signal = await self._signal(db, "BOOK")
+
+        assert signal.total_gestures == 2
+        assert signal.distinct_users == 2
+
+    async def test_distinct_users_are_counted_per_type_not_per_item(self, client, db):
+        """Several pairs of different people, each pair on a different item.
+
+        The counter has the same scope as ``total_gestures`` and as the
+        threshold that reads it: the **type's** whole window, not one item.
+        Correlating it by ``item_id`` would report 2 here — below
+        ``TRENDING_MIN_USERS`` — and send a type with six active people back to
+        the catalog. ``docs/api.md`` states the per-type reading; nothing
+        pinned it until now, and every other test in this class uses either one
+        item or one user, so none of them can tell the two apart.
+
+        Two users per item is what makes the distinction bite (it has to be
+        under the people minimum); the number of items is just what it takes to
+        clear the gesture minimum at that rate.
+        """
+        assert 2 < settings.TRENDING_MIN_USERS, "a pair must be too few for the per-item reading"
+        pairs = -(-settings.TRENDING_MIN_ACTIVITY // 2)
+        quiet = await _make_book(db, "min-users-per-type-quiet", rating_internal=5.0)
+        touched = []
+        for n in range(pairs):
+            book = await _make_book(db, f"min-users-per-type-{n}", rating_internal=1.0)
+            touched.append(book)
+            await _burst(db, item_type="BOOK", item_id=book.id, count=2, age=timedelta(minutes=5))
+
+        signal = await self._signal(db, "BOOK")
+        slugs = _slugs((await client.get("/v1/trending?type=book")).json())
+
+        assert signal.distinct_users == 2 * pairs
+        assert signal.total_gestures == 2 * pairs
+        assert set(slugs) == {book.slug for book in touched}
+        assert quiet.slug not in slugs
+
+    async def test_min_users_is_configurable(self, client, db, monkeypatch):
+        """Same knob shape as ``TRENDING_MIN_ACTIVITY``: an operator can move
+        it without a code change, and it is evaluated per type."""
+        from backlogg.core.cache import get_cache
+
+        busy = await _make_series(db, "min-users-cfg-busy", rating_internal=1.0)
+        quiet = await _make_series(db, "min-users-cfg-quiet", rating_internal=5.0)
+        await _burst(
+            db,
+            item_type="SERIES",
+            item_id=busy.id,
+            count=settings.TRENDING_MIN_ACTIVITY,
+            age=timedelta(minutes=5),
+        )
+
+        monkeypatch.setattr(settings, "TRENDING_MIN_USERS", 99)
+        high = _slugs((await client.get("/v1/trending?type=series")).json())
+
+        get_cache().clear()
+        monkeypatch.setattr(settings, "TRENDING_MIN_USERS", 2)
+        low = _slugs((await client.get("/v1/trending?type=series")).json())
+
+        assert high.index(quiet.slug) < high.index(busy.slug)  # fallback order
+        assert low == [busy.slug]  # local ranking
+
+
+# ---------------------------------------------------------------------------
+# The fallback runs no COUNT(*) it is going to throw away (issue #31)
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackSkipsTheDiscardedCount:
+    """The fallback reuses the catalog ``list_*`` functions for their canonical
+    ``ORDER BY`` (feature 66) and never paginates, so the pagination total they
+    compute is discarded — but the ``COUNT(*)`` still ran. Four per mix, eight
+    when a type relaxes its empty release window.
+    """
+
+    async def _count_statements(self, db, monkeypatch, coro_factory):
+        """Run ``coro_factory()`` recording every statement the session runs."""
+        executed: list[str] = []
+        original = db.execute
+
+        async def spy(statement, *args, **kwargs):
+            executed.append(str(statement))
+            return await original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(db, "execute", spy)
+        await coro_factory()
+        monkeypatch.undo()
+        return [sql for sql in executed if "count(" in sql.lower()]
+
+    @pytest.mark.parametrize(
+        ("item_type", "make"),
+        [
+            ("MOVIE", _make_movie),
+            ("SERIES", _make_series),
+            ("BOOK", _make_book),
+            ("GAME", _make_game),
+        ],
+    )
+    async def test_the_catalog_fallback_runs_no_count_query(self, db, monkeypatch, item_type, make):
+        """All four branches, not just one.
+
+        ``_list_recent_catalog`` has a separate call site per type, so there
+        are four independent ``with_total=False`` to lose. Covering only movies
+        and books let two of them regress in silence (found in review: removing
+        the flag from the SERIES and GAME branches left the suite green).
+        """
+        await make(db, f"cnt-fallback-{item_type.lower()}", rating_internal=4.0)
+
+        counts = await self._count_statements(
+            db, monkeypatch, lambda: trending_service._fallback(db, item_type, "week", 20)
+        )
+
+        assert counts == []
+
+    async def test_the_relaxed_second_pass_runs_no_count_query_either(self, db, monkeypatch):
+        """The empty-window case is the one that pays twice."""
+        await _make_book(db, "cnt-ancient-book", first_publish_date=date(1927, 1, 1))
+
+        counts = await self._count_statements(
+            db, monkeypatch, lambda: trending_service._fallback(db, "BOOK", "day", 20)
+        )
+
+        assert counts == []
+
+    async def test_with_total_false_returns_none_not_zero_in_all_four(self, db):
+        """``None`` means "not computed"; ``0`` would be a real, wrong answer —
+        and the same answer in the four repositories, not four conventions."""
+        await _make_movie(db, "cnt-none-movie")
+        await _make_series(db, "cnt-none-series")
+        await _make_book(db, "cnt-none-book")
+        await _make_game(db, "cnt-none-game")
+
+        _, movie_total = await movies_repo.list_movies(
+            db, genre=None, sort=MovieSortEnum.rating_desc, page=1, limit=5, with_total=False
+        )
+        _, series_total = await series_repo.list_series(
+            db, genre=None, sort=SeriesSortEnum.rating_desc, page=1, limit=5, with_total=False
+        )
+        _, book_total = await books_repo.list_books(
+            db, genre=None, sort=BookSortEnum.rating_desc, page=1, limit=5, with_total=False
+        )
+        _, game_total = await games_repo.list_games(
+            db, genre=None, sort=GameSortEnum.rating_desc, page=1, limit=5, with_total=False
+        )
+
+        assert (movie_total, series_total, book_total, game_total) == (None, None, None, None)
+
+    async def test_the_paginating_callers_keep_their_total_by_default(self, db):
+        """The default preserves the existing contract: every caller that
+        paginates still gets a real count without asking for it."""
+        await _make_movie(db, "cnt-default-movie")
+
+        items, total = await movies_repo.list_movies(
+            db, genre=None, sort=MovieSortEnum.rating_desc, page=1, limit=5
+        )
+
+        assert isinstance(total, int)
+        assert total >= len(items) >= 1

@@ -241,5 +241,16 @@ class Settings(BaseSettings):
     # single click, not to wait for a crowd.
     TRENDING_MIN_ACTIVITY: int = 5
 
+    # Second half of the same gate (issue #35). The gesture count alone is a
+    # proxy for "there is a community here", and it is a good one only when the
+    # community exists: a single account rating five different items crosses
+    # TRENDING_MIN_ACTIVITY on its own, with five perfectly legitimate
+    # gestures, and then owns the whole type. So the local signal also needs a
+    # minimum number of **distinct people** behind it, counted over the same
+    # de-duplicated, moderation-filtered gestures that feed the score. Both
+    # conditions must hold; either one failing falls the type back to the
+    # catalog. Also per type.
+    TRENDING_MIN_USERS: int = 3
+
 
 settings = Settings()

@@ -27,13 +27,22 @@ async def list_games(
     page: int,
     limit: int,
     filters: CatalogSearchFilters | None = None,
-) -> tuple[list[Game], int]:
+    *,
+    with_total: bool = True,
+) -> tuple[list[Game], int | None]:
     """Return a paginated list of games with optional genre/search/date/rating filters and sorting.
 
     ``filters`` (feature 50) holds ``search``/``date_from``/``date_to``/
     ``rating_internal_min``/``rating_internal_max``/``rating_external_min``/
     ``rating_external_max`` — all independently optional and AND-combined
     with ``genre``. Returns a tuple of (items, total_count).
+
+    ``with_total=False`` skips the ``COUNT(*)`` entirely and returns ``None``
+    as the second element — not ``0``, which would be indistinguishable from an
+    empty catalog. It exists for the callers that reuse this function purely
+    for its canonical ``ORDER BY`` and never paginate (``/trending``'s catalog
+    fallback, issue #31); every paginating caller keeps the default and the
+    total it needs.
     """
     base_query = select(Game).options(selectinload(Game.genres), selectinload(Game.platforms))
 
@@ -51,10 +60,12 @@ async def list_games(
         if clauses:
             base_query = base_query.where(*clauses)
 
-    # Count query (without pagination)
-    count_query = select(func.count()).select_from(base_query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar_one()
+    # Count query (without pagination) — only when the caller asked for it.
+    total: int | None = None
+    if with_total:
+        count_query = select(func.count()).select_from(base_query.subquery())
+        total_result = await db.execute(count_query)
+        total = total_result.scalar_one()
 
     # Sorting. rating_desc/rating_asc order by rating_internal (the community's
     # own rating, feature 66) first — rating_external is only an internal

@@ -1587,3 +1587,106 @@ cero usuarios eso no es un borde, es el escenario real. La infraestructura para
 arreglarlo ya está: `user_id` viaja por la query desde el #30, así que
 `count(DISTINCT user_id)` no obliga a rehacer nada. Se arreglaría en el mismo
 sitio que el issue #29.
+
+---
+
+## 2026-09-14 (segunda) — `fix/trending_moderation_and_threshold`
+
+Tres issues de la misma superficie (`backlogg/trending/`), juntos porque los
+tres viven en `activity_scores` / `_local_activity` / `_list_recent_catalog`.
+Separarlos habría costado tres ramas sobre el mismo archivo.
+
+### Issue #29 — la actividad de usuarios baneados empujaba trending
+
+El issue dejaba abierta la pregunta de si excluir al baneado solo en ratings o
+en las tres tablas. **Decisión del leader: las tres.** Banear debe retirar toda
+la influencia sobre la portada, no solo las reviews; que `visible_review_filters()`
+cubriera únicamente ratings era la causa de que esto faltara, no un argumento
+para dejarlo a medias otra vez.
+
+Cada contribución lleva su `INNER JOIN users` sobre la columna de autor de **su**
+tabla. La 3 reutiliza el helper verbatim —lo que el issue pedía—; las otras dos
+usan `is_banned` directo, porque en la contribución 1 el autor que importa es el
+**del evento**: uno alcanzado vía `user_ratings` sería `NULL` para
+`status_completed`. El `LEFT JOIN` load-bearing no se degrada (los joins son
+asociativos por la izquierda y `users.id` es PK, así que no multiplica filas).
+
+**El `NOT EXISTS` del PR #216 no se tocó, y es decisión razonada**: está
+correlacionado por (user, item), así que solo puede suprimir filas del mismo
+usuario, y las de un baneado ya caen por el join de la contribución 2. Un
+`is_banned` dentro sería código inalcanzable que se lee como regla.
+
+### Issue #35 — el umbral contaba gestos, no personas
+
+`TRENDING_MIN_USERS = 3` como segunda condición. Descartada la opción de
+ponderar el score por usuarios distintos: es un rediseño del ranking.
+
+`activity_scores` pasa de tupla a `ActivitySignal(total_gestures,
+distinct_users, scored)` — dos contadores contiguos del mismo tipo se
+intercambian por accidente. `count(DISTINCT …)` no existe como window function
+en Postgres, así que el `UNION ALL` pasa a CTE y el conteo es una subconsulta
+escalar sobre esa misma CTE: cuenta las filas **ya deduplicadas** por el #216 y
+**ya filtradas** por moderación.
+
+**Efecto esperado y deseado:** con la comunidad actual trending servirá el
+fallback del catálogo casi siempre. Es el punto del issue, no una regresión, y
+está dicho en `docs/api.md`.
+
+### Issue #31 — cuatro `COUNT(*)` que se descartaban
+
+`with_total: bool = True` keyword-only en los cuatro `list_*`. Con `False` el
+total es `None` y no `0`, porque `0` es una respuesta real y falsa que un caller
+podría creerse. El default preserva a los cuatro servicios que paginan.
+
+### Lo que encontró la review, que no era ninguno de los tres arreglos
+
+El reviewer trabajó **por mutación**: rompía cada filtro y comprobaba qué test
+lo detectaba. Ninguna mutación de los tres arreglos sobrevivió. Pero midió dos
+cosas que por lectura no se ven:
+
+1. **El riesgo que el leader temía quedó desmentido con medida.** Instrumentó
+   `_local_activity` y comparó `main` contra la rama con el mismo dataset: los
+   mismos 8 tests preexistentes toman el camino de señal local antes y después.
+   Ninguno pasó a fallback. La razón es que `_burst(count=N)` siempre creó N
+   usuarios distintos.
+2. **Pero el reverso sí ocurrió**: `test_a_lone_toggling_user_cannot_cross_the_threshold`
+   dejó de discriminar. En `main` detectaba una rotura del `GROUP BY` del #216;
+   en la rama ya no, porque `distinct_users == 1` manda el caso al fallback
+   antes de que el conteo de gestos importe. Se perdía el **espejo end-to-end**
+   del arreglo de esa misma mañana, no el invariante (los tres tests de
+   repositorio siguen cubriéndolo). Recuperado monkeypatcheando
+   `TRENDING_MIN_USERS` a 1.
+
+Además: el test del #31 solo cubría `MOVIE` y `BOOK` —quitar `with_total=False`
+de `SERIES` y `GAME` dejaba los 62 tests en verde—, y faltaba el caso que
+distingue «personas por tipo» de «personas por ítem». Ambos añadidos.
+
+Y un comentario que explicaba un mecanismo inexistente: afirmaba que
+`.correlate(None)` era load-bearing. No lo es — el SQL compila byte a byte
+idéntico sin él. Lo que mantiene la subconsulta sin correlacionar es el
+`select_from(gestures)` explícito. Comentario reescrito; la llamada se conserva
+como declaración de intención.
+
+### QA del leader
+
+- **Plan a escala**, con una sospecha que resultó falsa y conviene no repetir:
+  la primera medición (300.032 `activity_events`) mostró un Nested Loop de
+  151.200 loops contra `user_ratings`. Era un artefacto de dejar esa tabla con
+  sus 14 filas reales de dev — con 20.014 filas el planner elige **Hash Left
+  Join** por su cuenta y el tiempo **baja** de 219 ms a 119 ms. La CTE se
+  materializa una vez pese a leerse dos, y el conteo distinct sale como
+  `InitPlan` con `loops=1`.
+- **End-to-end, #29 + #35 a la vez**: 3 usuarios con 5 gestos servían señal
+  local; al banear a uno, el endpoint pasa a 4 gestos y 2 personas y cae al
+  fallback.
+- **End-to-end, el escenario exacto del #35**: 1 usuario, 5 películas distintas,
+  actividad 100% legítima. En `main` cruzaba el umbral y el endpoint servía las
+  5 películas de ese único usuario; en la rama no cruza y cae al catálogo.
+- DB de dev restaurada (32 / 17 / 14 filas, las de partida). `init.sh` verde:
+  **1649 tests**.
+
+### Estado del backlog tras esta sesión
+
+Quedan **dos** issues abiertos: el #20 (solo falta medir contra Neon; el código
+está desplegado desde la migración `0036`) y el #33 (frontend, low). Ninguna
+feature es elegible mientras el bloque de recomendaciones siga congelado.
