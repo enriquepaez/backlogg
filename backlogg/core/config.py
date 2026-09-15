@@ -129,6 +129,73 @@ class Settings(BaseSettings):
     # survive, and the next dispatch continues where it stopped. 0 disables it.
     WIKIDATA_SYNC_TIME_BUDGET_MINUTES: float = 300.0
 
+    # ── Semantic layer: embeddings + pgvector (feature 75) ───────────────────
+    #
+    # The model runs on the GitHub Actions runner, never on Render and never on
+    # the request path (backlogg/recommendations/adapters/local_embedder.py).
+    # It is a *local* model on purpose: an embeddings API costs money and this
+    # project runs on free tiers, while a runner has CPU, RAM and disk to spare
+    # for free.
+    #
+    # intfloat/multilingual-e5-small: MIT, 100+ languages, 384 native
+    # dimensions and — the deciding factor over
+    # paraphrase-multilingual-MiniLM-L12-v2, which is otherwise the canonical
+    # symmetric-similarity model at this size — a 512-token window instead of
+    # 128. Synopses routinely run past 128 tokens, and truncating there would
+    # cut most of them mid-plot.
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"
+    # E5 models are trained with a task prefix and degrade measurably without
+    # one. "query: " on *both* sides is what the model card prescribes for
+    # symmetric similarity, which is exactly what /similar is.
+    EMBEDDING_TEXT_PREFIX: str = "query: "
+    # 384 is the model's native dimensionality. It is an env var because the
+    # acceptance list asks for it, not because it is routinely tuned: the
+    # migration bakes this number into the halfvec column, so changing it after
+    # migrating needs an ALTER (docs/operations.md). Never truncate a
+    # non-Matryoshka model to save disk — shrink EMBEDDING_MAX_ITEMS instead,
+    # which costs coverage rather than quality (progress/history.md, 75).
+    EMBEDDING_DIM: int = 384
+
+    # The hard cap on how many items carry a vector, and the reason this
+    # feature is "a subset" and not "the catalog". Neon free is 512 MB per
+    # project and the full catalog is projected at 444-488 MB (issue #28), so
+    # the headroom is ~80-120 MB.
+    #
+    # MEASURED (2026-09-15, 35.215 real rows): 2.262 bytes per item, so 40.000
+    # items cost 86-90 MB. That fits — but AT THE BOTTOM of the headroom, not
+    # with room to spare, and the planning estimate it replaces (~67 MB) was
+    # 30% low. So this default is a starting point, not a safe value
+    # everywhere: measure the real headroom before the first generation in
+    # production and size the cap to it. The pre-check, the rule of thumb and
+    # the full breakdown are in docs/operations.md § "Disco: la restricción que
+    # manda, medida". 100.000 items do not fit in any format.
+    #
+    # Overrunning does not fail a test. It fails the nightly sync the day Neon
+    # refuses a write — hence the ERROR the job logs past 120 MB.
+    EMBEDDING_MAX_ITEMS: int = 40000
+    # Per-type overrides. Left at None the cap is split **equally** between the
+    # four types, with any share a type cannot fill handed back to the others
+    # (backlogg/recommendations/embeddings.py::allocate_quotas). Equal and not
+    # proportional to catalog size: feature 80's cross-type quota needs depth
+    # in every type, and a proportional split would give movies half the budget
+    # and the smallest type almost nothing — the exact failure this cap is
+    # supposed to avoid.
+    EMBEDDING_MAX_ITEMS_MOVIES: int | None = None
+    EMBEDDING_MAX_ITEMS_SERIES: int | None = None
+    EMBEDDING_MAX_ITEMS_BOOKS: int | None = None
+    EMBEDDING_MAX_ITEMS_GAMES: int | None = None
+
+    # How many items are serialised, embedded and upserted per transaction.
+    # Bigger batches amortise the model's fixed per-call cost; smaller ones
+    # lose less work when a run is cut short. 256 is roughly one second of CPU
+    # inference on a runner.
+    EMBEDDING_BATCH_SIZE: int = 256
+    # Wall-clock ceiling for the whole run, in minutes, same contract as the
+    # Wikidata job: the run stops itself instead of being killed by the Actions
+    # timeout, and because unchanged items are skipped, the next dispatch
+    # resumes where this one stopped. 0 disables it.
+    EMBEDDING_TIME_BUDGET_MINUTES: float = 300.0
+
     # Quality thresholds for the Open Library book catalog (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the
     # tunable numbers are env vars. Defaults are the calibrated values

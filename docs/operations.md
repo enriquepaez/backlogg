@@ -236,11 +236,16 @@ cambia.
 |---|---|
 | `RENDER_API_URL` | nightly-sync.yml |
 | `ADMIN_API_KEY` | nightly-sync.yml |
-| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml, incremental-sync.yml, wikidata-sync.yml |
+| `DATABASE_URL` (`postgresql+asyncpg://...`) | backfill-sync.yml, incremental-sync.yml, wikidata-sync.yml, embeddings.yml |
 | `TMDB_API_KEY` | backfill-sync.yml, incremental-sync.yml |
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | backfill-sync.yml, incremental-sync.yml |
 
 Añadir/rotar con `gh secret set <NOMBRE>` (valor interactivo, nunca en chat/logs).
+
+**No hay secret de embeddings, y no lo va a haber**: el modelo de la capa
+semántica es local y corre en el runner, así que `embeddings.yml` no necesita
+más que `DATABASE_URL`. Si algún día aparece una `*_EMBEDDING_API_KEY` en esta
+tabla, es que alguien se saltó la regla de coste cero.
 
 ## Sync nocturno
 
@@ -609,6 +614,52 @@ Dos trampas al usarla a mano:
    ```
 
    Si el número se parece al de tu catálogo de dev, es dev.
+
+## Cambiar la imagen de Postgres a pgvector (DB de dev local)
+
+La feature 75 necesita la extensión `vector`, y **la imagen oficial
+`postgres:16` no la trae** — `pg_available_extensions` ni siquiera la lista. Por
+eso `docker-compose.yml` pasa a `pgvector/pgvector:pg16`, que es el mismo
+Postgres 16 con la extensión compilada. Producción (Neon) no se entera: ahí
+`CREATE EXTENSION vector` está disponible en todos los planes, el free
+incluido, sin add-on.
+
+**El volumen NO se recrea.** Es el mismo major, así que los datos se leen tal
+cual. Lo único que hay que hacer en local:
+
+```bash
+docker compose up -d db     # recrea el contenedor con la imagen nueva
+uv run alembic upgrade head # aplica la 0042 (extensión + item_embeddings)
+```
+
+### El aviso de `collation version mismatch`
+
+Al arrancar con la imagen nueva, `psql` puede empezar a avisar:
+
+```
+WARNING:  database "backlogg" has a collation version mismatch
+DETAIL:  The database was created using collation version 2.41, but the
+         operating system provides version 2.36.
+```
+
+No es un problema de pgvector: `postgres:16` se publica hoy sobre una Debian
+más nueva que `pgvector/pgvector:pg16`, y **la glibc cambia el orden de
+comparación de texto entre versiones**. Un índice B-tree sobre columnas de
+texto construido con una collation y leído con otra puede devolver resultados
+incompletos, así que no se ignora: se reindexan las bases y se vuelve a anclar
+la versión.
+
+```bash
+for db in backlogg backlogg_test postgres template1; do
+  docker exec backlogg-db psql -U postgres -d "$db" \
+    -c "REINDEX DATABASE $db;" \
+    -c "ALTER DATABASE $db REFRESH COLLATION VERSION;"
+done
+```
+
+Tarda segundos en una base de dev de ~240 MB. En CI no aplica (cada run parte
+de una base vacía) y en Neon tampoco (es un Postgres gestionado, no cambia de
+glibc bajo los pies).
 
 ## Recuperar espacio en Neon (`VACUUM FULL`)
 
@@ -1263,6 +1314,211 @@ propiedad que guarda el id numérico de IGDB casi no está poblada
 feature 79 (`source='WIKIDATA'`) y la 83 (`source='INTERNAL'`); un borrado
 ancho se lleva la otra capa por delante. Si hay que limpiar, acotar siempre por
 `source`.
+
+## Embeddings semánticos (feature 75)
+
+`.github/workflows/embeddings.yml` ejecuta `scripts/generate_embeddings.py` en
+el runner contra Neon. Cron **mensual** (`0 4 5 * *`) más `workflow_dispatch`.
+Único secret: `DATABASE_URL`.
+
+**Coste: cero euros.** El modelo (`intfloat/multilingual-e5-small`, MIT) es
+**local** y corre en el runner, que es gratis. No hay API de embeddings, ni
+key, ni cuenta, ni vendor. Lo único que se gasta son minutos de runner.
+
+**El modelo no entra en la imagen de Render.** `sentence-transformers` y torch
+son un extra (`[project.optional-dependencies].embeddings`) y el Dockerfile
+construye con `uv sync --no-dev --frozen`, que instala las dependencias por
+defecto y **ningún extra**. Comprobable en cualquier momento:
+
+```bash
+uv export --no-dev --frozen | grep -iE "torch|sentence-transformers"   # vacío
+uv export --no-dev --frozen --extra embeddings | grep -c torch          # >0
+```
+
+La API nunca infiere: servir «parecidos» es un lookup ANN contra el índice HNSW.
+
+```bash
+# Run completo (los cuatro tipos, tope EMBEDDING_MAX_ITEMS)
+gh workflow run embeddings.yml
+
+# Un solo tipo, o un tope menor para una prueba
+gh workflow run embeddings.yml -f item_type=BOOK
+gh workflow run embeddings.yml -f max_items=5000
+
+# Re-embeber lo que el hash dice que no ha cambiado (solo si cambió la
+# SERIALIZACIÓN; un modelo nuevo se detecta solo)
+gh workflow run embeddings.yml -f force=true
+
+gh run list --workflow=embeddings.yml --limit 3
+
+# En local (usa la DATABASE_URL del entorno; NO toca .env)
+uv sync --extra embeddings
+uv run python scripts/generate_embeddings.py --max-items 400
+uv run python scripts/generate_embeddings.py --size-report   # solo medir
+```
+
+**Códigos de salida.** `0` = recorrió el subconjunto entero; `2` = **incompleto**
+(se acabó el presupuesto de reloj), sacado como `::warning::` sin tumbar el job;
+`1` = fallo irrecuperable.
+
+**Reanudar.** Re-lanzar el workflow, y ya está. **No hay cursor**: la lista de
+candidatos es una función determinista del estado del catálogo y todo ítem que
+ya tenga vector del mismo `(modelo, hash del texto)` se salta antes de pedirle
+nada al modelo. Un segundo run sobre un catálogo sin cambios cuesta cuatro
+queries y **cero inferencias**.
+
+### Qué se embebe, y qué no
+
+`EMBEDDING_MAX_ITEMS` (40.000) se reparte **a partes iguales** entre los cuatro
+tipos; el que no puede llenar su cuota devuelve el resto a los demás. Dentro de
+cada tipo manda la señal: primero los ítems **con sinopsis**, luego
+`rating_count_external` descendente, luego `rating_external`, luego `id`.
+Comparación siempre **dentro** del tipo — un `vote_count` de TMDB y un
+`rating_count` de IGDB no son la misma unidad.
+
+Un ítem fuera del subconjunto **no tiene vector**, y eso es normal, no un fallo.
+
+```bash
+# Cobertura por tipo
+psql "$DATABASE_URL" -c "SELECT item_type, count(*) FROM item_embeddings GROUP BY 1 ORDER BY 1;"
+
+# Qué modelo hay guardado (una mezcla de dos modelos sería un bug: los
+# vectores de modelos distintos no son comparables)
+psql "$DATABASE_URL" -c "SELECT model, count(*) FROM item_embeddings GROUP BY 1;"
+```
+
+### Disco: la restricción que manda, medida
+
+Neon free son **512 MB por proyecto** (~490 utilizables) y el catálogo ocupa la
+mayor parte. Dos medidas del 2026-09-15, pgvector 0.8.6 sobre PG16, que se
+corroboran entre ellas:
+
+**A) Generación real** — 35.215 ítems del catálogo de dev (los cuatro tipos,
+vectores del modelo de verdad, índice construido incrementalmente, que es como
+crece en producción):
+
+| | tamaño | por fila |
+|---|---|---|
+| heap (datos) | **34,4 MB** | 1.025 B |
+| TOAST | 0 (el vector cabe inline) | — |
+| índice HNSW (`m=16`) | **39,3 MB** | 1.169 B |
+| `uq_item_embedding` (1,48) + PK (0,77) | 2,25 MB | 67 B |
+| **TOTAL** | **76,0 MB** | **2.262 B** |
+
+Ojo al desglose, porque es fácil leerlo mal: los **41,5 MB** que suma
+`pg_indexes_size` **no son el HNSW**, son los tres índices juntos. El ANN son
+39,3 MB y los b-trees (`uq_item_embedding` + PK) 2,2 MB.
+
+El job informa exactamente con este desglose, así que el log y esta tabla dicen
+lo mismo:
+
+```
+rows                 35215
+heap (data)        34.4 MB
+toast               0.0 MB
+indexes            41.5 MB
+  hnsw (ann)       39.3 MB
+  b-trees           2.2 MB
+TOTAL              76.0 MB
+per item           2262 bytes
+```
+
+Para comprobarlo a mano, índice a índice:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) \
+  FROM pg_stat_user_indexes WHERE relname='item_embeddings';"
+```
+
+**B) Sintética a la cota exacta** — 40.000 filas de `halfvec(384)`, índice
+construido en bloque:
+
+| | tamaño | por fila |
+|---|---|---|
+| heap (datos) | 39 MB | 1.022 B |
+| índice HNSW (`m=16`) | 45 MB | 1.180 B |
+| `uq_item_embedding` + PK | 2,1 MB | 55 B |
+| **TOTAL** | **86 MB** | **2.255 B** |
+
+Los 2.262 B/ítem de la medida real y los 2.255 B/ítem de la sintética
+coinciden, así que la extrapolación es sólida: **40.000 ítems cuestan 86-90 MB**
+(el rango es el índice, que sale un 5 % mayor construido fila a fila que en
+bloque).
+
+**Ese número corrige la estimación de planificación (~67 MB): la real es 86-90
+MB, un 30 % más.** La diferencia es todo lo que la estimación no contaba —
+cabecera de tupla, `model`, `source_hash`, timestamps, relleno de página y los
+dos b-trees. Entra en el margen de 80-120 MB, pero **por la parte baja**: antes
+de la primera generación en producción hay que medir el hueco real.
+
+```bash
+# 1. ¿Cuánto hueco queda de verdad?
+psql "$DATABASE_URL" -c "SELECT pg_size_pretty(pg_database_size(current_database()));"
+
+# 2. Regla de bolsillo: EMBEDDING_MAX_ITEMS ≈ (hueco_MB - 20 de colchón) / 0,00225
+#    - 138 MB de hueco → hasta ~52.000, sobra
+#    -  80 MB de hueco → ~26.000; NO dejar el default en 40.000
+#    -  40 MB de hueco → ~9.000; la capa casi no cabe
+
+# 3. Después de generar, comprobar contra lo medido
+uv run python scripts/generate_embeddings.py --size-report
+```
+
+El propio job saca el informe en el step summary del run y **loguea un `ERROR`
+si se pasa de 120 MB**. Pasarse no rompe ningún test: rompe el sync nocturno el
+día que Neon rechace una escritura.
+
+**Bajar el índice a `m=8` no es la solución** (medido: 45 MB → 39 MB, solo 6 MB
+de ahorro, a cambio de recall). El grueso del índice HNSW es **el vector**, no
+los enlaces. La única palanca real es `EMBEDDING_MAX_ITEMS`.
+
+### Coste en tiempo de runner
+
+Medido el 2026-09-15 en local (12 vCPU, modelo en caché, incluyendo la
+escritura en Postgres): **34.815 ítems en 21 min 52 s = ~26,5 ítems/s**. El
+runner de Actions tiene 4 vCPU, así que la extrapolación razonable es **~9
+ítems/s**:
+
+| | ítems | medido / estimado |
+|---|---|---|
+| Generación inicial completa, local 12 vCPU | 34.815 | **22 min (medido)** |
+| Generación inicial completa, runner 4 vCPU | 40.000 | **~75 min (estimado)** |
+| Mensual típico (solo lo que cambió) | cientos | **< 5 min** |
+| Segunda pasada sin cambios | 0 inferencias | segundos |
+
+Más ~1 min de descarga del modelo (~470 MB) la primera vez; el workflow lo
+cachea con `actions/cache`, así que los meses siguientes son segundos. El
+presupuesto de reloj por defecto (`EMBEDDING_TIME_BUDGET_MINUTES=300`) y el
+`timeout-minutes: 350` del job dejan margen de sobra; si aun así se corta, se
+re-lanza y continúa.
+
+**El mensual es barato por una razón concreta**: `source_hash` y `model`. Sin
+ese salto, cada run re-embebería los 40.000 ítems para reflejar un puñado de
+sinopsis editadas.
+
+### Cambiar `EMBEDDING_DIM` después de migrar
+
+No basta con tocar la variable. La `0042` escribe el ancho **dentro del tipo de
+la columna**, así que un `EMBEDDING_DIM` distinto del migrado hace fallar toda
+escritura con `expected N dimensions`. El job lo detecta antes de cargar el
+modelo y lo dice; el arreglo es explícito y borra los vectores viejos, que
+pertenecen a otro espacio:
+
+```bash
+psql "$DATABASE_URL" <<'SQL'
+BEGIN;
+DROP INDEX idx_item_embeddings_hnsw;
+TRUNCATE item_embeddings;                       -- otro ancho = otro modelo
+ALTER TABLE item_embeddings ALTER COLUMN embedding TYPE halfvec(<nuevo>);
+CREATE INDEX idx_item_embeddings_hnsw ON item_embeddings
+  USING hnsw (embedding halfvec_cosine_ops);
+COMMIT;
+SQL
+```
+
+Y después re-generar. **No truncar un modelo a menos dimensiones para ahorrar
+disco**: `multilingual-e5-small` no es Matryoshka y truncarlo degrada sin
+garantía. Para ahorrar disco se baja `EMBEDDING_MAX_ITEMS`.
 
 ## Endpoints admin
 

@@ -136,41 +136,94 @@ credit `AUTHOR` en un libro del catálogo antes de emitir el enlace cross-type.
 
 ### Capa 1 — Semántica: embeddings + pgvector
 
+> **IMPLEMENTADA (feature 75, 2026-09-15).** Esta sección se reescribió tras
+> medir: la versión anterior recomendaba una API de embeddings de pago y daba
+> por hecho el catálogo entero. Las dos cosas se cayeron. Lo que sigue describe
+> lo que hay en el código; el detalle de esquema está en `docs/schema.md`
+> §«Item embeddings» y el runbook en `docs/operations.md`.
+
 El puente natural entre tipos: **todo ítem tiene título, sinopsis y géneros**,
 sea del tipo que sea. Se serializa a un párrafo, se embebe con un modelo
-multilingüe y se guarda un vector por ítem. La similitud es coseno en un
-espacio común, así que el cruce entre tipos es gratis por construcción.
+multilingüe y se guarda un vector por ítem en `item_embeddings`. La similitud
+es coseno en un espacio común, así que el cruce entre tipos es gratis por
+construcción.
 
-**Modelo.** Debe ser multilingüe: las sinopsis llegan en español y en inglés
-(la app es bilingüe). Opciones:
+**El tipo NO entra en el texto.** Escribir «película» o «videojuego» en el
+párrafo daría a cada ítem de un tipo un token en común y el modelo agruparía por
+tipo — destruyendo justo la propiedad por la que existe la capa. El tipo es una
+columna: va en el `WHERE`, no en el vector.
 
-| Opción | Coste | Notas |
-|---|---|---|
-| OpenAI `text-embedding-3-small` | 0,02 $/M tokens | ~0,16 $ una vez para 40.000 ítems. Admite reducir dimensiones (`dimensions=512`) |
-| BGE-M3 (MIT, local) | 0 € | 100+ idiomas, 8k de contexto. Requiere torch en el pipeline de ingesta |
-| Jina embeddings | de pago | Especialmente fuerte en español-inglés según sus benchmarks |
+**Modelo: local, en el runner, gratis.** `intfloat/multilingual-e5-small` (MIT,
+118M params, 384 dimensiones nativas, ventana de 512 tokens). La recomendación
+anterior —«API en el pipeline de ingesta, no modelo local, porque torch metería
+cientos de MB y presión de RAM en un VPS de 2 vCPU»— describía un sitio donde la
+inferencia **no ocurre**: la propia arquitectura fija que se genera al ingerir,
+en GitHub Actions, que tiene CPU, RAM y disco de sobra y es gratis. Y el
+proyecto vive en free tiers, así que una API de pago está descartada por
+principio. `sentence-transformers` es un **extra** de dependencias; el
+`uv sync --no-dev` del Dockerfile no instala extras, así que torch no puede
+entrar en la imagen de Render ni por accidente.
 
-**Recomendación: API en el pipeline de ingesta, no modelo local.** Ya tienes
-`httpx` como dependencia; añadir torch/sentence-transformers metería cientos de
-MB y presión de RAM en un VPS de 2 vCPU. El coste es despreciable.
+Por qué ese y no otro:
+
+| Modelo | Dims | Ventana | Veredicto |
+|---|---|---|---|
+| `intfloat/multilingual-e5-small` | 384 | 512 tokens | **Elegido.** MIT, 100+ idiomas |
+| `paraphrase-multilingual-MiniLM-L12-v2` | 384 | **128 tokens** | Descartado: corta la mayoría de las sinopsis por la mitad |
+| BGE-M3 | 1024 | 8k | Descartado **por disco**, no por calidad: 2 KB/ítem en `halfvec` se come el margen entero |
+| OpenAI / Jina | — | — | Descartados: cuestan dinero |
 
 **Punto clave de arquitectura: no hay inferencia en tiempo de petición.** El
-vector se genera una vez al ingerir el ítem (job de sync/backfill, que corre en
-GitHub Actions). Servir `/similar` es un lookup ANN contra un índice HNSW. Cero
-latencia añadida, cero dependencia externa en el camino de la petición.
+vector se genera una vez al ingerir (job mensual en Actions). Servir
+«parecidos» es un lookup ANN contra un índice HNSW. Cero latencia añadida, cero
+dependencia externa en el camino de la petición, cero modelo en el runtime.
 
-**Almacenamiento.** 40.000 ítems × 1536 dims × 4 bytes ≈ 245 MB. Con
-`dimensions=512` baja a ~80 MB, y `halfvec` lo reduce a la mitad otra vez.
-Relevante porque Neon cobra 0,35 $/GB-mes.
+**Almacenamiento: es la restricción que manda, y está medida.** Neon free son
+512 MB por proyecto y el catálogo ocupa la mayor parte. Medido de verdad sobre
+una generación real de 35.215 ítems (**34,4 MB de heap + 39,3 MB de índice HNSW
++ 2,25 MB de b-trees = 76 MB**, 2.262 B/ítem) y corroborado con 40.000 filas
+sintéticas (**86 MB**, 2.255 B/ítem): **40.000 ítems cuestan 86-90 MB**, no los
+~67 MB que estimaba la planificación. Por eso la capa se acota con un **tope
+duro** (`EMBEDDING_MAX_ITEMS`, 40.000 por defecto) y no cubre el catálogo
+entero; 100.000 ítems no caben en ningún formato. Y entra **por la parte baja**
+del margen, así que antes de la primera generación en producción hay que medir
+el hueco real (`docs/operations.md` § «Disco: la restricción que manda,
+medida»).
 
-**Infra necesaria:**
-- `docker-compose.yml`: cambiar `postgres:16` por `pgvector/pgvector:pg16`
-  (la imagen oficial de Postgres no trae la extensión). Igual en CI.
-- Neon soporta pgvector con `CREATE EXTENSION vector`, incluido índice HNSW.
-- Migración Alembic: columna `embedding vector(512)` + índice HNSW por tabla,
-  o una tabla `item_embeddings(item_type, item_id, embedding)` polimórfica —
-  **preferible la segunda**, coherente con `credits` y `external_ids`, y evita
-  cuatro índices HNSW separados.
+Dos decisiones que se derivan de ese número:
+
+- **`halfvec`, no `vector` float32.** Mitad de disco, error de cuantización muy
+  por debajo del ruido del embedding.
+- **No se trunca la dimensionalidad.** El modelo no es Matryoshka: truncar a
+  256 degrada sin garantía. Si hace falta más sitio se recorta el
+  **subconjunto**, que cuesta cobertura, no calidad por ítem. Medido: bajar el
+  índice HNSW a `m=8` solo ahorra 6 MB de 45, porque el grueso del índice es el
+  vector y no los enlaces. **La única palanca real es el número de filas.**
+
+**El subconjunto se reparte por tipos, a partes iguales.** Cada tipo llena su
+cuota con sus ítems mejor señalados (primero los que tienen sinopsis, luego por
+`rating_count_external`); un tipo que no puede llenarla devuelve el resto. Igual
+y no proporcional al tamaño del catálogo porque el ranker necesita **profundidad
+en los cuatro tipos**: un reparto proporcional daría a movies la mitad del
+presupuesto y dejaría al tipo más pequeño sin nada que ofrecer.
+
+**Consecuencia que hay que aceptar con los ojos abiertos:** un ítem fuera del
+subconjunto **no tiene vector**. El `/similar` semántico solo funciona para los
+ítems embebidos, y quien consuma la capa tiene que decidir qué hacer con el
+resto (hoy movies y series tienen el `/similar` de TMDB como fallback; books y
+games se calculan en local). Nace aquí y se resuelve en la capa del ranker.
+
+**Infra necesaria (ya aplicada):**
+- `docker-compose.yml` y `.github/workflows/ci.yml` usan `pgvector/pgvector:pg16`
+  — la imagen oficial de Postgres no trae la extensión. Ojo al aviso de
+  `collation version mismatch` al cambiar de imagen en local: procedimiento en
+  `docs/operations.md`.
+- Neon soporta `CREATE EXTENSION vector` con índice HNSW **en todos los planes,
+  el free incluido, sin add-on** (verificado 2026-09-15).
+- Migración `0042`: extensión + tabla `item_embeddings(item_type, item_id,
+  embedding)` polimórfica + índice HNSW. Una tabla y no una columna por tipo —
+  coherente con `credits`, `external_ids` e `item_relations`, y evita cuatro
+  índices HNSW y un `UNION` de cuatro brazos en cada lectura cross-type.
 
 **Limitación honesta:** capta "de qué va", no "a quién le gusta". Pondrá el
 documental sobre la Segunda Guerra Mundial junto a la novela bélica. Por eso no

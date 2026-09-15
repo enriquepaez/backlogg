@@ -1,0 +1,133 @@
+name: Monthly semantic embeddings
+
+on:
+  schedule:
+    # 04:00 UTC on the 5th of every month. Away from the nightly sync (02:00)
+    # and from the Wikidata dump (03:00 on the 3rd) so the three never share
+    # Neon's connection budget, and monthly because the input barely moves: a
+    # synopsis is edited far more rarely than it is read, and the job re-embeds
+    # only the items whose text actually changed.
+    - cron: '0 4 5 * *'
+  workflow_dispatch:
+    inputs:
+      item_type:
+        description: 'Restrict the run to one content type (blank = all four). The per-type quota split is computed over all four regardless, so a restricted run can never spend another type''s budget.'
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - MOVIE
+          - SERIES
+          - BOOK
+          - GAME
+      max_items:
+        description: 'Hard cap on how many items carry a vector, across all types (blank = EMBEDDING_MAX_ITEMS, 40000). Raising it past ~40.000 does not fit in Neon free — see the disk report at the end of the run.'
+        required: false
+        type: string
+        default: ''
+      budget_minutes:
+        description: 'Wall-clock ceiling for the run, in minutes (blank = EMBEDDING_TIME_BUDGET_MINUTES, 300). The job stops itself at the ceiling; re-dispatch to continue, nothing is redone.'
+        required: false
+        type: string
+        default: ''
+      force:
+        description: 'Re-embed even items whose text and model are unchanged. Only needed when the SERIALISATION changed — a new model is detected on its own.'
+        required: false
+        type: boolean
+        default: false
+
+# Runs directly against the production database (Neon), like backfill-sync.yml
+# and wikidata-sync.yml, and for a reason this job makes especially sharp: the
+# model must never enter the image Render deploys. sentence-transformers and
+# torch are an optional extra (`uv sync --extra embeddings`) and the Dockerfile
+# builds with `uv sync --no-dev --frozen`, which installs no extras — so the API
+# cannot load a model even by accident. It only ever reads the HNSW index.
+#
+# Cost: zero euros. The model is local and the runner is free; the only budget
+# spent is runner minutes, measured in docs/operations.md. No embeddings API,
+# no key, no account. DATABASE_URL is the only secret this workflow needs.
+#
+# Re-dispatching is safe and is the documented way to finish an interrupted
+# run: the selection is deterministic and items already embedded with the same
+# text and model are skipped, so a second dispatch continues instead of redoing
+# work. There is no cursor to get out of sync.
+jobs:
+  embeddings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Pinned so the cache key below matches what the job actually downloads.
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ~470 MB of weights. Caching them turns a two-minute download at the
+      # start of every monthly run into a few seconds; the key carries the model
+      # name so switching models fetches the new one instead of serving the old.
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.hf-cache
+          key: hf-${{ hashFiles('.env.example') }}-multilingual-e5-small
+
+      # The ONLY place this extra is ever installed. torch comes from PyTorch's
+      # CPU-only index (see [tool.uv.sources] in pyproject.toml): the runner has
+      # no GPU and the default wheel would drag ~2.5 GB of CUDA libraries.
+      - name: Install the embedding extra (runner only, never in the API image)
+        run: uv sync --extra embeddings --frozen
+
+      # Exit code 2 = the run finished but is incomplete: the time budget
+      # expired mid-walk. Surfaced as a warning annotation rather than a failed
+      # job — a partially embedded subset is still useful and the next dispatch
+      # continues — but it must never be reported as green.
+      - name: Generate embeddings
+        run: |
+          set +e
+          uv run python scripts/generate_embeddings.py \
+            ${{ github.event.inputs.item_type != '' && format('--item-type {0}', github.event.inputs.item_type) || '' }} \
+            ${{ github.event.inputs.max_items != '' && format('--max-items {0}', github.event.inputs.max_items) || '' }} \
+            ${{ github.event.inputs.budget_minutes != '' && format('--budget-minutes {0}', github.event.inputs.budget_minutes) || '' }} \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            2>&1 | tee embeddings.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::embeddings run INCOMPLETE — the time budget cut the walk short. Re-dispatch this workflow to continue; items already embedded are skipped, so nothing is redone."
+          elif [ "$status" -ne 0 ]; then
+            echo "::error::embeddings run failed (exit $status)"
+            exit "$status"
+          fi
+
+      # The acceptance list asks for the disk measurement, per run and not just
+      # once. Pinning it to the run summary is what keeps the Neon free budget
+      # observable: going over it does not fail a test, it fails the nightly
+      # sync the day the project quota is exhausted.
+      - name: Publish quota plan and disk report
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Subset selected"
+            echo ''
+            echo '```'
+            grep -E 'quota=|stored per type|of 4 types covered' embeddings.log || echo 'no quota plan in this run'
+            echo '```'
+            echo ''
+            echo "## item_embeddings on disk (Neon free headroom: 80-120 MB)"
+            echo ''
+            echo '```'
+            grep -A 9 'item_embeddings on disk' embeddings.log || echo 'no disk report in this run'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
