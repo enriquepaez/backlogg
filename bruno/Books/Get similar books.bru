@@ -18,4 +18,45 @@ tests {
   test("results field is an array", function() {
     expect(res.body.results).to.be.an("array");
   });
+
+  test("every result carries its own item_type and a structured reason", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.item_type).to.be.oneOf(["MOVIE", "SERIES", "BOOK", "GAME"]);
+      expect(entry.slug).to.be.a("string");
+      expect(entry.reason).to.be.an("object");
+      expect(entry.reason.kind).to.be.oneOf([
+        "SEMANTIC",
+        "SEMANTIC_CROSS_TYPE",
+        "SHARED_AUTHOR",
+        "SHARED_GENRE",
+        "EXTERNAL"
+      ]);
+    });
+  });
+
+  test("the item in the URL is not among its own results", function() {
+    res.body.results.forEach(function(entry) {
+      expect(entry.slug).to.not.equal("harry-potter-and-the-philosophers-stone-1997");
+    });
+  });
+}
+
+docs {
+  Feature 80. The primary path is the semantic HNSW index: neighbours may be of
+  ANY item_type, so item_type travels in every result and the link is
+  /{entry.item_type}/{entry.slug} — never the type of the page.
+
+  reason is structured data ({kind, score, source}), not a sentence: FE-69
+  renders it in es/en with next-intl. score is the cosine similarity and is only
+  present for the SEMANTIC kinds.
+
+  An item outside the embedded subset (EMBEDDING_MAX_ITEMS) falls back to the
+  path it always used — TMDB/IGDB or the local book tiers — and those results
+  carry reason.kind EXTERNAL / SHARED_AUTHOR / SHARED_GENRE.
+
+  SIMILAR_CROSS_TYPE_QUOTA ships at 0, and at 0 the query is narrowed to the type
+  of the item in the URL: the response NEVER contains another type, so against a
+  default environment every entry.item_type equals the type of this request.
+  FE-67 raises it to 3, and then cross-type entries appear. Either way the link
+  must be built from entry.item_type, never from the page.
 }

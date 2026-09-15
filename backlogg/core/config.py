@@ -196,6 +196,92 @@ class Settings(BaseSettings):
     # resumes where this one stopped. 0 disables it.
     EMBEDDING_TIME_BUDGET_MINUTES: float = 300.0
 
+    # ── The /similar ranker (feature 80) ─────────────────────────────────────
+    #
+    # THE SWITCH THAT DECIDES WHETHER /similar IS CROSS-TYPE AT ALL.
+    #
+    # > 0: how many of the 10 results are RESERVED for a type other than the
+    #      item in the URL. The plan asks for 3
+    #      (docs/recommendations-plan.md § El ranker) because cosine on its own
+    #      returns the anchor's own type almost every time: items of one type
+    #      share vocabulary ("season", "player", "novel") and that dominates
+    #      the metric, so without a reserved quota the cross-media bridge this
+    #      product is built on rarely reaches the user.
+    #
+    #   0: the endpoint NEVER returns an item of another type. Not "reserves
+    #      nothing" — never: the query itself is narrowed to the anchor's own
+    #      type (recommendations/similar.py::_neighbours).
+    #
+    # That second line is the whole point of the default and it had to be made
+    # true rather than assumed. Reserving zero slots is NOT the same as
+    # returning none: an unfiltered cosine top-N hands back the other types
+    # whenever they genuinely win, and measured on the real development catalog
+    # that was 63% of the rows of a film's page — including 7 of the 10
+    # neighbours of The Return of the King.
+    #
+    # Why 0 ships: apps/web/src/components/item-similar.tsx links every result
+    # to /{type-of-the-page}/{slug}, so ONE book among films is a 404 in
+    # production — the exact shape of issues #32, #33 and #36 — and Render
+    # deploys main on merge. The behaviour is implemented and tested at any
+    # value; what is deferred is switching it on. FE-67 raises this to 3 in the
+    # same PR that renders the type badge. See docs/api.md § Movies.
+    SIMILAR_CROSS_TYPE_QUOTA: int = 0
+    # How much a candidate is demoted for each group (same creator, same
+    # franchise) already taken above it: score *= (1 - penalty) per repetition.
+    # 0.25 lets a saga keep the top slot it earned and then yield the next ones
+    # — ten entries of one franchise are not ten recommendations. 0 disables
+    # the re-rank and leaves raw cosine order.
+    SIMILAR_DIVERSITY_PENALTY: float = 0.25
+    # How many neighbours are pulled from the HNSW index per result served.
+    # The index walk is cheap and the ranker needs room to demote duplicates
+    # and to reach a fourth type; over-fetching is also what makes a *filtered*
+    # ANN query (item_types=...) come back full instead of short.
+    SIMILAR_CANDIDATE_MULTIPLIER: int = 6
+    # pgvector's HNSW candidate window (hnsw.ef_search) for the queries that
+    # are NARROWED BY TYPE. It is not touched on any other read.
+    #
+    # Both narrowed queries pass it, in both directions:
+    #   - quota = 0 → the main query is narrowed to the anchor's OWN type;
+    #   - quota > 0 → the second query is narrowed to the OTHER THREE types.
+    #
+    # It is here because item_types is a POST-FILTER: when the planner uses the
+    # HNSW index it produces ef_search candidates and only then is the type
+    # kept, so if the wanted type is a small share of the index the answer is
+    # not "fewer rows", it is NO ROWS.
+    #
+    # MEASURED on the development catalog — 35.215 vectors, of which 33.062 are
+    # games, 1.157 series, 605 movies and 391 books — asking for 60 neighbours:
+    #
+    #   non-GAME neighbours of a game — the quota>0 path, 6% of the index:
+    #     ef_search=40 (pgvector default) →  0 rows,  28 ms
+    #     ef_search=200                   →  0 rows,   4 ms
+    #     ef_search=400                   →  1 row,    6 ms
+    #     ef_search=800                   → 60 rows,   4 ms
+    #     ef_search=1000 (pgvector max)   → 60 rows,   3 ms
+    #
+    #   GAME neighbours of a game — the quota=0 path on the majority type:
+    #     ef_search=40 (pgvector default) → 39 rows,   4 ms
+    #     ef_search=200                   → 60 rows,   9 ms
+    #     ef_search=1000                  → 60 rows,  15 ms
+    #
+    # The curve is a cliff, not a slope, so the value sits at the ceiling:
+    # widening the window costs a few milliseconds inside one index, while
+    # landing under the cliff costs the whole cross-type feature.
+    #
+    # The quota=0 path on a MINORITY type never needs it, and that is a
+    # property of the planner rather than of this value: narrowing to MOVIE
+    # (1,7% of the index) or BOOK (1,1%) is selective enough that Postgres
+    # drops the HNSW index and answers from the b-tree of uq_item_embedding
+    # with an exact top-N sort — 60/60 rows in ~3 ms at any ef_search,
+    # verified with EXPLAIN ANALYZE. Exact beats approximate on a few hundred
+    # rows. The setting is passed anyway: which plan wins depends on the row
+    # counts of the day, and the cost of being wrong is a half-empty carousel.
+    #
+    # In production the split is far less skewed — EMBEDDING_MAX_ITEMS_* gives
+    # each type an equal quota — so this is sized for the worst case, not the
+    # expected one.
+    SIMILAR_FILTERED_EF_SEARCH: int = 1000
+
     # Quality thresholds for the Open Library book catalog (feature 73). The
     # language fragments live in backlogg/books/constants.py — only the
     # tunable numbers are env vars. Defaults are the calibrated values

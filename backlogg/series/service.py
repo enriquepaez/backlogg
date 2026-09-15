@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
+from backlogg.recommendations import similar
 from backlogg.series import repository as repo
 from backlogg.series.adapters.tmdb import TMDBSeriesClient
 from backlogg.series.models import Series
@@ -304,12 +305,24 @@ async def get_series(db: AsyncSession, slug: str, viewer_id: int | None = None) 
 
 
 async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOut:
+    """Similar items for a series: the semantic index first, TMDB as fallback.
+
+    Same two-path shape as ``movies.service.get_similar_movies`` — see there
+    for why the legacy path survives feature 80 untouched.
+    """
     # 1. Look up the source series — 404 if it doesn't exist
     series = await repo.get_series_by_slug(db, slug)
     if series is None:
         raise HTTPException(status_code=404, detail="Series not found")
 
-    # 2. Get the TMDB ID for the source series
+    # 2. Semantic path (feature 80); ``None`` = this series has no vector.
+    semantic = await similar.get_semantic_similar(db, "SERIES", series.id)
+    if semantic is not None:
+        return SimilarSeriesListOut(
+            results=[SimilarSeriesOut(**row.model_dump()) for row in semantic]
+        )
+
+    # 3. Get the TMDB ID for the source series
     ext_id = await get_external_id(db, "SERIES", series.id, "TMDB")
     if ext_id is None:
         # Series exists locally but has no TMDB ID — return empty results
@@ -317,10 +330,10 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
 
     tmdb_id = int(ext_id.external_id)
 
-    # 3. Fetch recommendations from TMDB (page 1 only)
+    # 4. Fetch recommendations from TMDB (page 1 only)
     raw_results = await _tmdb.get_series_recommendations(tmdb_id)
 
-    # 4. Persist any new series and collect up to 10 results. TMDB's
+    # 5. Persist any new series and collect up to 10 results. TMDB's
     # recommendations order reflects its own relevance ranking, not rating —
     # results are re-sorted below by rating_internal desc / rating_external
     # desc tie-break (feature 66) so the community's own rating decides what
@@ -378,6 +391,8 @@ async def get_similar_series(db: AsyncSession, slug: str) -> SimilarSeriesListOu
                 rating_internal,
                 rating_external,
                 SimilarSeriesOut(
+                    item_type="SERIES",
+                    reason=similar.legacy_reason("TMDB"),
                     title=rec_series.title,
                     slug=rec_series.slug,
                     poster_url=rec_series.poster_url,

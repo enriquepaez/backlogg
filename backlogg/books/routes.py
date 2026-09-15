@@ -46,8 +46,11 @@ async def list_books(
     response_model=SimilarBooksOut,
     summary="Similar books",
     description=(
-        "Up to 10 similar books computed locally: same-author matches (feature 19) "
-        "take priority over genre overlap. No external API calls."
+        "Up to 10 similar items for this book, from the semantic index (feature 80): "
+        "neighbours may be of any item_type, and each result carries its own item_type "
+        "and a structured reason. Books outside the embedded subset fall back to the "
+        "local tiers: same-author matches (feature 19) over genre overlap. No external "
+        "API calls on either path."
     ),
 )
 async def get_similar_books(slug: str, db: AsyncSession = Depends(get_db)):

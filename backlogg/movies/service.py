@@ -18,6 +18,7 @@ from backlogg.movies.schemas import (
     SimilarMoviesOut,
 )
 from backlogg.people import repository as people_repo
+from backlogg.recommendations import similar
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import (
@@ -287,12 +288,27 @@ async def get_movie(db: AsyncSession, slug: str, viewer_id: int | None = None) -
 
 
 async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
+    """Similar items for a movie: the semantic index first, TMDB as fallback.
+
+    Feature 80 moved the primary path to the HNSW index of feature 75 — no
+    external call, and the neighbours may be of any type. The TMDB path below
+    stays exactly as it was for movies **outside the embedded subset**
+    (``EMBEDDING_MAX_ITEMS`` caps it at 40.000, so in production most of the
+    catalog lands here): a rewrite that left those items with an empty
+    carousel would be a regression dressed as a feature.
+    """
     # 1. Look up the source movie — 404 if it doesn't exist
     movie = await repo.get_movie_by_slug(db, slug)
     if movie is None:
         raise HTTPException(status_code=404, detail="Movie not found")
 
-    # 2. Get the TMDB ID for the source movie
+    # 2. Semantic path (feature 80). ``None`` means "this movie has no vector",
+    #    not "it has no neighbours" — fall through to TMDB.
+    semantic = await similar.get_semantic_similar(db, "MOVIE", movie.id)
+    if semantic is not None:
+        return SimilarMoviesOut(results=[SimilarMovieOut(**row.model_dump()) for row in semantic])
+
+    # 3. Get the TMDB ID for the source movie
     ext_id = await get_external_id(db, "MOVIE", movie.id, "TMDB")
     if ext_id is None:
         # Movie exists locally but has no TMDB ID — return empty results
@@ -300,10 +316,10 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
 
     tmdb_id = int(ext_id.external_id)
 
-    # 3. Fetch recommendations from TMDB (page 1 only)
+    # 4. Fetch recommendations from TMDB (page 1 only)
     raw_results = await _tmdb.get_movie_recommendations(tmdb_id)
 
-    # 4. Persist any new movies and collect up to 10 results
+    # 5. Persist any new movies and collect up to 10 results
     results: list[SimilarMovieOut] = []
     for raw in raw_results[:10]:
         rec_tmdb_id = raw.get("id")
@@ -345,6 +361,8 @@ async def get_similar_movies(db: AsyncSession, slug: str) -> SimilarMoviesOut:
 
         results.append(
             SimilarMovieOut(
+                item_type="MOVIE",
+                reason=similar.legacy_reason("TMDB"),
                 title=rec_movie.title,
                 slug=rec_movie.slug,
                 poster_url=rec_movie.poster_url,

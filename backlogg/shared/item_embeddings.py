@@ -405,6 +405,7 @@ async def get_similar_by_item(
     *,
     limit: int = 20,
     item_types: Sequence[str] | None = None,
+    ef_search: int | None = None,
 ) -> list[SimilarItem]:
     """Nearest neighbours of an item **that is already embedded**.
 
@@ -414,7 +415,31 @@ async def get_similar_by_item(
     An item outside the subset yields an empty list, never an error: the subset
     is bounded on purpose (see the module docstring) and "not embedded" is an
     ordinary, expected state that feature 80 has to fall back from.
+
+    ``ef_search`` widens pgvector's HNSW candidate window (``SET LOCAL
+    hnsw.ef_search``) for this statement only.  It exists because ``item_types``
+    is a **post-filter**, applied to whatever the index walk already produced:
+    with the default window of 40, asking for the nearest books of a game in an
+    index that is 94% games returns **nothing at all**, not "fewer than asked".
+    That is not hypothetical — it is what feature 80's cross-type quota hit on
+    the real development catalog (33.062 games out of 35.215 vectors), where
+    the quota silently reserved slots it could never fill.  Widening the window
+    is pgvector's own answer to a filtered ANN; the cost is a longer walk in
+    the same index, paid only by the caller that asks for it.
     """
+    if ef_search is not None:
+        # SET LOCAL: scoped to the surrounding transaction, which for a request
+        # is the request. A session-wide SET would make one endpoint's recall
+        # setting leak into every other query on the pooled connection —
+        # verified not to survive a COMMIT, a ROLLBACK or the recycling of the
+        # connection.
+        #
+        # It does stay in force for the rest of *this* transaction, i.e. for
+        # whatever the caller runs next. That is harmless rather than merely
+        # tolerable: no other statement on the request path touches the HNSW
+        # index (feature 80's follow-up read hydrates rows by primary key), so
+        # the setting has nothing left to affect.
+        await db.execute(sa.text(f"SET LOCAL hnsw.ef_search = {int(ef_search)}"))
     anchor = (
         select(ItemEmbedding.embedding)
         .where(ItemEmbedding.item_type == item_type, ItemEmbedding.item_id == item_id)

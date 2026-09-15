@@ -45,7 +45,12 @@ async def list_movies(
     "/{slug}/similar",
     response_model=SimilarMoviesOut,
     summary="Similar movies",
-    description="Up to 10 similar movies (TMDB). New items are persisted locally.",
+    description=(
+        "Up to 10 similar items for this movie, from the semantic index (feature 80): "
+        "neighbours may be of any item_type, and each result carries its own item_type "
+        "and a structured reason. Movies outside the embedded subset fall back to TMDB "
+        "recommendations, which persist new items locally."
+    ),
 )
 async def get_similar_movies(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_movies(db, slug)

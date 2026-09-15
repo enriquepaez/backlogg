@@ -17,6 +17,7 @@ from backlogg.games.schemas import (
     SimilarGameOut,
 )
 from backlogg.library import service as library_service
+from backlogg.recommendations import similar
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import get_external_id, upsert_external_id
@@ -117,18 +118,28 @@ async def get_game(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
 
 
 async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
+    """Similar items for a game: the semantic index first, IGDB as fallback.
+
+    Same two-path shape as ``movies.service.get_similar_movies`` — see there
+    for why the legacy path survives feature 80 untouched.
+    """
     # 1. Look up the source game — 404 if it doesn't exist
     game = await repo.get_game_by_slug(db, slug)
     if game is None:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    # 2. Confirm the source game has an IGDB ID (needed to trust similar_games)
+    # 2. Semantic path (feature 80); ``None`` = this game has no vector.
+    semantic = await similar.get_semantic_similar(db, "GAME", game.id)
+    if semantic is not None:
+        return SimilarGameListOut(results=[SimilarGameOut(**row.model_dump()) for row in semantic])
+
+    # 3. Confirm the source game has an IGDB ID (needed to trust similar_games)
     ext_id = await get_external_id(db, "GAME", game.id, "IGDB")
     if ext_id is None:
         # Game exists locally but has no IGDB ID — return empty results
         return SimilarGameListOut(results=[])
 
-    # 3. Re-fetch the source game from IGDB by slug to get similar_games.*
+    # 4. Re-fetch the source game from IGDB by slug to get similar_games.*
     # (IGDB relations, not a local genre-overlap heuristic)
     raw = await _igdb_client.get_game_by_slug(game.slug)
     if raw is None:
@@ -136,7 +147,7 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
 
     similar_raw = raw.get("similar_games") or []
 
-    # 4. Persist any new games and collect up to 10 results. IGDB's
+    # 5. Persist any new games and collect up to 10 results. IGDB's
     # similar_games order reflects its own curated relations, not rating —
     # results are re-sorted below by rating_internal desc / rating_external
     # desc tie-break (feature 66) so the community's own rating decides what
@@ -179,6 +190,8 @@ async def get_similar_games(db: AsyncSession, slug: str) -> SimilarGameListOut:
                 rating_internal,
                 rating_external,
                 SimilarGameOut(
+                    item_type="GAME",
+                    reason=similar.legacy_reason("IGDB"),
                     title=sim_game.title,
                     slug=sim_game.slug,
                     poster_url=sim_game.poster_url,

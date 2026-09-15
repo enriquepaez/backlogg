@@ -69,7 +69,15 @@ def _row_to_rec(item_type: str, row, reason: str) -> RecommendationOut:
 
 
 async def _external_similar(db: AsyncSession, item_type: str, slug: str):
-    """Delegate to feature 16's similar-items service for the given type."""
+    """Delegate to the similar-items service of the seed's type.
+
+    Since feature 80 this is no longer only "the external similar-items API":
+    the four services answer from the semantic index when the seed has a vector
+    and only fall back to TMDB/IGDB when it does not. Two consequences for this
+    caller: the fan-out is often free of external calls, and **the results are
+    not necessarily of the seed's type** — each row carries its own
+    ``item_type`` and it has to be read from there.
+    """
     if item_type == "MOVIE":
         return (await movies_service.get_similar_movies(db, slug)).results
     return (await series_service.get_similar_series(db, slug)).results
@@ -137,10 +145,23 @@ async def get_recommendations(
                 for item in similar:
                     if item.slug in taken_slugs or item.slug in seen_slugs:
                         continue
+                    # ``?type=`` is a promise about the whole response, and the
+                    # fan-out can now return another type (feature 80). Without
+                    # this guard a request for films could come back with a
+                    # book in it.
+                    if item.item_type not in item_types:
+                        continue
                     taken_slugs.add(item.slug)
                     candidates.append(
                         RecommendationOut(
-                            item_type=item_type,
+                            # ``item.item_type``, NOT the seed's type. Since
+                            # feature 80 the similar-items service answers from
+                            # the semantic index and a neighbour of a film can
+                            # be a book, so echoing the seed's type here would
+                            # label that book ``MOVIE`` and hand the frontend a
+                            # link to /movies/{book-slug} — issues #32, #33 and
+                            # #36, one endpoint over.
+                            item_type=item.item_type,
                             title=item.title,
                             slug=item.slug,
                             poster_url=item.poster_url,

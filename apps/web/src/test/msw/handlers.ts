@@ -247,6 +247,10 @@ export const hadesFixture: GameOut = {
 export const similarMoviesFixture: SimilarMoviesOut = {
   results: [
     {
+      // Feature 80: every result carries its own `item_type` (a neighbour may
+      // be of any type) and a structured `reason` the UI translates itself.
+      item_type: "MOVIE",
+      reason: { kind: "SEMANTIC", score: 0.91, source: null },
       title: "Arrival",
       slug: "arrival-2016",
       poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
@@ -261,6 +265,8 @@ export const similarMoviesFixture: SimilarMoviesOut = {
 export const similarSeriesFixture: SimilarSeriesListOut = {
   results: [
     {
+      item_type: "SERIES",
+      reason: { kind: "SEMANTIC", score: 0.88, source: null },
       title: "The Last of Us",
       slug: "the-last-of-us",
       poster_url: "https://image.tmdb.org/t/p/w500/tlou.jpg",
@@ -275,6 +281,8 @@ export const similarSeriesFixture: SimilarSeriesListOut = {
 export const similarBooksFixture: SimilarBooksOut = {
   results: [
     {
+      item_type: "BOOK",
+      reason: { kind: "SEMANTIC", score: 0.94, source: null },
       title: "Dune Messiah",
       slug: "OL893416W",
       poster_url: "https://covers.openlibrary.org/b/id/13-L.jpg",
@@ -289,6 +297,8 @@ export const similarBooksFixture: SimilarBooksOut = {
 export const similarGamesFixture: SimilarGameListOut = {
   results: [
     {
+      item_type: "GAME",
+      reason: { kind: "SEMANTIC", score: 0.86, source: null },
       title: "Bastion",
       slug: "bastion",
       poster_url: "https://images.igdb.com/igdb/image/upload/t_cover_big/bastion.jpg",

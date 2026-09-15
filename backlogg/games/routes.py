@@ -45,7 +45,12 @@ async def list_games(
     "/{slug}/similar",
     response_model=SimilarGameListOut,
     summary="Similar games",
-    description="Up to 10 similar games (IGDB similar_games). New items are persisted locally.",
+    description=(
+        "Up to 10 similar items for this game, from the semantic index (feature 80): "
+        "neighbours may be of any item_type, and each result carries its own item_type "
+        "and a structured reason. Games outside the embedded subset fall back to IGDB "
+        "similar_games, which persist new items locally."
+    ),
 )
 async def get_similar_games(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_games(db, slug)

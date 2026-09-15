@@ -220,16 +220,142 @@ idéntica salvo `viewer_status: null`.
 
 ```
 GET /v1/movies/{slug}/similar
-→ 200  Hasta 10 películas similares (TMDB recommendations)
+→ 200  Hasta 10 ítems similares, del índice semántico (cualquier item_type)
 → 404  Slug no encontrado
 ```
 
-Response: `{"results": [...]}` — cada item: `title`, `slug`, `poster_url`,
-`release_date`, `rating_external`, `rating_internal` (feature 69). Los items
-nuevos se persisten en la DB local. Orden: el propio orden de relevancia de
-TMDB (no reordenado por rating — a diferencia de `/v1/series/{slug}/similar`
-y `/v1/games/{slug}/similar`, este endpoint queda fuera del alcance explícito
-de la feature 66).
+**Contrato compartido por los cuatro tipos** (feature 80). Se describe una
+sola vez aquí; en series, books y games es idéntico salvo el prefijo.
+
+Response: `{"results": [...]}` — cada entrada:
+
+| Campo             | Qué es                                                      |
+|-------------------|-------------------------------------------------------------|
+| `item_type`       | `MOVIE` / `SERIES` / `BOOK` / `GAME` **del resultado**       |
+| `title`           | Título del ítem recomendado                                  |
+| `slug`            | Slug del ítem recomendado (con `item_type` compone el enlace) |
+| `poster_url`      | Póster, o `null`                                             |
+| `release_date`    | Fecha propia del tipo (`first_air_date` en series, `first_publish_date` en libros) |
+| `rating_external` | Nota de la fuente externa, o `null` (feature 69)             |
+| `rating_internal` | Nota de la comunidad, o `null` (feature 69)                  |
+| `reason`          | Objeto `{kind, score, source}` — ver abajo                   |
+
+#### De dónde salen los resultados
+
+El camino principal es el **índice HNSW** de la feature 75: se busca el vecino
+más cercano por coseno del vector del ítem de la URL, **sin ninguna llamada
+externa**. El espacio es común a los cuatro tipos, así que un vecino *puede*
+ser de cualquiera de ellos — es el puente cross-media del producto — pero
+**si ese puente está abierto lo decide `SIMILAR_CROSS_TYPE_QUOTA`** (ver abajo).
+
+El ítem de la URL **nunca aparece en sus propios resultados**: el coseno
+consigo mismo vale 1,0, así que se excluye explícitamente en la consulta.
+
+Antes de servir, el ranker aplica dos reglas
+(`backlogg/recommendations/ranking.py`):
+
+1. **Diversificación.** Cada candidato se penaliza (`score × (1 − penalty)`)
+   por cada grupo ya ocupado más arriba: misma franquicia (heurística
+   conservadora sobre el título: subtítulo tras `:` o número de secuela) o
+   mismo creador (`credits` con rol `AUTHOR`/`SOURCE_AUTHOR`/`DIRECTOR`/
+   `CREATOR`). Penaliza, **no descarta**: diez entradas de una misma saga
+   siguen llenando la lista si de verdad no hay nada más cerca.
+   Configurable con `SIMILAR_DIVERSITY_PENALTY` (por defecto `0.25`).
+2. **Cuota cross-type** (`SIMILAR_CROSS_TYPE_QUOTA`). No es solo un reparto de
+   huecos: es **el interruptor que decide si el endpoint es cross-type**.
+
+   | Valor | Qué hace |
+   |-------|----------|
+   | `0` (el que se mergea) | La consulta al índice se **restringe al tipo del ítem de la URL**. La respuesta **nunca** contiene un ítem de otro tipo. |
+   | `N > 0` | Reserva N de los 10 huecos para ítems de otro tipo. Garantiza `min(N, 10, vecinos de otro tipo disponibles)`: si el catálogo no tiene N vecinos de otro tipo, no se inventan. |
+
+   «Reservar cero huecos» y «no devolver ningún otro tipo» **no son lo mismo**,
+   y la diferencia no es teórica: con el `top-N` sin filtrar, el coseno mete
+   otros tipos en cuanto ganan de verdad, y sobre el catálogo de desarrollo eso
+   era el **63 %** de las filas de la ficha de una película. Por eso a 0 se
+   filtra la consulta, no solo el reparto.
+
+   La cuota decide **quién** está en la página, nunca **en qué orden** se lee:
+   un resultado promovido aparece donde lo pone su propio score.
+
+#### `hnsw.ef_search` en las consultas filtradas por tipo
+
+Las dos consultas que llevan filtro de tipo (la de `quota=0`, restringida al
+tipo del ancla, y la segunda de `quota>0`, restringida a los otros tres) se
+lanzan con `hnsw.ef_search` ampliado (`SIMILAR_FILTERED_EF_SEARCH`, 1000) vía
+`SET LOCAL`. No es cosmético: cuando el planner usa el índice HNSW, el filtro
+por tipo se aplica **después** del recorrido, así que si el tipo buscado es una
+fracción pequeña del índice la respuesta no es «menos filas», es **cero filas**.
+
+Medido sobre el catálogo de desarrollo (35.215 vectores: 33.062 juegos, 1.157
+series, 605 películas, 391 libros), pidiendo 60 vecinos:
+
+| Consulta | `ef_search` 40 (default) | 200 | 400 | 800 | 1000 |
+|---|---|---|---|---|---|
+| vecinos **no**-GAME de un juego (`quota>0`) | 0 | 0 | 1 | 60 | 60 |
+| vecinos GAME de un juego (`quota=0`) | 39 | 60 | 60 | 60 | 60 |
+
+Para un tipo minoritario (`MOVIE`, 1,7 %; `BOOK`, 1,1 %) la consulta de
+`quota=0` **no necesita la ventana**: el filtro es tan selectivo que Postgres
+descarta el índice HNSW y responde por el b-tree de `uq_item_embedding` con un
+top-N exacto — 60 de 60 filas en ~3 ms con cualquier `ef_search` (verificado
+con `EXPLAIN ANALYZE`). Se pasa igualmente porque qué plan gana depende de los
+recuentos del día.
+
+`SET LOCAL` queda vigente el resto de la transacción —o sea, el resto de la
+petición—, lo cual es inocuo: ninguna consulta posterior del endpoint toca el
+índice HNSW. No contamina la conexión del pool.
+
+> ⚠️ **`SIMILAR_CROSS_TYPE_QUOTA` se mergea en `0` y lo enciende FE-67.** El
+> valor que pide la ficha de la feature 80 es **3 de 10**, y el comportamiento
+> está implementado y probado a cualquier valor; lo que se difiere es
+> encenderlo. Hoy `apps/web/src/components/item-similar.tsx` enlaza cada
+> resultado a `/{tipo-de-la-página}/{slug}`, así que **un solo** libro devuelto
+> entre películas sería un **enlace roto en producción** —la forma exacta de
+> los issues #32, #33 y #36— y Render despliega `main` al mergear. **FE-67 sube
+> la cuota a 3 en el mismo PR que enseña el badge de tipo.** Mientras tanto
+> `item_type` viaja **igual** en cada resultado, desde ya: sin él FE-67 no
+> puede encender nada, y ningún cliente debe inferirlo de la página en la que
+> está.
+
+#### `reason`: dato estructurado, nunca una frase
+
+`reason` es un objeto, no una cadena: FE-69 lo traduce a es/en con next-intl y
+una frase montada en el backend sería intraducible. Mismo criterio que
+`direction` en `/adaptations` (feature 92).
+
+| Campo    | Qué es                                                                |
+|----------|------------------------------------------------------------------------|
+| `kind`   | `SEMANTIC`, `SEMANTIC_CROSS_TYPE`, `SHARED_AUTHOR`, `SHARED_GENRE`, `EXTERNAL` |
+| `score`  | Similitud coseno en `[0, 1]` — solo en los `kind` semánticos; `null` en el resto |
+| `source` | `TMDB` / `IGDB` — solo con `kind: "EXTERNAL"`; `null` en el resto      |
+
+- **`SEMANTIC`** — vecino del índice, del mismo tipo que el ítem de la URL.
+- **`SEMANTIC_CROSS_TYPE`** — vecino del índice, de **otro** tipo. Es una
+  afirmación distinta («también hay una novela sobre esto»), por eso es un
+  `kind` aparte y no una comparación que tenga que hacer el cliente.
+- **`SHARED_AUTHOR` / `SHARED_GENRE`** — respaldo local de books.
+- **`EXTERNAL`** — respaldo vía la API de la fuente (TMDB/IGDB).
+
+#### Ítems sin vector: respaldo, no regresión
+
+La capa semántica cubre un **subconjunto acotado** del catálogo
+(`EMBEDDING_MAX_ITEMS`, 40.000 por defecto — ver feature 75), así que en
+producción la mayoría de los ítems **no tiene vector**. Esos ítems caen al
+camino que ya tenían, sin cambios:
+
+| Tipo         | Respaldo                                    | `reason.kind`                  |
+|--------------|---------------------------------------------|--------------------------------|
+| Movies       | TMDB recommendations (persiste ítems nuevos) | `EXTERNAL` (`source: "TMDB"`)  |
+| Series       | TMDB recommendations (persiste ítems nuevos) | `EXTERNAL` (`source: "TMDB"`)  |
+| Books        | Mismo autor, luego solapamiento de género    | `SHARED_AUTHOR` / `SHARED_GENRE` |
+| Games        | `similar_games` de IGDB (persiste ítems nuevos) | `EXTERNAL` (`source: "IGDB"`) |
+
+En el respaldo `item_type` es constante (el del propio endpoint) pero **se
+rellena igual**, para que ningún cliente tenga que saber qué camino respondió.
+El orden del respaldo es el de siempre: relevancia de TMDB en movies, y
+`rating_internal DESC NULLS LAST` con `rating_external` de desempate en series
+y games (feature 66).
 
 ```
 GET /v1/movies/{slug}/adaptations
@@ -306,13 +432,15 @@ Response fields: `id`, `title`, `original_title`, `slug`, `overview`, `first_air
 
 ```
 GET /v1/series/{slug}/similar
-→ 200  Hasta 10 series similares (mismo contrato que /v1/movies/{slug}/similar)
+→ 200  Hasta 10 ítems similares (mismo contrato que /v1/movies/{slug}/similar)
 → 404  Slug no encontrado
 ```
 
-Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
-NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
-no por el orden de relevancia que devuelve TMDB.
+Camino principal: el índice semántico, igual que en movies — los vecinos
+pueden ser de cualquier `item_type`. Para series **sin vector** el respaldo es
+TMDB, reordenado por `rating_internal DESC NULLS LAST` con `rating_external
+DESC NULLS LAST` como desempate interno (feature 66), no por el orden de
+relevancia que devuelve TMDB.
 
 ```
 GET /v1/series/{slug}/adaptations
@@ -338,27 +466,31 @@ para el work, cuando existe alguno.
 
 ```
 GET /v1/books/{slug}/similar
-→ 200  Hasta 10 libros similares, calculados 100% en local (sin API externa)
+→ 200  Hasta 10 ítems similares, calculados 100% en local (sin API externa)
 → 404  Slug no encontrado
 ```
 
-Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`:
-cada item incluye `title`, `slug`, `poster_url`, `release_date`
-(`first_publish_date` del libro), `rating_external`, `rating_internal`
-(feature 69). **A diferencia de `GET /v1/recommendations`, no incluye un
-campo `reason`.**
+Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`,
+`reason` incluido (desde la feature 80; `release_date` es el
+`first_publish_date` del libro).
 
-Ranking: prioriza libros que comparten autor con el libro base (vía
-`people`/`credits` con `role: "AUTHOR"`, feature 19) sobre el resto; para
-completar hasta 10 resultados (o si no hay coincidencia de autor) usa
-solapamiento de género, con `rating_internal DESC NULLS LAST` como desempate
-en ambos niveles (feature 66 — el rating de la propia comunidad) y
-`rating_external DESC NULLS LAST` como desempate interno de segundo nivel
-para libros cuyo `rating_internal` todavía es `NULL` o está empatado. El
-propio libro nunca aparece en sus resultados. No se
-hace ninguna llamada a Open Library ni se crean `external_ids` nuevos — el
-ranking se calcula enteramente desde datos ya persistidos localmente (ver
-investigación en `backend_feature_list.json`, feature 46).
+Camino principal: el índice semántico, igual que en movies — los vecinos
+pueden ser de cualquier `item_type`, y para un libro es donde más se nota (la
+película o el juego de la misma obra).
+
+Para libros **sin vector**, el respaldo local de la feature 46, sin cambios:
+prioriza libros que comparten autor con el libro base (vía `people`/`credits`
+con `role: "AUTHOR"`, feature 19) sobre el resto; para completar hasta 10
+resultados (o si no hay coincidencia de autor) usa solapamiento de género, con
+`rating_internal DESC NULLS LAST` como desempate en ambos niveles (feature 66
+— el rating de la propia comunidad) y `rating_external DESC NULLS LAST` como
+desempate interno de segundo nivel para libros cuyo `rating_internal` todavía
+es `NULL` o está empatado. Los resultados del respaldo llevan
+`reason.kind: "SHARED_AUTHOR"` o `"SHARED_GENRE"` según el nivel que los
+produjo. El propio libro nunca aparece en sus resultados, en ninguno de los dos
+caminos. **Ninguno de los dos hace llamadas externas**: no se llama a Open
+Library ni se crean `external_ids` nuevos (ver investigación en
+`backend_feature_list.json`, feature 46).
 
 ```
 GET /v1/books/{slug}/adaptations
@@ -392,18 +524,19 @@ distintos (p.ej. developer autopublicado). Array vacío si no hay.
 
 ```
 GET /v1/games/{slug}/similar
-→ 200  Hasta 10 juegos similares (campo similar_games de IGDB — relaciones
-       curadas, no solapamiento de género)
+→ 200  Hasta 10 ítems similares (mismo contrato que /v1/movies/{slug}/similar)
 → 404  Slug no encontrado
 ```
 
 Response: `{"results": [...]}` — mismo contrato que `/v1/movies/{slug}/similar`
-y `/v1/series/{slug}/similar`: cada item incluye `title`, `slug`, `poster_url`,
-`release_date`, `rating_external`, `rating_internal` (feature 69). Los juegos
-nuevos se persisten en la DB local.
-Orden (feature 66): los resultados se reordenan por `rating_internal` `DESC
-NULLS LAST` con `rating_external DESC NULLS LAST` como desempate interno —
-no por el orden curado de relaciones que devuelve IGDB.
+y `/v1/series/{slug}/similar`, `reason` incluido (desde la feature 80).
+
+Camino principal: el índice semántico, igual que en movies — los vecinos
+pueden ser de cualquier `item_type`. Para juegos **sin vector** el respaldo es
+`similar_games` de IGDB (relaciones curadas, no solapamiento de género); los
+juegos nuevos se persisten en la DB local y el orden es `rating_internal DESC
+NULLS LAST` con `rating_external DESC NULLS LAST` de desempate (feature 66),
+no el orden curado que devuelve IGDB.
 
 ```
 GET /v1/games/{slug}/adaptations
@@ -973,9 +1106,13 @@ indica, solo se generan recomendaciones de ese tipo. `page` (≥1, default 1) y
 Cómo se generan los candidatos:
 - **Movies/series:** primero candidatos locales por solapamiento de género con
   las semillas; solo si no se alcanzan suficientes candidatos locales se hace
-  fan-out externo reutilizando las recomendaciones de TMDB (feature 16,
-  `get_similar_movies`/`get_similar_series`). No se dispara fan-out externo
-  cuando ya hay suficientes candidatos locales.
+  fan-out reutilizando `get_similar_movies`/`get_similar_series` (feature 16).
+  No se dispara fan-out cuando ya hay suficientes candidatos locales. Desde la
+  feature 80 ese fan-out **puede no llamar a TMDB en absoluto** (si la semilla
+  tiene vector se resuelve con el índice semántico) y **puede devolver ítems de
+  otro tipo**: cada candidato lleva su propio `item_type`, que se copia tal
+  cual — nunca el de la semilla. Con `?type=` activo los candidatos de otro
+  tipo se descartan, porque el filtro es una promesa sobre toda la respuesta.
 - **Books/games:** solapamiento por género (sin API externa de similares).
 - **Sin semillas:** fallback a populares/trending locales, ordenado por
   `rating_internal DESC NULLS LAST` (feature 66 — el rating de la propia
