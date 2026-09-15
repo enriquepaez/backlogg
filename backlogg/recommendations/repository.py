@@ -6,24 +6,30 @@ reuses the polymorphic ``item_type``/``item_id`` model mapping from
 ``UserRating`` tables, and builds cross-type reads with the same ``union_all``
 style as ``backlogg/feed/repository.py`` and ``backlogg/library/repository.py``.
 
-Nothing here writes; recommendations are computed, never persisted.
+Nothing here writes; recommendations are computed, never persisted. The one
+thing this domain *does* persist — the semantic vectors of feature 75 — is
+written from ``backlogg/shared/item_embeddings.py``, which owns that table the
+way ``shared/item_relations.py`` owns its own. What lives here is the read half
+of that job: which items are selected, and what text they are embedded from.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import String, and_, case, func, literal, select, union_all
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
-from backlogg.books.models import Book, book_genres_join
-from backlogg.games.models import Game, game_genres_join
+from backlogg.books.models import Book, BookGenre, book_genres_join
+from backlogg.games.models import Game, GameGenre, game_genres_join
 from backlogg.library.models import LibraryEntry
-from backlogg.movies.models import Movie, movie_genres_join
+from backlogg.movies.models import Movie, MovieGenre, movie_genres_join
 from backlogg.ratings.models import UserRating
-from backlogg.series.models import Series, series_genres_join
+from backlogg.series.models import Series, SeriesGenre, series_genres_join
 from backlogg.shared.credits import AUTHORSHIP_ROLES
+from backlogg.shared.item_embeddings import ItemEmbedding
 from backlogg.shared.models import Credit
 
 # Statuses that count as an implicit positive signal for seeding.
@@ -389,3 +395,162 @@ async def get_item_refs(
                 poster_url=row.poster_url,
             )
     return refs
+
+
+# ── Semantic layer: which items get a vector, and from what text (feature 75) ─
+
+# Per item_type, the genre vocabulary table that hangs off the join in
+# ``_TYPE_CONFIG``. Separate from ``_TYPE_CONFIG`` because the four vocabularies
+# are four different tables (books use the controlled vocabulary of feature 72),
+# and no other consumer in this file needs the genre *name*.
+_GENRE_MODELS: dict[str, type[DeclarativeBase]] = {
+    "MOVIE": MovieGenre,
+    "SERIES": SeriesGenre,
+    "BOOK": BookGenre,
+    "GAME": GameGenre,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingSource:
+    """Everything one item contributes to its vector, plus what is stored today.
+
+    ``stored_model`` / ``stored_hash`` come from a LEFT JOIN against
+    ``item_embeddings`` in the same query rather than a second round trip: they
+    are what decides whether this item needs re-embedding at all, and fetching
+    them separately would double the reads of a job whose whole point is that
+    almost every item is skipped.
+    """
+
+    item_type: str
+    item_id: int
+    title: str
+    original_title: str | None
+    overview: str | None
+    genres: tuple[str, ...]
+    stored_model: str | None
+    stored_hash: str | None
+
+
+def _embedding_rank_order(model: type[DeclarativeBase]):
+    """The selection order of the bounded subset, and the whole of the criterion.
+
+    Three keys, in this order:
+
+    1. **Has a synopsis.** An item with only a title and genres still produces
+       a vector, but a thin one; when the budget is capped, spending it on
+       items the model has something to read about is strictly better. This
+       matters most for books, where Open Library describes a minority of works.
+    2. **``rating_count_external`` descending.** How many people rated the item
+       at its own source: the closest thing to a notoriety signal that all four
+       types carry. Compared only *within* a type — a TMDB vote count and an
+       IGDB rating count are not the same unit, which is exactly why the cap is
+       split into per-type quotas instead of being one global ranking.
+    3. **``rating_external`` descending, then ``id`` ascending.** Tie-breakers.
+       ``id`` last makes the order total and therefore the whole selection
+       deterministic, which is what lets an interrupted run resume by simply
+       recomputing the list.
+
+    Books deserve a note: Open Library reports no rating counts at all today,
+    so for that type keys 2 and 3 are flat and the order is effectively "has a
+    synopsis, then seed order". That is acceptable rather than accidental —
+    every work in the book catalog already cleared the reading-log and edition
+    thresholds of ``docs/seeding-plan.md`` before being seeded, so the type has
+    no long tail of unknown items to filter out in the first place.
+    """
+    overview_col = model.overview
+    return (
+        case((and_(overview_col.is_not(None), overview_col != ""), 1), else_=0).desc(),
+        func.coalesce(model.rating_count_external, 0).desc(),
+        func.coalesce(model.rating_external, 0).desc(),
+        model.id.asc(),
+    )
+
+
+async def count_catalog_items(db: AsyncSession, item_type: str) -> int:
+    """How many items of this type exist — the ceiling on its quota."""
+    model, _join, _item_col, _release_attr = _TYPE_CONFIG[item_type]
+    return int((await db.execute(select(func.count()).select_from(model))).scalar_one())
+
+
+async def select_embedding_candidate_ids(db: AsyncSession, item_type: str, limit: int) -> list[int]:
+    """The ``limit`` best-signalled items of this type, in selection order.
+
+    Returned as a plain id list, computed once at the start of a run, rather
+    than paged through with OFFSET: the list for a whole type is at most tens
+    of thousands of integers, and materialising it once means the expensive
+    ordering is paid once instead of once per batch — and that every batch sees
+    the *same* ranking, which an OFFSET walk over a table being written to by
+    the nightly sync would not guarantee.
+    """
+    if limit <= 0:
+        return []
+    model, _join, _item_col, _release_attr = _TYPE_CONFIG[item_type]
+    stmt = select(model.id).order_by(*_embedding_rank_order(model)).limit(limit)
+    result = await db.execute(stmt)
+    return [int(row) for row in result.scalars().all()]
+
+
+async def load_embedding_sources(
+    db: AsyncSession, item_type: str, item_ids: Sequence[int]
+) -> list[EmbeddingSource]:
+    """Title, genres, synopsis and current vector state for a batch of ids.
+
+    Genres are aggregated in SQL (``array_agg`` ordered by name) instead of
+    through the ORM relationship: the serialised text has to be **byte-stable**
+    across runs or its hash changes and every item is re-embedded for nothing,
+    and a deterministic ``ORDER BY`` inside the aggregate is the cheapest way to
+    guarantee that.
+
+    Rows come back in the order the caller asked for, not the database's:
+    ``item_ids`` is a slice of the ranked selection and the caller reports
+    progress against it.
+    """
+    if not item_ids:
+        return []
+    model, join_table, item_col, _release_attr = _TYPE_CONFIG[item_type]
+    genre_model = _GENRE_MODELS[item_type]
+    join_item_col = join_table.c[item_col]
+
+    genres_subq = (
+        select(func.array_agg(aggregate_order_by(genre_model.name, genre_model.name.asc())))
+        .select_from(join_table)
+        .join(genre_model, genre_model.id == join_table.c.genre_id)
+        .where(join_item_col == model.id)
+        .correlate(model)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            model.id,
+            model.title,
+            model.original_title,
+            model.overview,
+            genres_subq.label("genres"),
+            ItemEmbedding.model.label("stored_model"),
+            ItemEmbedding.source_hash.label("stored_hash"),
+        )
+        .outerjoin(
+            ItemEmbedding,
+            and_(
+                ItemEmbedding.item_type == item_type,
+                ItemEmbedding.item_id == model.id,
+            ),
+        )
+        .where(model.id.in_(list(item_ids)))
+    )
+    result = await db.execute(stmt)
+    by_id = {
+        int(row.id): EmbeddingSource(
+            item_type=item_type,
+            item_id=int(row.id),
+            title=row.title,
+            original_title=row.original_title,
+            overview=row.overview,
+            genres=tuple(row.genres or ()),
+            stored_model=row.stored_model,
+            stored_hash=row.stored_hash,
+        )
+        for row in result.all()
+    }
+    return [by_id[item_id] for item_id in item_ids if item_id in by_id]

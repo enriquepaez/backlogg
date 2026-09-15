@@ -1024,6 +1024,110 @@ poblada. `updated_at` tiene trigger (`set_updated_at_item_relations`,
 reutilizando `trigger_set_updated_at()` de la 0001). Creada en la migración
 `0041`, con `downgrade()` implementado.
 
+## Item embeddings (feature 75)
+
+### `item_embeddings`
+
+La **capa semántica** de `docs/recommendations-plan.md`: un vector por ítem del
+catálogo, en un espacio común a los cuatro tipos, para que «parecido a esto»
+cruce de tipo por construcción. Requiere la extensión `vector` (pgvector),
+habilitada por la misma migración.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE item_embeddings (
+    id            BIGSERIAL PRIMARY KEY,
+    item_type     VARCHAR(20) NOT NULL,     -- MOVIE | SERIES | BOOK | GAME
+    item_id       BIGINT NOT NULL,
+    embedding     halfvec(384) NOT NULL,    -- ancho = EMBEDDING_DIM al migrar
+    model         VARCHAR(120) NOT NULL,    -- qué modelo produjo el vector
+    source_hash   VARCHAR(64) NOT NULL,     -- SHA-256 del texto serializado
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_item_embedding UNIQUE (item_type, item_id)
+);
+
+CREATE INDEX idx_item_embeddings_hnsw
+    ON item_embeddings USING hnsw (embedding halfvec_cosine_ops);
+```
+
+Sin FK: la referencia es **polimórfica**, igual que `external_ids`, `credits` e
+`item_relations`, y la integridad es del código de aplicación. Una tabla y no
+una columna por tabla de contenido porque cuatro columnas serían cuatro índices
+HNSW y un `UNION` de cuatro brazos en cada lectura cross-type — justo la
+operación que esta capa existe para hacer gratis.
+
+### `halfvec`, no `vector`: el disco manda
+
+Neon free son 512 MB por proyecto (~490 utilizables) y el catálogo ya ocupa la
+mayor parte. `halfvec` guarda cada componente en 2 bytes en vez de 4, lo que
+parte por la mitad **tabla e índice** a cambio de un error de cuantización muy
+por debajo del ruido de un embedding de 384 dimensiones.
+
+Lo que **no** se hace es truncar el vector a 256 dimensiones: el modelo no es
+Matryoshka, así que truncarlo degrada sin garantía. Si hace falta más sitio se
+recorta el **subconjunto** (`EMBEDDING_MAX_ITEMS`), que cuesta cobertura, no
+calidad por ítem.
+
+**Medido de verdad, no estimado** (2026-09-15, pgvector 0.8.6, PG16). Dos
+medidas que se corroboran: una generación **real** de 35.215 ítems de los cuatro
+tipos, y una sintética a la cota exacta de 40.000 filas.
+
+| | real, 35.215 filas | sintética, 40.000 filas |
+|---|---|---|
+| heap (datos) | 34,4 MB | 39 MB |
+| TOAST | 0 | 8 kB (vacío) |
+| índice HNSW (`m=16`) | **39,3 MB** | 45 MB |
+| `uq_item_embedding` + PK | 2,25 MB | 2,1 MB |
+| **TOTAL** | **76,0 MB** | **86 MB** |
+| **por fila** | **2.262 B** | **2.255 B** |
+
+Las tres filas de índice se dan por separado a propósito: los 41,5 MB que suman
+los índices en la medida real **no son el HNSW** — son HNSW (39,3) +
+`item_embeddings_pkey` (0,77) + `uq_item_embedding` (1,48). Confundirlos
+sobrestima el índice ANN en un 5 % y hace que las dos columnas dejen de ser
+comparables fila a fila.
+
+Las dos coinciden en bytes por fila, así que **40.000 ítems cuestan 86-90 MB**
+(el índice sale ~5 % mayor construido fila a fila que en bloque). La estimación
+de planificación era ~67 MB: la real es un 30 % mayor, porque esa cuenta solo
+sumaba los bytes del vector y no la cabecera de tupla, `model`, `source_hash`,
+los timestamps, el relleno de página ni los dos b-trees.
+
+Un `halfvec(384)` ocupa 776 bytes, por debajo del umbral de TOAST (~2 kB): el
+vector vive **inline**, que es lo que hace que el heap sea lineal y predecible.
+Bajar el índice a `m=8` solo ahorra 6 MB (45 → 39): el grueso del índice es el
+vector, no los enlaces, así que **la única palanca real es el número de filas**.
+
+### El subconjunto está acotado, y eso tiene consecuencias
+
+`item_embeddings` **no** cubre el catálogo entero. `EMBEDDING_MAX_ITEMS` (40.000
+por defecto) se reparte en **cuotas por tipo, iguales**, y cada tipo la llena con
+sus ítems mejor señalados: primero los que tienen sinopsis, luego por
+`rating_count_external` descendente. Reparto igual y no proporcional al tamaño
+del catálogo porque la feature 80 necesita **profundidad en los cuatro tipos**;
+un tipo que no puede llenar su cuota devuelve el resto a los demás. Detalle en
+`backlogg/recommendations/embeddings.py`.
+
+Consecuencia que hay que aceptar: un ítem fuera del subconjunto **no tiene
+vector**, y «no tiene vector» es un estado normal, no un error — quien consulte
+la capa tiene que poder replegarse.
+
+`model` y `source_hash` no son metadatos decorativos: son el test de «esto no ha
+cambiado». El job mensual se salta cualquier ítem cuyo texto serializado y
+modelo coincidan con lo guardado, que es lo que hace que una segunda pasada no
+cueste ni una inferencia. Cambiar de modelo invalida todos los vectores sin
+necesidad de ningún flag.
+
+`updated_at` tiene trigger (`set_updated_at_item_embeddings`, reutilizando
+`trigger_set_updated_at()` de la 0001). Creada en la migración `0042`, con
+`downgrade()` implementado (borra tabla, índice y extensión).
+
+**El ancho del vector se congela al migrar.** `EMBEDDING_DIM` es una variable de
+entorno, pero la `0042` la escribe dentro del tipo de la columna. Cambiarla
+después no migra nada: ver `docs/operations.md`.
+
 ## Users
 
 ```sql

@@ -22,7 +22,7 @@ API externa, persiste el ítem y lo devuelve en la misma petición.
 - **GitHub Actions** — sync nocturno (`.github/workflows/nightly-sync.yml`)
   que llama a los endpoints `/v1/admin/sync/{type}`; la instancia free de Render
   duerme sin tráfico, por lo que no puede haber schedulers embebidos en el proceso
-- **PostgreSQL** (Neon en producción)
+- **PostgreSQL** (Neon en producción), con **pgvector** para la capa semántica
 - **ruff** — linting y formato
 - **pytest** — suite de tests
 - **Render** — despliegue
@@ -59,6 +59,9 @@ backlogg/
 │   ├── item_relations.py  # Tabla de aristas ítem-ítem (adaptaciones de
 │   │                      # Wikidata hoy, co-ocurrencia mañana) + su upsert;
 │   │                      # ningún writer puede hacer un DELETE ancho
+│   ├── item_embeddings.py # Tabla polimórfica de vectores (pgvector/halfvec),
+│   │                      # su tipo SQLAlchemy, el upsert y las lecturas por
+│   │                      # coseno contra el índice HNSW (feature 75)
 │   ├── pacing.py          # RequestPacer: el límite de req/s por fuente,
 │   │                      # compartido por Open Library y Wikidata
 │   ├── identity.py        # Resolución del ítem por external_id antes que por
@@ -78,6 +81,10 @@ scripts/
 ├── sync_wikidata.py       # Volcado SPARQL mensual: ancla de QID en
 │                          # external_ids + adaptaciones en item_relations
 │                          # (feature 79)
+├── generate_embeddings.py # Genera los vectores del subconjunto acotado con un
+│                          # modelo LOCAL en el runner (feature 75). Su stack
+│                          # (torch) es un extra que la imagen de Render no
+│                          # instala
 └── bench_bulk_load.py     # Benchmark ruta por ítem vs. ruta por lotes
 ```
 
@@ -166,6 +173,15 @@ mensual de Wikidata (GitHub Actions → `scripts/sync_wikidata.py`, feature 79),
 que escribe el QID de cada ítem en `external_ids` y las adaptaciones en
 `item_relations`. Corre en el runner contra Neon, por el mismo motivo que el
 backfill, y no añade superficie HTTP.
+
+Y un cuarto que tampoco toca el catálogo: la **generación de embeddings**
+(GitHub Actions → `scripts/generate_embeddings.py`, feature 75), que escribe un
+vector por ítem en `item_embeddings`. Corre en el runner por una razón extra a
+las de los otros: el modelo es local y su stack (`sentence-transformers` +
+torch) es un **extra de dependencias** que el `uv sync --no-dev` del Dockerfile
+no instala, así que no puede entrar en la imagen que despliega Render. La API
+nunca infiere — servir «parecidos» es un lookup ANN contra el índice HNSW.
+Tampoco añade superficie HTTP.
 
 ## APIs externas
 

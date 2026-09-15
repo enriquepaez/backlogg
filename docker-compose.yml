@@ -9,7 +9,15 @@
 # This is DEV ONLY — production runs on Neon (configured in Render).
 services:
   db:
-    image: postgres:16
+    # pgvector/pgvector:pg16, NOT the plain postgres:16 image: feature 75 needs
+    # `CREATE EXTENSION vector` (halfvec + HNSW) and the official Postgres
+    # image does not ship the extension — `pg_available_extensions` on a
+    # postgres:16 container does not list `vector` at all, so the migration
+    # fails before it can create `item_embeddings`. This image is the upstream
+    # pgvector build of the very same Postgres 16, so the existing data volume
+    # is read as-is: switching the image does NOT require recreating the volume
+    # (see docs/operations.md, "Cambiar la imagen de Postgres a pgvector").
+    image: pgvector/pgvector:pg16
     container_name: backlogg-db
     # Come back automatically after a reboot or a Docker daemon restart, so the
     # dev/test database is up without having to remember `docker compose up -d`.

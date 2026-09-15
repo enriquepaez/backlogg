@@ -2012,3 +2012,62 @@ construya un enlace. Razonamiento del implementer, correcto para este proyecto:
 
 Gate de frontend en verde: `typecheck && lint && build && test`, **1305 tests**
 en 136 ficheros. `init.sh` también verde (1706). Cero issues abiertos.
+
+---
+
+## 2026-09-15 — Feature 75 `pgvector + item_embeddings` (capa semántica acotada)
+
+**La ficha se reescribió antes de implementar, porque dos de sus premisas eran
+falsas.** Las dos incógnitas que la 75 arrastraba desde el 2026-09-14 se
+resolvieron hoy: pgvector **sí** está en Neon free y con HNSW («*available on
+every Neon plan with no add-on or paid tier required*»), y los embeddings se
+generan con un **modelo local en el runner de Actions**. La ficha anterior
+descartaba el modelo local «porque torch añadiría cientos de MB y presión de RAM
+en un VPS de 2 vCPU» — argumento que describe un sitio donde la inferencia no
+ocurre: la propia ficha ya fijaba que se genera al ingerir, en Actions. Y una
+API de embeddings cuesta dinero, contra la regla de coste cero.
+
+**Y apareció un tercer problema que nadie había medido: el disco.** Neon free son
+512 MB y el issue #28 dejó el catálogo proyectado en 444-488 MB → margen de
+~80-120 MB. Ningún formato cabe a 100k ítems. La feature pasó a ser `halfvec(384)`
+sobre un **subconjunto con tope duro**, repartido en cuotas por tipo (condición
+que la feature 80 necesita para su cuota cross-type).
+
+**El implementer midió en vez de estimar, y corrigió al leader.** La estimación
+del plan (67 MB a 40.000) se quedó **un 35 % corta**: medido, **2.262 B por fila
+→ 86-90 MB a 40.000**, por dos caminos independientes que coinciden en bytes/fila.
+Entra en el margen, pero **por la parte baja**, así que añadió un pre-check
+obligatorio en `docs/operations.md` y un `ERROR` del job si el total pasa de
+120 MB. Midió además que bajar el índice a `m=8` solo ahorra **6 MB de 45**:
+pgvector guarda el vector entero en cada elemento, así que los enlaces que
+gobierna `m` son la parte pequeña. Conclusión que quedó escrita en tres sitios:
+**no hay ninguna palanca de calidad que compre disco; la única palanca es el
+número de filas, y cuesta cobertura.**
+
+**Generación real, no simulada**: 35.215 ítems de los cuatro tipos en 21 min 52 s.
+El puente cross-type funciona — vecinos de *The Return of the King*: LEGO LOTR
+(juego) 0,918, *The Fellowship of the Ring* (**libro**) 0,894, *Rings of Power*
+(serie) 0,884. Los cuatro tipos en los primeros puestos.
+
+**Tres rondas de review, y el código dejó de moverse tras la primera.** Ronda 1:
+tres copias rancias del `~67 MB` pegadas a la perilla que fija el tope, incluida
+una que decía «fits with room to spare», lo contrario de lo medido. Ronda 2: dos
+añadidos del leader — la etiqueta `hnsw index` sobre una cifra de
+`pg_indexes_size` (el operador se creía con 2 MB más de hueco), y dos docstrings
+que prometían la palanca de `m` que la propia medición había matado. El
+implementer separó la cifra en vez de solo reetiquetar. Ronda 3: **el test nuevo
+no mordía donde decía morder** — el fixture escribe 5 filas y a esa escala el
+HNSW y el total de índices se renderizan los dos como `0.0 MB`, así que la
+aserción se cumplía imprimiera el campo que imprimiera. Arreglado ejercitando la
+función pura con un `StorageReport` sintético a escala real. `APPROVED`.
+
+**QA del leader**: muro de producción verificado por mí (`uv export --no-dev`
+sin torch ni sentence-transformers; `import backlogg.main` no filtra ningún
+módulo del stack), informe de disco reproducido (76,0 MB / 2.262 B por ítem, con
+HNSW 39,3 y b-trees 2,2 separados), consulta cross-type reproducida sobre los
+35.215 vectores, y ciclo `upgrade → downgrade → re-upgrade` en una **DB
+desechable** para no destruir los embeddings que la feature 80 necesita.
+
+`bash init.sh` verde: **1743 tests** (partida: 1706). Cero issues abiertos.
+**La DB de dev queda con los 35.215 embeddings dentro** (~76 MB, la base pasa de
+~237 a ~315 MB), a propósito: los necesita la feature 80.

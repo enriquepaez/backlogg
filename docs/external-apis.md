@@ -23,6 +23,33 @@
     Los métodos `get_top_movies`/`get_top_series` siguen existiendo como
     clientes documentados de esos endpoints, pero ningún job los llama.
 
+### La cláusula de IA de TMDB — riesgo asumido, no bloqueante (feature 75)
+
+Los términos de TMDB listan **«entrenar sistemas de machine learning / IA con
+datos de TMDB»** entre sus *ejemplos de uso comercial*. No es una prohibición
+absoluta: es una actividad que activa la necesidad de licencia comercial
+(149 $/mes).
+
+La capa semántica (`item_embeddings`, feature 75) embebe **título, géneros y
+sinopsis**, sinopsis de TMDB incluida. El argumento por el que se hace: generar
+un embedding es **inferencia** sobre contenido que ya se tiene licencia para
+mostrar, no entrenamiento de un modelo. Los pesos del modelo no cambian; ningún
+dato de TMDB sale del proyecto. Pero esa distinción **no está escrita en sus
+términos**, así que no es una certeza, es una lectura.
+
+- **Decisión del usuario (2026-09-02), sin cambios**: riesgo aceptado y
+  documentado; no se consulta a `sales@themoviedb.org` antes de escribir código.
+- **Exposición asumida**: que TMDB reclame la licencia comercial antes de que el
+  producto monetice.
+- **Plan de repliegue si eso ocurre**: regenerar los vectores de movies/series
+  solo con título y géneros (datos fácticos, sin el texto con copyright), o
+  limitar la capa semántica a books (Open Library es CC0) y games. Cuesta
+  reprocesar dos tipos, no rediseñar nada: `item_embeddings` es polimórfica por
+  `item_type` y el job acepta `--item-type`.
+- **Lo que NO cambia el riesgo**: el modelo es local y gratuito
+  (`intfloat/multilingual-e5-small`, MIT, en el runner de GitHub Actions). Eso
+  elimina el coste y el vendor, no la cláusula.
+
 ### Enumeración por `/discover` (feature 86)
 
 El catálogo de movies y series se define por **umbral de `vote_count`**, no
@@ -1065,6 +1092,13 @@ Esquema de `item_relations` en `docs/schema.md`, sección «Item relations».
 | `BOOKS_SEED_MIN_EDITIONS`      | Open Library seed | Mínimo `edition_count` del stream inglés: el filtro de notoriedad que separa la entrega suelta de la obra canónica (default: 10) |
 | `BOOKS_SEED_MIN_EDITIONS_ES`   | Open Library seed | Ídem para el stream en castellano. **No subir a 3**: *Reina roja* tiene exactamente 2 ediciones (default: 2) |
 | `WIKIDATA_SYNC_TIME_BUDGET_MINUTES` | Volcado Wikidata | Techo de reloj por pasada, en minutos. El job se para solo antes de que lo mate el timeout de Actions, conservando cursor e informe; un re-dispatch continúa. 0 lo desactiva (default: 300) |
+| `EMBEDDING_MODEL` | Capa semántica | Modelo **local** que genera los vectores, en el runner de Actions. Multilingüe obligatorio: las sinopsis llegan en castellano y en inglés (default: `intfloat/multilingual-e5-small`, MIT, 384 dims nativas, ventana de 512 tokens) |
+| `EMBEDDING_TEXT_PREFIX` | Capa semántica | Prefijo de tarea que los modelos E5 esperan. `"query: "` en ambos lados es lo que su model card prescribe para similitud **simétrica**, que es lo que hace `/similar` |
+| `EMBEDDING_DIM` | Capa semántica | Componentes por vector. **Se congela en la columna `halfvec` al migrar** (0042): cambiarla después no migra nada — ver `docs/operations.md` (default: 384) |
+| `EMBEDDING_MAX_ITEMS` | Capa semántica | Tope duro de ítems con vector. No es un acelerador: es el hueco que queda en los 512 MB de Neon free. 40.000 miden 86 MB **medidos**; 100.000 no caben en ningún formato (default: 40000) |
+| `EMBEDDING_MAX_ITEMS_MOVIES` / `_SERIES` / `_BOOKS` / `_GAMES` | Capa semántica | Override por tipo. Sin valor, el tope se reparte **a partes iguales** entre los cuatro y lo que un tipo no puede llenar vuelve a los demás (default: sin valor) |
+| `EMBEDDING_BATCH_SIZE` | Capa semántica | Ítems por lote de inferencia y por transacción (default: 256) |
+| `EMBEDDING_TIME_BUDGET_MINUTES` | Capa semántica | Techo de reloj del run. Se para solo y el siguiente dispatch continúa, porque los ítems sin cambios se saltan. 0 lo desactiva (default: 300) |
 | `SYNC_SLICE_SIZE`      | Sync job      | Max items per sync run and type (default: 200)   |
 | `SYNC_SLICE_SIZE_MOVIES` / `_SERIES` / `_BOOKS` / `_GAMES` | Sync job | Override por tipo del anterior. Movies necesita ~350/noche y series ~61 para la ventana de 6 meses de TMDB (default: sin valor → cae al global) |
 

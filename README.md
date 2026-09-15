@@ -35,7 +35,10 @@ cp .env.example .env
 
 # 3. Base de datos local: Postgres en Docker, con datos persistentes.
 #    Crea las DBs `backlogg` (dev) y `backlogg_test` (tests) en el primer
-#    arranque. Ver docker-compose.yml.
+#    arranque. La imagen es pgvector/pgvector:pg16 (el Postgres oficial NO
+#    trae la extensión `vector`, que la capa semántica necesita). Si vienes
+#    de la imagen anterior, lee docs/operations.md § «Cambiar la imagen de
+#    Postgres a pgvector»: el volumen se conserva, pero hay que reindexar.
 docker compose up -d
 
 # 4. Migraciones a la DB de dev (backlogg_test se automigra al correr los

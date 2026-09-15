@@ -28,6 +28,19 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
 ]
+# The embedding model stack (feature 75). An EXTRA, deliberately: the Dockerfile
+# builds with `uv sync --no-dev --frozen`, which installs the default
+# dependencies and no extras, so torch cannot reach the image Render deploys.
+# Only scripts/generate_embeddings.py needs it and it runs on the GitHub Actions
+# runner. Verify with:  uv export --no-dev --frozen | grep -i torch   (empty)
+embeddings = [
+    "sentence-transformers>=3.0.0",
+    # torch is listed explicitly although sentence-transformers already pulls it:
+    # [tool.uv.sources] only applies to DIRECT dependencies, and routing torch to
+    # the CPU-only index below is the difference between a ~200 MB download and a
+    # ~2.5 GB one on every runner invocation.
+    "torch>=2.2.0",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -49,3 +62,15 @@ dev-dependencies = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
 ]
+
+# torch from PyTorch's CPU-only index. The runner has no GPU and the default
+# wheel drags ~2.5 GB of CUDA libraries it would never use — minutes of download
+# per run, for nothing. `explicit = true` means this index is consulted ONLY for
+# the packages routed to it below, so nothing else in the resolution changes.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
