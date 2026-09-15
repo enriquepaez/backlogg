@@ -19,12 +19,13 @@ from backlogg.books.schemas import (
 )
 from backlogg.library import service as library_service
 from backlogg.people import repository as people_repo
+from backlogg.recommendations import similar
 from backlogg.shared.bulk_load import BulkPerson
 from backlogg.shared.catalog_filters import CatalogSearchFilters
 from backlogg.shared.credits import get_credits_for_item
 from backlogg.shared.external_ids import upsert_external_id
 from backlogg.shared.models import Person
-from backlogg.shared.schemas import CreditOut
+from backlogg.shared.schemas import CreditOut, SimilarReason, SimilarReasonKind
 from backlogg.shared.slugs import slug_with_external_fallback
 
 _ol_client = OpenLibraryClient()
@@ -222,8 +223,10 @@ async def get_book(db: AsyncSession, slug: str, viewer_id: int | None = None) ->
 _MAX_SIMILAR_RESULTS = 10
 
 
-def _book_to_similar_out(book: Book) -> SimilarBookOut:
+def _book_to_similar_out(book: Book, reason: SimilarReason) -> SimilarBookOut:
     return SimilarBookOut(
+        item_type="BOOK",
+        reason=reason,
         title=book.title,
         slug=book.slug,
         poster_url=book.poster_url,
@@ -234,18 +237,28 @@ def _book_to_similar_out(book: Book) -> SimilarBookOut:
 
 
 async def get_similar_books(db: AsyncSession, slug: str) -> SimilarBooksOut:
-    """Up to 10 similar books, computed 100% locally (no external API calls).
+    """Similar items for a book: the semantic index first, the local tiers after.
 
-    Priority tiers (feature 46):
+    Feature 80 put the HNSW index of feature 75 in front, so a book's
+    neighbours can now be the film or the game about the same thing. The two
+    local tiers below are the fallback for books **outside the embedded
+    subset** and are unchanged (feature 46):
+
     1. Books sharing an author with the source book (via people/credits,
        role=AUTHOR — feature 19), ordered by rating_external descending.
     2. Books sharing a genre with the source book, ordered by number of
        shared genres descending, then rating_external descending.
-    The source book never appears in its own results.
+
+    Neither path makes an external call, and the source book never appears in
+    its own results on either.
     """
     book = await repo.get_book_by_slug(db, slug)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
+
+    semantic = await similar.get_semantic_similar(db, "BOOK", book.id)
+    if semantic is not None:
+        return SimilarBooksOut(results=[SimilarBookOut(**row.model_dump()) for row in semantic])
 
     results: list[SimilarBookOut] = []
     excluded_ids: set[int] = {book.id}
@@ -259,7 +272,11 @@ async def get_similar_books(db: AsyncSession, slug: str) -> SimilarBooksOut:
             if candidate.id in excluded_ids:
                 continue
             excluded_ids.add(candidate.id)
-            results.append(_book_to_similar_out(candidate))
+            results.append(
+                _book_to_similar_out(
+                    candidate, similar.legacy_reason(kind=SimilarReasonKind.SHARED_AUTHOR)
+                )
+            )
 
     if len(results) < _MAX_SIMILAR_RESULTS:
         genre_ids = [g.id for g in book.genres]
@@ -275,6 +292,10 @@ async def get_similar_books(db: AsyncSession, slug: str) -> SimilarBooksOut:
                 if candidate.id in excluded_ids:
                     continue
                 excluded_ids.add(candidate.id)
-                results.append(_book_to_similar_out(candidate))
+                results.append(
+                    _book_to_similar_out(
+                        candidate, similar.legacy_reason(kind=SimilarReasonKind.SHARED_GENRE)
+                    )
+                )
 
     return SimilarBooksOut(results=results[:_MAX_SIMILAR_RESULTS])

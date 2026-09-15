@@ -328,3 +328,120 @@ async def test_external_fanout_when_local_candidates_insufficient(db):
     # Feature 69: field travels through from the external similar-items path
     # too; a freshly-persisted TMDB item has no community rating yet.
     assert ext.rating_internal is None
+
+
+# ── Fan-out after feature 80: the semantic path can return another type ───────
+
+
+async def test_fanout_labels_a_cross_type_neighbour_with_its_own_type(db, monkeypatch):
+    """A book reached through a film seed is labelled ``BOOK``, not ``MOVIE``.
+
+    Since feature 80 ``movies.service.get_similar_movies`` answers from the
+    semantic index, and its neighbours may be of any type. This caller used to
+    stamp the *seed's* type on every fan-out result — harmless while the
+    similar-items API only ever returned films, and the moment it stops being
+    true it becomes issues #32/#33/#36 one endpoint over: a book rendered as
+    ``/movies/{book-slug}``.
+    """
+    import math
+
+    from backlogg.core.config import settings
+    from backlogg.shared.item_embeddings import EmbeddingWrite, upsert_item_embeddings
+
+    # The cross-type quota is what lets /similar answer with another type at
+    # all (SIMILAR_CROSS_TYPE_QUOTA ships at 0 = never), so the situation this
+    # test is about only exists with it on. The bug it guards is in *this*
+    # module and does not go away when FE-67 turns the knob on for real.
+    monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
+
+    dim = settings.EMBEDDING_DIM
+
+    async def _embed(item_type: str, item_id: int, near: float) -> None:
+        vector = [0.0] * dim
+        vector[0] = near
+        vector[1] = math.sqrt(max(0.0, 1.0 - near * near))
+        await upsert_item_embeddings(
+            db,
+            [
+                EmbeddingWrite(
+                    item_type=item_type,
+                    item_id=item_id,
+                    embedding=vector,
+                    model="f80-fanout",
+                    source_hash=f"{item_type}-{item_id}",
+                )
+            ],
+        )
+
+    genre = [{"name": "Rec Crosstype", "slug": "rec-crosstype-1"}]
+    seed = await upsert_movie(db, _movie_data("rec-xt-seed", genre, "Rec XT Seed"))
+    book = await upsert_book(db, _book_data("rec-xt-book", [], "Rec XT Novel"))
+    await _embed("MOVIE", seed.id, 1.0)
+    await _embed("BOOK", book.id, 0.95)
+
+    user = await _make_user(db, "rec-user-xt")
+    await upsert_rating(db, user.id, "MOVIE", seed.id, 5, None)
+
+    with patch.object(
+        movies_service._tmdb,
+        "get_movie_recommendations",
+        new_callable=AsyncMock,
+        side_effect=AssertionError("the semantic path must not call TMDB"),
+    ):
+        out = await service.get_recommendations(db, user, None, page=1, limit=20)
+
+    entry = next(r for r in out.results if r.slug == "rec-xt-book")
+    assert entry.item_type == "BOOK"
+
+
+async def test_type_filter_keeps_cross_type_fanout_results_out(db, monkeypatch):
+    """``?type=movie`` is a promise about the whole response, fan-out included."""
+    import math
+
+    from backlogg.core.config import settings
+    from backlogg.shared.item_embeddings import EmbeddingWrite, upsert_item_embeddings
+
+    # The cross-type quota is what lets /similar answer with another type at
+    # all (SIMILAR_CROSS_TYPE_QUOTA ships at 0 = never), so the situation this
+    # test is about only exists with it on. The bug it guards is in *this*
+    # module and does not go away when FE-67 turns the knob on for real.
+    monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
+
+    dim = settings.EMBEDDING_DIM
+
+    async def _embed(item_type: str, item_id: int, near: float) -> None:
+        vector = [0.0] * dim
+        vector[0] = near
+        vector[1] = math.sqrt(max(0.0, 1.0 - near * near))
+        await upsert_item_embeddings(
+            db,
+            [
+                EmbeddingWrite(
+                    item_type=item_type,
+                    item_id=item_id,
+                    embedding=vector,
+                    model="f80-fanout",
+                    source_hash=f"{item_type}-{item_id}",
+                )
+            ],
+        )
+
+    genre = [{"name": "Rec Filtered", "slug": "rec-filtered-1"}]
+    seed = await upsert_movie(db, _movie_data("rec-ft-seed", genre, "Rec FT Seed"))
+    book = await upsert_book(db, _book_data("rec-ft-book", [], "Rec FT Novel"))
+    await _embed("MOVIE", seed.id, 1.0)
+    await _embed("BOOK", book.id, 0.95)
+
+    user = await _make_user(db, "rec-user-ft")
+    await upsert_rating(db, user.id, "MOVIE", seed.id, 5, None)
+
+    with patch.object(
+        movies_service._tmdb,
+        "get_movie_recommendations",
+        new_callable=AsyncMock,
+        side_effect=AssertionError("the semantic path must not call TMDB"),
+    ):
+        out = await service.get_recommendations(db, user, "movie", page=1, limit=20)
+
+    assert {r.item_type for r in out.results} <= {"MOVIE"}
+    assert "rec-ft-book" not in {r.slug for r in out.results}

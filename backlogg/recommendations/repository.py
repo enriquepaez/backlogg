@@ -15,9 +15,10 @@ of that job: which items are selected, and what text they are embedded from.
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
-from sqlalchemy import String, and_, case, func, literal, select, union_all
+from sqlalchemy import String, and_, case, func, literal, or_, select, union_all
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -31,6 +32,13 @@ from backlogg.series.models import Series, SeriesGenre, series_genres_join
 from backlogg.shared.credits import AUTHORSHIP_ROLES
 from backlogg.shared.item_embeddings import ItemEmbedding
 from backlogg.shared.models import Credit
+
+#: Credit roles that mean "this person made it", for the diversification
+#: penalty of feature 80. Authorship (the cross-type bridge) plus the two
+#: roles that head a film and a series. ``WRITER`` is out for the same reason
+#: ``AUTHORSHIP_ROLES`` leaves it out, and ``ACTOR`` is not a credit at all
+#: since feature 89 — a shared supporting actor is not a shared saga.
+DIVERSITY_CREATOR_ROLES: tuple[str, ...] = (*AUTHORSHIP_ROLES, "DIRECTOR", "CREATOR")
 
 # Statuses that count as an implicit positive signal for seeding.
 SEED_LIBRARY_STATUSES = ("completed", "want")
@@ -554,3 +562,106 @@ async def load_embedding_sources(
         for row in result.all()
     }
     return [by_id[item_id] for item_id in item_ids if item_id in by_id]
+
+
+# ── Semantic /similar: hydrating the neighbours the HNSW index returned (80) ──
+
+
+@dataclass(frozen=True, slots=True)
+class SimilarCandidateRow:
+    """A neighbour, with everything both the ranker and the response need.
+
+    One shape for the four types: the semantic neighbours of a film are a mix
+    of films, series, books and games, so a per-type row would have to be
+    merged back together by the caller anyway. ``release_date`` is the type's
+    own date column (``first_air_date`` for series, ``first_publish_date`` for
+    books), already normalised here so the service never branches on type.
+    """
+
+    item_type: str
+    item_id: int
+    title: str
+    slug: str
+    poster_url: str | None
+    release_date: date | None
+    rating_external: float | None
+    rating_internal: float | None
+    creator_ids: frozenset[int]
+
+
+async def get_similar_candidates(
+    db: AsyncSession, keys: Iterable[tuple[str, int]]
+) -> dict[tuple[str, int], SimilarCandidateRow]:
+    """Resolve ``(item_type, item_id)`` neighbours to displayable rows.
+
+    At most five queries for a whole ``/similar`` response: one per distinct
+    ``item_type`` present (four at the very most) plus **one** over ``credits``
+    for every key at once. The credits read is batched across types rather than
+    folded into each type's query because it is the same table for all four and
+    a correlated aggregate per type would turn one index scan into four.
+
+    ``creator_ids`` is the diversification signal of ``ranking.py``: the people
+    who *made* the item — ``AUTHOR``/``SOURCE_AUTHOR`` (authorship, the
+    cross-type bridge of layer 0), plus ``DIRECTOR`` and ``CREATOR``.
+    ``WRITER`` is excluded for the same reason ``AUTHORSHIP_ROLES`` excludes it
+    and ``ACTOR`` is not there at all — it lives in ``item_cast`` since feature
+    89, and two films sharing a supporting actor are not "the same saga".
+
+    A key with no row is **absent** from the result, exactly like
+    ``get_item_refs``: ``item_embeddings`` has no foreign keys either, so a
+    vector can outlive the item it described until the next generation. The
+    caller drops those instead of emitting a link that is guaranteed to 404.
+    """
+    ids_by_type: dict[str, set[int]] = {}
+    for item_type, item_id in keys:
+        if item_type in _TYPE_CONFIG:
+            ids_by_type.setdefault(item_type, set()).add(item_id)
+    if not ids_by_type:
+        return {}
+
+    creators: dict[tuple[str, int], set[int]] = {}
+    credit_filters = [
+        and_(Credit.item_type == item_type, Credit.item_id.in_(item_ids))
+        for item_type, item_ids in ids_by_type.items()
+    ]
+    credit_rows = await db.execute(
+        select(Credit.item_type, Credit.item_id, Credit.person_id).where(
+            Credit.role.in_(DIVERSITY_CREATOR_ROLES), or_(*credit_filters)
+        )
+    )
+    for row in credit_rows.all():
+        creators.setdefault((row.item_type, row.item_id), set()).add(int(row.person_id))
+
+    rows: dict[tuple[str, int], SimilarCandidateRow] = {}
+    for item_type, item_ids in ids_by_type.items():
+        model, _join, _item_col, _release_attr = _TYPE_CONFIG[item_type]
+        release_col = _release_col(item_type)
+        result = await db.execute(
+            select(
+                model.id,
+                model.title,
+                model.slug,
+                model.poster_url,
+                release_col.label("release_date"),
+                model.rating_external,
+                model.rating_internal,
+            ).where(model.id.in_(item_ids))
+        )
+        for row in result.all():
+            key = (item_type, int(row.id))
+            rows[key] = SimilarCandidateRow(
+                item_type=item_type,
+                item_id=int(row.id),
+                title=row.title,
+                slug=row.slug,
+                poster_url=row.poster_url,
+                release_date=row.release_date,
+                rating_external=(
+                    float(row.rating_external) if row.rating_external is not None else None
+                ),
+                rating_internal=(
+                    float(row.rating_internal) if row.rating_internal is not None else None
+                ),
+                creator_ids=frozenset(creators.get(key, ())),
+            )
+    return rows

@@ -45,7 +45,12 @@ async def list_series(
     "/{slug}/similar",
     response_model=SimilarSeriesListOut,
     summary="Similar series",
-    description="Up to 10 similar series (TMDB). New items are persisted locally.",
+    description=(
+        "Up to 10 similar items for this series, from the semantic index (feature 80): "
+        "neighbours may be of any item_type, and each result carries its own item_type "
+        "and a structured reason. Series outside the embedded subset fall back to TMDB "
+        "recommendations, which persist new items locally."
+    ),
 )
 async def get_similar_series(slug: str, db: AsyncSession = Depends(get_db)):
     return await service.get_similar_series(db, slug)

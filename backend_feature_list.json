@@ -1602,7 +1602,7 @@
         "Tests: cuota cross-type, diversificación, ítem sin embedding",
         "bash init.sh en verde"
       ],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 81,

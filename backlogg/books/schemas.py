@@ -4,7 +4,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from backlogg.shared.catalog_filters import CatalogSearchFilters
-from backlogg.shared.schemas import CreditOut
+from backlogg.shared.schemas import CreditOut, SimilarItemBase
 
 
 class BookGenreOut(BaseModel):
@@ -15,15 +15,15 @@ class BookGenreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class SimilarBookOut(BaseModel):
-    title: str
-    slug: str
-    poster_url: str | None
-    release_date: date | None
-    rating_external: float | None
-    rating_internal: float | None
+class SimilarBookOut(SimilarItemBase):
+    """One result of ``GET /v1/books/{slug}/similar``.
 
-    model_config = ConfigDict(from_attributes=True)
+    The fields moved to ``SimilarItemBase`` in feature 80, when the semantic
+    ranker made the four responses genuinely the same response: a neighbour of
+    a book can be an item of **any** type, so ``item_type`` now travels in
+    every row instead of being implied by the endpoint. The name is kept so
+    ``packages/api-client`` and every existing consumer keep compiling.
+    """
 
 
 class SimilarBooksOut(BaseModel):

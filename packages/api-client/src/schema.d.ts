@@ -50,7 +50,7 @@ export interface paths {
         };
         /**
          * Similar movies
-         * @description Up to 10 similar movies (TMDB). New items are persisted locally.
+         * @description Up to 10 similar items for this movie, from the semantic index (feature 80): neighbours may be of any item_type, and each result carries its own item_type and a structured reason. Movies outside the embedded subset fall back to TMDB recommendations, which persist new items locally.
          */
         get: operations["get_similar_movies_v1_movies__slug__similar_get"];
         put?: never;
@@ -198,7 +198,7 @@ export interface paths {
         };
         /**
          * Similar series
-         * @description Up to 10 similar series (TMDB). New items are persisted locally.
+         * @description Up to 10 similar items for this series, from the semantic index (feature 80): neighbours may be of any item_type, and each result carries its own item_type and a structured reason. Series outside the embedded subset fall back to TMDB recommendations, which persist new items locally.
          */
         get: operations["get_similar_series_v1_series__slug__similar_get"];
         put?: never;
@@ -346,7 +346,7 @@ export interface paths {
         };
         /**
          * Similar books
-         * @description Up to 10 similar books computed locally: same-author matches (feature 19) take priority over genre overlap. No external API calls.
+         * @description Up to 10 similar items for this book, from the semantic index (feature 80): neighbours may be of any item_type, and each result carries its own item_type and a structured reason. Books outside the embedded subset fall back to the local tiers: same-author matches (feature 19) over genre overlap. No external API calls on either path.
          */
         get: operations["get_similar_books_v1_books__slug__similar_get"];
         put?: never;
@@ -494,7 +494,7 @@ export interface paths {
         };
         /**
          * Similar games
-         * @description Up to 10 similar games (IGDB similar_games). New items are persisted locally.
+         * @description Up to 10 similar items for this game, from the semantic index (feature 80): neighbours may be of any item_type, and each result carries its own item_type and a structured reason. Games outside the embedded subset fall back to IGDB similar_games, which persist new items locally.
          */
         get: operations["get_similar_games_v1_games__slug__similar_get"];
         put?: never;
@@ -2858,8 +2858,19 @@ export interface components {
          * @enum {string}
          */
         SeriesSortEnum: "rating_desc" | "rating_asc" | "date_desc" | "date_asc" | "title_asc";
-        /** SimilarBookOut */
+        /**
+         * SimilarBookOut
+         * @description One result of ``GET /v1/books/{slug}/similar``.
+         *
+         *     The fields moved to ``SimilarItemBase`` in feature 80, when the semantic
+         *     ranker made the four responses genuinely the same response: a neighbour of
+         *     a book can be an item of **any** type, so ``item_type`` now travels in
+         *     every row instead of being implied by the endpoint. The name is kept so
+         *     ``packages/api-client`` and every existing consumer keep compiling.
+         */
         SimilarBookOut: {
+            /** Item Type */
+            item_type: string;
             /** Title */
             title: string;
             /** Slug */
@@ -2872,6 +2883,7 @@ export interface components {
             rating_external: number | null;
             /** Rating Internal */
             rating_internal: number | null;
+            reason: components["schemas"]["SimilarReason"];
         };
         /** SimilarBooksOut */
         SimilarBooksOut: {
@@ -2883,8 +2895,19 @@ export interface components {
             /** Results */
             results: components["schemas"]["SimilarGameOut"][];
         };
-        /** SimilarGameOut */
+        /**
+         * SimilarGameOut
+         * @description One result of ``GET /v1/games/{slug}/similar``.
+         *
+         *     The fields moved to ``SimilarItemBase`` in feature 80, when the semantic
+         *     ranker made the four responses genuinely the same response: a neighbour of
+         *     a game can be an item of **any** type, so ``item_type`` now travels in
+         *     every row instead of being implied by the endpoint. The name is kept so
+         *     ``packages/api-client`` and every existing consumer keep compiling.
+         */
         SimilarGameOut: {
+            /** Item Type */
+            item_type: string;
             /** Title */
             title: string;
             /** Slug */
@@ -2897,9 +2920,21 @@ export interface components {
             rating_external: number | null;
             /** Rating Internal */
             rating_internal: number | null;
+            reason: components["schemas"]["SimilarReason"];
         };
-        /** SimilarMovieOut */
+        /**
+         * SimilarMovieOut
+         * @description One result of ``GET /v1/movies/{slug}/similar``.
+         *
+         *     The fields moved to ``SimilarItemBase`` in feature 80, when the semantic
+         *     ranker made the four responses genuinely the same response: a neighbour of
+         *     a movie can be an item of **any** type, so ``item_type`` now travels in
+         *     every row instead of being implied by the endpoint. The name is kept so
+         *     ``packages/api-client`` and every existing consumer keep compiling.
+         */
         SimilarMovieOut: {
+            /** Item Type */
+            item_type: string;
             /** Title */
             title: string;
             /** Slug */
@@ -2912,19 +2947,72 @@ export interface components {
             rating_external: number | null;
             /** Rating Internal */
             rating_internal: number | null;
+            reason: components["schemas"]["SimilarReason"];
         };
         /** SimilarMoviesOut */
         SimilarMoviesOut: {
             /** Results */
             results: components["schemas"]["SimilarMovieOut"][];
         };
+        /**
+         * SimilarReason
+         * @description The structured reason attached to one ``/similar`` result.
+         *
+         *     ``score`` is the cosine **similarity** in ``[0, 1]`` and is only present
+         *     for the semantic kinds; the legacy paths have no comparable number and say
+         *     ``null`` instead of inventing one.  ``source`` names the external provider
+         *     for ``EXTERNAL`` (``TMDB`` / ``IGDB``) and is ``null`` everywhere else.
+         */
+        SimilarReason: {
+            kind: components["schemas"]["SimilarReasonKind"];
+            /** Score */
+            score?: number | null;
+            /** Source */
+            source?: string | null;
+        };
+        /**
+         * SimilarReasonKind
+         * @description Why a "more like this" result is in the list — as an *enumerated fact*.
+         *
+         *     The four ``/similar`` endpoints answer with a mix of layers (the semantic
+         *     index of feature 75, and the legacy per-type paths it falls back to), and
+         *     the acceptance list of feature 80 asks each result to carry a readable
+         *     reason.  It is carried as **structured data and never as a formed
+         *     sentence**: FE-69 has to render this in Spanish *and* English, and a string
+         *     assembled in the backend is untranslatable on arrival — the frontend would
+         *     have to parse English prose back into meaning, or ship a second copy of the
+         *     rule that produced it.
+         *
+         *     Direct precedent, and a recent one: ``AdaptationDirection`` in feature 92,
+         *     which the web app turns into copy with next-intl.  Same shape, same reason.
+         *
+         *     ``SEMANTIC`` and ``SEMANTIC_CROSS_TYPE`` are split rather than being one
+         *     kind plus a comparison the client does between two ``item_type`` fields.
+         *     They are two different *claims*: "another film about this" and "there is a
+         *     novel about this too", and the second is the one this product exists to
+         *     make.  Handing over the raw pair would push the decision of which sentence
+         *     to write back onto whoever renders it.
+         * @enum {string}
+         */
+        SimilarReasonKind: "SEMANTIC" | "SEMANTIC_CROSS_TYPE" | "SHARED_AUTHOR" | "SHARED_GENRE" | "EXTERNAL";
         /** SimilarSeriesListOut */
         SimilarSeriesListOut: {
             /** Results */
             results: components["schemas"]["SimilarSeriesOut"][];
         };
-        /** SimilarSeriesOut */
+        /**
+         * SimilarSeriesOut
+         * @description One result of ``GET /v1/series/{slug}/similar``.
+         *
+         *     The fields moved to ``SimilarItemBase`` in feature 80, when the semantic
+         *     ranker made the four responses genuinely the same response: a neighbour of
+         *     a series can be an item of **any** type, so ``item_type`` now travels in
+         *     every row instead of being implied by the endpoint. The name is kept so
+         *     ``packages/api-client`` and every existing consumer keep compiling.
+         */
         SimilarSeriesOut: {
+            /** Item Type */
+            item_type: string;
             /** Title */
             title: string;
             /** Slug */
@@ -2937,6 +3025,7 @@ export interface components {
             rating_external: number | null;
             /** Rating Internal */
             rating_internal: number | null;
+            reason: components["schemas"]["SimilarReason"];
         };
         /** StatsResponse */
         StatsResponse: {

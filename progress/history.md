@@ -2071,3 +2071,59 @@ desechable** para no destruir los embeddings que la feature 80 necesita.
 `bash init.sh` verde: **1743 tests** (partida: 1706). Cero issues abiertos.
 **La DB de dev queda con los 35.215 embeddings dentro** (~76 MB, la base pasa de
 ~237 a ~315 MB), a propósito: los necesita la feature 80.
+
+---
+
+## 2026-09-16 — Feature 80 `similar_semantic_rewrite`
+
+`GET /{tipo}/{slug}/similar` pasa a resolverse contra el índice HNSW de la
+feature 75 en los cuatro tipos, con cuota cross-type, diversificación y `reason`
+estructurado. Desbloquea **FE-67**.
+
+**El leader se equivocó en el enunciado, y el reviewer lo cazó midiendo.** El
+plan (§2.1) decidió mergear con la cuota «apagada» (default 0) para que `main`
+fuese desplegable sin enlaces rotos, ya que `item-similar.tsx` enlaza al tipo de
+la **página**. Pero una cuota **reserva huecos adicionales, no filtra**: con
+`quota=0` la consulta principal seguía sin filtro de tipo. Medido por el
+reviewer sobre 160 anclas reales: **63% de filas cross-type en MOVIE y SERIES,
+46% en BOOK**. La ficha de *El retorno del Rey* habría renderizado siete
+tarjetas con badge «Movie» y enlaces `/movies/{slug-de-libro}` — los issues
+#32/#33/#36 exactamente, provocados por la decisión que existía para evitarlos.
+Arreglado estrechando también la consulta principal: remedido, **0% en los
+cuatro tipos**, 10 filas en las 160 páginas.
+
+**Dos hallazgos que solo aparecen con datos reales:**
+
+1. **El acantilado de `ef_search`.** Filtrar por tipo en pgvector es un
+   **post-filtro**: recorre el índice, produce `ef_search` candidatos y solo
+   entonces filtra. Con 33.062 juegos de 35.215 vectores la consulta estrecha
+   devolvía **cero** filas con el default, y la cuota rellenaba los huecos
+   reservados con juegos. No es una pendiente: 0 filas a `ef_search=40/200`, 1 a
+   400, 60 a 800. Y al arreglar el bloqueante resultó que muerde **en las dos
+   direcciones** —las películas son el 1,7% del índice—, así que la perilla pasó
+   a llamarse `SIMILAR_FILTERED_EF_SEARCH`. Efecto secundario medido por el
+   reviewer con `EXPLAIN ANALYZE`: para tipos minoritarios el planner **abandona
+   el HNSW** y hace un top-N exacto por b-tree en 0,7 ms. Es una mejora, no un
+   riesgo.
+2. **Esta feature creaba un bug en otro endpoint.** El fan-out de la feature 16
+   en `recommendations/service.py` etiquetaba cada candidato con el tipo de la
+   **semilla** — inocuo mientras `/similar` solo devolvía un tipo. Al devolver
+   cualquiera, `GET /v1/recommendations` habría entregado un libro como `MOVIE`.
+   Arreglado en la misma rama, con el test de que `?type=movie` sigue siendo una
+   promesa sobre toda la respuesta.
+
+**Diversificación, demostrada como regla y no como anécdota:** el mismo ancla con
+`penalty=0.0` devuelve diez entradas de LOTR; con 0.25, no.
+
+**QA del leader** (API local, 35.215 embeddings): con el default, 10/10 del mismo
+tipo en los cuatro tipos, `reason` estructurado `{kind, score, source}`, y el
+ancla nunca en sus propios resultados. Con `SIMILAR_CROSS_TYPE_QUOTA=3`,
+reproducidos los dos casos del informe: *El retorno del Rey* mezcla juego, libro
+y película; *The Witcher 3* da siete juegos y luego **la serie de The Witcher**
+entrando por abajo, donde su score la pone.
+
+`bash init.sh` verde: **1777 tests** (partida: 1743). `pnpm typecheck` y los 1305
+del frontend, verdes. Cero issues abiertos.
+
+**Pendiente inmediato para FE-67**: encender `SIMILAR_CROSS_TYPE_QUOTA=3` en el
+mismo PR que muestre el badge de tipo en la sección de similares.
