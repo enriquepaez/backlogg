@@ -10,9 +10,9 @@ what feature 80 calls non-negotiable.
 What earns a test here:
 
 - the **quota** actually reserves slots, is bounded by what exists, and is
-  **off at zero** — which is the value this feature merges with, so "0 behaves
-  exactly like no quota at all" is the property that keeps ``main``
-  deployable;
+  **off at zero** — "0 behaves exactly like no quota at all" is what makes the
+  switch reversible, so setting ``SIMILAR_CROSS_TYPE_QUOTA`` back to 0 is a
+  configuration change and never a code change;
 - the quota changes **who** is on the page and never the **order** of the page;
 - **diversification** demotes a repeated saga or author and never *drops* it,
   because a list that is genuinely all one franchise must still come back full;
@@ -100,10 +100,11 @@ def _mixed_pool() -> list[Candidate]:
 
 
 def test_quota_zero_is_plain_truncation():
-    """The value feature 80 merges with: the same path, nothing reserved.
+    """Zero is the same path with nothing reserved, not a second code path.
 
-    This is the assertion that says ``main`` stays deployable — at 0 the
-    endpoint cannot hand the web app a book to link as ``/movies/{slug}``.
+    This is the assertion that makes the switch reversible: whatever
+    ``SIMILAR_CROSS_TYPE_QUOTA`` is set to in ``core/config.py``, turning it
+    down to 0 gives back exactly the pre-quota page.
     """
     ranked = _mixed_pool()
     selected = apply_cross_type_quota("MOVIE", ranked, limit=10, quota=0)

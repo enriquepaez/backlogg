@@ -198,12 +198,17 @@ def apply_cross_type_quota(
     more than ``available``: if the whole catalog has two embedded books and
     nothing else of another type, no ranking can conjure a third.
 
-    ``quota <= 0`` is the **default this feature merges with**, and it is not a
-    stub: it is the same code path with nothing reserved, i.e. today's
-    behaviour.  The value the ficha wants (3 of 10) is turned on by env in
-    FE-67, in the same PR that renders the type badge — until then a book among
-    films would be a link the web app builds as ``/movies/{book-slug}`` and
-    404s.  See ``docs/api.md`` § Movies.
+    ``quota <= 0`` is not a stub: it is this same code path with nothing
+    reserved.  It is what a deployment gets by setting the env var to 0; the
+    value in force is ``SIMILAR_CROSS_TYPE_QUOTA`` in ``core/config.py`` and is
+    deliberately not repeated here.
+
+    Feature 80 merged with ``quota <= 0`` for one release, because the web app
+    then built every link as ``/{type-of-the-page}/{slug}`` and one book among
+    films would have been a wrong link in production.  FE-67 removed that
+    constraint — the frontend builds each link from ``entry.item_type`` — and
+    raised the default in ``core/config.py`` in the same PR.  See
+    ``docs/api.md`` § Movies.
     """
     if limit <= 0:
         return []

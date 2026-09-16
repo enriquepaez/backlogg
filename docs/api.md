@@ -266,8 +266,8 @@ Antes de servir, el ranker aplica dos reglas
 
    | Valor | Qué hace |
    |-------|----------|
-   | `0` (el que se mergea) | La consulta al índice se **restringe al tipo del ítem de la URL**. La respuesta **nunca** contiene un ítem de otro tipo. |
-   | `N > 0` | Reserva N de los 10 huecos para ítems de otro tipo. Garantiza `min(N, 10, vecinos de otro tipo disponibles)`: si el catálogo no tiene N vecinos de otro tipo, no se inventan. |
+   | `0` | La consulta al índice se **restringe al tipo del ítem de la URL**. La respuesta **nunca** contiene un ítem de otro tipo. |
+   | `N > 0` (**hoy `3`**) | Reserva N de los 10 huecos para ítems de otro tipo. Garantiza `min(N, 10, vecinos de otro tipo disponibles)`: si el catálogo no tiene N vecinos de otro tipo, no se inventan. |
 
    «Reservar cero huecos» y «no devolver ningún otro tipo» **no son lo mismo**,
    y la diferencia no es teórica: con el `top-N` sin filtrar, el coseno mete
@@ -306,17 +306,20 @@ recuentos del día.
 petición—, lo cual es inocuo: ninguna consulta posterior del endpoint toca el
 índice HNSW. No contamina la conexión del pool.
 
-> ⚠️ **`SIMILAR_CROSS_TYPE_QUOTA` se mergea en `0` y lo enciende FE-67.** El
-> valor que pide la ficha de la feature 80 es **3 de 10**, y el comportamiento
-> está implementado y probado a cualquier valor; lo que se difiere es
-> encenderlo. Hoy `apps/web/src/components/item-similar.tsx` enlaza cada
-> resultado a `/{tipo-de-la-página}/{slug}`, así que **un solo** libro devuelto
-> entre películas sería un **enlace roto en producción** —la forma exacta de
-> los issues #32, #33 y #36— y Render despliega `main` al mergear. **FE-67 sube
-> la cuota a 3 en el mismo PR que enseña el badge de tipo.** Mientras tanto
-> `item_type` viaja **igual** en cada resultado, desde ya: sin él FE-67 no
-> puede encender nada, y ningún cliente debe inferirlo de la página en la que
-> está.
+> ✅ **`SIMILAR_CROSS_TYPE_QUOTA` está en `3` desde FE-67.** La feature 80 lo
+> mergeó en `0` por una sola razón: `apps/web/src/components/item-similar.tsx`
+> enlazaba cada resultado a `/{tipo-de-la-página}/{slug}`, así que **un solo**
+> libro devuelto entre películas era un **enlace equivocado en producción**
+> —la forma exacta de los issues #32, #33 y #36— y Render despliega `main` al
+> mergear. FE-67 arregló el frontend (badge y enlace salen del `item_type` de
+> **cada** resultado, pasado por `toCatalogType`, que descarta lo que no mapea)
+> y subió la cuota a 3 en el mismo PR, como estaba planeado.
+>
+> Volver a `0` sigue siendo una decisión **solo de backend**: el frontend
+> pinta una respuesta de un único tipo exactamente igual que antes, sin hueco
+> ni sección vacía. Y `item_type` viaja **igual** en cada resultado con
+> cualquier valor de la cuota: ningún cliente debe inferirlo de la página en la
+> que está.
 
 #### `reason`: dato estructurado, nunca una frase
 

@@ -2127,3 +2127,62 @@ del frontend, verdes. Cero issues abiertos.
 
 **Pendiente inmediato para FE-67**: encender `SIMILAR_CROSS_TYPE_QUOTA=3` en el
 mismo PR que muestre el badge de tipo en la sección de similares.
+
+---
+
+## 2026-09-16 — FE-67 `similar_cross_type_presentation` (frontend + el interruptor)
+
+**Segunda mitad de la decisión de la feature 80.** Aquella mergeó la cuota
+cross-type implementada pero **apagada**, porque `item-similar.tsx` enlazaba al
+tipo de la **página**. FE-67 arregla el frontend **y sube el default de
+`SIMILAR_CROSS_TYPE_QUOTA` de 0 a 3 en el mismo PR** — separarlo habría
+reabierto la ventana que la 80 cerró. Con esto, la única FE bloqueada que queda
+es FE-69, que espera al ranker 82.
+
+**El implementer no arregló el síntoma, quitó el arma.** En vez de dejar de usar
+el prop `type` del componente, lo **borró**: mientras exista un prop que dice «el
+tipo de la página» junto a una lista que puede traer cualquier tipo, el bug
+vuelve. El guard va en la frontera de fetch (`catalog.ts`), no en el JSX, con un
+tipo público nuevo `SimilarEntry` que ya lleva `type: CatalogType`, así que el
+compilador impide aguas abajo que un tipo crudo construya un enlace. Mismo patrón
+que FE-66 dos días antes. Detalle fino suyo: la `key` de React pasa a
+`${item.type}-${item.slug}`, porque el mismo slug puede nombrar una película y
+una novela y hasta ahora no podían coincidir en la misma rejilla.
+
+**Dos rondas de review, las dos por documentación caduca, y una lección de
+proceso.** El código de la feature se aprobó en la primera pasada y no se movió
+después. Lo que bloqueó fue:
+
+1. Los cuatro `.bru` de `/similar` afirmando que la cuota «ships at 0» — **la
+   misma cuarta fuente que ya se escapó en la feature 80**.
+2. Un test cuyo nombre prometía cubrir la `key` y solo miraba los `href`: pasaba
+   con `key={item.slug}`. Ahora espía `console.error` y muere ante la mutación.
+3. Y en la segunda ronda, **la misma afirmación un nivel más abajo**, con otra
+   redacción («the merged default», «until then», «today»), en los docstrings de
+   los dos módulos que implementan la cuota. Los barridos por subcadena no la
+   encontraron porque buscaban las palabras de la primera redacción.
+
+**La causa raíz, anotada para no repetirla:** la feature 80 describió un **estado
+temporal en presente**. «El default que mergeamos es 0» fue cierto durante
+exactamente un PR. La regla que queda: describir **qué hace cada valor**, no
+**cuál está puesto hoy**; si hay que nombrar el actual, remitir a `config.py`.
+
+**Fallo de proceso del leader**: el árbol estuvo sobre `main` durante toda la
+implementación —la rama existía pero nunca se verificó con
+`git branch --show-current`, que `AGENTS.md` §5.1 marca como **bloqueante**—. Lo
+cazó el reviewer mirando el estado del repo y no solo el diff. Los 16 archivos
+estaban a un commit de acabar en `main`, con el interruptor de la cuota dentro y
+Render desplegando `main`.
+
+**QA del leader** (backend `:8000` + `next dev` `:3000`, 35.215 embeddings):
+
+- `/es/game/the-witcher-3-wild-hunt`: siete tarjetas «Juego» (`bg-type-game`) y
+  tres «Serie» (`bg-type-series`), y las tres enlazan a `/es/series/…`.
+  **Las tres resuelven 200** con su `h1` correcto — el bug de los cuatro asaltos,
+  cerrado en el navegador y no solo en tests.
+- `/es/movie/the-lord-of-the-rings-the-return-of-the-king-2003`: **tres tipos en
+  un mismo carrusel** — «Juego» → `/es/game/lego-…`, «Libro» →
+  `/es/book/the-fellowship-of-the-ring-1972` (200), «Película» → `/es/movie/…`.
+
+`bash init.sh` verde: **1778 tests**. Frontend: **1317** (antes 1305). Cero
+issues abiertos.

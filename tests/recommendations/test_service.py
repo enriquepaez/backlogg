@@ -349,9 +349,10 @@ async def test_fanout_labels_a_cross_type_neighbour_with_its_own_type(db, monkey
     from backlogg.shared.item_embeddings import EmbeddingWrite, upsert_item_embeddings
 
     # The cross-type quota is what lets /similar answer with another type at
-    # all (SIMILAR_CROSS_TYPE_QUOTA ships at 0 = never), so the situation this
-    # test is about only exists with it on. The bug it guards is in *this*
-    # module and does not go away when FE-67 turns the knob on for real.
+    # all (SIMILAR_CROSS_TYPE_QUOTA = 0 means never), so the situation this
+    # test is about only exists with it on. Pinned here rather than read from
+    # the environment: the bug it guards is in *this* module and must stay
+    # covered whatever the deployment sets the knob to.
     monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
 
     dim = settings.EMBEDDING_DIM
@@ -402,9 +403,10 @@ async def test_type_filter_keeps_cross_type_fanout_results_out(db, monkeypatch):
     from backlogg.shared.item_embeddings import EmbeddingWrite, upsert_item_embeddings
 
     # The cross-type quota is what lets /similar answer with another type at
-    # all (SIMILAR_CROSS_TYPE_QUOTA ships at 0 = never), so the situation this
-    # test is about only exists with it on. The bug it guards is in *this*
-    # module and does not go away when FE-67 turns the knob on for real.
+    # all (SIMILAR_CROSS_TYPE_QUOTA = 0 means never), so the situation this
+    # test is about only exists with it on. Pinned here rather than read from
+    # the environment: the bug it guards is in *this* module and must stay
+    # covered whatever the deployment sets the knob to.
     monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
 
     dim = settings.EMBEDDING_DIM

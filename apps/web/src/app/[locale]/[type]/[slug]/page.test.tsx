@@ -86,8 +86,26 @@ vi.mock("@/components/item-platforms", () => ({
 vi.mock("@/components/item-reviews", () => ({
   ItemReviews: () => <div data-testid="item-reviews" />,
 }));
+// Exposed via `data-*` (same pattern as the `ItemRelatedWorks` mock below)
+// since FE-67: what the page hands down — the items with their own `type`
+// and the badge label for all four types — is the whole point of that
+// feature, and the component's own rendering is covered in
+// `item-similar.test.tsx`.
 vi.mock("@/components/item-similar", () => ({
-  ItemSimilar: () => <div data-testid="item-similar" />,
+  ItemSimilar: (props: {
+    items: { type: string; slug: string }[];
+    heading: string;
+    emptyMessage: string;
+    typeLabels: Record<string, string>;
+  }) => (
+    <div
+      data-testid="item-similar"
+      data-heading={props.heading}
+      data-empty-message={props.emptyMessage}
+      data-items={JSON.stringify(props.items)}
+      data-type-labels={JSON.stringify(props.typeLabels)}
+    />
+  ),
 }));
 // Exposed via `data-props` (same pattern as the `ItemHero` mock above) so
 // this file can assert what the page hands down — the mapped items, the
@@ -1261,5 +1279,91 @@ describe("ItemDetailPage — 'Related works' section (FE-66)", () => {
       "item-reviews",
       "item-similar",
     ]);
+  });
+});
+
+/**
+ * FE-67. The page's `type` selects which `/similar` endpoint to call and
+ * nothing else: with `SIMILAR_CROSS_TYPE_QUOTA` on (3 of 10) the results are
+ * genuinely mixed, so each card's route and badge must come from its own
+ * `type` — which `@/lib/catalog` has already put through `toCatalogType`
+ * before the page sees it.
+ */
+describe("ItemDetailPage — cross-type 'similar' results (FE-67)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSimilarItems.mockResolvedValue([]);
+    getAdaptations.mockResolvedValue([]);
+  });
+
+  /** What `getSimilarItems` returns for a film once the quota is on. */
+  const mixedSimilar = [
+    {
+      type: "movie",
+      title: "Arrival",
+      slug: "arrival-2016",
+      poster_url: null,
+      release_date: "2016-11-11",
+      rating_internal: 7.9,
+    },
+    {
+      type: "book",
+      title: "Story of Your Life",
+      slug: "OL15843344W",
+      poster_url: null,
+      release_date: "1998-01-01",
+      rating_internal: 4.2,
+    },
+  ];
+
+  function similarEl(container: HTMLElement): Element | null {
+    return container.querySelector('[data-testid="item-similar"]');
+  }
+
+  it("hands the results down untouched, each keeping its own type", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getSimilarItems.mockResolvedValue(mixedSimilar);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(JSON.parse(similarEl(container)?.getAttribute("data-items") ?? "null")).toEqual(
+      mixedSimilar,
+    );
+  });
+
+  it("passes the badge label for all four types, not only the page's", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getSimilarItems.mockResolvedValue(mixedSimilar);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(
+      JSON.parse(similarEl(container)?.getAttribute("data-type-labels") ?? "null"),
+    ).toEqual({
+      movie: "typeBadge.movie",
+      series: "typeBadge.series",
+      book: "typeBadge.book",
+      game: "typeBadge.game",
+    });
+  });
+
+  it("still fetches from the page's own endpoint — the type picks the URL, not the results", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: gameItem });
+    getSimilarItems.mockResolvedValue(mixedSimilar);
+
+    render(await ItemDetailPage(buildProps("game", "hades-2020")));
+
+    expect(getSimilarItems).toHaveBeenCalledWith("game", "hades-2020");
+  });
+
+  it("renders the same single section when nothing cross-type comes back", async () => {
+    getItemDetail.mockResolvedValue({ status: "ok", item: movieItem });
+    getSimilarItems.mockResolvedValue([mixedSimilar[0]]);
+
+    const { container } = render(await ItemDetailPage(buildProps("movie", "dune-2021")));
+
+    expect(container.querySelectorAll('[data-testid="item-similar"]')).toHaveLength(1);
+    expect(similarEl(container)?.getAttribute("data-heading")).toBe("similar.heading");
+    expect(similarEl(container)?.getAttribute("data-empty-message")).toBe("similar.empty");
   });
 });

@@ -449,8 +449,9 @@ export default async function ItemDetailPage({
     getAdaptations(type, slug),
     getTranslations("ItemDetail"),
     // FE-57: `Home.typeBadge` holds the singular type label ("Movie") used
-    // by every `CatalogCard` type badge — reused here for `ItemSimilar`'s
-    // grid so it matches every other grid's badge text.
+    // by every `CatalogCard` type badge — reused here for the two grids of
+    // this page (`ItemSimilar`, `ItemRelatedWorks`) so they match every other
+    // grid's badge text.
     getTranslations("Home"),
   ]);
 
@@ -476,11 +477,13 @@ export default async function ItemDetailPage({
   // Computed once: the render below needs both the list and whether it's
   // empty (see the `ItemCredits` call for why an empty one renders nothing).
   const credits = getCredits(item);
-  // FE-66's "Related works" grid mixes types by design (a series page can
-  // list a book), so unlike `ItemSimilar` — where every card shares the
-  // page's own type — it needs the label for all four. Spelled out rather
-  // than built from `CATALOG_TYPES` so the `Record<CatalogType, string>` is
-  // exhaustive by type-checking, with no cast.
+  // Both `ItemRelatedWorks` (FE-66) and `ItemSimilar` (FE-67) mix types by
+  // design — a movie page can list the novel it comes from *and* get a game
+  // in its "You might also like" grid (`SIMILAR_CROSS_TYPE_QUOTA`) — so both
+  // need the badge label for all four types, not just the page's. Spelled
+  // out rather than built from `CATALOG_TYPES` so the
+  // `Record<CatalogType, string>` is exhaustive by type-checking, with no
+  // cast.
   const typeLabels: Record<CatalogType, string> = {
     movie: tBadge("typeBadge.movie"),
     series: tBadge("typeBadge.series"),
@@ -574,12 +577,15 @@ export default async function ItemDetailPage({
 
       <ItemReviews type={type} slug={slug} />
 
+      {/* FE-67: `similar` carries each result's own `type` (guarded by
+          `getSimilarItems`), so a cross-type neighbour links under its own
+          route segment and wears its own badge color. The page's `type` is
+          NOT passed down — it selects the endpoint above and nothing else. */}
       <ItemSimilar
-        type={type}
         items={similar}
         heading={t("similar.heading")}
         emptyMessage={t("similar.empty")}
-        typeLabel={tBadge(`typeBadge.${type}`)}
+        typeLabels={typeLabels}
       />
     </div>
   );

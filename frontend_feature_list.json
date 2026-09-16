@@ -1266,7 +1266,7 @@
         "Test con una respuesta mixta de al menos dos tipos",
         "pnpm --filter web typecheck && lint && build && test en verde"
       ],
-      "status": "blocked"
+      "status": "done"
     },
     {
       "id": 67,

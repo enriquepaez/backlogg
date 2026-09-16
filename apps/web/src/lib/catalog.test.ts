@@ -420,29 +420,142 @@ describe("itemDetailCacheTag", () => {
   });
 });
 
+/**
+ * The UI shape of one `/similar` row (`SimilarEntry`): lowercase route
+ * `type` from the row's own `item_type`, `reason`/`rating_external`
+ * dropped. Used by the single-type fixtures, whose mapping is mechanical.
+ */
+const mapped = (entry: {
+  item_type: string;
+  title: string;
+  slug: string;
+  poster_url: string | null;
+  release_date: string | null;
+  rating_internal: number | null;
+}) => ({
+  type: entry.item_type.toLowerCase(),
+  title: entry.title,
+  slug: entry.slug,
+  poster_url: entry.poster_url,
+  release_date: entry.release_date,
+  rating_internal: entry.rating_internal,
+});
+
+/**
+ * FE-67. What is under test is the **mapping**, not just the round trip:
+ * since backend feature 80 a `/similar` row carries its own `item_type` (the
+ * semantic index is shared by the four types) and since this feature
+ * `SIMILAR_CROSS_TYPE_QUOTA` is on, so the movie fixture is mixed on purpose.
+ * Every row goes through `toCatalogType`, so the section can only link a
+ * result under *its own* route segment — issues #32/#33/#36 were each a
+ * guessed or cast `item_type` producing a silently wrong link, and here the
+ * guess ("same type as the page") is precisely what used to be hardcoded.
+ */
 describe("getSimilarItems", () => {
-  it("returns similar movies on success", async () => {
-    expect(await getSimilarItems("movie", duneFixture.slug)).toEqual(
-      similarMoviesFixture.results,
-    );
+  /** The movie fixture mapped as the UI consumes it: route `type`, no `reason`, no `rating_external`. */
+  const mappedMovieFixture = [
+    {
+      type: "movie",
+      title: "Arrival",
+      slug: "arrival-2016",
+      poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
+      release_date: "2016-11-11",
+      rating_internal: null,
+    },
+    {
+      type: "book",
+      title: "Story of Your Life",
+      slug: "OL15843344W",
+      poster_url: "https://covers.openlibrary.org/b/id/42-L.jpg",
+      release_date: "1998-01-01",
+      rating_internal: null,
+    },
+    {
+      type: "series",
+      title: "The Expanse",
+      slug: "the-expanse-2015",
+      poster_url: null,
+      release_date: "2015-12-14",
+      rating_internal: null,
+    },
+  ];
+
+  it("maps a mixed response onto each result's own route type, in the backend's order", async () => {
+    expect(await getSimilarItems("movie", duneFixture.slug)).toEqual(mappedMovieFixture);
   });
 
   it("returns similar series on success", async () => {
     expect(await getSimilarItems("series", chernobylFixture.slug)).toEqual(
-      similarSeriesFixture.results,
+      similarSeriesFixture.results.map(mapped),
     );
   });
 
   it("returns similar books on success", async () => {
     expect(await getSimilarItems("book", duneBookFixture.slug)).toEqual(
-      similarBooksFixture.results,
+      similarBooksFixture.results.map(mapped),
     );
   });
 
   it("returns similar games on success", async () => {
     expect(await getSimilarItems("game", hadesFixture.slug)).toEqual(
-      similarGamesFixture.results,
+      similarGamesFixture.results.map(mapped),
     );
+  });
+
+  // `reason` (`{kind, score, source}`) arrives in every row and is dropped
+  // here on purpose: rendering it is FE-69, still blocked on the backend
+  // ranker (feature 82). Pinned so the drop stays a decision, not a leak.
+  it("drops each result's `reason` — rendering it is FE-69, not this feature", async () => {
+    const results = await getSimilarItems("movie", duneFixture.slug);
+
+    expect(similarMoviesFixture.results.every((entry) => entry.reason != null)).toBe(true);
+    expect(results.every((entry) => !("reason" in entry))).toBe(true);
+  });
+
+  // The guard's whole point: an `item_type` outside the four-type vocabulary
+  // (a fifth backend type added before the frontend catches up) is dropped,
+  // not linked to `/{unknown}/{slug}` and not silently re-typed as the page's
+  // own type. A missing card is recoverable; a confidently wrong link is not.
+  it("drops a result whose item_type is outside the vocabulary instead of guessing a route", async () => {
+    server.use(
+      http.get(`${MOCK_API_BASE_URL}/v1/movies/:slug/similar`, () =>
+        HttpResponse.json({
+          results: [
+            {
+              item_type: "PODCAST",
+              reason: { kind: "SEMANTIC_CROSS_TYPE", score: 0.9, source: null },
+              title: "Dune: The Podcast",
+              slug: "dune-the-podcast",
+              poster_url: null,
+              release_date: null,
+              rating_external: null,
+              rating_internal: null,
+            },
+            {
+              item_type: "GAME",
+              reason: { kind: "SEMANTIC_CROSS_TYPE", score: 0.8, source: null },
+              title: "Dune: Spice Wars",
+              slug: "dune-spice-wars",
+              poster_url: null,
+              release_date: "2023-09-14",
+              rating_external: null,
+              rating_internal: 7.1,
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(await getSimilarItems("movie", duneFixture.slug)).toEqual([
+      {
+        type: "game",
+        title: "Dune: Spice Wars",
+        slug: "dune-spice-wars",
+        poster_url: null,
+        release_date: "2023-09-14",
+        rating_internal: 7.1,
+      },
+    ]);
   });
 
   it("degrades to an empty array on a non-200 response", async () => {

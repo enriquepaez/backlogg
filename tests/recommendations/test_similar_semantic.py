@@ -22,9 +22,12 @@ database is involved:
   most of the catalog lands there, and "the rewrite emptied the carousel for
   60% of the catalog" is the regression this feature most easily causes;
 - the quota and the diversification penalty, which are env-configured, do what
-  the pure tests say **through the endpoint** — including the fact that the
-  merged default (``SIMILAR_CROSS_TYPE_QUOTA=0``) returns no cross-type result
-  at all when the same-type neighbours are closer.
+  the pure tests say **through the endpoint** — including the fact that
+  ``SIMILAR_CROSS_TYPE_QUOTA=0`` returns no cross-type result at all, not even
+  when the neighbours of another type are closer.  Every test here sets the
+  quota it needs instead of reading the ambient one: the shipped default is
+  pinned once, in ``test_shipped_default_reserves_three_cross_type_slots``,
+  and FE-67 moved it from 0 to 3.
 """
 
 import math
@@ -37,7 +40,7 @@ from httpx import ASGITransport, AsyncClient
 
 from backlogg.books import repository as books_repo
 from backlogg.books import service as books_service
-from backlogg.core.config import settings
+from backlogg.core.config import Settings, settings
 from backlogg.games import repository as games_repo
 from backlogg.games import service as games_service
 from backlogg.main import app
@@ -232,9 +235,9 @@ async def test_four_types_serve_similar_from_the_vector_index(
 ):
     """Each page returns the other three items, each labelled with its own type.
 
-    Runs with the quota **on**, because that is what cross-type means now: at
-    the merged default of 0 the index query is narrowed to the anchor's own
-    type and this fixture — one item per type — correctly answers empty.
+    Runs with the quota **on**, because that is what cross-type means: with the
+    quota at 0 the index query is narrowed to the anchor's own type and this
+    fixture — one item per type — correctly answers empty.
     """
     monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
     expected_by_anchor = {
@@ -282,10 +285,12 @@ async def test_endpoint_payload_carries_item_type_and_a_structured_reason(
     ``reason`` is an object with an enumerated ``kind``, not a sentence. A
     string here would be untranslatable by the time it reached next-intl.
 
-    The same request is made twice — at the merged default and with the quota
-    on — because the payload has to be identical in shape either way: FE-67
-    flips one env var and must not meet a different contract on the other side.
+    The same request is made twice — with the quota off and with it on —
+    because the payload has to be identical in shape either way: turning
+    ``SIMILAR_CROSS_TYPE_QUOTA`` back down to 0 must not present a different
+    contract to the client on the other side.
     """
+    monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 0)
     expected_keys = {
         "item_type",
         "title",
@@ -303,7 +308,7 @@ async def test_endpoint_payload_carries_item_type_and_a_structured_reason(
     assert results
     for entry in results:
         assert set(entry) == expected_keys
-        # The merged default: the type of every row is the type of the page.
+        # Quota off: the type of every row is the type of the page.
         assert entry["item_type"] == "MOVIE"
         assert isinstance(entry["reason"], dict)
         assert set(entry["reason"]) == {"kind", "score", "source"}
@@ -396,10 +401,10 @@ async def crowded(db):
 
 
 async def test_quota_zero_serves_same_type_neighbours_and_hides_nearer_others(
-    db, star, no_external_calls
+    db, star, no_external_calls, monkeypatch
 ):
     """A film with one film neighbour: served, while the nearer book is not."""
-    assert settings.SIMILAR_CROSS_TYPE_QUOTA == 0
+    monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 0)
     sibling = await movies_repo.upsert_movie(db, _movie_data("f80-star-movie-2", "Star Film II"))
     # Further from the anchor than the book (0.95) and the series (0.90).
     await _embed(db, "MOVIE", sibling.id, _blend(0, 4, 0.60))
@@ -408,6 +413,19 @@ async def test_quota_zero_serves_same_type_neighbours_and_hides_nearer_others(
 
     assert [r.slug for r in out.results] == ["f80-star-movie-2"]
     assert out.results[0].reason.kind == "SEMANTIC"
+
+
+async def test_shipped_default_reserves_three_cross_type_slots():
+    """The switch itself: what a deployment that sets nothing gets.
+
+    Read off the field default, never off ``settings`` — the running instance
+    takes its value from ``.env``/the environment, so asserting on the loaded
+    object would only describe whoever ran the suite.  This is the line FE-67
+    moved from 0 to 3, closing the window feature 80 left open on purpose
+    (``apps/web`` linked every result to the *page's* type, so one book among
+    films was a wrong link in production — issues #32/#33/#36).
+    """
+    assert Settings.model_fields["SIMILAR_CROSS_TYPE_QUOTA"].default == 3
 
 
 async def test_quota_on_restores_the_nearer_cross_type_neighbours(
@@ -431,7 +449,7 @@ async def test_quota_zero_never_returns_another_type_on_the_crowded_fixture(
     db, crowded, no_external_calls, monkeypatch
 ):
     """The full-page version: ten same-type rows, zero of any other type."""
-    assert settings.SIMILAR_CROSS_TYPE_QUOTA == 0
+    monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 0)
     monkeypatch.setattr(settings, "SIMILAR_DIVERSITY_PENALTY", 0.0)
 
     out = await movies_service.get_similar_movies(db, "f80-quota-anchor")
@@ -444,7 +462,7 @@ async def test_quota_zero_never_returns_another_type_on_the_crowded_fixture(
 async def test_cross_type_quota_reserves_slots_when_configured(
     db, crowded, no_external_calls, monkeypatch
 ):
-    """Turned on by env — the value the ficha asks for is 3 of 10."""
+    """At 3 of 10, three slots are reserved — whatever config has in force."""
     monkeypatch.setattr(settings, "SIMILAR_CROSS_TYPE_QUOTA", 3)
     monkeypatch.setattr(settings, "SIMILAR_DIVERSITY_PENALTY", 0.0)
 
