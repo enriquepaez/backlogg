@@ -243,7 +243,15 @@ export const hadesFixture: GameOut = {
   viewer_status: null,
 };
 
-/** `GET /v1/movies/{slug}/similar` (FE-10). */
+/**
+ * `GET /v1/movies/{slug}/similar` (FE-10) — deliberately **mixed**, which is
+ * what the endpoint actually serves now that `SIMILAR_CROSS_TYPE_QUOTA` is on
+ * (3 of 10, FE-67): the semantic index is shared by the four types, so a
+ * film's neighbours include the novel and the series. Measured on the dev
+ * catalog, `/movie/the-lord-of-the-rings-the-return-of-the-king-2003` returns
+ * exactly that mix. The cross-type rows sit where their own score put them,
+ * not grouped at the end.
+ */
 export const similarMoviesFixture: SimilarMoviesOut = {
   results: [
     {
@@ -256,6 +264,26 @@ export const similarMoviesFixture: SimilarMoviesOut = {
       poster_url: "https://image.tmdb.org/t/p/w500/arrival.jpg",
       release_date: "2016-11-11",
       rating_external: 7.9,
+      rating_internal: null,
+    },
+    {
+      item_type: "BOOK",
+      reason: { kind: "SEMANTIC_CROSS_TYPE", score: 0.87, source: null },
+      title: "Story of Your Life",
+      slug: "OL15843344W",
+      poster_url: "https://covers.openlibrary.org/b/id/42-L.jpg",
+      release_date: "1998-01-01",
+      rating_external: 4.2,
+      rating_internal: null,
+    },
+    {
+      item_type: "SERIES",
+      reason: { kind: "SEMANTIC_CROSS_TYPE", score: 0.84, source: null },
+      title: "The Expanse",
+      slug: "the-expanse-2015",
+      poster_url: null,
+      release_date: "2015-12-14",
+      rating_external: 8.5,
       rating_internal: null,
     },
   ],

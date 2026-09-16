@@ -490,29 +490,103 @@ export async function getItemDetail(
 }
 
 /**
- * A `similar` result item — identical shape across all four catalog types
- * (`SimilarMovieOut`/`SimilarSeriesOut`/`SimilarBookOut`/`SimilarGameOut`).
+ * One raw `similar` result off the wire — identical shape across all four
+ * catalog types (`SimilarMovieOut`/`SimilarSeriesOut`/`SimilarBookOut`/
+ * `SimilarGameOut`, which backend feature 80 collapsed onto one
+ * `SimilarItemBase`). Private: callers get {@link SimilarEntry}, the guarded
+ * shape, never this one.
  */
-export type SimilarItem = components["schemas"]["SimilarMovieOut"];
+type SimilarItemOut = components["schemas"]["SimilarMovieOut"];
+
+/**
+ * One "similar" result as the UI consumes it (FE-67), already resolved into
+ * the vocabulary the app links and colors with: `type` is a
+ * {@link CatalogType} route segment belonging to **this result**, not the
+ * backend's raw uppercase `item_type` and not the type of the page the
+ * section is rendered on.
+ *
+ * Same shape-and-guard split as {@link RelatedWork} for FE-66's related
+ * works, for the same reason: since backend feature 80 the endpoint answers
+ * from one shared semantic index, so a neighbour of a film can be a book, a
+ * series or a game (`SIMILAR_CROSS_TYPE_QUOTA`, on at 3 since this feature).
+ *
+ * `reason` (`{kind, score, source}`) is deliberately **not** carried here.
+ * It does arrive in every row and it is dropped at this boundary on purpose:
+ * rendering it is FE-69, which is still blocked on the backend ranker
+ * (feature 82) and needs next-intl copy per `kind` that does not exist yet.
+ * This type describes what the section renders today; FE-69 adds the field
+ * here, in one place, when it has something to say with it.
+ */
+export type SimilarEntry = {
+  type: CatalogType;
+  title: string;
+  slug: string;
+  poster_url: string | null;
+  release_date: string | null;
+  rating_internal: number | null;
+};
+
+/**
+ * Maps the raw results onto {@link SimilarEntry}[], putting every
+ * `item_type` through {@link toCatalogType} — never a cast, never the page's
+ * own type. This is the call site the cross-type quota made mandatory: with
+ * `SIMILAR_CROSS_TYPE_QUOTA = 3` a film's "You might also like" grid
+ * routinely contains a book, and until FE-67 the section linked every card
+ * to `/{type-of-the-page}/{slug}`, i.e. a book's slug under `/movie/` — the
+ * exact shape of issues #32, #33 and #36, where a guessed `item_type` does
+ * not merely 404 but can resolve to a *different, real* item.
+ *
+ * An entry whose type doesn't map is dropped rather than rendered unlinked,
+ * the rule every other `toCatalogType` call site follows
+ * ({@link toRelatedWorks}, {@link getGenrePage}, `/trending`,
+ * `/recommendations`): a missing card is recoverable, a confidently wrong
+ * link is not. Dropping every entry simply leaves an empty list, which
+ * renders the same empty message the section has always shown when the
+ * backend had nothing.
+ */
+function toSimilarEntries(results: SimilarItemOut[]): SimilarEntry[] {
+  return (results ?? []).flatMap((entry) => {
+    const type = toCatalogType(entry.item_type);
+    if (!type) {
+      return [];
+    }
+    return [
+      {
+        type,
+        title: entry.title,
+        slug: entry.slug,
+        poster_url: entry.poster_url,
+        release_date: entry.release_date,
+        rating_internal: entry.rating_internal,
+      },
+    ];
+  });
+}
 
 /**
  * "Similar" items for the item detail page's similar section (FE-10/FE-32) —
- * `GET /v1/{type}/{slug}/similar` for all four catalog types: TMDB
- * recommendations for movies/series, IGDB `similar_games` for games (feature
- * 45), and a local same-author/genre-overlap computation for books (feature
- * 46, `docs/api.md`) — same response shape (`{results: [...]}`) either way,
- * modulo the generated client's per-type wrapper name (`SimilarMoviesOut`,
+ * `GET /v1/{type}/{slug}/similar` for all four catalog types. Since backend
+ * feature 80 the primary source is the shared semantic index (feature 75),
+ * with the old per-type paths kept as a fallback for items that have no
+ * vector: TMDB recommendations for movies/series, IGDB `similar_games` for
+ * games (feature 45), same-author/genre-overlap for books (feature 46,
+ * `docs/api.md`). Same response shape (`{results: [...]}`) either way, modulo
+ * the generated client's per-type wrapper name (`SimilarMoviesOut`,
  * `SimilarSeriesListOut`, `SimilarBooksOut`, `SimilarGameListOut` — not
- * symmetric, see `packages/api-client/src/schema.d.ts`). Degrades to an empty
- * array on any failure (network error or non-200 response) — same spirit as
- * {@link getTrending}/{@link getFeatured}: this is a secondary section, not
- * the point of the page (unlike {@link getItemDetail}, whose failure IS the
- * page).
+ * symmetric, see `packages/api-client/src/schema.d.ts`).
+ *
+ * Returns {@link SimilarEntry}[], i.e. every row's own `item_type` already
+ * through the guard (see {@link toSimilarEntries}) — the `type` argument
+ * selects the *endpoint*, and says nothing about the type of what comes
+ * back. Degrades to an empty array on any failure (network error or non-200
+ * response) — same spirit as {@link getTrending}/{@link getFeatured}: this is
+ * a secondary section, not the point of the page (unlike
+ * {@link getItemDetail}, whose failure IS the page).
  */
 export async function getSimilarItems(
   type: CatalogType,
   slug: string,
-): Promise<SimilarItem[]> {
+): Promise<SimilarEntry[]> {
   try {
     const client = getApiClient();
     const next = { revalidate: ITEM_REVALIDATE_SECONDS };
@@ -523,28 +597,28 @@ export async function getSimilarItems(
           params: { path: { slug } },
           next,
         });
-        return response.status === 200 && data ? data.results : [];
+        return response.status === 200 && data ? toSimilarEntries(data.results) : [];
       }
       case "series": {
         const { data, response } = await client.GET("/v1/series/{slug}/similar", {
           params: { path: { slug } },
           next,
         });
-        return response.status === 200 && data ? data.results : [];
+        return response.status === 200 && data ? toSimilarEntries(data.results) : [];
       }
       case "book": {
         const { data, response } = await client.GET("/v1/books/{slug}/similar", {
           params: { path: { slug } },
           next,
         });
-        return response.status === 200 && data ? data.results : [];
+        return response.status === 200 && data ? toSimilarEntries(data.results) : [];
       }
       case "game": {
         const { data, response } = await client.GET("/v1/games/{slug}/similar", {
           params: { path: { slug } },
           next,
         });
-        return response.status === 200 && data ? data.results : [];
+        return response.status === 200 && data ? toSimilarEntries(data.results) : [];
       }
     }
   } catch (error) {

@@ -109,15 +109,16 @@ async def _neighbours(
     The quota does not only *reserve* slots — it decides whether items of
     another type may appear **at all**:
 
-    ``quota <= 0`` (the merged default)
-        One read, narrowed to the anchor's own type.  Zero has to mean "never
-        another type", not "no slots reserved for another type", because that
-        is the property the whole deferral rests on: today
-        ``apps/web/src/components/item-similar.tsx`` links every result to
-        ``/{type-of-the-page}/{slug}``, so **one** book among films is a 404 in
-        production.  Reserving nothing is not enough — an unfiltered cosine
-        top-N returns the other types anyway whenever they genuinely win, which
-        on the real catalog is 63% of the rows of a film's page.
+    ``quota <= 0``
+        One read, narrowed to the anchor's own type.  Zero means "never another
+        type", not "no slots reserved for another type", and the difference is
+        not academic: reserving nothing is not enough, because an unfiltered
+        cosine top-N returns the other types anyway whenever they genuinely
+        win — on the real catalog, 63% of the rows of a film's page.  So the
+        query itself is narrowed rather than the split.  That is what let
+        feature 80 merge the cross-type bridge switched off while the web app
+        still built every link as ``/{type-of-the-page}/{slug}``, and it is
+        what still makes 0 a safe value to set.
     ``quota > 0``
         Two reads: the unfiltered top-N, plus a second walk narrowed to the
         *other three* types.  ``item_types`` is a post-filter, so a single

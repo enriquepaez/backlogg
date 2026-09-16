@@ -212,20 +212,22 @@ class Settings(BaseSettings):
     #      nothing" — never: the query itself is narrowed to the anchor's own
     #      type (recommendations/similar.py::_neighbours).
     #
-    # That second line is the whole point of the default and it had to be made
+    # That second line is the whole point of the 0 case and it had to be made
     # true rather than assumed. Reserving zero slots is NOT the same as
     # returning none: an unfiltered cosine top-N hands back the other types
     # whenever they genuinely win, and measured on the real development catalog
     # that was 63% of the rows of a film's page — including 7 of the 10
     # neighbours of The Return of the King.
     #
-    # Why 0 ships: apps/web/src/components/item-similar.tsx links every result
-    # to /{type-of-the-page}/{slug}, so ONE book among films is a 404 in
-    # production — the exact shape of issues #32, #33 and #36 — and Render
-    # deploys main on merge. The behaviour is implemented and tested at any
-    # value; what is deferred is switching it on. FE-67 raises this to 3 in the
-    # same PR that renders the type badge. See docs/api.md § Movies.
-    SIMILAR_CROSS_TYPE_QUOTA: int = 0
+    # Feature 80 merged this at 0 for one reason only: apps/web's similar
+    # section linked every result to /{type-of-the-page}/{slug}, so ONE book
+    # among films was a wrong link in production — the exact shape of issues
+    # #32, #33 and #36 — and Render deploys main on merge. FE-67 fixed that
+    # (every card takes its route and its badge colour from its own item_type,
+    # through toCatalogType) and turns the switch on here, in the same PR, as
+    # planned. Turning it back down to 0 stays a pure backend decision: the
+    # frontend renders a same-type-only response exactly as it did before.
+    SIMILAR_CROSS_TYPE_QUOTA: int = 3
     # How much a candidate is demoted for each group (same creator, same
     # franchise) already taken above it: score *= (1 - penalty) per repetition.
     # 0.25 lets a saga keep the top slot it earned and then yield the next ones

@@ -54,9 +54,12 @@ docs {
   path it always used — TMDB/IGDB or the local book tiers — and those results
   carry reason.kind EXTERNAL / SHARED_AUTHOR / SHARED_GENRE.
 
-  SIMILAR_CROSS_TYPE_QUOTA ships at 0, and at 0 the query is narrowed to the type
-  of the item in the URL: the response NEVER contains another type, so against a
-  default environment every entry.item_type equals the type of this request.
-  FE-67 raises it to 3, and then cross-type entries appear. Either way the link
-  must be built from entry.item_type, never from the page.
+  SIMILAR_CROSS_TYPE_QUOTA is 3 of 10 since FE-67, so against a default
+  environment cross-type entries ARE expected: some entry.item_type will differ
+  from the type of this request. Set SIMILAR_CROSS_TYPE_QUOTA=0 and the query
+  itself is narrowed to the type of the item in the URL, so the response
+  contains no other type at all. That is a property of the narrowed query, not
+  of the arithmetic: reserving zero slots on an unfiltered top-N would still
+  hand back other types whenever they win on cosine. Either way the link must
+  be built from entry.item_type, never from the page.
 }
